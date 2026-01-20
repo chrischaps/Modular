@@ -2,6 +2,7 @@
 //!
 //! Contains the main egui application, theme definitions, and UI state management.
 
-// Future submodules:
-// pub mod synth_app;
-// pub mod theme;
+pub mod synth_app;
+pub mod theme;
+
+pub use synth_app::SynthApp;
