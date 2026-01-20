@@ -448,28 +448,69 @@ impl SynthApp {
         })
     }
 
-    /// Get the output port index for a given output ID.
+    /// Get the DspModule port index for a given egui output ID.
+    ///
+    /// In egui_node_graph2, outputs are numbered separately from inputs.
+    /// In DspModule, all ports are in a single array with inputs first.
+    /// So we need to offset the egui output index by the number of input ports.
     fn get_output_port_index(
         &self,
         node_id: egui_node_graph2::NodeId,
         output_id: egui_node_graph2::OutputId,
     ) -> Option<usize> {
         let node = self.graph_state.graph.nodes.get(node_id)?;
-        node.outputs
+
+        // Count the number of ConnectionOnly inputs (these map to DspModule input ports)
+        let num_input_ports = node.inputs
             .iter()
-            .position(|(_, id)| *id == output_id)
+            .filter(|(_, id)| {
+                let input = self.graph_state.graph.get_input(*id);
+                matches!(input.kind, egui_node_graph2::InputParamKind::ConnectionOnly)
+            })
+            .count();
+
+        // Find the egui output index
+        let egui_output_idx = node.outputs
+            .iter()
+            .position(|(_, id)| *id == output_id)?;
+
+        // DspModule port index = num_input_ports + egui_output_index
+        Some(num_input_ports + egui_output_idx)
     }
 
-    /// Get the input port index for a given input ID.
+    /// Get the DspModule port index for a given egui input ID.
+    ///
+    /// Only ConnectionOnly inputs map to DspModule input ports.
+    /// We count only those when determining the port index.
     fn get_input_port_index(
         &self,
         node_id: egui_node_graph2::NodeId,
         input_id: egui_node_graph2::InputId,
     ) -> Option<usize> {
         let node = self.graph_state.graph.nodes.get(node_id)?;
-        node.inputs
-            .iter()
-            .position(|(_, id)| *id == input_id)
+
+        // Count ConnectionOnly inputs up to and including the target input
+        let mut port_index = 0;
+        for (_, id) in &node.inputs {
+            let input = self.graph_state.graph.get_input(*id);
+
+            if *id == input_id {
+                // Only return a port index if this is a ConnectionOnly input
+                if matches!(input.kind, egui_node_graph2::InputParamKind::ConnectionOnly) {
+                    return Some(port_index);
+                } else {
+                    // This input doesn't map to a DspModule port
+                    return None;
+                }
+            }
+
+            // Only count ConnectionOnly inputs as ports
+            if matches!(input.kind, egui_node_graph2::InputParamKind::ConnectionOnly) {
+                port_index += 1;
+            }
+        }
+
+        None
     }
 
     /// Sync parameter values from the graph UI to the audio engine.
