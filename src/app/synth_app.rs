@@ -3,10 +3,14 @@
 //! Contains the SynthApp which implements eframe::App and manages
 //! the synthesizer's UI state, audio engine, and graph state.
 
+use std::collections::HashMap;
+
 use eframe::egui::{self, RichText, Layout, Align};
 use egui_node_graph2::{GraphEditorState, NodeResponse};
 
-use crate::engine::{AudioEngine, AudioError, DeviceInfo};
+use crate::engine::{
+    AudioEngine, AudioError, AudioProcessor, DeviceInfo, EngineChannels, EngineCommand, UiHandle,
+};
 use crate::graph::{
     validate_connection, AllNodeTemplates, AnyParameterId, SynthDataType, SynthGraphState,
     SynthNodeData, SynthNodeTemplate, SynthValueType,
@@ -21,13 +25,16 @@ pub struct SynthApp {
     /// Audio engine handle
     audio_engine: Result<AudioEngine, AudioError>,
 
+    /// UI-side handle for communicating with audio engine
+    ui_handle: Option<UiHandle>,
+
     /// Whether the test tone is currently enabled
     test_tone_enabled: bool,
 
     /// Last audio error message to display
     audio_error_message: Option<String>,
 
-    /// Whether the transport is "playing" (for future use)
+    /// Whether the transport is "playing" (audio graph processing active)
     is_playing: bool,
 
     /// Whether theme has been applied
@@ -44,6 +51,10 @@ pub struct SynthApp {
 
     /// Index of currently selected device
     selected_device_index: usize,
+
+    /// Cached parameter values for change detection.
+    /// Key is (node_id as u64, param_index), value is the last sent value.
+    cached_params: HashMap<(u64, usize), f32>,
 }
 
 impl SynthApp {
@@ -51,7 +62,7 @@ impl SynthApp {
     ///
     /// If `enable_test_tone` is true, audio will start with a test tone immediately.
     pub fn new(enable_test_tone: bool) -> Self {
-        let audio_engine = AudioEngine::new();
+        let mut audio_engine = AudioEngine::new();
 
         let audio_error_message = match &audio_engine {
             Ok(_) => None,
@@ -70,8 +81,30 @@ impl SynthApp {
             Err(_) => (Vec::new(), 0),
         };
 
+        // Create engine channels for communication with audio thread
+        let channels = EngineChannels::with_defaults();
+        let (ui_handle, engine_handle) = channels.split();
+
+        // Create and start the audio processor if engine is available
+        let ui_handle = if let Ok(ref mut engine) = audio_engine {
+            let sample_rate = engine.sample_rate() as f32;
+            let block_size = 256; // Standard block size
+            let processor = AudioProcessor::new(sample_rate, block_size, engine_handle);
+
+            if let Err(e) = engine.start_with_processor(processor) {
+                eprintln!("Failed to start audio processor: {}", e);
+            }
+
+            Some(ui_handle)
+        } else {
+            // Drop the engine_handle since we can't use it
+            drop(engine_handle);
+            None
+        };
+
         let mut app = Self {
             audio_engine,
+            ui_handle,
             test_tone_enabled: false,
             audio_error_message,
             is_playing: false,
@@ -80,11 +113,11 @@ impl SynthApp {
             user_state: SynthGraphState::default(),
             audio_devices,
             selected_device_index,
+            cached_params: HashMap::new(),
         };
 
-        // Start engine and enable test tone if requested
+        // Enable test tone if requested (uses the old test tone, not the processor)
         if enable_test_tone {
-            app.start_audio();
             app.toggle_test_tone();
         }
 
@@ -160,7 +193,7 @@ impl SynthApp {
             ui.label(RichText::new("Transport").color(theme::text::SECONDARY));
             ui.add_space(8.0);
 
-            // Play/Stop button
+            // Play/Stop button - controls whether the audio graph is processing
             let play_text = if self.is_playing { "⏹ Stop" } else { "▶ Play" };
             let play_color = if self.is_playing {
                 theme::accent::WARNING
@@ -169,7 +202,7 @@ impl SynthApp {
             };
 
             if ui.button(RichText::new(play_text).color(play_color)).clicked() {
-                self.is_playing = !self.is_playing;
+                actions.toggle_playing = true;
             }
 
             ui.add_space(20.0);
@@ -283,10 +316,21 @@ impl SynthApp {
         actions
     }
 
+    /// Send a command to the audio engine.
+    fn send_command(&mut self, cmd: EngineCommand) {
+        if let Some(ref mut handle) = self.ui_handle {
+            // Use lossy send - if buffer is full, command is dropped
+            // This is acceptable for rapid updates like parameter changes
+            handle.send_command_lossy(cmd);
+        }
+    }
+
     /// Draw the main content area with the node graph editor
     fn draw_main_area(&mut self, ctx: &egui::Context) {
         // Collect connections to remove (validated after drawing)
         let mut invalid_connections: Vec<(egui_node_graph2::OutputId, egui_node_graph2::InputId)> = Vec::new();
+        // Collect commands to send (to avoid borrow issues)
+        let mut commands_to_send: Vec<EngineCommand> = Vec::new();
 
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
@@ -302,6 +346,27 @@ impl SynthApp {
                 // Process graph responses
                 for response in graph_response.node_responses {
                     match response {
+                        NodeResponse::CreatedNode(node_id) => {
+                            // Allocate engine node ID for the new node
+                            let engine_node_id = self.user_state.allocate_engine_node_id(node_id);
+
+                            // Get the module ID from the node's user data
+                            if let Some(node) = self.graph_state.graph.nodes.get(node_id) {
+                                let module_id = node.user_data.module_id;
+                                commands_to_send.push(EngineCommand::AddModule {
+                                    node_id: engine_node_id,
+                                    module_id,
+                                });
+                            }
+                        }
+                        NodeResponse::DeleteNodeFull { node_id, .. } => {
+                            // Get engine node ID before removing from mapping
+                            if let Some(engine_node_id) = self.user_state.remove_node(node_id) {
+                                commands_to_send.push(EngineCommand::RemoveModule {
+                                    node_id: engine_node_id,
+                                });
+                            }
+                        }
                         NodeResponse::ConnectEventEnded { output, input, .. } => {
                             // Validate the connection after it was made
                             if let Some(error_msg) = self.validate_and_check_connection(output, input) {
@@ -309,26 +374,163 @@ impl SynthApp {
                                 invalid_connections.push((output, input));
                                 // Show error message
                                 self.user_state.set_validation_error(error_msg);
+                            } else {
+                                // Connection is valid - send to engine
+                                if let Some(cmd) = self.build_connect_command(output, input) {
+                                    commands_to_send.push(cmd);
+                                }
                             }
                         }
-                        NodeResponse::CreatedNode(node_id) => {
-                            // Allocate engine node ID for the new node
-                            self.user_state.allocate_engine_node_id(node_id);
-                        }
-                        NodeResponse::DeleteNodeFull { node_id, .. } => {
-                            // Remove from our mapping
-                            self.user_state.remove_node(node_id);
+                        NodeResponse::DisconnectEvent { output: _, input } => {
+                            // Send disconnect command to engine
+                            if let Some(cmd) = self.build_disconnect_command(input) {
+                                commands_to_send.push(cmd);
+                            }
                         }
                         _ => {
-                            // Other responses handled in Phase 3 Issue #14
+                            // Other responses not yet handled
                         }
                     }
                 }
             });
 
+        // Send collected commands
+        for cmd in commands_to_send {
+            self.send_command(cmd);
+        }
+
         // Remove invalid connections outside the UI closure
         for (output, input) in invalid_connections {
             self.graph_state.graph.remove_connection(input, output);
+        }
+    }
+
+    /// Build a Connect command from graph port IDs.
+    fn build_connect_command(
+        &self,
+        output: egui_node_graph2::OutputId,
+        input: egui_node_graph2::InputId,
+    ) -> Option<EngineCommand> {
+        let output_data = self.graph_state.graph.get_output(output);
+        let input_data = self.graph_state.graph.get_input(input);
+
+        let from_node = self.user_state.get_engine_node_id(output_data.node)?;
+        let to_node = self.user_state.get_engine_node_id(input_data.node)?;
+
+        // Get port indices
+        // For output ports, we count only output ports up to this one
+        let from_port = self.get_output_port_index(output_data.node, output)?;
+
+        // For input ports, we count only input ports up to this one
+        let to_port = self.get_input_port_index(input_data.node, input)?;
+
+        Some(EngineCommand::Connect {
+            from_node,
+            from_port,
+            to_node,
+            to_port,
+        })
+    }
+
+    /// Build a Disconnect command from a graph input port ID.
+    fn build_disconnect_command(
+        &self,
+        input: egui_node_graph2::InputId,
+    ) -> Option<EngineCommand> {
+        let input_data = self.graph_state.graph.get_input(input);
+        let node_id = self.user_state.get_engine_node_id(input_data.node)?;
+        let port = self.get_input_port_index(input_data.node, input)?;
+
+        Some(EngineCommand::Disconnect {
+            node_id,
+            port,
+            is_input: true,
+        })
+    }
+
+    /// Get the output port index for a given output ID.
+    fn get_output_port_index(
+        &self,
+        node_id: egui_node_graph2::NodeId,
+        output_id: egui_node_graph2::OutputId,
+    ) -> Option<usize> {
+        let node = self.graph_state.graph.nodes.get(node_id)?;
+        node.outputs
+            .iter()
+            .position(|(_, id)| *id == output_id)
+    }
+
+    /// Get the input port index for a given input ID.
+    fn get_input_port_index(
+        &self,
+        node_id: egui_node_graph2::NodeId,
+        input_id: egui_node_graph2::InputId,
+    ) -> Option<usize> {
+        let node = self.graph_state.graph.nodes.get(node_id)?;
+        node.inputs
+            .iter()
+            .position(|(_, id)| *id == input_id)
+    }
+
+    /// Sync parameter values from the graph UI to the audio engine.
+    ///
+    /// This iterates through all nodes and their parameters, compares against
+    /// cached values, and sends SetParameter commands for any changes.
+    fn sync_parameters(&mut self) {
+        let mut commands_to_send: Vec<EngineCommand> = Vec::new();
+
+        // Iterate through all nodes
+        for (node_id, node) in self.graph_state.graph.nodes.iter() {
+            // Get the engine node ID for this graph node
+            let Some(engine_node_id) = self.user_state.get_engine_node_id(node_id) else {
+                continue;
+            };
+
+            // Track which param index we're at (only count ConstantOnly params)
+            let mut param_index = 0;
+
+            // Iterate through inputs to find parameters
+            for (_param_name, input_id) in &node.inputs {
+                let input = self.graph_state.graph.get_input(*input_id);
+
+                // Only process ConstantOnly or ConnectionOrConstant params
+                use egui_node_graph2::InputParamKind;
+                match input.kind {
+                    InputParamKind::ConstantOnly | InputParamKind::ConnectionOrConstant => {
+                        // Get the normalized value
+                        let normalized_value = input.value.normalized_value();
+
+                        // Create cache key
+                        let cache_key = (engine_node_id, param_index);
+
+                        // Check if value has changed
+                        let needs_update = match self.cached_params.get(&cache_key) {
+                            Some(&cached_value) => (normalized_value - cached_value).abs() > 0.0001,
+                            None => true, // New parameter, needs initial sync
+                        };
+
+                        if needs_update {
+                            commands_to_send.push(EngineCommand::SetParameter {
+                                node_id: engine_node_id,
+                                param_index,
+                                value: normalized_value,
+                            });
+                            self.cached_params.insert(cache_key, normalized_value);
+                        }
+
+                        param_index += 1;
+                    }
+                    InputParamKind::ConnectionOnly => {
+                        // This is a connection-only port, not a parameter
+                        // Don't increment param_index
+                    }
+                }
+            }
+        }
+
+        // Send collected commands
+        for cmd in commands_to_send {
+            self.send_command(cmd);
         }
     }
 
@@ -433,6 +635,7 @@ struct ToolbarActions {
     start_audio: bool,
     stop_audio: bool,
     toggle_test_tone: bool,
+    toggle_playing: bool,
     select_device: Option<usize>,
     refresh_devices: bool,
 }
@@ -467,6 +670,9 @@ impl eframe::App for SynthApp {
         // Main content area - the node graph editor
         self.draw_main_area(ctx);
 
+        // Sync parameter values to the audio engine
+        self.sync_parameters();
+
         // Handle deferred actions (to avoid borrow checker issues)
         if toolbar_actions.start_audio {
             self.start_audio();
@@ -476,6 +682,10 @@ impl eframe::App for SynthApp {
         }
         if toolbar_actions.toggle_test_tone {
             self.toggle_test_tone();
+        }
+        if toolbar_actions.toggle_playing {
+            self.is_playing = !self.is_playing;
+            self.send_command(EngineCommand::SetPlaying(self.is_playing));
         }
         if toolbar_actions.refresh_devices {
             self.refresh_devices();

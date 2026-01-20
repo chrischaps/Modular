@@ -218,6 +218,14 @@ impl DspModule for AudioOutput {
         self.peak_left = 0.0;
         self.peak_right = 0.0;
     }
+
+    fn get_audio_output(&self) -> Option<(&[f32], &[f32])> {
+        Some((&self.output_buffer[0], &self.output_buffer[1]))
+    }
+
+    fn get_peak_levels(&self) -> Option<(f32, f32)> {
+        Some((self.peak_left, self.peak_right))
+    }
 }
 
 #[cfg(test)]

@@ -248,6 +248,24 @@ pub trait DspModule: Send + 'static {
     fn deserialize_state(&mut self, _data: &[u8]) -> Result<(), ModuleError> {
         Ok(())
     }
+
+    /// Returns the final audio output for output modules.
+    ///
+    /// This is used by the audio engine to extract stereo audio from
+    /// AudioOutput modules. Returns `None` for non-output modules.
+    ///
+    /// The returned slices are (left_channel, right_channel).
+    fn get_audio_output(&self) -> Option<(&[f32], &[f32])> {
+        None
+    }
+
+    /// Returns peak levels for metering (for output modules).
+    ///
+    /// Returns (left_peak, right_peak) in the range 0.0 to 1.0+.
+    /// Returns `None` for non-output modules.
+    fn get_peak_levels(&self) -> Option<(f32, f32)> {
+        None
+    }
 }
 
 #[cfg(test)]

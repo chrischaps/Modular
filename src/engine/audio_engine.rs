@@ -6,7 +6,9 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Host, SampleRate, Stream, StreamConfig};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+use super::audio_processor::AudioProcessor;
 
 /// Errors that can occur during audio engine operation.
 #[derive(Debug, Clone)]
@@ -294,6 +296,57 @@ impl AudioEngine {
     /// Check if the audio stream is currently running.
     pub fn is_running(&self) -> bool {
         self.stream.is_some()
+    }
+
+    /// Start the audio stream with an AudioProcessor for graph-based synthesis.
+    ///
+    /// The AudioProcessor is moved into the audio callback where it processes
+    /// the audio graph and produces output. The processor is wrapped in a Mutex
+    /// to allow safe access from the audio callback.
+    ///
+    /// Note: This method is preferred over `start()` for actual synthesis.
+    /// The test tone (`start()`) is only for basic audio testing.
+    pub fn start_with_processor(&mut self, processor: AudioProcessor) -> Result<(), AudioError> {
+        if self.stream.is_some() {
+            return Ok(());
+        }
+
+        let channels = self.config.channels as usize;
+
+        // Wrap processor in Mutex for the callback
+        // Note: In practice, the Mutex is uncontested since only the audio
+        // callback accesses it, so there's no actual blocking.
+        let processor = Arc::new(Mutex::new(processor));
+        let processor_clone = Arc::clone(&processor);
+
+        let stream = self
+            .device
+            .build_output_stream(
+                &self.config,
+                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                    // Lock the processor - this should never block since we're the only user
+                    if let Ok(mut proc) = processor_clone.try_lock() {
+                        proc.process(data, channels);
+                    } else {
+                        // Fallback to silence if lock fails (should never happen)
+                        for sample in data.iter_mut() {
+                            *sample = 0.0;
+                        }
+                    }
+                },
+                move |err| {
+                    eprintln!("Audio stream error: {}", err);
+                },
+                None,
+            )
+            .map_err(|e| AudioError::StreamCreationFailed(e.to_string()))?;
+
+        stream
+            .play()
+            .map_err(|e| AudioError::StreamPlaybackFailed(e.to_string()))?;
+
+        self.stream = Some(stream);
+        Ok(())
     }
 }
 

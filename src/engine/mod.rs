@@ -5,12 +5,14 @@
 
 pub mod audio_engine;
 pub mod audio_graph;
+pub mod audio_processor;
 pub mod buffer_pool;
 pub mod channels;
 pub mod commands;
 
 pub use audio_engine::{AudioEngine, AudioError, DeviceInfo};
 pub use audio_graph::{AudioGraph, Connection};
+pub use audio_processor::{AudioProcessor, create_module_registry};
 pub use buffer_pool::{BufferPool, BufferSlot};
 pub use channels::{
     EngineChannels, EngineHandle, UiHandle, DEFAULT_COMMAND_BUFFER_SIZE, DEFAULT_EVENT_BUFFER_SIZE,

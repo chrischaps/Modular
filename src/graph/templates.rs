@@ -22,10 +22,11 @@ pub enum SynthNodeTemplate {
 
 impl SynthNodeTemplate {
     /// Get the module ID for this template.
+    /// These IDs must match the `id` field in the corresponding DspModule::info().
     pub fn module_id(&self) -> &'static str {
         match self {
-            SynthNodeTemplate::SineOscillator => "sine_osc",
-            SynthNodeTemplate::AudioOutput => "audio_output",
+            SynthNodeTemplate::SineOscillator => "osc.sine",
+            SynthNodeTemplate::AudioOutput => "output.audio",
         }
     }
 
@@ -80,12 +81,12 @@ impl NodeTemplateTrait for SynthNodeTemplate {
     fn user_data(&self, _user_state: &mut Self::UserState) -> Self::NodeData {
         match self {
             SynthNodeTemplate::SineOscillator => SynthNodeData::new(
-                "sine_osc",
+                "osc.sine",
                 "Sine Oscillator",
                 ModuleCategory::Source,
             ),
             SynthNodeTemplate::AudioOutput => SynthNodeData::new(
-                "audio_output",
+                "output.audio",
                 "Audio Output",
                 ModuleCategory::Output,
             ),
@@ -206,8 +207,8 @@ mod tests {
 
     #[test]
     fn test_module_id() {
-        assert_eq!(SynthNodeTemplate::SineOscillator.module_id(), "sine_osc");
-        assert_eq!(SynthNodeTemplate::AudioOutput.module_id(), "audio_output");
+        assert_eq!(SynthNodeTemplate::SineOscillator.module_id(), "osc.sine");
+        assert_eq!(SynthNodeTemplate::AudioOutput.module_id(), "output.audio");
     }
 
     #[test]
