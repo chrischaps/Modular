@@ -28,9 +28,6 @@ pub struct SynthApp {
     /// UI-side handle for communicating with audio engine
     ui_handle: Option<UiHandle>,
 
-    /// Whether the test tone is currently enabled
-    test_tone_enabled: bool,
-
     /// Last audio error message to display
     audio_error_message: Option<String>,
 
@@ -102,10 +99,9 @@ impl SynthApp {
             None
         };
 
-        let mut app = Self {
+        let app = Self {
             audio_engine,
             ui_handle,
-            test_tone_enabled: false,
             audio_error_message,
             is_playing: false,
             theme_applied: false,
@@ -116,10 +112,8 @@ impl SynthApp {
             cached_params: HashMap::new(),
         };
 
-        // Enable test tone if requested (uses the old test tone, not the processor)
-        if enable_test_tone {
-            app.toggle_test_tone();
-        }
+        // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
+        let _ = enable_test_tone;
 
         app
     }
@@ -146,30 +140,14 @@ impl SynthApp {
         }
     }
 
-    /// Start the audio engine
-    fn start_audio(&mut self) {
-        if let Ok(ref mut engine) = self.audio_engine {
-            if let Err(e) = engine.start() {
-                self.audio_error_message = Some(e.to_string());
-            }
-        }
-    }
+    // Note: start_audio/stop_audio removed - we now use AudioProcessor which
+    // starts automatically. Use the Play/Stop transport button to control audio.
 
-    /// Stop the audio engine
-    fn stop_audio(&mut self) {
-        if let Ok(ref mut engine) = self.audio_engine {
-            if let Err(e) = engine.stop() {
-                self.audio_error_message = Some(e.to_string());
-            }
-        }
-    }
-
-    /// Toggle the test tone on/off
+    /// Toggle the test tone on/off (legacy - may conflict with AudioProcessor)
+    #[allow(dead_code)]
     fn toggle_test_tone(&mut self) {
-        self.test_tone_enabled = !self.test_tone_enabled;
-        if let Ok(ref engine) = self.audio_engine {
-            engine.set_test_tone(self.test_tone_enabled);
-        }
+        // Test tone is disabled when using AudioProcessor
+        // This function is kept for potential future debug use
     }
 
     /// Draw the top toolbar with transport controls and status
@@ -209,43 +187,10 @@ impl SynthApp {
             ui.separator();
             ui.add_space(20.0);
 
-            // Audio engine controls
-            ui.label(RichText::new("Audio").color(theme::text::SECONDARY));
-            ui.add_space(8.0);
-
+            // Audio output selector
             match &self.audio_engine {
                 Ok(engine) => {
                     let is_running = engine.is_running();
-
-                    if is_running {
-                        if ui.button("⏹ Stop Audio").clicked() {
-                            actions.stop_audio = true;
-                        }
-                    } else if ui.button("▶ Start Audio").clicked() {
-                        actions.start_audio = true;
-                    }
-
-                    ui.add_space(10.0);
-
-                    // Test tone toggle
-                    let tone_text = if self.test_tone_enabled {
-                        "🔊 Tone ON"
-                    } else {
-                        "🔇 Tone OFF"
-                    };
-                    let tone_color = if self.test_tone_enabled {
-                        theme::accent::SUCCESS
-                    } else {
-                        theme::text::SECONDARY
-                    };
-
-                    if ui.button(RichText::new(tone_text).color(tone_color)).clicked() {
-                        actions.toggle_test_tone = true;
-                    }
-
-                    ui.add_space(20.0);
-                    ui.separator();
-                    ui.add_space(20.0);
 
                     // Device selector
                     ui.label(RichText::new("Output").color(theme::text::SECONDARY));
@@ -673,9 +618,6 @@ impl SynthApp {
 /// Actions collected from the toolbar for deferred execution
 #[derive(Default)]
 struct ToolbarActions {
-    start_audio: bool,
-    stop_audio: bool,
-    toggle_test_tone: bool,
     toggle_playing: bool,
     select_device: Option<usize>,
     refresh_devices: bool,
@@ -715,15 +657,6 @@ impl eframe::App for SynthApp {
         self.sync_parameters();
 
         // Handle deferred actions (to avoid borrow checker issues)
-        if toolbar_actions.start_audio {
-            self.start_audio();
-        }
-        if toolbar_actions.stop_audio {
-            self.stop_audio();
-        }
-        if toolbar_actions.toggle_test_tone {
-            self.toggle_test_tone();
-        }
         if toolbar_actions.toggle_playing {
             self.is_playing = !self.is_playing;
             self.send_command(EngineCommand::SetPlaying(self.is_playing));
