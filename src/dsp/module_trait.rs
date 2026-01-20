@@ -8,6 +8,7 @@ use super::parameter::ParameterDefinition;
 use super::port::PortDefinition;
 use super::SignalBuffer;
 use egui::Color32;
+use egui_node_graph2::CategoryTrait;
 use std::fmt;
 
 /// Category of a DSP module, used for organization and UI coloring.
@@ -58,6 +59,12 @@ impl ModuleCategory {
             ModuleCategory::Utility => "Utility",
             ModuleCategory::Output => "Output",
         }
+    }
+}
+
+impl CategoryTrait for ModuleCategory {
+    fn name(&self) -> String {
+        self.name().to_string()
     }
 }
 

@@ -4,8 +4,17 @@
 //! the synthesizer's UI state, audio engine, and graph state.
 
 use eframe::egui::{self, RichText, Layout, Align};
+use egui_node_graph2::GraphEditorState;
+
 use crate::engine::{AudioEngine, AudioError};
+use crate::graph::{
+    AllNodeTemplates, SynthDataType, SynthGraphState, SynthNodeData, SynthNodeTemplate,
+    SynthValueType,
+};
 use super::theme;
+
+/// Type alias for our graph editor state
+type SynthGraphEditorState = GraphEditorState<SynthNodeData, SynthDataType, SynthValueType, SynthNodeTemplate, SynthGraphState>;
 
 /// Main application state for the Modular Synth
 pub struct SynthApp {
@@ -23,6 +32,12 @@ pub struct SynthApp {
 
     /// Whether theme has been applied
     theme_applied: bool,
+
+    /// Node graph editor state
+    graph_state: SynthGraphEditorState,
+
+    /// User state for the graph editor
+    user_state: SynthGraphState,
 }
 
 impl SynthApp {
@@ -43,6 +58,8 @@ impl SynthApp {
             audio_error_message,
             is_playing: false,
             theme_applied: false,
+            graph_state: GraphEditorState::new(1.0),
+            user_state: SynthGraphState::default(),
         };
 
         // Start engine and enable test tone if requested
@@ -178,26 +195,22 @@ impl SynthApp {
         actions
     }
 
-    /// Draw the main content area with grid background
-    fn draw_main_area(&mut self, ui: &mut egui::Ui) {
-        let rect = ui.available_rect_before_wrap();
-        let painter = ui.painter();
+    /// Draw the main content area with the node graph editor
+    fn draw_main_area(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none())
+            .show(ctx, |ui| {
+                // Draw the node graph editor
+                let _graph_response = self.graph_state.draw_graph_editor(
+                    ui,
+                    AllNodeTemplates,
+                    &mut self.user_state,
+                    Vec::default(),
+                );
 
-        // Draw the grid background
-        theme::draw_grid_background(painter, rect);
-
-        // Placeholder content - centered message
-        let center = rect.center();
-        painter.text(
-            center,
-            egui::Align2::CENTER_CENTER,
-            "Node Graph Editor\n(Coming in Phase 3)",
-            egui::FontId::proportional(24.0),
-            theme::text::DISABLED,
-        );
-
-        // Reserve the space
-        ui.allocate_rect(rect, egui::Sense::hover());
+                // TODO: In Phase 3 Issue #14, process graph_response to sync with audio engine
+                // For now, we just display the empty graph editor with pan/zoom capability
+            });
     }
 
     /// Draw the bottom status bar
@@ -211,7 +224,14 @@ impl SynthApp {
                     .color(theme::accent::ERROR)
                     .small());
             } else {
-                ui.label(RichText::new("Ready")
+                // Show node count
+                let node_count = self.graph_state.graph.nodes.len();
+                let status = if node_count == 0 {
+                    "Right-click to add nodes".to_string()
+                } else {
+                    format!("{} node{}", node_count, if node_count == 1 { "" } else { "s" })
+                };
+                ui.label(RichText::new(status)
                     .color(theme::text::SECONDARY)
                     .small());
             }
@@ -260,12 +280,8 @@ impl eframe::App for SynthApp {
                 self.draw_status_bar(ui);
             });
 
-        // Main content area
-        egui::CentralPanel::default()
-            .frame(egui::Frame::none())
-            .show(ctx, |ui| {
-                self.draw_main_area(ui);
-            });
+        // Main content area - the node graph editor
+        self.draw_main_area(ctx);
 
         // Handle deferred actions (to avoid borrow checker issues)
         if toolbar_actions.start_audio {
