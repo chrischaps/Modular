@@ -4,12 +4,12 @@
 //! the synthesizer's UI state, audio engine, and graph state.
 
 use eframe::egui::{self, RichText, Layout, Align};
-use egui_node_graph2::GraphEditorState;
+use egui_node_graph2::{GraphEditorState, NodeResponse};
 
 use crate::engine::{AudioEngine, AudioError, DeviceInfo};
 use crate::graph::{
-    AllNodeTemplates, SynthDataType, SynthGraphState, SynthNodeData, SynthNodeTemplate,
-    SynthValueType,
+    validate_connection, AllNodeTemplates, AnyParameterId, SynthDataType, SynthGraphState,
+    SynthNodeData, SynthNodeTemplate, SynthValueType,
 };
 use super::theme;
 
@@ -285,39 +285,133 @@ impl SynthApp {
 
     /// Draw the main content area with the node graph editor
     fn draw_main_area(&mut self, ctx: &egui::Context) {
+        // Collect connections to remove (validated after drawing)
+        let mut invalid_connections: Vec<(egui_node_graph2::OutputId, egui_node_graph2::InputId)> = Vec::new();
+
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
             .show(ctx, |ui| {
                 // Draw the node graph editor
-                let _graph_response = self.graph_state.draw_graph_editor(
+                let graph_response = self.graph_state.draw_graph_editor(
                     ui,
                     AllNodeTemplates,
                     &mut self.user_state,
                     Vec::default(),
                 );
 
-                // TODO: In Phase 3 Issue #14, process graph_response to sync with audio engine
-                // For now, we just display the empty graph editor with pan/zoom capability
+                // Process graph responses
+                for response in graph_response.node_responses {
+                    match response {
+                        NodeResponse::ConnectEventEnded { output, input, .. } => {
+                            // Validate the connection after it was made
+                            if let Some(error_msg) = self.validate_and_check_connection(output, input) {
+                                // Mark for removal
+                                invalid_connections.push((output, input));
+                                // Show error message
+                                self.user_state.set_validation_error(error_msg);
+                            }
+                        }
+                        NodeResponse::CreatedNode(node_id) => {
+                            // Allocate engine node ID for the new node
+                            self.user_state.allocate_engine_node_id(node_id);
+                        }
+                        NodeResponse::DeleteNodeFull { node_id, .. } => {
+                            // Remove from our mapping
+                            self.user_state.remove_node(node_id);
+                        }
+                        _ => {
+                            // Other responses handled in Phase 3 Issue #14
+                        }
+                    }
+                }
             });
+
+        // Remove invalid connections outside the UI closure
+        for (output, input) in invalid_connections {
+            self.graph_state.graph.remove_connection(input, output);
+        }
+    }
+
+    /// Validate a connection and return an error message if invalid.
+    ///
+    /// Returns None if the connection is valid, Some(error_msg) if invalid.
+    fn validate_and_check_connection(
+        &self,
+        output: egui_node_graph2::OutputId,
+        input: egui_node_graph2::InputId,
+    ) -> Option<String> {
+        // Get the signal types for both ports
+        let output_type = self.graph_state.graph
+            .any_param_type(AnyParameterId::Output(output))
+            .ok()
+            .map(|dt| dt.signal_type());
+
+        let input_type = self.graph_state.graph
+            .any_param_type(AnyParameterId::Input(input))
+            .ok()
+            .map(|dt| dt.signal_type());
+
+        match (output_type, input_type) {
+            (Some(from_type), Some(to_type)) => {
+                let result = validate_connection(from_type, to_type);
+                if !result.is_valid() {
+                    result.error_message().map(|s| s.to_string())
+                } else {
+                    None
+                }
+            }
+            _ => {
+                // Couldn't get types - shouldn't happen
+                Some("Could not determine port types".to_string())
+            }
+        }
+    }
+
+    /// Check if a connection between two nodes would create a self-loop.
+    #[allow(dead_code)]
+    fn is_self_connection(
+        &self,
+        output: egui_node_graph2::OutputId,
+        input: egui_node_graph2::InputId,
+    ) -> bool {
+        let output_node = self.graph_state.graph.get_output(output).node;
+        let input_node = self.graph_state.graph.get_input(input).node;
+        output_node == input_node
     }
 
     /// Draw the bottom status bar
-    fn draw_status_bar(&self, ui: &mut egui::Ui) {
+    fn draw_status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
 
-            // Error display
-            if let Some(ref error) = self.audio_error_message {
+            // Priority order: validation message > audio error > status
+            if let Some(validation_msg) = self.user_state.validation_message() {
+                // Show validation error with warning icon
+                ui.label(RichText::new(format!("⚠ {}", validation_msg))
+                    .color(theme::accent::WARNING)
+                    .small());
+            } else if let Some(ref error) = self.audio_error_message {
+                // Show audio error
                 ui.label(RichText::new(format!("⚠ {}", error))
                     .color(theme::accent::ERROR)
                     .small());
             } else {
-                // Show node count
+                // Show node and connection count
                 let node_count = self.graph_state.graph.nodes.len();
+                let connection_count = self.graph_state.graph.iter_connections().count();
+
                 let status = if node_count == 0 {
                     "Right-click to add nodes".to_string()
-                } else {
+                } else if connection_count == 0 {
                     format!("{} node{}", node_count, if node_count == 1 { "" } else { "s" })
+                } else {
+                    format!(
+                        "{} node{}, {} connection{}",
+                        node_count,
+                        if node_count == 1 { "" } else { "s" },
+                        connection_count,
+                        if connection_count == 1 { "" } else { "s" }
+                    )
                 };
                 ui.label(RichText::new(status)
                     .color(theme::text::SECONDARY)

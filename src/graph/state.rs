@@ -4,16 +4,19 @@
 
 use egui_node_graph2::{GraphEditorState, NodeId};
 use std::collections::HashMap;
+use std::time::Instant;
 
 use crate::engine::NodeId as EngineNodeId;
 use super::{SynthDataType, SynthNodeData, SynthValueType};
 use super::templates::SynthNodeTemplate;
 
+/// Duration to show validation messages before auto-clearing.
+const VALIDATION_MESSAGE_DURATION_SECS: f32 = 3.0;
+
 /// User state for the graph editor.
 ///
 /// This is passed to all graph callbacks and can store any
 /// application-specific data needed during graph editing.
-#[derive(Default)]
 pub struct SynthGraphState {
     /// Currently selected node, if any.
     pub selected_node: Option<NodeId>,
@@ -24,6 +27,24 @@ pub struct SynthGraphState {
 
     /// Counter for generating unique engine node IDs.
     next_engine_node_id: EngineNodeId,
+
+    /// Last validation error message for display in UI.
+    validation_message: Option<String>,
+
+    /// When the validation message was set (for auto-clear).
+    validation_message_time: Option<Instant>,
+}
+
+impl Default for SynthGraphState {
+    fn default() -> Self {
+        Self {
+            selected_node: None,
+            node_id_map: HashMap::new(),
+            next_engine_node_id: 0,
+            validation_message: None,
+            validation_message_time: None,
+        }
+    }
 }
 
 impl SynthGraphState {
@@ -54,6 +75,31 @@ impl SynthGraphState {
     pub fn clear(&mut self) {
         self.node_id_map.clear();
         self.selected_node = None;
+        self.validation_message = None;
+        self.validation_message_time = None;
+    }
+
+    /// Set a validation error message to display.
+    pub fn set_validation_error(&mut self, message: impl Into<String>) {
+        self.validation_message = Some(message.into());
+        self.validation_message_time = Some(Instant::now());
+    }
+
+    /// Clear the validation message.
+    pub fn clear_validation_message(&mut self) {
+        self.validation_message = None;
+        self.validation_message_time = None;
+    }
+
+    /// Get the current validation message if it hasn't expired.
+    pub fn validation_message(&mut self) -> Option<&str> {
+        // Auto-clear after duration
+        if let Some(time) = self.validation_message_time {
+            if time.elapsed().as_secs_f32() > VALIDATION_MESSAGE_DURATION_SECS {
+                self.clear_validation_message();
+            }
+        }
+        self.validation_message.as_deref()
     }
 }
 
