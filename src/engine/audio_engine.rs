@@ -47,6 +47,8 @@ pub struct DeviceInfo {
     pub name: String,
     /// Whether this is the default output device.
     pub is_default: bool,
+    /// Index in the device list (for selection).
+    pub index: usize,
 }
 
 /// Shared state between audio callback and main thread.
@@ -119,15 +121,64 @@ impl AudioEngine {
             .output_devices()
             .map(|devices| {
                 devices
-                    .filter_map(|device| {
+                    .enumerate()
+                    .filter_map(|(index, device)| {
                         device.name().ok().map(|name| DeviceInfo {
                             is_default: Some(&name) == default_name.as_ref(),
                             name,
+                            index,
                         })
                     })
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Get the name of the currently selected device.
+    pub fn current_device_name(&self) -> String {
+        self.device.name().unwrap_or_else(|_| "Unknown".to_string())
+    }
+
+    /// Select a different output device by index.
+    ///
+    /// This will stop the current stream if running. Call `start()` to begin
+    /// playback on the new device.
+    pub fn select_device(&mut self, index: usize) -> Result<(), AudioError> {
+        // Stop current stream if running
+        let was_running = self.is_running();
+        if was_running {
+            self.stop()?;
+        }
+
+        // Find the device by index
+        let device = self
+            .host
+            .output_devices()
+            .map_err(|e| AudioError::ConfigurationFailed(e.to_string()))?
+            .nth(index)
+            .ok_or(AudioError::NoOutputDevice)?;
+
+        // Get configuration for new device
+        let supported_config = device
+            .default_output_config()
+            .map_err(|e| AudioError::ConfigurationFailed(e.to_string()))?;
+
+        let sample_rate = supported_config.sample_rate().0;
+        let config = StreamConfig {
+            channels: supported_config.channels(),
+            sample_rate: SampleRate(sample_rate),
+            buffer_size: cpal::BufferSize::Default,
+        };
+
+        self.device = device;
+        self.config = config;
+
+        // Restart if it was running before
+        if was_running {
+            self.start()?;
+        }
+
+        Ok(())
     }
 
     /// Get the current stream configuration.
@@ -264,9 +315,11 @@ mod tests {
         let info = DeviceInfo {
             name: "Test Device".to_string(),
             is_default: true,
+            index: 0,
         };
         assert_eq!(info.name, "Test Device");
         assert!(info.is_default);
+        assert_eq!(info.index, 0);
     }
 
     // Note: Hardware-dependent tests are difficult to run in CI

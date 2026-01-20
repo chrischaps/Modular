@@ -6,7 +6,7 @@
 use eframe::egui::{self, RichText, Layout, Align};
 use egui_node_graph2::GraphEditorState;
 
-use crate::engine::{AudioEngine, AudioError};
+use crate::engine::{AudioEngine, AudioError, DeviceInfo};
 use crate::graph::{
     AllNodeTemplates, SynthDataType, SynthGraphState, SynthNodeData, SynthNodeTemplate,
     SynthValueType,
@@ -38,6 +38,12 @@ pub struct SynthApp {
 
     /// User state for the graph editor
     user_state: SynthGraphState,
+
+    /// Cached list of audio devices
+    audio_devices: Vec<DeviceInfo>,
+
+    /// Index of currently selected device
+    selected_device_index: usize,
 }
 
 impl SynthApp {
@@ -52,6 +58,18 @@ impl SynthApp {
             Err(e) => Some(e.to_string()),
         };
 
+        // Get initial device list and find the default device index
+        let (audio_devices, selected_device_index) = match &audio_engine {
+            Ok(engine) => {
+                let devices = engine.enumerate_devices();
+                let default_idx = devices.iter()
+                    .position(|d| d.is_default)
+                    .unwrap_or(0);
+                (devices, default_idx)
+            }
+            Err(_) => (Vec::new(), 0),
+        };
+
         let mut app = Self {
             audio_engine,
             test_tone_enabled: false,
@@ -60,6 +78,8 @@ impl SynthApp {
             theme_applied: false,
             graph_state: GraphEditorState::new(1.0),
             user_state: SynthGraphState::default(),
+            audio_devices,
+            selected_device_index,
         };
 
         // Start engine and enable test tone if requested
@@ -69,6 +89,28 @@ impl SynthApp {
         }
 
         app
+    }
+
+    /// Refresh the list of available audio devices
+    fn refresh_devices(&mut self) {
+        if let Ok(ref engine) = self.audio_engine {
+            self.audio_devices = engine.enumerate_devices();
+        }
+    }
+
+    /// Select an audio output device by index
+    fn select_device(&mut self, index: usize) {
+        if let Ok(ref mut engine) = self.audio_engine {
+            match engine.select_device(index) {
+                Ok(()) => {
+                    self.selected_device_index = index;
+                    self.audio_error_message = None;
+                }
+                Err(e) => {
+                    self.audio_error_message = Some(e.to_string());
+                }
+            }
+        }
     }
 
     /// Start the audio engine
@@ -168,6 +210,52 @@ impl SynthApp {
                         actions.toggle_test_tone = true;
                     }
 
+                    ui.add_space(20.0);
+                    ui.separator();
+                    ui.add_space(20.0);
+
+                    // Device selector
+                    ui.label(RichText::new("Output").color(theme::text::SECONDARY));
+                    ui.add_space(8.0);
+
+                    // Get current device name for display
+                    let current_device = self.audio_devices
+                        .get(self.selected_device_index)
+                        .map(|d| d.name.as_str())
+                        .unwrap_or("No device");
+
+                    // Truncate long device names
+                    let display_name = if current_device.len() > 30 {
+                        format!("{}...", &current_device[..27])
+                    } else {
+                        current_device.to_string()
+                    };
+
+                    egui::ComboBox::from_id_salt("device_selector")
+                        .selected_text(display_name)
+                        .width(200.0)
+                        .show_ui(ui, |ui| {
+                            for device in &self.audio_devices {
+                                let label = if device.is_default {
+                                    format!("{} (Default)", device.name)
+                                } else {
+                                    device.name.clone()
+                                };
+
+                                if ui.selectable_label(
+                                    device.index == self.selected_device_index,
+                                    label
+                                ).clicked() {
+                                    actions.select_device = Some(device.index);
+                                }
+                            }
+
+                            ui.separator();
+                            if ui.button("🔄 Refresh").clicked() {
+                                actions.refresh_devices = true;
+                            }
+                        });
+
                     // Status indicator
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         let status_color = if is_running {
@@ -251,6 +339,8 @@ struct ToolbarActions {
     start_audio: bool,
     stop_audio: bool,
     toggle_test_tone: bool,
+    select_device: Option<usize>,
+    refresh_devices: bool,
 }
 
 impl eframe::App for SynthApp {
@@ -292,6 +382,12 @@ impl eframe::App for SynthApp {
         }
         if toolbar_actions.toggle_test_tone {
             self.toggle_test_tone();
+        }
+        if toolbar_actions.refresh_devices {
+            self.refresh_devices();
+        }
+        if let Some(device_index) = toolbar_actions.select_device {
+            self.select_device(device_index);
         }
     }
 }
