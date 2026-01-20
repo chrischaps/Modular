@@ -82,9 +82,11 @@ impl AudioProcessor {
         // Calculate number of frames in this callback
         let num_frames = output.len() / channels;
 
-        // Update context block size if different
+        // Update context and graph block size if different
         if num_frames != self.context.block_size {
             self.context = ProcessContext::new(self.context.sample_rate, num_frames);
+            // Resize audio graph buffers to match new block size
+            self.graph.set_block_size(num_frames);
         }
 
         // Process the audio graph

@@ -120,6 +120,27 @@ impl AudioGraph {
         self.registry = Some(registry);
     }
 
+    /// Updates the block size, resizing all buffers and re-preparing modules.
+    ///
+    /// This should be called when the audio callback block size changes.
+    /// Note: This allocates memory and should ideally only be called during
+    /// initialization or configuration changes, not in the real-time audio path.
+    pub fn set_block_size(&mut self, block_size: usize) {
+        if block_size == self.block_size {
+            return;
+        }
+
+        self.block_size = block_size;
+
+        // Resize buffer pool
+        self.buffers.resize_all(block_size);
+
+        // Re-prepare all modules with new block size
+        for data in self.modules.values_mut() {
+            data.module.prepare(self.sample_rate, block_size);
+        }
+    }
+
     /// Returns a reference to the processing order.
     pub fn processing_order(&self) -> &[NodeId] {
         &self.processing_order
