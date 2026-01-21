@@ -127,7 +127,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
 
     fn node_finder_label(&self, _user_state: &mut Self::UserState) -> Cow<'_, str> {
         match self {
-            SynthNodeTemplate::SineOscillator => Cow::Borrowed("Sine Oscillator"),
+            SynthNodeTemplate::SineOscillator => Cow::Borrowed("Oscillator"),
             SynthNodeTemplate::AudioOutput => Cow::Borrowed("Audio Output"),
             SynthNodeTemplate::Lfo => Cow::Borrowed("LFO"),
             SynthNodeTemplate::SvfFilter => Cow::Borrowed("SVF Filter"),
@@ -144,7 +144,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
 
     fn node_graph_label(&self, _user_state: &mut Self::UserState) -> String {
         match self {
-            SynthNodeTemplate::SineOscillator => "Sine Oscillator".to_string(),
+            SynthNodeTemplate::SineOscillator => "Oscillator".to_string(),
             SynthNodeTemplate::AudioOutput => "Audio Output".to_string(),
             SynthNodeTemplate::Lfo => "LFO".to_string(),
             SynthNodeTemplate::SvfFilter => "SVF Filter".to_string(),
@@ -159,7 +159,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
         match self {
             SynthNodeTemplate::SineOscillator => SynthNodeData::new(
                 "osc.sine",
-                "Sine Oscillator",
+                "Oscillator",
                 ModuleCategory::Source,
             ).with_knob_params(vec![
                 // Frequency: exposed param with input port AND bottom knob
@@ -167,6 +167,8 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 KnobParam::exposed("Frequency", "Freq"),
                 // FM Depth: knob-only, no input port
                 KnobParam::knob_only("FM Depth", "FM Dpth"),
+                // Pulse Width: knob-only, for square wave duty cycle
+                KnobParam::knob_only("Pulse Width", "PW"),
             ]),
             SynthNodeTemplate::AudioOutput => SynthNodeData::new(
                 "output.audio",
@@ -281,6 +283,16 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     true, // Port shown inline, widget skipped via knob_params check
                 );
 
+                // PWM: Pulse width modulation for square wave
+                graph.add_input_param(
+                    node_id,
+                    "PWM".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
                 // Knob-only parameter: no input port, knob at bottom
                 // ConstantOnly + hidden inline = knob only appears at bottom
                 graph.add_input_param(
@@ -290,6 +302,30 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthValueType::linear_hz(0.0, 0.0, 1000.0, ""),
                     InputParamKind::ConstantOnly,
                     false, // Hidden inline - shown only in bottom knob row
+                );
+
+                // Waveform selector - shown inline
+                graph.add_input_param(
+                    node_id,
+                    "Waveform".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::select(
+                        0,
+                        vec!["Sine".to_string(), "Saw".to_string(), "Square".to_string(), "Tri".to_string()],
+                        "Wave",
+                    ),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline as dropdown
+                );
+
+                // Pulse Width: knob-only parameter (0.1-0.9)
+                graph.add_input_param(
+                    node_id,
+                    "Pulse Width".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(0.5, 0.1, 0.9, "", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
                 );
 
                 // Output port
@@ -733,7 +769,7 @@ mod tests {
         let mut state = SynthGraphState::default();
         assert_eq!(
             SynthNodeTemplate::SineOscillator.node_finder_label(&mut state),
-            "Sine Oscillator"
+            "Oscillator"
         );
         assert_eq!(
             SynthNodeTemplate::AudioOutput.node_finder_label(&mut state),
