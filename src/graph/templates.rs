@@ -53,6 +53,41 @@ impl NodeTemplateIter for AllNodeTemplates {
     }
 }
 
+impl AllNodeTemplates {
+    /// Returns all templates grouped by category.
+    ///
+    /// Categories are returned in a logical display order:
+    /// Sources, Filters, Modulation, Effects, Utilities, Output.
+    /// Only includes categories that have at least one template.
+    pub fn by_category() -> Vec<(ModuleCategory, Vec<SynthNodeTemplate>)> {
+        use std::collections::HashMap;
+
+        // Collect templates by category
+        let mut map: HashMap<ModuleCategory, Vec<SynthNodeTemplate>> = HashMap::new();
+        for template in Self.all_kinds() {
+            map.entry(template.category())
+                .or_default()
+                .push(template);
+        }
+
+        // Define display order for categories
+        let category_order = [
+            ModuleCategory::Source,
+            ModuleCategory::Filter,
+            ModuleCategory::Modulation,
+            ModuleCategory::Effect,
+            ModuleCategory::Utility,
+            ModuleCategory::Output,
+        ];
+
+        // Build result in display order, excluding empty categories
+        category_order
+            .into_iter()
+            .filter_map(|cat| map.remove(&cat).map(|templates| (cat, templates)))
+            .collect()
+    }
+}
+
 impl NodeTemplateTrait for SynthNodeTemplate {
     type NodeData = SynthNodeData;
     type DataType = SynthDataType;

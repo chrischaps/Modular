@@ -2,6 +2,7 @@
 //!
 //! Contains the user state passed to egui_node_graph2 callbacks.
 
+use egui::Pos2;
 use egui_node_graph2::{GraphEditorState, NodeId};
 use std::collections::HashMap;
 use std::time::Instant;
@@ -33,6 +34,10 @@ pub struct SynthGraphState {
 
     /// When the validation message was set (for auto-clear).
     validation_message_time: Option<Instant>,
+
+    /// Position where context menu was opened (screen coords).
+    /// None when menu is closed.
+    pub context_menu_pos: Option<Pos2>,
 }
 
 impl Default for SynthGraphState {
@@ -43,6 +48,7 @@ impl Default for SynthGraphState {
             next_engine_node_id: 0,
             validation_message: None,
             validation_message_time: None,
+            context_menu_pos: None,
         }
     }
 }
@@ -77,6 +83,7 @@ impl SynthGraphState {
         self.selected_node = None;
         self.validation_message = None;
         self.validation_message_time = None;
+        self.context_menu_pos = None;
     }
 
     /// Set a validation error message to display.

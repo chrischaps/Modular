@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use eframe::egui::{self, RichText, Layout, Align};
-use egui_node_graph2::{GraphEditorState, NodeResponse};
+use egui_node_graph2::{GraphEditorState, NodeResponse, NodeTemplateTrait};
 
 use crate::engine::{
     AudioEngine, AudioError, AudioProcessor, DeviceInfo, EngineChannels, EngineCommand, UiHandle,
@@ -276,10 +276,17 @@ impl SynthApp {
         let mut invalid_connections: Vec<(egui_node_graph2::OutputId, egui_node_graph2::InputId)> = Vec::new();
         // Collect commands to send (to avoid borrow issues)
         let mut commands_to_send: Vec<EngineCommand> = Vec::new();
+        // Track if we clicked in the editor area
+        let mut cursor_in_editor = false;
+        // Store editor rect for coordinate conversion
+        let mut editor_rect = egui::Rect::NOTHING;
 
         egui::CentralPanel::default()
             .frame(egui::Frame::none())
             .show(ctx, |ui| {
+                // Store editor rect for coordinate conversion
+                editor_rect = ui.available_rect_before_wrap();
+
                 // Draw the node graph editor
                 let graph_response = self.graph_state.draw_graph_editor(
                     ui,
@@ -287,6 +294,11 @@ impl SynthApp {
                     &mut self.user_state,
                     Vec::default(),
                 );
+
+                cursor_in_editor = graph_response.cursor_in_editor;
+
+                // Disable the built-in node finder - we use our own context menu
+                self.graph_state.node_finder = None;
 
                 // Process graph responses
                 for response in graph_response.node_responses {
@@ -338,6 +350,97 @@ impl SynthApp {
                     }
                 }
             });
+
+        // Detect right-click in editor to open context menu
+        if ctx.input(|i| i.pointer.secondary_clicked()) && cursor_in_editor {
+            // Only open if not already showing a menu
+            if self.user_state.context_menu_pos.is_none() {
+                self.user_state.context_menu_pos = ctx.input(|i| i.pointer.interact_pos());
+            }
+        }
+
+        // Show custom context menu for adding nodes
+        if let Some(menu_pos) = self.user_state.context_menu_pos {
+            let mut close_menu = false;
+            let mut template_to_create: Option<SynthNodeTemplate> = None;
+
+            let menu_id = egui::Id::new("add_node_context_menu");
+            let menu_response = egui::Area::new(menu_id)
+                .fixed_pos(menu_pos)
+                .order(egui::Order::Foreground)
+                .show(ctx, |ui| {
+                    egui::Frame::menu(ui.style()).show(ui, |ui| {
+                        ui.set_min_width(120.0);
+
+                        for (category, templates) in AllNodeTemplates::by_category() {
+                            // Show category as a submenu button
+                            ui.menu_button(
+                                egui::RichText::new(format!("{} ", category.name()))
+                                    .color(category.color()),
+                                |ui| {
+                                    for template in templates {
+                                        let label = template.node_finder_label(&mut self.user_state);
+                                        if ui.button(label.as_ref()).clicked() {
+                                            template_to_create = Some(template);
+                                            close_menu = true;
+                                            ui.close_menu();
+                                        }
+                                    }
+                                },
+                            );
+                        }
+                    });
+                });
+
+            // Close menu on click outside
+            let menu_rect = menu_response.response.rect;
+            if ctx.input(|i| i.pointer.any_click()) {
+                if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
+                    // Check if click was outside menu (with some margin for submenus)
+                    let expanded_rect = menu_rect.expand(200.0); // Allow for submenu width
+                    if !expanded_rect.contains(pos) && template_to_create.is_none() {
+                        close_menu = true;
+                    }
+                }
+            }
+
+            // Close menu on Escape
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                close_menu = true;
+            }
+
+            // Create node if a template was selected
+            if let Some(template) = template_to_create {
+                // Convert screen position to graph coordinates
+                let pan = self.graph_state.pan_zoom.pan;
+                let zoom = self.graph_state.pan_zoom.zoom;
+                let graph_pos = (menu_pos - editor_rect.min.to_vec2() - pan) / zoom;
+
+                // Add the node to the graph
+                let node_id = self.graph_state.graph.add_node(
+                    template.node_graph_label(&mut self.user_state),
+                    template.user_data(&mut self.user_state),
+                    |graph, node_id| template.build_node(graph, &mut self.user_state, node_id),
+                );
+
+                // Set the node position and add to node_order
+                self.graph_state.node_positions.insert(node_id, graph_pos);
+                self.graph_state.node_order.push(node_id);
+
+                // Allocate engine node ID and send command
+                let engine_node_id = self.user_state.allocate_engine_node_id(node_id);
+                commands_to_send.push(EngineCommand::AddModule {
+                    node_id: engine_node_id,
+                    module_id: template.module_id(),
+                });
+
+                close_menu = true;
+            }
+
+            if close_menu {
+                self.user_state.context_menu_pos = None;
+            }
+        }
 
         // Send collected commands
         for cmd in commands_to_send {
