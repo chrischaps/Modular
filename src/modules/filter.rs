@@ -167,7 +167,8 @@ impl DspModule for SvfFilter {
     ) {
         let base_cutoff = params[Self::PARAM_CUTOFF];
         let base_resonance = params[Self::PARAM_RESONANCE];
-        let drive = params[Self::PARAM_DRIVE];
+        // Map drive from 0-1 (UI) to 1-10 (DSP) so signal always passes through
+        let drive = 1.0 + params[Self::PARAM_DRIVE] * 9.0;
 
         // Get input buffers
         let audio_in = inputs.get(Self::PORT_IN);
@@ -324,7 +325,7 @@ mod tests {
         ];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        filter.process(&[&input], &mut outputs, &[1000.0, 0.5, 1.0], &ctx);
+        filter.process(&[&input], &mut outputs, &[1000.0, 0.5, 0.0], &ctx);
 
         // All outputs should have non-zero values
         let lp_has_signal = outputs[0].samples.iter().any(|&s| s.abs() > 0.001);
@@ -368,7 +369,7 @@ mod tests {
         let ctx = ProcessContext::new(sample_rate, 4410);
 
         // Set cutoff to 500 Hz (well below our 5000 Hz signal)
-        filter.process(&[&input], &mut outputs, &[500.0, 0.5, 1.0], &ctx);
+        filter.process(&[&input], &mut outputs, &[500.0, 0.5, 0.0], &ctx);
 
         // Calculate RMS of input and lowpass output (after initial transient)
         let skip = 441; // Skip first ~10ms for filter settling
@@ -409,7 +410,7 @@ mod tests {
         let ctx = ProcessContext::new(sample_rate, 4410);
 
         // Set cutoff to 2000 Hz (well above our 100 Hz signal)
-        filter.process(&[&input], &mut outputs, &[2000.0, 0.5, 1.0], &ctx);
+        filter.process(&[&input], &mut outputs, &[2000.0, 0.5, 0.0], &ctx);
 
         // Calculate RMS of input and highpass output (after initial transient)
         let skip = 441;
@@ -444,7 +445,7 @@ mod tests {
             SignalBuffer::audio(256),
         ];
         let ctx = ProcessContext::new(44100.0, 256);
-        filter.process(&[&input], &mut outputs, &[1000.0, 0.5, 1.0], &ctx);
+        filter.process(&[&input], &mut outputs, &[1000.0, 0.5, 0.0], &ctx);
 
         // Reset should clear internal state
         filter.reset();
@@ -457,7 +458,7 @@ mod tests {
             SignalBuffer::audio(256),
         ];
         let ctx2 = ProcessContext::new(44100.0, 256);
-        filter.process(&[&silence], &mut outputs2, &[1000.0, 0.5, 1.0], &ctx2);
+        filter.process(&[&silence], &mut outputs2, &[1000.0, 0.5, 0.0], &ctx2);
 
         // First output sample should be near zero after reset
         assert!(
@@ -566,24 +567,24 @@ mod tests {
             input.samples[i] = 0.5;
         }
 
-        // Process with drive = 1.0
+        // Process with drive = 0.0 (UI value) -> actual drive = 1.0 (unity)
         let mut outputs1 = vec![
             SignalBuffer::audio(256),
             SignalBuffer::audio(256),
             SignalBuffer::audio(256),
         ];
         let ctx = ProcessContext::new(44100.0, 256);
-        filter.process(&[&input], &mut outputs1, &[1000.0, 0.5, 1.0], &ctx);
+        filter.process(&[&input], &mut outputs1, &[1000.0, 0.5, 0.0], &ctx);
 
         filter.reset();
 
-        // Process with drive = 5.0
+        // Process with drive = 0.5 (UI value) -> actual drive = 5.5
         let mut outputs2 = vec![
             SignalBuffer::audio(256),
             SignalBuffer::audio(256),
             SignalBuffer::audio(256),
         ];
-        filter.process(&[&input], &mut outputs2, &[1000.0, 0.5, 5.0], &ctx);
+        filter.process(&[&input], &mut outputs2, &[1000.0, 0.5, 0.5], &ctx);
 
         // With higher drive, the output should be louder (until saturation)
         let rms1: f32 = (outputs1[0].samples.iter().map(|s| s * s).sum::<f32>() / 256.0).sqrt();
