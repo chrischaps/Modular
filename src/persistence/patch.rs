@@ -8,7 +8,62 @@ use serde::{Deserialize, Serialize};
 
 /// Current patch format version.
 /// Increment this when making breaking changes to the format.
-pub const PATCH_VERSION: u32 = 1;
+pub const PATCH_VERSION: u32 = 2;
+
+/// A MIDI CC to parameter mapping.
+///
+/// Maps a hardware MIDI CC controller to a synthesizer parameter.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MidiMapping {
+    /// CC number (0-127).
+    pub cc_number: u8,
+    /// MIDI channel (0 = omni/any channel, 1-16 = specific channel).
+    pub channel: u8,
+    /// Target engine node ID.
+    pub node_id: u64,
+    /// Target parameter index within the node.
+    pub param_index: usize,
+    /// Name of the parameter (for display).
+    pub param_name: String,
+    /// Minimum value of the mapped range.
+    pub min_value: f32,
+    /// Maximum value of the mapped range.
+    pub max_value: f32,
+}
+
+impl MidiMapping {
+    /// Create a new MIDI mapping with full range.
+    pub fn new(
+        cc_number: u8,
+        channel: u8,
+        node_id: u64,
+        param_index: usize,
+        param_name: impl Into<String>,
+        min_value: f32,
+        max_value: f32,
+    ) -> Self {
+        Self {
+            cc_number,
+            channel,
+            node_id,
+            param_index,
+            param_name: param_name.into(),
+            min_value,
+            max_value,
+        }
+    }
+
+    /// Check if this mapping matches a given CC event.
+    pub fn matches(&self, cc_number: u8, channel: u8) -> bool {
+        self.cc_number == cc_number && (self.channel == 0 || self.channel == channel + 1)
+    }
+
+    /// Convert a CC value (0-127) to the mapped parameter range.
+    pub fn cc_to_value(&self, cc_value: u8) -> f32 {
+        let normalized = cc_value as f32 / 127.0;
+        self.min_value + normalized * (self.max_value - self.min_value)
+    }
+}
 
 /// A complete synthesizer patch.
 ///
@@ -24,6 +79,9 @@ pub struct Patch {
     pub nodes: Vec<NodeData>,
     /// All connections between nodes.
     pub connections: Vec<ConnectionData>,
+    /// MIDI CC mappings (optional for backwards compatibility).
+    #[serde(default)]
+    pub midi_mappings: Vec<MidiMapping>,
 }
 
 impl Patch {
@@ -34,6 +92,7 @@ impl Patch {
             version: PATCH_VERSION,
             nodes: Vec::new(),
             connections: Vec::new(),
+            midi_mappings: Vec::new(),
         }
     }
 

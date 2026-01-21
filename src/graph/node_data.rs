@@ -163,6 +163,23 @@ pub struct SynthNodeData {
     pub led_indicators: Vec<LedIndicator>,
 }
 
+/// Configuration for MIDI mapping display on a knob.
+///
+/// This struct is used to pass MIDI mapping state to the knob rendering function.
+#[derive(Default)]
+struct KnobMidiConfig {
+    /// Whether this knob has a MIDI CC mapping.
+    has_midi_mapping: bool,
+    /// The CC number if mapped.
+    cc_number: Option<u8>,
+    /// Whether this knob is the current MIDI Learn target.
+    is_learn_target: bool,
+    /// Parameter min value (for MIDI Learn).
+    min_value: f32,
+    /// Parameter max value (for MIDI Learn).
+    max_value: f32,
+}
+
 impl SynthNodeData {
     /// Create new node data for a module.
     pub fn new(module_id: &'static str, display_name: impl Into<String>, category: ModuleCategory) -> Self {
@@ -233,6 +250,7 @@ impl SynthNodeData {
         param_name: &str,
         responses: &mut Vec<NodeResponse<SynthResponse, Self>>,
         signal_value: Option<f32>,
+        _midi_config: &KnobMidiConfig,
     ) {
         // Dim the knob if it's connected (externally controlled)
         let alpha = if is_connected { 0.5 } else { 1.0 };
@@ -596,6 +614,17 @@ impl NodeDataTrait for SynthNodeData {
                         if let Some((_name, input_id)) = node.inputs.iter().find(|(name, _)| *name == knob_param.param_name) {
                             let input = graph.get_input(*input_id);
 
+                            // Calculate param_index by finding the position among editable parameters
+                            let current_param_index = node.inputs.iter()
+                                .take_while(|(name, _)| *name != knob_param.param_name)
+                                .filter(|(_, id)| {
+                                    let inp = graph.get_input(*id);
+                                    matches!(inp.kind,
+                                        egui_node_graph2::InputParamKind::ConstantOnly |
+                                        egui_node_graph2::InputParamKind::ConnectionOrConstant)
+                                })
+                                .count();
+
                             // Check if this exposed param has a connection
                             // iter_connections returns (InputId, OutputId) - input port and the output it's connected to
                             let is_connected = knob_param.exposed_as_input &&
@@ -625,12 +654,79 @@ impl NodeDataTrait for SynthNodeData {
                                 None
                             };
 
+                            // Get MIDI mapping info for this parameter
+                            let midi_mapping = engine_node_id.and_then(|eid|
+                                user_state.get_midi_mapping(eid, current_param_index));
+                            let is_learn_target = engine_node_id
+                                .map(|eid| user_state.is_midi_learn_target(eid, current_param_index))
+                                .unwrap_or(false);
+
+                            // Get min/max values for MIDI Learn
+                            let (min_value, max_value) = match &input.value {
+                                SynthValueType::Scalar { .. } => (0.0, 1.0),
+                                SynthValueType::Frequency { min, max, .. } => (*min, *max),
+                                SynthValueType::LinearHz { min, max, .. } => (*min, *max),
+                                SynthValueType::Time { min, max, .. } => (*min, *max),
+                                SynthValueType::LinearRange { min, max, .. } => (*min, *max),
+                                SynthValueType::Toggle { .. } => (0.0, 1.0),
+                                SynthValueType::Select { options, .. } => (0.0, (options.len() - 1) as f32),
+                            };
+
+                            // Build MIDI config for the knob
+                            let midi_config = KnobMidiConfig {
+                                has_midi_mapping: midi_mapping.is_some(),
+                                cc_number: midi_mapping.map(|m| m.cc_number),
+                                is_learn_target,
+                                min_value,
+                                max_value,
+                            };
+
                             // Render the knob based on value type
-                            ui.vertical(|ui| {
+                            let knob_response = ui.vertical(|ui| {
                                 ui.set_min_width(KNOB_SIZE + 8.0);
 
-                                // Visual indicator for connected exposed params with signal feedback
-                                if is_connected {
+                                // Visual indicator for MIDI mapping or learn mode
+                                let show_midi_indicator = midi_config.has_midi_mapping || midi_config.is_learn_target;
+                                let show_connection_indicator = is_connected && !show_midi_indicator;
+
+                                if show_midi_indicator {
+                                    // MIDI CC badge - purple for mapped, blinking for learn mode
+                                    let badge_color = if midi_config.is_learn_target {
+                                        // Blink effect for learn mode
+                                        let time = ui.ctx().input(|i| i.time);
+                                        let blink = ((time * 4.0).sin() > 0.0) as u8;
+                                        Color32::from_rgba_unmultiplied(180, 100, 200, 128 + blink * 127)
+                                    } else {
+                                        Color32::from_rgb(180, 100, 200) // Purple for MIDI
+                                    };
+
+                                    let dot_size = 8.0;
+                                    let available_width = ui.available_width();
+                                    let badge_center = egui::pos2(
+                                        ui.cursor().left() + available_width / 2.0,
+                                        ui.cursor().top() + dot_size / 2.0,
+                                    );
+
+                                    // Draw badge background
+                                    ui.painter().circle_filled(badge_center, dot_size / 2.0 + 1.0, badge_color);
+
+                                    // Draw "M" letter on badge
+                                    let text_pos = badge_center - egui::vec2(3.0, 4.0);
+                                    ui.painter().text(
+                                        text_pos,
+                                        egui::Align2::LEFT_TOP,
+                                        "M",
+                                        egui::FontId::proportional(8.0),
+                                        Color32::WHITE,
+                                    );
+
+                                    ui.add_space(dot_size + 2.0);
+
+                                    // Request repaint for blinking effect
+                                    if midi_config.is_learn_target {
+                                        ui.ctx().request_repaint();
+                                    }
+                                } else if show_connection_indicator {
                                     // Orange color for Control signal (matches signal type color)
                                     let indicator_color = if signal_value.is_some() {
                                         Color32::from_rgb(255, 165, 0) // Orange for active signal
@@ -664,8 +760,51 @@ impl NodeDataTrait for SynthNodeData {
                                     &knob_param.param_name,
                                     &mut responses,
                                     signal_value,
+                                    &midi_config,
                                 );
                             });
+
+                            // Handle right-click context menu for MIDI Learn
+                            if let Some(engine_id) = engine_node_id {
+                                knob_response.response.context_menu(|ui| {
+                                    if midi_config.has_midi_mapping {
+                                        let cc_text = midi_config.cc_number
+                                            .map(|cc| format!("CC #{}", cc))
+                                            .unwrap_or_else(|| "MIDI".to_string());
+                                        ui.label(RichText::new(cc_text).small().weak());
+                                        ui.separator();
+
+                                        if ui.button("Clear MIDI").clicked() {
+                                            responses.push(NodeResponse::User(SynthResponse::MidiLearnClear {
+                                                engine_node_id: engine_id,
+                                                param_index: current_param_index,
+                                            }));
+                                            ui.close_menu();
+                                        }
+                                        if ui.button("Re-learn MIDI CC").clicked() {
+                                            responses.push(NodeResponse::User(SynthResponse::MidiLearnStart {
+                                                engine_node_id: engine_id,
+                                                param_index: current_param_index,
+                                                param_name: knob_param.param_name.clone(),
+                                                min_value: midi_config.min_value,
+                                                max_value: midi_config.max_value,
+                                            }));
+                                            ui.close_menu();
+                                        }
+                                    } else {
+                                        if ui.button("Learn MIDI CC").clicked() {
+                                            responses.push(NodeResponse::User(SynthResponse::MidiLearnStart {
+                                                engine_node_id: engine_id,
+                                                param_index: current_param_index,
+                                                param_name: knob_param.param_name.clone(),
+                                                min_value: midi_config.min_value,
+                                                max_value: midi_config.max_value,
+                                            }));
+                                            ui.close_menu();
+                                        }
+                                    }
+                                });
+                            }
                         }
                     }
                 }

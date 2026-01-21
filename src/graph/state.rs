@@ -27,6 +27,15 @@ pub struct DisplayMidiEvent {
     pub timestamp: f32,
 }
 
+/// Info about a MIDI CC mapping for display in the UI.
+#[derive(Clone, Debug)]
+pub struct MidiMappingInfo {
+    /// CC number that is mapped.
+    pub cc_number: u8,
+    /// MIDI channel (0 = omni).
+    pub channel: u8,
+}
+
 /// User state for the graph editor.
 ///
 /// This is passed to all graph callbacks and can store any
@@ -67,6 +76,17 @@ pub struct SynthGraphState {
 
     /// Timestamp of the first MIDI event received (for relative timestamps).
     midi_first_event_time: Option<Instant>,
+
+    /// MIDI CC mappings for UI display.
+    /// Key: (engine_node_id, param_index), Value: mapping info.
+    pub midi_mappings: HashMap<(EngineNodeId, usize), MidiMappingInfo>,
+
+    /// Whether MIDI Learn mode is active.
+    pub midi_learn_active: bool,
+
+    /// Target parameter for MIDI Learn (if active).
+    /// Tuple of (engine_node_id, param_index).
+    pub midi_learn_target: Option<(EngineNodeId, usize)>,
 }
 
 impl Default for SynthGraphState {
@@ -82,6 +102,9 @@ impl Default for SynthGraphState {
             output_values: HashMap::new(),
             midi_events: VecDeque::new(),
             midi_first_event_time: None,
+            midi_mappings: HashMap::new(),
+            midi_learn_active: false,
+            midi_learn_target: None,
         }
     }
 }
@@ -121,6 +144,32 @@ impl SynthGraphState {
         self.output_values.clear();
         self.midi_events.clear();
         self.midi_first_event_time = None;
+        self.midi_mappings.clear();
+        self.midi_learn_active = false;
+        self.midi_learn_target = None;
+    }
+
+    /// Get the MIDI mapping info for a parameter, if any.
+    pub fn get_midi_mapping(&self, engine_node_id: EngineNodeId, param_index: usize) -> Option<&MidiMappingInfo> {
+        self.midi_mappings.get(&(engine_node_id, param_index))
+    }
+
+    /// Set or update a MIDI mapping for a parameter.
+    pub fn set_midi_mapping(&mut self, engine_node_id: EngineNodeId, param_index: usize, cc_number: u8, channel: u8) {
+        self.midi_mappings.insert(
+            (engine_node_id, param_index),
+            MidiMappingInfo { cc_number, channel },
+        );
+    }
+
+    /// Remove a MIDI mapping for a parameter.
+    pub fn remove_midi_mapping(&mut self, engine_node_id: EngineNodeId, param_index: usize) {
+        self.midi_mappings.remove(&(engine_node_id, param_index));
+    }
+
+    /// Check if a parameter is currently the MIDI Learn target.
+    pub fn is_midi_learn_target(&self, engine_node_id: EngineNodeId, param_index: usize) -> bool {
+        self.midi_learn_target == Some((engine_node_id, param_index))
     }
 
     /// Set a validation error message to display.

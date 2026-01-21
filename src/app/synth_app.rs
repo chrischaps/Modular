@@ -22,7 +22,7 @@ use crate::graph::{
 use crate::modules::keyboard::{key_to_note, relative_to_midi};
 use crate::modules::midi_note::MidiNote;
 use crate::persistence::{
-    ConnectionData, NodeData, ParameterValue, Patch, PatchError,
+    ConnectionData, MidiMapping, NodeData, ParameterValue, Patch, PatchError,
     load_from_file, save_to_file,
 };
 use crate::widgets::{cpu_meter, CpuMeterConfig};
@@ -30,6 +30,24 @@ use super::theme;
 
 /// Type alias for our graph editor state
 type SynthGraphEditorState = GraphEditorState<SynthNodeData, SynthDataType, SynthValueType, SynthNodeTemplate, SynthGraphState>;
+
+/// Target parameter for MIDI Learn mode.
+///
+/// When the user activates MIDI Learn on a knob, this stores the target
+/// parameter information until a CC event is received.
+#[derive(Debug, Clone)]
+pub struct MidiLearnTarget {
+    /// Engine node ID of the target parameter.
+    pub node_id: u64,
+    /// Parameter index within the node.
+    pub param_index: usize,
+    /// Parameter name for display.
+    pub param_name: String,
+    /// Minimum value of the parameter range.
+    pub min_value: f32,
+    /// Maximum value of the parameter range.
+    pub max_value: f32,
+}
 
 /// Main application state for the Modular Synth
 pub struct SynthApp {
@@ -120,6 +138,13 @@ pub struct SynthApp {
 
     /// Current aftertouch value (channel pressure).
     midi_aftertouch: u8,
+
+    // --- MIDI CC Mapping state ---
+    /// Active MIDI CC to parameter mappings.
+    midi_mappings: Vec<MidiMapping>,
+
+    /// Target for MIDI Learn mode (None = not learning).
+    midi_learn_target: Option<MidiLearnTarget>,
 }
 
 impl SynthApp {
@@ -210,6 +235,9 @@ impl SynthApp {
             midi_last_triggered_note: 60,
             midi_last_velocity: 100,
             midi_aftertouch: 0,
+            // MIDI CC Mapping state
+            midi_mappings: Vec::new(),
+            midi_learn_target: None,
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -258,8 +286,11 @@ impl SynthApp {
     /// Process pending MIDI events.
     /// - Stores events in user state for display by MIDI Monitor modules.
     /// - Routes note events to MIDI Note modules.
+    /// - Handles CC events for MIDI Learn and mapped parameters.
     fn process_midi_events(&mut self) {
         let mut notes_changed = false;
+        let mut cc_updates: Vec<(u64, usize, f32)> = Vec::new();
+        let mut learned_mapping: Option<MidiMapping> = None;
 
         if let Some(ref mut consumer) = self.midi_event_consumer {
             while let Ok(timestamped) = consumer.pop() {
@@ -291,17 +322,153 @@ impl SynthApp {
                             notes_changed = true;
                         }
                     }
+                    MidiEvent::ControlChange { channel, controller, value } => {
+                        // Check if we're in MIDI Learn mode
+                        if let Some(ref target) = self.midi_learn_target {
+                            // Create new mapping from the received CC
+                            learned_mapping = Some(MidiMapping::new(
+                                controller,
+                                0, // Omni channel for learned mappings
+                                target.node_id,
+                                target.param_index,
+                                target.param_name.clone(),
+                                target.min_value,
+                                target.max_value,
+                            ));
+                        } else {
+                            // Apply CC to all matching mappings
+                            for mapping in &self.midi_mappings {
+                                if mapping.matches(controller, channel) {
+                                    let param_value = mapping.cc_to_value(value);
+                                    cc_updates.push((mapping.node_id, mapping.param_index, param_value));
+                                }
+                            }
+                        }
+                    }
                     _ => {
-                        // Other events (CC, pitch bend, etc.) are not handled by MIDI Note module
+                        // Other events (pitch bend, etc.) are not handled yet
                     }
                 }
             }
+        }
+
+        // Handle MIDI Learn completion
+        if let Some(mapping) = learned_mapping {
+            // Remove any existing mapping for the same parameter (from user_state too)
+            self.midi_mappings.retain(|m| {
+                !(m.node_id == mapping.node_id && m.param_index == mapping.param_index)
+            });
+            self.user_state.remove_midi_mapping(mapping.node_id, mapping.param_index);
+
+            // Also remove any existing mapping for the same CC
+            self.midi_mappings.retain(|m| {
+                !(m.cc_number == mapping.cc_number && (m.channel == 0 || m.channel == mapping.channel))
+            });
+
+            // Add the new mapping
+            self.user_state.set_midi_mapping(
+                mapping.node_id,
+                mapping.param_index,
+                mapping.cc_number,
+                mapping.channel,
+            );
+            self.midi_mappings.push(mapping);
+
+            // Exit learn mode
+            self.midi_learn_target = None;
+            self.user_state.midi_learn_active = false;
+            self.user_state.midi_learn_target = None;
+            self.status_message = Some("MIDI CC mapped successfully".to_string());
+        }
+
+        // Apply CC updates to parameters
+        for (node_id, param_index, value) in cc_updates {
+            self.send_command(EngineCommand::SetParameter {
+                node_id,
+                param_index,
+                value,
+            });
+            // Update cached param so sync_parameters doesn't overwrite
+            self.cached_params.insert((node_id, param_index), value);
+
+            // Also update the graph UI to reflect the change
+            self.update_graph_param_from_cc(node_id, param_index, value);
         }
 
         // Update MIDI Note modules if note state changed
         if notes_changed {
             self.sync_midi_note_modules();
         }
+    }
+
+    /// Update a graph parameter value from a CC change.
+    fn update_graph_param_from_cc(&mut self, engine_node_id: u64, param_index: usize, value: f32) {
+        // Find the graph node ID for this engine node
+        let graph_node_id = self.user_state.node_id_map.iter()
+            .find(|(_, &engine_id)| engine_id == engine_node_id)
+            .map(|(graph_id, _)| *graph_id);
+
+        if let Some(graph_node_id) = graph_node_id {
+            if let Some(node) = self.graph_state.graph.nodes.get_mut(graph_node_id) {
+                // Find the parameter by index
+                let mut current_param_index = 0;
+                for (_name, input_id) in &node.inputs {
+                    if let Some(input) = self.graph_state.graph.inputs.get_mut(*input_id) {
+                        match input.kind {
+                            InputParamKind::ConstantOnly | InputParamKind::ConnectionOrConstant => {
+                                if current_param_index == param_index {
+                                    input.value.set_actual_value(value);
+                                    return;
+                                }
+                                current_param_index += 1;
+                            }
+                            InputParamKind::ConnectionOnly => {
+                                // Skip connection-only inputs
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Start MIDI Learn mode for a parameter.
+    pub fn start_midi_learn(&mut self, target: MidiLearnTarget) {
+        self.midi_learn_target = Some(target);
+        self.status_message = Some("Move a MIDI CC to map it...".to_string());
+    }
+
+    /// Cancel MIDI Learn mode.
+    pub fn cancel_midi_learn(&mut self) {
+        self.midi_learn_target = None;
+        self.user_state.midi_learn_active = false;
+        self.user_state.midi_learn_target = None;
+        self.status_message = Some("MIDI Learn cancelled".to_string());
+    }
+
+    /// Check if currently in MIDI Learn mode.
+    pub fn is_midi_learning(&self) -> bool {
+        self.midi_learn_target.is_some()
+    }
+
+    /// Get the MIDI mapping for a specific parameter, if any.
+    pub fn get_mapping_for_param(&self, node_id: u64, param_index: usize) -> Option<&MidiMapping> {
+        self.midi_mappings.iter()
+            .find(|m| m.node_id == node_id && m.param_index == param_index)
+    }
+
+    /// Remove MIDI mapping for a specific parameter.
+    pub fn clear_mapping_for_param(&mut self, node_id: u64, param_index: usize) {
+        self.midi_mappings.retain(|m| {
+            !(m.node_id == node_id && m.param_index == param_index)
+        });
+        self.status_message = Some("MIDI mapping cleared".to_string());
+    }
+
+    /// Clear all MIDI mappings.
+    pub fn clear_all_midi_mappings(&mut self) {
+        self.midi_mappings.clear();
+        self.status_message = Some("All MIDI mappings cleared".to_string());
     }
 
     /// Check if there are any MIDI Note modules in the graph.
@@ -787,6 +954,34 @@ impl SynthApp {
                                 }
                             }
                         }
+                        NodeResponse::User(crate::graph::SynthResponse::MidiLearnStart {
+                            engine_node_id,
+                            param_index,
+                            param_name,
+                            min_value,
+                            max_value,
+                        }) => {
+                            // Start MIDI Learn mode for this parameter
+                            self.start_midi_learn(MidiLearnTarget {
+                                node_id: engine_node_id,
+                                param_index,
+                                param_name,
+                                min_value,
+                                max_value,
+                            });
+                            // Update the user state to show visual feedback
+                            self.user_state.midi_learn_active = true;
+                            self.user_state.midi_learn_target = Some((engine_node_id, param_index));
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::MidiLearnClear {
+                            engine_node_id,
+                            param_index,
+                        }) => {
+                            // Clear MIDI mapping for this parameter
+                            self.clear_mapping_for_param(engine_node_id, param_index);
+                            // Update the user state
+                            self.user_state.remove_midi_mapping(engine_node_id, param_index);
+                        }
                         _ => {
                             // Other responses not yet handled
                         }
@@ -1265,6 +1460,9 @@ impl SynthApp {
             }
         }
 
+        // Copy MIDI mappings to the patch
+        patch.midi_mappings = self.midi_mappings.clone();
+
         patch
     }
 
@@ -1389,6 +1587,18 @@ impl SynthApp {
             }
         }
 
+        // Load MIDI mappings
+        self.midi_mappings = patch.midi_mappings.clone();
+        // Sync mappings to user state for UI display
+        for mapping in &self.midi_mappings {
+            self.user_state.set_midi_mapping(
+                mapping.node_id,
+                mapping.param_index,
+                mapping.cc_number,
+                mapping.channel,
+            );
+        }
+
         // Restore playback state
         if was_playing {
             self.is_playing = true;
@@ -1408,11 +1618,15 @@ impl SynthApp {
         self.graph_state.node_positions.clear();
         self.graph_state.node_order.clear();
 
-        // Clear user state
+        // Clear user state (also clears MIDI mapping UI state)
         self.user_state.clear();
 
         // Clear cached parameters
         self.cached_params.clear();
+
+        // Clear MIDI mappings
+        self.midi_mappings.clear();
+        self.midi_learn_target = None;
     }
 
     /// Start a new patch - clears the graph and resets the current file path.

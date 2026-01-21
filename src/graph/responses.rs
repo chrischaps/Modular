@@ -24,6 +24,19 @@ pub enum SynthResponse {
     DeleteNode(egui_node_graph2::NodeId),
     /// Request to reset a node's parameters to defaults.
     ResetNode(egui_node_graph2::NodeId),
+    /// Request to start MIDI Learn mode for a parameter.
+    MidiLearnStart {
+        engine_node_id: u64,
+        param_index: usize,
+        param_name: String,
+        min_value: f32,
+        max_value: f32,
+    },
+    /// Request to clear MIDI mapping for a parameter.
+    MidiLearnClear {
+        engine_node_id: u64,
+        param_index: usize,
+    },
 }
 
 impl SynthResponse {
@@ -58,6 +71,31 @@ impl SynthResponse {
     /// Create a reset node response.
     pub fn reset_node(node_id: egui_node_graph2::NodeId) -> Self {
         Self::ResetNode(node_id)
+    }
+
+    /// Create a MIDI learn start response.
+    pub fn midi_learn_start(
+        engine_node_id: u64,
+        param_index: usize,
+        param_name: impl Into<String>,
+        min_value: f32,
+        max_value: f32,
+    ) -> Self {
+        Self::MidiLearnStart {
+            engine_node_id,
+            param_index,
+            param_name: param_name.into(),
+            min_value,
+            max_value,
+        }
+    }
+
+    /// Create a MIDI learn clear response.
+    pub fn midi_learn_clear(engine_node_id: u64, param_index: usize) -> Self {
+        Self::MidiLearnClear {
+            engine_node_id,
+            param_index,
+        }
     }
 }
 

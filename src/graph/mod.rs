@@ -14,7 +14,7 @@ mod value_types;
 pub use data_types::SynthDataType;
 pub use node_data::{KnobParam, LedIndicator, SynthNodeData};
 pub use responses::SynthResponse;
-pub use state::{create_editor_state, DisplayMidiEvent, SynthGraphEditorState, SynthGraphState};
+pub use state::{create_editor_state, DisplayMidiEvent, MidiMappingInfo, SynthGraphEditorState, SynthGraphState};
 pub use templates::{AllNodeTemplates, SynthNodeTemplate};
 pub use validation::{validate_connection, types_compatible, ConnectionError, ValidationResult};
 pub use value_types::SynthValueType;
