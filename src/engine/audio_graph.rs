@@ -4,7 +4,7 @@
 //! the correct processing order via topological sort. It handles all
 //! graph manipulation commands from the UI thread in a real-time safe manner.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::dsp::{DspModule, ModuleRegistry, ProcessContext, SignalBuffer, SignalType};
 use crate::engine::buffer_pool::BufferPool;
@@ -84,6 +84,12 @@ pub struct AudioGraph {
     registry: Option<ModuleRegistry>,
     /// Whether the graph needs resorting.
     needs_sort: bool,
+    /// Inputs that should report values back to UI for knob animation.
+    /// Key: (node_id, input_port_index).
+    monitored_inputs: HashSet<(NodeId, PortIndex)>,
+    /// Temporary storage for sampled input values to send to UI.
+    /// Populated during process(), consumed by the caller.
+    sampled_input_values: Vec<(NodeId, PortIndex, f32)>,
 }
 
 impl AudioGraph {
@@ -98,6 +104,8 @@ impl AudioGraph {
             block_size,
             registry: None,
             needs_sort: false,
+            monitored_inputs: HashSet::new(),
+            sampled_input_values: Vec::new(),
         }
     }
 
@@ -112,6 +120,8 @@ impl AudioGraph {
             block_size,
             registry: Some(registry),
             needs_sort: false,
+            monitored_inputs: HashSet::new(),
+            sampled_input_values: Vec::new(),
         }
     }
 
@@ -345,6 +355,24 @@ impl AudioGraph {
         self.processing_order.clear();
         self.buffers.clear_pool();
         self.needs_sort = false;
+        self.monitored_inputs.clear();
+        self.sampled_input_values.clear();
+    }
+
+    /// Start monitoring an input port for UI feedback.
+    pub fn monitor_input(&mut self, node_id: NodeId, input_index: PortIndex) {
+        self.monitored_inputs.insert((node_id, input_index));
+    }
+
+    /// Stop monitoring an input port.
+    pub fn unmonitor_input(&mut self, node_id: NodeId, input_index: PortIndex) {
+        self.monitored_inputs.remove(&(node_id, input_index));
+    }
+
+    /// Drain sampled input values for sending to UI.
+    /// Call this after process() to get the values to send.
+    pub fn drain_sampled_input_values(&mut self) -> Vec<(NodeId, PortIndex, f32)> {
+        std::mem::take(&mut self.sampled_input_values)
     }
 
     // ========================================================================
@@ -429,6 +457,8 @@ impl AudioGraph {
                 self.add_module(node_id, module_id)
             }
             EngineCommand::RemoveModule { node_id } => {
+                // Also remove any monitored inputs for this node
+                self.monitored_inputs.retain(|(n, _)| *n != node_id);
                 self.remove_module(node_id)
             }
             EngineCommand::Connect {
@@ -455,6 +485,14 @@ impl AudioGraph {
                 self.clear();
                 true
             }
+            EngineCommand::MonitorInput { node_id, input_index } => {
+                self.monitor_input(node_id, input_index);
+                true
+            }
+            EngineCommand::UnmonitorInput { node_id, input_index } => {
+                self.unmonitor_input(node_id, input_index);
+                true
+            }
         }
     }
 
@@ -466,6 +504,7 @@ impl AudioGraph {
     ///
     /// This is the main audio processing method, called from the audio callback.
     /// It processes all modules in topological order.
+    /// After processing, call `drain_sampled_input_values()` to get monitored input values.
     pub fn process(&mut self, context: &ProcessContext) {
         // Ensure processing order is up to date
         self.update_processing_order();
@@ -473,10 +512,67 @@ impl AudioGraph {
         // Clear all output buffers
         self.buffers.clear_all();
 
+        // Clear sampled input values from previous block
+        self.sampled_input_values.clear();
+
         // Process modules in topological order
         for &node_id in &self.processing_order.clone() {
             self.process_module(node_id, context);
         }
+
+        // Sample monitored inputs after processing
+        self.sample_monitored_inputs();
+    }
+
+    /// Samples the values of monitored inputs for UI feedback.
+    fn sample_monitored_inputs(&mut self) {
+        // Collect monitored inputs that we need to sample
+        let monitored: Vec<(NodeId, PortIndex)> = self.monitored_inputs.iter().copied().collect();
+
+        for (node_id, input_index) in monitored {
+            // Check if the node exists and get the input buffer value
+            if let Some(data) = self.modules.get(&node_id) {
+                // Find the connection to this input port
+                let connection = self.connections.iter().find(|conn| {
+                    conn.to_node == node_id && conn.to_port == input_index
+                });
+
+                if let Some(conn) = connection {
+                    // Get the output buffer from the source module
+                    if let Some(source_data) = self.modules.get(&conn.from_node) {
+                        let output_idx = self.port_to_output_index_for_data(source_data, conn.from_port);
+                        if let Some(buf) = self.buffers.get(conn.from_node, output_idx) {
+                            // Sample the first value from the buffer
+                            let value = buf.samples.first().copied().unwrap_or(0.0);
+                            self.sampled_input_values.push((node_id, input_index, value));
+                        }
+                    }
+                } else {
+                    // No connection - use default value
+                    let input_ports: Vec<_> = data
+                        .module
+                        .ports()
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, p)| p.is_input())
+                        .collect();
+
+                    if let Some((_, port_def)) = input_ports.get(input_index) {
+                        self.sampled_input_values.push((node_id, input_index, port_def.default_value));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Helper to convert port index to output index without borrowing self.modules.
+    fn port_to_output_index_for_data(&self, data: &ModuleData, port_index: PortIndex) -> usize {
+        data.module
+            .ports()
+            .iter()
+            .take(port_index)
+            .filter(|p| p.is_output())
+            .count()
     }
 
     /// Processes a single module.

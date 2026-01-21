@@ -38,6 +38,11 @@ pub struct SynthGraphState {
     /// Position where context menu was opened (screen coords).
     /// None when menu is closed.
     pub context_menu_pos: Option<Pos2>,
+
+    /// Current input values received from the audio engine for signal feedback.
+    /// Key: (engine_node_id, input_port_index), Value: sampled signal value.
+    /// These values animate the knobs when their inputs are connected.
+    pub input_values: HashMap<(EngineNodeId, usize), f32>,
 }
 
 impl Default for SynthGraphState {
@@ -49,6 +54,7 @@ impl Default for SynthGraphState {
             validation_message: None,
             validation_message_time: None,
             context_menu_pos: None,
+            input_values: HashMap::new(),
         }
     }
 }
@@ -84,6 +90,7 @@ impl SynthGraphState {
         self.validation_message = None;
         self.validation_message_time = None;
         self.context_menu_pos = None;
+        self.input_values.clear();
     }
 
     /// Set a validation error message to display.
@@ -107,6 +114,22 @@ impl SynthGraphState {
             }
         }
         self.validation_message.as_deref()
+    }
+
+    /// Update an input value from the audio engine feedback.
+    pub fn set_input_value(&mut self, engine_node_id: EngineNodeId, input_index: usize, value: f32) {
+        self.input_values.insert((engine_node_id, input_index), value);
+    }
+
+    /// Get the current input value for a node's input port.
+    /// Returns None if no value has been received yet.
+    pub fn get_input_value(&self, engine_node_id: EngineNodeId, input_index: usize) -> Option<f32> {
+        self.input_values.get(&(engine_node_id, input_index)).copied()
+    }
+
+    /// Clear input values for a specific node (e.g., when node is deleted).
+    pub fn clear_input_values_for_node(&mut self, engine_node_id: EngineNodeId) {
+        self.input_values.retain(|(node_id, _), _| *node_id != engine_node_id);
     }
 }
 

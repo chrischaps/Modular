@@ -65,6 +65,23 @@ pub enum EngineCommand {
 
     /// Clear the entire audio graph.
     ClearGraph,
+
+    /// Start monitoring an input port for UI feedback.
+    /// The engine will send InputValue events with the signal values.
+    MonitorInput {
+        /// The node containing the input.
+        node_id: NodeId,
+        /// The input port index to monitor.
+        input_index: PortIndex,
+    },
+
+    /// Stop monitoring an input port.
+    UnmonitorInput {
+        /// The node containing the input.
+        node_id: NodeId,
+        /// The input port index to stop monitoring.
+        input_index: PortIndex,
+    },
 }
 
 /// Events sent from the audio engine to the UI thread.
@@ -90,6 +107,17 @@ pub enum EngineEvent {
 
     /// An error occurred in the audio engine.
     Error,
+
+    /// Reports the current value at a monitored input port.
+    /// Used for animating knobs when their input is connected.
+    InputValue {
+        /// The node containing the input.
+        node_id: NodeId,
+        /// The input port index.
+        input_index: PortIndex,
+        /// The sampled value (typically first sample or average of block).
+        value: f32,
+    },
 }
 
 #[cfg(test)]

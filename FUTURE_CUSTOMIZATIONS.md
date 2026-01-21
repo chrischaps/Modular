@@ -33,6 +33,22 @@ To achieve the concept image aesthetic, we would need access to the internal ren
 
 ---
 
+## Output Port Label Alignment
+
+**Current state**: Output port labels (e.g., "Out") are left-aligned in the node body, while the actual port connector is on the right edge.
+
+**Desired state**:
+- [ ] Output labels right-aligned, positioned closer to their port connectors
+
+**Possible solutions**:
+1. **Custom rendering in `bottom_ui()`** - Hide default labels, render manually with right alignment
+2. **Fork egui_node_graph2** - Add an `output_ui` trait method for custom output rendering
+3. **Contribute upstream** - Submit PR to add output label customization
+
+**Priority**: Low (functional, just not visually ideal)
+
+---
+
 ## Node Styling
 
 **Current state**: Library draws rounded rectangles with configurable title bar color.
@@ -90,3 +106,9 @@ The custom widgets (knobs, faders, waveforms) should be attempted first WITHOUT 
 ---
 
 *Last updated: 2026-01-20*
+
+---
+
+## Recently Deferred
+
+- **Output Port Label Alignment** (2026-01-20) - Left-aligned output labels accepted for now

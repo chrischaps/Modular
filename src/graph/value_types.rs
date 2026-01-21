@@ -5,7 +5,6 @@
 use eframe::egui;
 use egui_node_graph2::WidgetValueTrait;
 use super::{SynthGraphState, SynthNodeData, SynthResponse};
-use crate::widgets::{knob, KnobConfig, ParamFormat};
 
 /// Parameter value types for the synthesizer.
 ///
@@ -20,6 +19,13 @@ pub enum SynthValueType {
     },
     /// A frequency value in Hz, displayed logarithmically.
     Frequency {
+        value: f32,
+        min: f32,
+        max: f32,
+        label: String,
+    },
+    /// A linear Hz range (for FM depth, etc. where 0 is valid).
+    LinearHz {
         value: f32,
         min: f32,
         max: f32,
@@ -54,9 +60,19 @@ impl SynthValueType {
         }
     }
 
-    /// Create a new frequency parameter.
+    /// Create a new frequency parameter (logarithmic scaling).
     pub fn frequency(value: f32, min: f32, max: f32, label: impl Into<String>) -> Self {
         Self::Frequency {
+            value,
+            min,
+            max,
+            label: label.into(),
+        }
+    }
+
+    /// Create a new linear Hz parameter (for ranges that include 0).
+    pub fn linear_hz(value: f32, min: f32, max: f32, label: impl Into<String>) -> Self {
+        Self::LinearHz {
             value,
             min,
             max,
@@ -102,6 +118,10 @@ impl SynthValueType {
                 let log_val = value.ln();
                 (log_val - log_min) / (log_max - log_min)
             }
+            Self::LinearHz { value, min, max, .. } => {
+                // Linear normalization
+                (value - min) / (max - min)
+            }
             Self::Time { value, min, max, .. } => {
                 // Linear normalization for time
                 (value - min) / (max - min)
@@ -122,6 +142,7 @@ impl SynthValueType {
     /// This returns the value in its natural units:
     /// - Scalar: 0.0-1.0 (already in natural range)
     /// - Frequency: Hz
+    /// - LinearHz: Hz
     /// - Time: seconds
     /// - Toggle: 0.0 or 1.0
     /// - Select: index as f32
@@ -129,9 +150,27 @@ impl SynthValueType {
         match self {
             Self::Scalar { value, .. } => *value,
             Self::Frequency { value, .. } => *value,  // Hz
+            Self::LinearHz { value, .. } => *value,   // Hz (linear)
             Self::Time { value, .. } => *value,       // seconds
             Self::Toggle { value, .. } => if *value { 1.0 } else { 0.0 },
             Self::Select { value, .. } => *value as f32,
+        }
+    }
+
+    /// Set the actual/raw value directly.
+    ///
+    /// This sets the value in its natural units (Hz for frequency, seconds for time, etc.).
+    /// Values are clamped to valid ranges where applicable.
+    pub fn set_actual_value(&mut self, new_value: f32) {
+        match self {
+            Self::Scalar { value, .. } => *value = new_value.clamp(0.0, 1.0),
+            Self::Frequency { value, min, max, .. } => *value = new_value.clamp(*min, *max),
+            Self::LinearHz { value, min, max, .. } => *value = new_value.clamp(*min, *max),
+            Self::Time { value, min, max, .. } => *value = new_value.clamp(*min, *max),
+            Self::Toggle { value, .. } => *value = new_value > 0.5,
+            Self::Select { value, options, .. } => {
+                *value = (new_value as usize).min(options.len().saturating_sub(1));
+            }
         }
     }
 }
@@ -156,48 +195,47 @@ impl WidgetValueTrait for SynthValueType {
         _node_id: egui_node_graph2::NodeId,
         ui: &mut egui::Ui,
         _user_state: &mut Self::UserState,
-        _node_data: &Self::NodeData,
+        node_data: &Self::NodeData,
     ) -> Vec<Self::Response> {
-        // Compact knob size for node graph context
-        const KNOB_SIZE: f32 = 40.0;
+        // Design Philosophy: Inputs vs Knobs
+        // ==================================
+        // - Inputs (left side ports): Connection points for external signals. No inline widgets.
+        // - Knobs (bottom section): Manual user controls for parameter values.
+        // - Some parameters are "exposed": they have both an input AND a knob.
+        //   When disconnected, the knob controls the value. When connected, the
+        //   external signal takes over and the knob becomes a read-only display.
+        //
+        // Therefore, inline widgets for inputs should be minimal - just labels for
+        // most types. Only Toggle and Select get inline widgets since they're not
+        // suitable for knobs.
 
+        // For params that have a knob in bottom_ui, just show the label (no widget)
+        // The knob at the bottom is the primary control
+        if node_data.knob_params.iter().any(|kp| kp.param_name == param_name) {
+            ui.label(param_name);
+            return Vec::new();
+        }
+
+        // For continuous value types, show just the label (no knob widget)
         match self {
-            Self::Scalar { value, label } => {
-                ui.horizontal(|ui: &mut egui::Ui| {
-                    let display_label = if label.is_empty() { param_name } else { label };
-                    let config = KnobConfig {
-                        size: KNOB_SIZE,
-                        range: 0.0..=1.0,
-                        default: 0.5,
-                        format: ParamFormat::Percent,
-                        logarithmic: false,
-                        label: Some(display_label.to_string()),
-                        show_value: true,
-                        ..Default::default()
-                    };
-                    knob(ui, value, &config);
-                });
+            Self::Scalar { label, .. } => {
+                let display_label = if label.is_empty() { param_name } else { label.as_str() };
+                ui.label(display_label);
             }
-            Self::Frequency { value, min, max, label } => {
-                ui.horizontal(|ui: &mut egui::Ui| {
-                    let display_label = if label.is_empty() { param_name } else { label };
-                    let config = KnobConfig::frequency(*min, *max, 440.0)
-                        .with_label(display_label)
-                        .with_size(KNOB_SIZE);
-                    knob(ui, value, &config);
-                });
+            Self::Frequency { label, .. } => {
+                let display_label = if label.is_empty() { param_name } else { label.as_str() };
+                ui.label(display_label);
             }
-            Self::Time { value, min, max, label } => {
-                ui.horizontal(|ui: &mut egui::Ui| {
-                    let display_label = if label.is_empty() { param_name } else { label };
-                    let config = KnobConfig::time(*min, *max, (*min + *max) / 2.0)
-                        .with_label(display_label)
-                        .with_size(KNOB_SIZE);
-                    knob(ui, value, &config);
-                });
+            Self::LinearHz { label, .. } => {
+                let display_label = if label.is_empty() { param_name } else { label.as_str() };
+                ui.label(display_label);
+            }
+            Self::Time { label, .. } => {
+                let display_label = if label.is_empty() { param_name } else { label.as_str() };
+                ui.label(display_label);
             }
             Self::Toggle { value, label } => {
-                // Keep checkbox for toggle - it's more intuitive for on/off
+                // Toggle gets an inline checkbox - not suitable for knob
                 ui.horizontal(|ui: &mut egui::Ui| {
                     ui.label(if label.is_empty() { param_name } else { label });
                     ui.add_space(4.0);
@@ -205,7 +243,7 @@ impl WidgetValueTrait for SynthValueType {
                 });
             }
             Self::Select { value, options, label } => {
-                // Keep ComboBox for selection - knobs aren't ideal for discrete choices
+                // Select gets an inline ComboBox - discrete choices need dropdown
                 ui.horizontal(|ui: &mut egui::Ui| {
                     ui.label(if label.is_empty() { param_name } else { label });
                     egui::ComboBox::from_id_salt(param_name)

@@ -187,6 +187,37 @@ git push
 3. **Type-safe connections** - Signal types must be validated when connecting ports
 4. **Real-time safe** - Audio callback must never block
 
+## Design Philosophy: Inputs vs Knobs
+
+This synthesizer follows a clear separation between **inputs** and **knobs**:
+
+### Inputs (Left Side Ports)
+- **Purpose**: Connection points for external signals from other modules
+- **Display**: Label only, no inline widget (except Toggle/Select which need special UI)
+- **Behavior**: Receive signals from connected modules
+
+### Knobs (Bottom Section)
+- **Purpose**: Manual user controls for parameter values
+- **Display**: Rotary knob with value readout
+- **Behavior**: User can drag to adjust value
+
+### Exposed Parameters (Both Input AND Knob)
+Some parameters can be controlled both manually and externally. These are called "exposed" parameters:
+
+1. **When disconnected**: The knob controls the value normally
+2. **When connected**: The external signal takes over:
+   - Knob becomes read-only (dimmed, non-interactive)
+   - Knob position animates to show the incoming signal value
+   - Visual indicator (orange dot) shows active external control
+3. **When disconnected again**: Returns to manual control
+
+This mirrors real analog modular synthesizers where patching a cable into a parameter jack overrides the manual control.
+
+### Implementation
+- `KnobParam::knob_only(...)` - Parameter with knob only, no input port
+- `KnobParam::exposed(...)` - Parameter with both input port AND knob
+- Signal feedback from audio engine enables knob animation when connected
+
 ## Visual Design Notes
 
 From the concept image Chris provided:

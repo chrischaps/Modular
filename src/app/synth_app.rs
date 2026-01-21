@@ -270,6 +270,25 @@ impl SynthApp {
         }
     }
 
+    /// Process events from the audio engine.
+    /// This handles InputValue events for knob animation feedback.
+    fn process_engine_events(&mut self) {
+        if let Some(ref mut handle) = self.ui_handle {
+            // Drain all available events
+            while let Some(event) = handle.recv_event() {
+                match event {
+                    crate::engine::EngineEvent::InputValue { node_id, input_index, value } => {
+                        // Store the input value for UI feedback
+                        self.user_state.set_input_value(node_id, input_index, value);
+                    }
+                    // Other events are not currently handled by the app
+                    // (OutputLevel, CpuLoad, Started, Stopped, Error)
+                    _ => {}
+                }
+            }
+        }
+    }
+
     /// Draw the main content area with the node graph editor
     fn draw_main_area(&mut self, ctx: &egui::Context) {
         // Collect connections to remove (validated after drawing)
@@ -335,6 +354,10 @@ impl SynthApp {
                                 // Connection is valid - send to engine
                                 if let Some(cmd) = self.build_connect_command(output, input) {
                                     commands_to_send.push(cmd);
+                                    // If this input is an exposed param, start monitoring it
+                                    if let Some(monitor_cmd) = self.build_monitor_input_command(input) {
+                                        commands_to_send.push(monitor_cmd);
+                                    }
                                 }
                             }
                         }
@@ -342,6 +365,26 @@ impl SynthApp {
                             // Send disconnect command to engine
                             if let Some(cmd) = self.build_disconnect_command(input) {
                                 commands_to_send.push(cmd);
+                                // Stop monitoring this input
+                                if let Some(unmonitor_cmd) = self.build_unmonitor_input_command(input) {
+                                    commands_to_send.push(unmonitor_cmd);
+                                }
+                            }
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::ParameterChanged {
+                            node_id: response_node_id,
+                            param_name,
+                            value,
+                        }) => {
+                            // Handle parameter changes from bottom_ui knobs
+                            // Find the input param by name and update its value
+                            if let Some(node) = self.graph_state.graph.nodes.get_mut(response_node_id) {
+                                if let Some((_name, input_id)) = node.inputs.iter().find(|(name, _)| *name == param_name) {
+                                    let input_id = *input_id;
+                                    if let Some(input) = self.graph_state.graph.inputs.get_mut(input_id) {
+                                        input.value.set_actual_value(value);
+                                    }
+                                }
                             }
                         }
                         _ => {
@@ -496,6 +539,69 @@ impl SynthApp {
         })
     }
 
+    /// Build a MonitorInput command if this input is an exposed parameter.
+    /// Exposed parameters have both an input port and a knob at the bottom.
+    fn build_monitor_input_command(
+        &self,
+        input: egui_node_graph2::InputId,
+    ) -> Option<EngineCommand> {
+        let input_data = self.graph_state.graph.get_input(input);
+        let node = self.graph_state.graph.nodes.get(input_data.node)?;
+
+        // Get the input name
+        let input_name = node.inputs.iter()
+            .find(|(_, id)| *id == input)
+            .map(|(name, _)| name)?;
+
+        // Check if this input name corresponds to an exposed knob parameter
+        let is_exposed_param = node.user_data.knob_params.iter()
+            .any(|kp| kp.param_name == *input_name && kp.exposed_as_input);
+
+        if !is_exposed_param {
+            return None;
+        }
+
+        // Get engine node ID and input port index
+        let engine_node_id = self.user_state.get_engine_node_id(input_data.node)?;
+        let input_index = self.get_input_port_index(input_data.node, input)?;
+
+        Some(EngineCommand::MonitorInput {
+            node_id: engine_node_id,
+            input_index,
+        })
+    }
+
+    /// Build an UnmonitorInput command for a given input.
+    fn build_unmonitor_input_command(
+        &self,
+        input: egui_node_graph2::InputId,
+    ) -> Option<EngineCommand> {
+        let input_data = self.graph_state.graph.get_input(input);
+        let node = self.graph_state.graph.nodes.get(input_data.node)?;
+
+        // Get the input name
+        let input_name = node.inputs.iter()
+            .find(|(_, id)| *id == input)
+            .map(|(name, _)| name)?;
+
+        // Check if this input name corresponds to an exposed knob parameter
+        let is_exposed_param = node.user_data.knob_params.iter()
+            .any(|kp| kp.param_name == *input_name && kp.exposed_as_input);
+
+        if !is_exposed_param {
+            return None;
+        }
+
+        // Get engine node ID and input port index
+        let engine_node_id = self.user_state.get_engine_node_id(input_data.node)?;
+        let input_index = self.get_input_port_index(input_data.node, input)?;
+
+        Some(EngineCommand::UnmonitorInput {
+            node_id: engine_node_id,
+            input_index,
+        })
+    }
+
     /// Get the DspModule port index for a given egui output ID.
     ///
     /// In egui_node_graph2, outputs are numbered separately from inputs.
@@ -508,12 +614,17 @@ impl SynthApp {
     ) -> Option<usize> {
         let node = self.graph_state.graph.nodes.get(node_id)?;
 
-        // Count the number of ConnectionOnly inputs (these map to DspModule input ports)
+        // Count the number of connectable inputs (ConnectionOnly or ConnectionOrConstant)
+        // These map to DspModule input ports
         let num_input_ports = node.inputs
             .iter()
             .filter(|(_, id)| {
                 let input = self.graph_state.graph.get_input(*id);
-                matches!(input.kind, egui_node_graph2::InputParamKind::ConnectionOnly)
+                matches!(
+                    input.kind,
+                    egui_node_graph2::InputParamKind::ConnectionOnly
+                        | egui_node_graph2::InputParamKind::ConnectionOrConstant
+                )
             })
             .count();
 
@@ -528,8 +639,8 @@ impl SynthApp {
 
     /// Get the DspModule port index for a given egui input ID.
     ///
-    /// Only ConnectionOnly inputs map to DspModule input ports.
-    /// We count only those when determining the port index.
+    /// Both ConnectionOnly and ConnectionOrConstant inputs map to DspModule input ports.
+    /// ConstantOnly inputs do NOT have ports (they are parameter-only).
     fn get_input_port_index(
         &self,
         node_id: egui_node_graph2::NodeId,
@@ -537,23 +648,30 @@ impl SynthApp {
     ) -> Option<usize> {
         let node = self.graph_state.graph.nodes.get(node_id)?;
 
-        // Count ConnectionOnly inputs up to and including the target input
+        // Count connectable inputs (ConnectionOnly or ConnectionOrConstant) up to target
         let mut port_index = 0;
         for (_, id) in &node.inputs {
             let input = self.graph_state.graph.get_input(*id);
 
+            // Check if this input can accept connections
+            let is_connectable = matches!(
+                input.kind,
+                egui_node_graph2::InputParamKind::ConnectionOnly
+                    | egui_node_graph2::InputParamKind::ConnectionOrConstant
+            );
+
             if *id == input_id {
-                // Only return a port index if this is a ConnectionOnly input
-                if matches!(input.kind, egui_node_graph2::InputParamKind::ConnectionOnly) {
+                // Return port index if this input can accept connections
+                if is_connectable {
                     return Some(port_index);
                 } else {
-                    // This input doesn't map to a DspModule port
+                    // ConstantOnly inputs don't map to DspModule ports
                     return None;
                 }
             }
 
-            // Only count ConnectionOnly inputs as ports
-            if matches!(input.kind, egui_node_graph2::InputParamKind::ConnectionOnly) {
+            // Count connectable inputs as ports
+            if is_connectable {
                 port_index += 1;
             }
         }
@@ -742,6 +860,9 @@ impl eframe::App for SynthApp {
             theme::apply_theme(ctx);
             self.theme_applied = true;
         }
+
+        // Process events from the audio engine
+        self.process_engine_events();
 
         // Top toolbar panel
         let toolbar_actions = egui::TopBottomPanel::top("toolbar")

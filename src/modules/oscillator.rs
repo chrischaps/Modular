@@ -49,8 +49,12 @@ impl SineOscillator {
             sample_rate: 44100.0,
             ports: vec![
                 // Input ports first (by convention)
-                PortDefinition::input_with_default("freq_cv", "Frequency", SignalType::Control, 0.0),
+                // These map to UI inputs: Add Freq (0), FM (1), Frequency (2)
+                PortDefinition::input_with_default("freq_cv", "Add Freq", SignalType::Control, 0.0),
                 PortDefinition::input_with_default("fm", "FM", SignalType::Control, 0.0),
+                // Direct frequency input - when connected, overrides the Frequency parameter
+                // Expects Control signal in range that maps to 20-20000 Hz
+                PortDefinition::input_with_default("freq_in", "Frequency", SignalType::Control, 0.0),
                 // Output port
                 PortDefinition::output("out", "Out", SignalType::Audio),
             ],
@@ -71,6 +75,7 @@ impl SineOscillator {
     /// Port index constants for clarity.
     const PORT_FREQ_CV: usize = 0;
     const PORT_FM: usize = 1;
+    const PORT_FREQ_IN: usize = 2;
     const PORT_OUT: usize = 0; // First (only) output
 
     /// Parameter index constants.
@@ -120,14 +125,37 @@ impl DspModule for SineOscillator {
         // Get input buffers (may be empty if not connected, use defaults)
         let freq_cv = inputs.get(Self::PORT_FREQ_CV);
         let fm_input = inputs.get(Self::PORT_FM);
+        let freq_in = inputs.get(Self::PORT_FREQ_IN);
+
+        // Check if freq_in is connected (has non-zero signal)
+        // If connected, it overrides the base frequency parameter
+        let freq_in_connected = freq_in
+            .map(|buf| buf.samples.iter().any(|&s| s.abs() > f32::EPSILON))
+            .unwrap_or(false);
 
         // Get output buffer
         let output = &mut outputs[Self::PORT_OUT];
 
         // Process each sample
         for i in 0..context.block_size {
-            // Get CV modulation for frequency (typically -1 to 1 or 0 to 1)
-            // We interpret CV as a multiplier: 0 = base freq, positive/negative = offset
+            // Determine base frequency: either from freq_in (if connected) or parameter
+            let effective_base_freq = if freq_in_connected {
+                // freq_in is a Control signal (-1 to 1), map to frequency range (20-20000 Hz)
+                // Using logarithmic mapping for musical response
+                let control_val = freq_in
+                    .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
+                    .unwrap_or(0.0);
+                // Map -1..1 to 0..1, then to log frequency range
+                let normalized = (control_val + 1.0) * 0.5; // 0..1
+                let min_freq = 20.0_f32;
+                let max_freq = 20000.0_f32;
+                // Logarithmic interpolation for musical scaling
+                min_freq * (max_freq / min_freq).powf(normalized)
+            } else {
+                base_freq
+            };
+
+            // Get CV modulation for frequency (additive offset)
             let freq_cv_value = freq_cv
                 .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
                 .unwrap_or(0.0);
@@ -138,12 +166,12 @@ impl DspModule for SineOscillator {
                 .unwrap_or(0.0);
 
             // Calculate final frequency:
-            // - Base frequency from parameter
-            // - CV input adds directly to frequency (could be scaled differently in future)
+            // - Base frequency (from param or freq_in)
+            // - CV input adds directly to frequency (scaled)
             // - FM input scaled by FM depth
             let freq_cv_hz = freq_cv_value * 1000.0; // CV -1..1 maps to -1000..1000 Hz offset
             let fm_hz = fm_value * fm_depth;
-            let final_freq = (base_freq + freq_cv_hz + fm_hz).max(0.0);
+            let final_freq = (effective_base_freq + freq_cv_hz + fm_hz).max(0.0);
 
             // Generate sine wave sample
             output.samples[i] = (self.phase * TAU).sin();
@@ -182,9 +210,9 @@ mod tests {
         let osc = SineOscillator::new();
         let ports = osc.ports();
 
-        assert_eq!(ports.len(), 3);
+        assert_eq!(ports.len(), 4);
 
-        // First two are inputs
+        // First three are inputs
         assert!(ports[0].is_input());
         assert_eq!(ports[0].id, "freq_cv");
         assert_eq!(ports[0].signal_type, SignalType::Control);
@@ -193,10 +221,14 @@ mod tests {
         assert_eq!(ports[1].id, "fm");
         assert_eq!(ports[1].signal_type, SignalType::Control);
 
-        // Third is output
-        assert!(ports[2].is_output());
-        assert_eq!(ports[2].id, "out");
-        assert_eq!(ports[2].signal_type, SignalType::Audio);
+        assert!(ports[2].is_input());
+        assert_eq!(ports[2].id, "freq_in");
+        assert_eq!(ports[2].signal_type, SignalType::Control);
+
+        // Fourth is output
+        assert!(ports[3].is_output());
+        assert_eq!(ports[3].id, "out");
+        assert_eq!(ports[3].signal_type, SignalType::Audio);
     }
 
     #[test]
@@ -362,7 +394,7 @@ mod tests {
         let module = module.unwrap();
         assert_eq!(module.info().id, "osc.sine");
         assert_eq!(module.info().name, "Sine Oscillator");
-        assert_eq!(module.ports().len(), 3);
+        assert_eq!(module.ports().len(), 4);
         assert_eq!(module.parameters().len(), 2);
     }
 }
