@@ -5,6 +5,7 @@
 use eframe::egui;
 use egui_node_graph2::WidgetValueTrait;
 use super::{SynthGraphState, SynthNodeData, SynthResponse};
+use crate::widgets::{knob, KnobConfig, ParamFormat};
 
 /// Parameter value types for the synthesizer.
 ///
@@ -157,53 +158,54 @@ impl WidgetValueTrait for SynthValueType {
         _user_state: &mut Self::UserState,
         _node_data: &Self::NodeData,
     ) -> Vec<Self::Response> {
+        // Compact knob size for node graph context
+        const KNOB_SIZE: f32 = 40.0;
+
         match self {
             Self::Scalar { value, label } => {
                 ui.horizontal(|ui: &mut egui::Ui| {
-                    ui.label(if label.is_empty() { param_name } else { label });
-                    ui.add(egui::Slider::new(value, 0.0..=1.0).show_value(true));
+                    let display_label = if label.is_empty() { param_name } else { label };
+                    let config = KnobConfig {
+                        size: KNOB_SIZE,
+                        range: 0.0..=1.0,
+                        default: 0.5,
+                        format: ParamFormat::Percent,
+                        logarithmic: false,
+                        label: Some(display_label.to_string()),
+                        show_value: true,
+                        ..Default::default()
+                    };
+                    knob(ui, value, &config);
                 });
             }
             Self::Frequency { value, min, max, label } => {
                 ui.horizontal(|ui: &mut egui::Ui| {
-                    ui.label(if label.is_empty() { param_name } else { label });
-                    ui.add(
-                        egui::Slider::new(value, *min..=*max)
-                            .logarithmic(true)
-                            .suffix(" Hz")
-                            .show_value(true),
-                    );
+                    let display_label = if label.is_empty() { param_name } else { label };
+                    let config = KnobConfig::frequency(*min, *max, 440.0)
+                        .with_label(display_label)
+                        .with_size(KNOB_SIZE);
+                    knob(ui, value, &config);
                 });
             }
             Self::Time { value, min, max, label } => {
                 ui.horizontal(|ui: &mut egui::Ui| {
-                    ui.label(if label.is_empty() { param_name } else { label });
-                    // Show as ms if under 1 second
-                    if *max < 1.0 {
-                        let ms = *value * 1000.0;
-                        let mut ms_val = ms;
-                        ui.add(
-                            egui::Slider::new(&mut ms_val, *min * 1000.0..=*max * 1000.0)
-                                .suffix(" ms")
-                                .show_value(true),
-                        );
-                        *value = ms_val / 1000.0;
-                    } else {
-                        ui.add(
-                            egui::Slider::new(value, *min..=*max)
-                                .suffix(" s")
-                                .show_value(true),
-                        );
-                    }
+                    let display_label = if label.is_empty() { param_name } else { label };
+                    let config = KnobConfig::time(*min, *max, (*min + *max) / 2.0)
+                        .with_label(display_label)
+                        .with_size(KNOB_SIZE);
+                    knob(ui, value, &config);
                 });
             }
             Self::Toggle { value, label } => {
+                // Keep checkbox for toggle - it's more intuitive for on/off
                 ui.horizontal(|ui: &mut egui::Ui| {
                     ui.label(if label.is_empty() { param_name } else { label });
+                    ui.add_space(4.0);
                     ui.checkbox(value, "");
                 });
             }
             Self::Select { value, options, label } => {
+                // Keep ComboBox for selection - knobs aren't ideal for discrete choices
                 ui.horizontal(|ui: &mut egui::Ui| {
                     ui.label(if label.is_empty() { param_name } else { label });
                     egui::ComboBox::from_id_salt(param_name)
