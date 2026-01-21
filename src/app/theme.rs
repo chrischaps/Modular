@@ -52,20 +52,63 @@ pub mod module {
     /// Source modules (oscillators) - blue
     pub const SOURCE: Color32 = Color32::from_rgb(66, 165, 245);
 
-    /// Filter modules - green
-    pub const FILTER: Color32 = Color32::from_rgb(129, 199, 132);
+    /// Filter modules - green/teal (matching concept image)
+    pub const FILTER: Color32 = Color32::from_rgb(38, 166, 154);
 
     /// Modulation modules (envelopes, LFOs) - orange
     pub const MODULATION: Color32 = Color32::from_rgb(255, 183, 77);
 
     /// Output modules - purple
-    pub const OUTPUT: Color32 = Color32::from_rgb(186, 104, 200);
+    pub const OUTPUT: Color32 = Color32::from_rgb(126, 87, 194);
 
     /// Utility modules - gray
     pub const UTILITY: Color32 = Color32::from_rgb(158, 158, 158);
 
     /// Effect modules - cyan
     pub const EFFECT: Color32 = Color32::from_rgb(77, 208, 225);
+}
+
+/// Node styling constants
+pub mod node {
+    use super::Color32;
+
+    /// Node body background color (dark)
+    pub const BODY_FILL: Color32 = Color32::from_rgb(35, 38, 48);
+
+    /// Node body border color
+    pub const BODY_STROKE: Color32 = Color32::from_rgb(55, 60, 75);
+
+    /// Node body border when selected
+    pub const SELECTED_STROKE: Color32 = Color32::from_rgb(100, 150, 255);
+
+    /// Node shadow color (use shadow() function for alpha)
+    pub const SHADOW_BASE: Color32 = Color32::from_rgb(0, 0, 0);
+
+    /// Get shadow color with alpha
+    pub fn shadow() -> Color32 {
+        Color32::from_rgba_unmultiplied(0, 0, 0, 80)
+    }
+
+    /// Port connector size
+    pub const PORT_RADIUS: f32 = 6.0;
+
+    /// Port connector highlight (metallic effect)
+    pub const PORT_HIGHLIGHT: Color32 = Color32::from_rgb(200, 210, 220);
+
+    /// Port connector shadow
+    pub const PORT_SHADOW: Color32 = Color32::from_rgb(40, 45, 55);
+}
+
+/// Cable styling constants
+pub mod cable {
+    /// Cable thickness
+    pub const THICKNESS: f32 = 3.0;
+
+    /// Cable glow radius
+    pub const GLOW_RADIUS: f32 = 6.0;
+
+    /// Cable curvature factor (0.0 = straight, 1.0 = very curved)
+    pub const CURVATURE: f32 = 0.5;
 }
 
 /// Text colors
@@ -221,14 +264,30 @@ mod tests {
     }
 
     #[test]
-    fn module_colors_match_categories() {
-        // Module colors should correspond to their signal types
-        // Source (oscillators) are blue like audio
-        assert_eq!(module::SOURCE, signal::AUDIO);
-        // Modulation is orange like control
-        assert_eq!(module::MODULATION, signal::CONTROL);
-        // Output is purple like MIDI
-        assert_eq!(module::OUTPUT, signal::MIDI);
+    fn module_colors_are_distinct() {
+        // Module category colors should all be visually distinct
+        let colors = [
+            module::SOURCE,
+            module::FILTER,
+            module::MODULATION,
+            module::EFFECT,
+            module::UTILITY,
+            module::OUTPUT,
+        ];
+
+        for i in 0..colors.len() {
+            for j in (i + 1)..colors.len() {
+                assert_ne!(colors[i], colors[j], "Module colors should be unique");
+            }
+        }
+    }
+
+    #[test]
+    fn node_styling_constants_exist() {
+        // Verify node styling constants are defined and reasonable
+        assert!(node::PORT_RADIUS > 0.0);
+        assert!(cable::THICKNESS > 0.0);
+        assert!(cable::GLOW_RADIUS > cable::THICKNESS);
     }
 
     #[test]

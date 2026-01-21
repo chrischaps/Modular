@@ -31,21 +31,21 @@ pub enum ModuleCategory {
 impl ModuleCategory {
     /// Returns the color associated with this module category.
     ///
-    /// These colors are used for module header bars in the UI:
-    /// - Source: Blue
-    /// - Filter: Green
-    /// - Modulation: Orange
-    /// - Effect: Cyan
-    /// - Utility: Gray
-    /// - Output: Purple
+    /// These colors match the concept image aesthetic:
+    /// - Source: Blue (#42A5F5) - oscillators, noise generators
+    /// - Filter: Teal (#26A69A) - filters, EQs
+    /// - Modulation: Orange (#FFB74D) - envelopes, LFOs
+    /// - Effect: Cyan (#4DD0E1) - delay, reverb
+    /// - Utility: Gray (#9E9E9E) - mixers, VCAs
+    /// - Output: Purple (#7E57C2) - master output
     pub fn color(&self) -> Color32 {
         match self {
-            ModuleCategory::Source => Color32::from_rgb(66, 135, 245),     // Blue
-            ModuleCategory::Filter => Color32::from_rgb(66, 245, 135),     // Green
-            ModuleCategory::Modulation => Color32::from_rgb(245, 158, 66), // Orange
-            ModuleCategory::Effect => Color32::from_rgb(66, 200, 245),     // Cyan
-            ModuleCategory::Utility => Color32::from_rgb(150, 150, 150),   // Gray
-            ModuleCategory::Output => Color32::from_rgb(178, 102, 255),    // Purple
+            ModuleCategory::Source => Color32::from_rgb(66, 165, 245),    // Blue #42A5F5
+            ModuleCategory::Filter => Color32::from_rgb(38, 166, 154),    // Teal #26A69A
+            ModuleCategory::Modulation => Color32::from_rgb(255, 183, 77), // Orange #FFB74D
+            ModuleCategory::Effect => Color32::from_rgb(77, 208, 225),    // Cyan #4DD0E1
+            ModuleCategory::Utility => Color32::from_rgb(158, 158, 158),  // Gray #9E9E9E
+            ModuleCategory::Output => Color32::from_rgb(126, 87, 194),    // Purple #7E57C2
         }
     }
 
