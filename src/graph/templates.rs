@@ -36,6 +36,8 @@ pub enum SynthNodeTemplate {
     MidiMonitor,
     /// MIDI Note - convert MIDI note events to CV signals.
     MidiNote,
+    /// Sample & Hold - sample input on trigger, hold until next trigger.
+    SampleHold,
 }
 
 impl SynthNodeTemplate {
@@ -54,6 +56,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::Keyboard => "input.keyboard",
             SynthNodeTemplate::MidiMonitor => "util.midi_monitor",
             SynthNodeTemplate::MidiNote => "input.midi_note",
+            SynthNodeTemplate::SampleHold => "util.sample_hold",
         }
     }
 
@@ -71,6 +74,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::Keyboard => ModuleCategory::Source,
             SynthNodeTemplate::MidiMonitor => ModuleCategory::Utility,
             SynthNodeTemplate::MidiNote => ModuleCategory::Source,
+            SynthNodeTemplate::SampleHold => ModuleCategory::Utility,
         }
     }
 }
@@ -92,6 +96,7 @@ impl NodeTemplateIter for AllNodeTemplates {
             SynthNodeTemplate::Clock,
             SynthNodeTemplate::Vca,
             SynthNodeTemplate::Attenuverter,
+            SynthNodeTemplate::SampleHold,
             SynthNodeTemplate::MidiMonitor,
             SynthNodeTemplate::AudioOutput,
         ]
@@ -153,6 +158,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::Keyboard => Cow::Borrowed("Keyboard"),
             SynthNodeTemplate::MidiMonitor => Cow::Borrowed("MIDI Monitor"),
             SynthNodeTemplate::MidiNote => Cow::Borrowed("MIDI Note"),
+            SynthNodeTemplate::SampleHold => Cow::Borrowed("Sample & Hold"),
         }
     }
 
@@ -173,6 +179,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::Keyboard => "Keyboard".to_string(),
             SynthNodeTemplate::MidiMonitor => "MIDI Monitor".to_string(),
             SynthNodeTemplate::MidiNote => "MIDI Note".to_string(),
+            SynthNodeTemplate::SampleHold => "Sample & Hold".to_string(),
         }
     }
 
@@ -292,6 +299,14 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             ]).with_led_indicators(vec![
                 // Gate output LED indicator (output index 1 = Gate port)
                 LedIndicator::gate(1, "Gate"),
+            ]),
+            SynthNodeTemplate::SampleHold => SynthNodeData::new(
+                "util.sample_hold",
+                "Sample & Hold",
+                ModuleCategory::Utility,
+            ).with_knob_params(vec![
+                // Slew: glide time to new value (0-1s)
+                KnobParam::knob_only("Slew", "Slew"),
             ]),
         }
     }
@@ -1013,6 +1028,44 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthDataType::new(SignalType::Control),
                 );
             }
+            SynthNodeTemplate::SampleHold => {
+                // Signal input port
+                graph.add_input_param(
+                    node_id,
+                    "In".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Trigger input port
+                graph.add_input_param(
+                    node_id,
+                    "Trig".to_string(),
+                    SynthDataType::new(SignalType::Gate),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Slew: knob-only parameter (0-1s)
+                graph.add_input_param(
+                    node_id,
+                    "Slew".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::time(0.0, 0.0, 1.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Control output port
+                graph.add_output_param(
+                    node_id,
+                    "Out".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                );
+            }
         }
     }
 }
@@ -1024,7 +1077,7 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 11);
+        assert_eq!(templates.len(), 12);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
@@ -1036,6 +1089,7 @@ mod tests {
         assert!(templates.contains(&SynthNodeTemplate::Keyboard));
         assert!(templates.contains(&SynthNodeTemplate::MidiMonitor));
         assert!(templates.contains(&SynthNodeTemplate::MidiNote));
+        assert!(templates.contains(&SynthNodeTemplate::SampleHold));
     }
 
     #[test]
@@ -1051,6 +1105,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::Keyboard.module_id(), "input.keyboard");
         assert_eq!(SynthNodeTemplate::MidiMonitor.module_id(), "util.midi_monitor");
         assert_eq!(SynthNodeTemplate::MidiNote.module_id(), "input.midi_note");
+        assert_eq!(SynthNodeTemplate::SampleHold.module_id(), "util.sample_hold");
     }
 
     #[test]
@@ -1066,6 +1121,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::Keyboard.category(), ModuleCategory::Source);
         assert_eq!(SynthNodeTemplate::MidiMonitor.category(), ModuleCategory::Utility);
         assert_eq!(SynthNodeTemplate::MidiNote.category(), ModuleCategory::Source);
+        assert_eq!(SynthNodeTemplate::SampleHold.category(), ModuleCategory::Utility);
     }
 
     #[test]
@@ -1114,6 +1170,10 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::MidiNote.node_finder_label(&mut state),
             "MIDI Note"
+        );
+        assert_eq!(
+            SynthNodeTemplate::SampleHold.node_finder_label(&mut state),
+            "Sample & Hold"
         );
     }
 }

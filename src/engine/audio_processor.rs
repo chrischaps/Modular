@@ -6,7 +6,7 @@
 use std::time::Instant;
 
 use crate::dsp::{ModuleRegistry, ProcessContext};
-use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Clock, KeyboardInput, Lfo, MidiMonitor, MidiNote, SineOscillator, SvfFilter, Vca};
+use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Clock, KeyboardInput, Lfo, MidiMonitor, MidiNote, SampleHold, SineOscillator, SvfFilter, Vca};
 
 use super::audio_graph::AudioGraph;
 use super::channels::EngineHandle;
@@ -26,6 +26,7 @@ pub fn create_module_registry() -> ModuleRegistry {
     registry.register::<KeyboardInput>();
     registry.register::<MidiMonitor>();
     registry.register::<MidiNote>();
+    registry.register::<SampleHold>();
     registry
 }
 
@@ -265,7 +266,8 @@ mod tests {
         assert!(registry.contains("input.keyboard"));
         assert!(registry.contains("util.midi_monitor"));
         assert!(registry.contains("input.midi_note"));
-        assert_eq!(registry.len(), 11);
+        assert!(registry.contains("util.sample_hold"));
+        assert_eq!(registry.len(), 12);
     }
 
     #[test]

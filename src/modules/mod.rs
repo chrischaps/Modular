@@ -13,6 +13,7 @@ pub mod midi_monitor;
 pub mod midi_note;
 pub mod oscillator;
 pub mod output;
+pub mod sample_hold;
 pub mod vca;
 
 // Re-export commonly used types
@@ -26,4 +27,5 @@ pub use midi_monitor::MidiMonitor;
 pub use midi_note::MidiNote;
 pub use oscillator::SineOscillator;
 pub use output::AudioOutput;
+pub use sample_hold::SampleHold;
 pub use vca::Vca;
