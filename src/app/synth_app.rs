@@ -528,7 +528,8 @@ impl SynthApp {
         &self,
         input: egui_node_graph2::InputId,
     ) -> Option<EngineCommand> {
-        let input_data = self.graph_state.graph.get_input(input);
+        // Use get() to safely check if the input exists (avoid panic on stale IDs)
+        let input_data = self.graph_state.graph.inputs.get(input)?;
         let node_id = self.user_state.get_engine_node_id(input_data.node)?;
         let port = self.get_input_port_index(input_data.node, input)?;
 
@@ -545,7 +546,8 @@ impl SynthApp {
         &self,
         input: egui_node_graph2::InputId,
     ) -> Option<EngineCommand> {
-        let input_data = self.graph_state.graph.get_input(input);
+        // Use get() to safely check if the input exists (avoid panic on stale IDs)
+        let input_data = self.graph_state.graph.inputs.get(input)?;
         let node = self.graph_state.graph.nodes.get(input_data.node)?;
 
         // Get the input name
@@ -576,7 +578,8 @@ impl SynthApp {
         &self,
         input: egui_node_graph2::InputId,
     ) -> Option<EngineCommand> {
-        let input_data = self.graph_state.graph.get_input(input);
+        // Use get() to safely check if the input exists (avoid panic on stale IDs)
+        let input_data = self.graph_state.graph.inputs.get(input)?;
         let node = self.graph_state.graph.nodes.get(input_data.node)?;
 
         // Get the input name
