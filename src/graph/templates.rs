@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use egui_node_graph2::{Graph, InputParamKind, NodeTemplateIter, NodeTemplateTrait};
 
 use crate::dsp::{ModuleCategory, SignalType};
-use super::{SynthDataType, SynthGraphState, SynthNodeData, SynthValueType};
+use super::{SynthDataType, SynthGraphState, SynthNodeData, SynthValueType, KnobParam};
 
 /// Templates for all available synth modules.
 ///
@@ -18,6 +18,10 @@ pub enum SynthNodeTemplate {
     SineOscillator,
     /// Audio output - final destination in signal chain.
     AudioOutput,
+    /// LFO - low frequency oscillator for modulation.
+    Lfo,
+    /// State Variable Filter - multi-mode filter with LP, HP, BP outputs.
+    SvfFilter,
 }
 
 impl SynthNodeTemplate {
@@ -27,6 +31,8 @@ impl SynthNodeTemplate {
         match self {
             SynthNodeTemplate::SineOscillator => "osc.sine",
             SynthNodeTemplate::AudioOutput => "output.audio",
+            SynthNodeTemplate::Lfo => "mod.lfo",
+            SynthNodeTemplate::SvfFilter => "filter.svf",
         }
     }
 
@@ -35,6 +41,8 @@ impl SynthNodeTemplate {
         match self {
             SynthNodeTemplate::SineOscillator => ModuleCategory::Source,
             SynthNodeTemplate::AudioOutput => ModuleCategory::Output,
+            SynthNodeTemplate::Lfo => ModuleCategory::Modulation,
+            SynthNodeTemplate::SvfFilter => ModuleCategory::Filter,
         }
     }
 }
@@ -48,6 +56,8 @@ impl NodeTemplateIter for AllNodeTemplates {
     fn all_kinds(&self) -> Vec<Self::Item> {
         vec![
             SynthNodeTemplate::SineOscillator,
+            SynthNodeTemplate::SvfFilter,
+            SynthNodeTemplate::Lfo,
             SynthNodeTemplate::AudioOutput,
         ]
     }
@@ -99,6 +109,8 @@ impl NodeTemplateTrait for SynthNodeTemplate {
         match self {
             SynthNodeTemplate::SineOscillator => Cow::Borrowed("Sine Oscillator"),
             SynthNodeTemplate::AudioOutput => Cow::Borrowed("Audio Output"),
+            SynthNodeTemplate::Lfo => Cow::Borrowed("LFO"),
+            SynthNodeTemplate::SvfFilter => Cow::Borrowed("SVF Filter"),
         }
     }
 
@@ -110,6 +122,8 @@ impl NodeTemplateTrait for SynthNodeTemplate {
         match self {
             SynthNodeTemplate::SineOscillator => "Sine Oscillator".to_string(),
             SynthNodeTemplate::AudioOutput => "Audio Output".to_string(),
+            SynthNodeTemplate::Lfo => "LFO".to_string(),
+            SynthNodeTemplate::SvfFilter => "SVF Filter".to_string(),
         }
     }
 
@@ -119,12 +133,41 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 "osc.sine",
                 "Sine Oscillator",
                 ModuleCategory::Source,
-            ),
+            ).with_knob_params(vec![
+                // Frequency: exposed param with input port AND bottom knob
+                // When connected, knob shows incoming value and is disabled
+                KnobParam::exposed("Frequency", "Freq"),
+                // FM Depth: knob-only, no input port
+                KnobParam::knob_only("FM Depth", "FM Dpth"),
+            ]),
             SynthNodeTemplate::AudioOutput => SynthNodeData::new(
                 "output.audio",
                 "Audio Output",
                 ModuleCategory::Output,
-            ),
+            ).with_knob_params(vec![
+                // Volume is knob-only
+                KnobParam::knob_only("Volume", "Vol"),
+            ]),
+            SynthNodeTemplate::Lfo => SynthNodeData::new(
+                "mod.lfo",
+                "LFO",
+                ModuleCategory::Modulation,
+            ).with_knob_params(vec![
+                // Rate: knob-only parameter
+                KnobParam::knob_only("Rate", "Rate"),
+            ]),
+            SynthNodeTemplate::SvfFilter => SynthNodeData::new(
+                "filter.svf",
+                "SVF Filter",
+                ModuleCategory::Filter,
+            ).with_knob_params(vec![
+                // Cutoff: exposed param (input port + knob)
+                KnobParam::exposed("Cutoff", "Cutoff"),
+                // Resonance: exposed param (input port + knob)
+                KnobParam::exposed("Resonance", "Res"),
+                // Drive: knob-only
+                KnobParam::knob_only("Drive", "Drive"),
+            ]),
         }
     }
 
@@ -136,14 +179,14 @@ impl NodeTemplateTrait for SynthNodeTemplate {
     ) {
         match self {
             SynthNodeTemplate::SineOscillator => {
-                // Input ports (connectable)
+                // Pure input ports (connection only, no knob)
                 graph.add_input_param(
                     node_id,
-                    "Freq CV".to_string(),
+                    "Add Freq".to_string(),  // Renamed from "Freq CV"
                     SynthDataType::new(SignalType::Control),
                     SynthValueType::scalar(0.0, ""),
                     InputParamKind::ConnectionOnly,
-                    true, // shown inline
+                    true, // shown inline (just the port)
                 );
                 graph.add_input_param(
                     node_id,
@@ -154,22 +197,27 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     true,
                 );
 
-                // Parameter widgets (with connection capability)
+                // Frequency parameter: input port for external control + knob at bottom
+                // ConnectionOrConstant allows both external modulation and manual control
+                // The inline widget is skipped (see value_widget) since we have the bottom knob
                 graph.add_input_param(
                     node_id,
                     "Frequency".to_string(),
                     SynthDataType::new(SignalType::Control),
-                    SynthValueType::frequency(440.0, 20.0, 20000.0, "Frequency"),
+                    SynthValueType::frequency(440.0, 20.0, 20000.0, ""),
                     InputParamKind::ConnectionOrConstant,
-                    true,
+                    true, // Port shown inline, widget skipped via knob_params check
                 );
+
+                // Knob-only parameter: no input port, knob at bottom
+                // ConstantOnly + hidden inline = knob only appears at bottom
                 graph.add_input_param(
                     node_id,
                     "FM Depth".to_string(),
                     SynthDataType::new(SignalType::Control),
-                    SynthValueType::scalar(0.0, "FM Depth"),
+                    SynthValueType::linear_hz(0.0, 0.0, 1000.0, ""),
                     InputParamKind::ConstantOnly,
-                    true,
+                    false, // Hidden inline - shown only in bottom knob row
                 );
 
                 // Output port
@@ -206,15 +254,17 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     true,
                 );
 
-                // Parameter widgets
+                // Knob-only parameter: Volume control
                 graph.add_input_param(
                     node_id,
                     "Volume".to_string(),
                     SynthDataType::new(SignalType::Control),
-                    SynthValueType::scalar(0.8, "Volume"),
+                    SynthValueType::scalar(0.8, ""),
                     InputParamKind::ConstantOnly,
-                    true,
+                    false, // Hidden inline - shown in bottom knob row
                 );
+
+                // Limiter toggle - keep inline for now (not a knob type)
                 graph.add_input_param(
                     node_id,
                     "Limiter".to_string(),
@@ -222,6 +272,96 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthValueType::toggle(true, "Limiter"),
                     InputParamKind::ConstantOnly,
                     true,
+                );
+            }
+            SynthNodeTemplate::Lfo => {
+                // Rate: knob-only parameter for LFO speed
+                graph.add_input_param(
+                    node_id,
+                    "Rate".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_hz(1.0, 0.01, 20.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Waveform selector - shown inline
+                graph.add_input_param(
+                    node_id,
+                    "Waveform".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::select(
+                        0,
+                        vec!["Sine".to_string(), "Triangle".to_string(), "Square".to_string(), "Saw".to_string()],
+                        "Wave",
+                    ),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline
+                );
+
+                // Output port - Control signal
+                graph.add_output_param(
+                    node_id,
+                    "Out".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                );
+            }
+            SynthNodeTemplate::SvfFilter => {
+                // Audio input port
+                graph.add_input_param(
+                    node_id,
+                    "In".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Cutoff: exposed param (input port + knob at bottom)
+                graph.add_input_param(
+                    node_id,
+                    "Cutoff".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::frequency(1000.0, 20.0, 20000.0, ""),
+                    InputParamKind::ConnectionOrConstant,
+                    true, // Port shown inline, widget skipped via knob_params check
+                );
+
+                // Resonance: exposed param (input port + knob at bottom)
+                graph.add_input_param(
+                    node_id,
+                    "Resonance".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(0.5, ""),
+                    InputParamKind::ConnectionOrConstant,
+                    true, // Port shown inline, widget skipped via knob_params check
+                );
+
+                // Drive: knob-only parameter
+                graph.add_input_param(
+                    node_id,
+                    "Drive".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(0.0, ""), // 0-1 maps to 1-10x in DSP
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown only in bottom knob row
+                );
+
+                // Output ports - all three filter types
+                graph.add_output_param(
+                    node_id,
+                    "LowPass".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "HighPass".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "BandPass".to_string(),
+                    SynthDataType::new(SignalType::Audio),
                 );
             }
         }
@@ -235,21 +375,27 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 2);
+        assert_eq!(templates.len(), 4);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
+        assert!(templates.contains(&SynthNodeTemplate::Lfo));
+        assert!(templates.contains(&SynthNodeTemplate::SvfFilter));
     }
 
     #[test]
     fn test_module_id() {
         assert_eq!(SynthNodeTemplate::SineOscillator.module_id(), "osc.sine");
         assert_eq!(SynthNodeTemplate::AudioOutput.module_id(), "output.audio");
+        assert_eq!(SynthNodeTemplate::Lfo.module_id(), "mod.lfo");
+        assert_eq!(SynthNodeTemplate::SvfFilter.module_id(), "filter.svf");
     }
 
     #[test]
     fn test_category() {
         assert_eq!(SynthNodeTemplate::SineOscillator.category(), ModuleCategory::Source);
         assert_eq!(SynthNodeTemplate::AudioOutput.category(), ModuleCategory::Output);
+        assert_eq!(SynthNodeTemplate::Lfo.category(), ModuleCategory::Modulation);
+        assert_eq!(SynthNodeTemplate::SvfFilter.category(), ModuleCategory::Filter);
     }
 
     #[test]
@@ -262,6 +408,14 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::AudioOutput.node_finder_label(&mut state),
             "Audio Output"
+        );
+        assert_eq!(
+            SynthNodeTemplate::Lfo.node_finder_label(&mut state),
+            "LFO"
+        );
+        assert_eq!(
+            SynthNodeTemplate::SvfFilter.node_finder_label(&mut state),
+            "SVF Filter"
         );
     }
 }

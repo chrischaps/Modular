@@ -4,7 +4,7 @@
 //! with command handling from the UI thread.
 
 use crate::dsp::{ModuleRegistry, ProcessContext};
-use crate::modules::{AudioOutput, SineOscillator};
+use crate::modules::{AudioOutput, Lfo, SineOscillator, SvfFilter};
 
 use super::audio_graph::AudioGraph;
 use super::channels::EngineHandle;
@@ -14,7 +14,9 @@ use super::commands::{EngineCommand, EngineEvent};
 pub fn create_module_registry() -> ModuleRegistry {
     let mut registry = ModuleRegistry::new();
     registry.register::<SineOscillator>();
+    registry.register::<SvfFilter>();
     registry.register::<AudioOutput>();
+    registry.register::<Lfo>();
     registry
 }
 
@@ -92,8 +94,22 @@ impl AudioProcessor {
         // Process the audio graph
         self.graph.process(&self.context);
 
+        // Send monitored input values to UI for knob animation
+        self.send_input_values();
+
         // Extract output from AudioOutput modules and write to output buffer
         self.extract_output(output, channels, num_frames);
+    }
+
+    /// Sends monitored input values to the UI thread.
+    fn send_input_values(&mut self) {
+        for (node_id, input_index, value) in self.graph.drain_sampled_input_values() {
+            self.engine_handle.send_event_lossy(EngineEvent::InputValue {
+                node_id,
+                input_index,
+                value,
+            });
+        }
     }
 
     /// Processes all pending commands from the UI thread.
@@ -181,8 +197,10 @@ mod tests {
     fn test_create_module_registry() {
         let registry = create_module_registry();
         assert!(registry.contains("osc.sine"));
+        assert!(registry.contains("filter.svf"));
         assert!(registry.contains("output.audio"));
-        assert_eq!(registry.len(), 2);
+        assert!(registry.contains("mod.lfo"));
+        assert_eq!(registry.len(), 4);
     }
 
     #[test]
