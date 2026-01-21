@@ -209,27 +209,143 @@ impl SynthNodeData {
         self.category.color()
     }
 
-    /// Get the icon character for this module category.
-    fn category_icon(&self) -> &'static str {
+    /// Draw the category icon at the given position.
+    /// Uses vector shapes for cross-platform reliability.
+    fn draw_category_icon(&self, painter: &egui::Painter, center: egui::Pos2, size: f32, color: Color32) {
+        let s = size * 0.5; // Half-size for calculations
         match self.category {
-            ModuleCategory::Source => "~",      // Wave symbol for oscillators
-            ModuleCategory::Filter => "▽",     // Filter symbol
-            ModuleCategory::Modulation => "◊",  // Diamond for modulation
-            ModuleCategory::Effect => "◈",     // Effect symbol
-            ModuleCategory::Utility => "◇",    // Utility symbol
-            ModuleCategory::Output => "◉",     // Output symbol (speaker-like)
+            ModuleCategory::Source => {
+                // Sine wave icon
+                let points: Vec<egui::Pos2> = (0..=12)
+                    .map(|i| {
+                        let t = i as f32 / 12.0;
+                        let x = center.x - s + t * s * 2.0;
+                        let y = center.y - (t * std::f32::consts::TAU).sin() * s * 0.6;
+                        egui::pos2(x, y)
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(points, egui::Stroke::new(1.5, color)));
+            }
+            ModuleCategory::Filter => {
+                // Triangle/slope icon (low-pass filter shape)
+                let points = vec![
+                    egui::pos2(center.x - s, center.y - s * 0.5),
+                    egui::pos2(center.x, center.y - s * 0.5),
+                    egui::pos2(center.x + s * 0.3, center.y + s * 0.5),
+                    egui::pos2(center.x + s, center.y + s * 0.5),
+                ];
+                painter.add(egui::Shape::line(points, egui::Stroke::new(1.5, color)));
+            }
+            ModuleCategory::Modulation => {
+                // Diamond icon
+                let points = vec![
+                    egui::pos2(center.x, center.y - s * 0.7),
+                    egui::pos2(center.x + s * 0.5, center.y),
+                    egui::pos2(center.x, center.y + s * 0.7),
+                    egui::pos2(center.x - s * 0.5, center.y),
+                    egui::pos2(center.x, center.y - s * 0.7),
+                ];
+                painter.add(egui::Shape::line(points, egui::Stroke::new(1.5, color)));
+            }
+            ModuleCategory::Effect => {
+                // Star/sparkle icon
+                for i in 0..4 {
+                    let angle = i as f32 * std::f32::consts::FRAC_PI_4;
+                    let len = if i % 2 == 0 { s * 0.7 } else { s * 0.4 };
+                    let dx = angle.cos() * len;
+                    let dy = angle.sin() * len;
+                    painter.line_segment(
+                        [egui::pos2(center.x - dx, center.y - dy), egui::pos2(center.x + dx, center.y + dy)],
+                        egui::Stroke::new(1.5, color),
+                    );
+                }
+            }
+            ModuleCategory::Utility => {
+                // Hash/grid icon
+                let d = s * 0.4;
+                painter.line_segment([egui::pos2(center.x - d, center.y - s * 0.6), egui::pos2(center.x - d, center.y + s * 0.6)], egui::Stroke::new(1.5, color));
+                painter.line_segment([egui::pos2(center.x + d, center.y - s * 0.6), egui::pos2(center.x + d, center.y + s * 0.6)], egui::Stroke::new(1.5, color));
+                painter.line_segment([egui::pos2(center.x - s * 0.6, center.y - d), egui::pos2(center.x + s * 0.6, center.y - d)], egui::Stroke::new(1.5, color));
+                painter.line_segment([egui::pos2(center.x - s * 0.6, center.y + d), egui::pos2(center.x + s * 0.6, center.y + d)], egui::Stroke::new(1.5, color));
+            }
+            ModuleCategory::Output => {
+                // Speaker cone icon
+                painter.rect_stroke(
+                    egui::Rect::from_center_size(egui::pos2(center.x - s * 0.3, center.y), egui::vec2(s * 0.4, s * 0.6)),
+                    0.0,
+                    egui::Stroke::new(1.5, color),
+                );
+                let cone = vec![
+                    egui::pos2(center.x - s * 0.1, center.y - s * 0.3),
+                    egui::pos2(center.x + s * 0.6, center.y - s * 0.6),
+                    egui::pos2(center.x + s * 0.6, center.y + s * 0.6),
+                    egui::pos2(center.x - s * 0.1, center.y + s * 0.3),
+                ];
+                painter.add(egui::Shape::line(cone, egui::Stroke::new(1.5, color)));
+            }
         }
     }
 
-    /// Get a secondary icon for the right side of the header.
-    fn secondary_icon(&self) -> &'static str {
+    /// Draw a secondary/smaller icon at the given position.
+    fn draw_secondary_icon(&self, painter: &egui::Painter, center: egui::Pos2, size: f32, color: Color32) {
+        let s = size * 0.4; // Smaller than category icon
         match self.category {
-            ModuleCategory::Source => "∿",      // Another wave symbol
-            ModuleCategory::Filter => "◠",     // Curved line for response
-            ModuleCategory::Modulation => "↕",  // Up-down arrows
-            ModuleCategory::Effect => "◈",     // Effect
-            ModuleCategory::Utility => "⚙",    // Gear
-            ModuleCategory::Output => "◉",     // Speaker
+            ModuleCategory::Source => {
+                // Small wave
+                let points: Vec<egui::Pos2> = (0..=8)
+                    .map(|i| {
+                        let t = i as f32 / 8.0;
+                        let x = center.x - s + t * s * 2.0;
+                        let y = center.y - (t * std::f32::consts::TAU).sin() * s * 0.5;
+                        egui::pos2(x, y)
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(points, egui::Stroke::new(1.2, color)));
+            }
+            ModuleCategory::Filter => {
+                // Curved response line
+                let points: Vec<egui::Pos2> = (0..=8)
+                    .map(|i| {
+                        let t = i as f32 / 8.0;
+                        let x = center.x - s + t * s * 2.0;
+                        let curve = 1.0 - (t * 2.0).min(1.0).powi(2);
+                        let y = center.y + s * 0.5 - curve * s;
+                        egui::pos2(x, y)
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(points, egui::Stroke::new(1.2, color)));
+            }
+            ModuleCategory::Modulation => {
+                // Up-down arrows
+                painter.line_segment([egui::pos2(center.x, center.y - s * 0.8), egui::pos2(center.x, center.y + s * 0.8)], egui::Stroke::new(1.2, color));
+                // Up arrow head
+                painter.line_segment([egui::pos2(center.x - s * 0.3, center.y - s * 0.4), egui::pos2(center.x, center.y - s * 0.8)], egui::Stroke::new(1.2, color));
+                painter.line_segment([egui::pos2(center.x + s * 0.3, center.y - s * 0.4), egui::pos2(center.x, center.y - s * 0.8)], egui::Stroke::new(1.2, color));
+                // Down arrow head
+                painter.line_segment([egui::pos2(center.x - s * 0.3, center.y + s * 0.4), egui::pos2(center.x, center.y + s * 0.8)], egui::Stroke::new(1.2, color));
+                painter.line_segment([egui::pos2(center.x + s * 0.3, center.y + s * 0.4), egui::pos2(center.x, center.y + s * 0.8)], egui::Stroke::new(1.2, color));
+            }
+            ModuleCategory::Effect | ModuleCategory::Output => {
+                // Small filled circle
+                painter.circle_stroke(center, s * 0.5, egui::Stroke::new(1.2, color));
+                painter.circle_filled(center, s * 0.2, color);
+            }
+            ModuleCategory::Utility => {
+                // Small gear (simplified)
+                painter.circle_stroke(center, s * 0.4, egui::Stroke::new(1.2, color));
+                for i in 0..6 {
+                    let angle = i as f32 * std::f32::consts::FRAC_PI_3;
+                    let inner = s * 0.4;
+                    let outer = s * 0.7;
+                    painter.line_segment(
+                        [
+                            egui::pos2(center.x + angle.cos() * inner, center.y + angle.sin() * inner),
+                            egui::pos2(center.x + angle.cos() * outer, center.y + angle.sin() * outer),
+                        ],
+                        egui::Stroke::new(1.2, color),
+                    );
+                }
+            }
         }
     }
 
@@ -457,27 +573,17 @@ impl NodeDataTrait for SynthNodeData {
         // This allows the entire title bar to be draggable
         let rect = ui.available_rect_before_wrap();
         let painter = ui.painter();
-        let text_color = ui.visuals().strong_text_color();
+        let icon_color = ui.visuals().strong_text_color();
 
-        // Left icon (category icon)
-        let left_font = egui::FontId::proportional(14.0);
-        painter.text(
-            egui::pos2(rect.left() + 4.0, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            self.category_icon(),
-            left_font,
-            text_color,
-        );
+        // Left icon (category icon) - vector drawn for cross-platform reliability
+        let icon_size = 14.0;
+        let left_center = egui::pos2(rect.left() + icon_size * 0.6, rect.center().y);
+        self.draw_category_icon(painter, left_center, icon_size, icon_color);
 
-        // Right icon (secondary icon)
-        let right_font = egui::FontId::proportional(12.0);
-        painter.text(
-            egui::pos2(rect.right() - 4.0, rect.center().y),
-            egui::Align2::RIGHT_CENTER,
-            self.secondary_icon(),
-            right_font,
-            text_color,
-        );
+        // Right icon (secondary icon) - smaller
+        let secondary_size = 12.0;
+        let right_center = egui::pos2(rect.right() - secondary_size * 0.6, rect.center().y);
+        self.draw_secondary_icon(painter, right_center, secondary_size, icon_color);
 
         // Allocate the space without creating any interactive widgets
         ui.allocate_space(ui.available_size());
