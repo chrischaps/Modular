@@ -5,6 +5,7 @@
 
 pub mod attenuverter;
 pub mod clock;
+pub mod delay;
 pub mod envelope;
 pub mod filter;
 pub mod keyboard;
@@ -21,6 +22,7 @@ pub mod vca;
 // Re-export commonly used types
 pub use attenuverter::Attenuverter;
 pub use clock::Clock;
+pub use delay::StereoDelay;
 pub use envelope::AdsrEnvelope;
 pub use filter::SvfFilter;
 pub use keyboard::KeyboardInput;

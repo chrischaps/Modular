@@ -42,6 +42,8 @@ pub enum SynthNodeTemplate {
     Oscilloscope,
     /// Step Sequencer - 16-step sequencer with pitch, gate, and velocity.
     StepSequencer,
+    /// Stereo Delay - delay effect with feedback, filtering, and ping-pong.
+    StereoDelay,
 }
 
 impl SynthNodeTemplate {
@@ -63,6 +65,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::SampleHold => "util.sample_hold",
             SynthNodeTemplate::Oscilloscope => "util.oscilloscope",
             SynthNodeTemplate::StepSequencer => "seq.step",
+            SynthNodeTemplate::StereoDelay => "fx.delay",
         }
     }
 
@@ -83,6 +86,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::SampleHold => ModuleCategory::Utility,
             SynthNodeTemplate::Oscilloscope => ModuleCategory::Utility,
             SynthNodeTemplate::StepSequencer => ModuleCategory::Utility,
+            SynthNodeTemplate::StereoDelay => ModuleCategory::Effect,
         }
     }
 }
@@ -107,6 +111,7 @@ impl NodeTemplateIter for AllNodeTemplates {
             SynthNodeTemplate::SampleHold,
             SynthNodeTemplate::Oscilloscope,
             SynthNodeTemplate::StepSequencer,
+            SynthNodeTemplate::StereoDelay,
             SynthNodeTemplate::MidiMonitor,
             SynthNodeTemplate::AudioOutput,
         ]
@@ -171,6 +176,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::SampleHold => Cow::Borrowed("Sample & Hold"),
             SynthNodeTemplate::Oscilloscope => Cow::Borrowed("Oscilloscope"),
             SynthNodeTemplate::StepSequencer => Cow::Borrowed("Step Sequencer"),
+            SynthNodeTemplate::StereoDelay => Cow::Borrowed("Stereo Delay"),
         }
     }
 
@@ -194,6 +200,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::SampleHold => "Sample & Hold".to_string(),
             SynthNodeTemplate::Oscilloscope => "Oscilloscope".to_string(),
             SynthNodeTemplate::StepSequencer => "Step Sequencer".to_string(),
+            SynthNodeTemplate::StereoDelay => "Stereo Delay".to_string(),
         }
     }
 
@@ -344,6 +351,22 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 LedIndicator::gate(1, "Gate"),
                 // EOC output LED
                 LedIndicator::activity(4, "EOC"),
+            ]),
+            SynthNodeTemplate::StereoDelay => SynthNodeData::new(
+                "fx.delay",
+                "Stereo Delay",
+                ModuleCategory::Effect,
+            ).with_knob_params(vec![
+                // Time: exposed (CV input + knob)
+                KnobParam::exposed("Time", "Time"),
+                // Feedback: exposed (CV input + knob)
+                KnobParam::exposed("Feedback", "FB"),
+                // Mix: knob-only
+                KnobParam::knob_only("Mix", "Mix"),
+                // High Cut: knob-only
+                KnobParam::knob_only("High Cut", "HiCut"),
+                // Low Cut: knob-only
+                KnobParam::knob_only("Low Cut", "LoCut"),
             ]),
         }
     }
@@ -1286,6 +1309,113 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthDataType::new(SignalType::Gate),
                 );
             }
+            SynthNodeTemplate::StereoDelay => {
+                // Left input port
+                graph.add_input_param(
+                    node_id,
+                    "In L".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Right input port (normalled from L)
+                graph.add_input_param(
+                    node_id,
+                    "In R".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Time: exposed parameter (CV input + knob at bottom)
+                graph.add_input_param(
+                    node_id,
+                    "Time".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::time(500.0, 1.0, 2000.0, ""),
+                    InputParamKind::ConnectionOrConstant,
+                    true, // Port shown inline
+                );
+
+                // Feedback: exposed parameter (CV input + knob at bottom)
+                graph.add_input_param(
+                    node_id,
+                    "Feedback".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(0.5, ""),
+                    InputParamKind::ConnectionOrConstant,
+                    true, // Port shown inline
+                );
+
+                // Mix: knob-only parameter
+                graph.add_input_param(
+                    node_id,
+                    "Mix".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(0.5, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // High Cut: knob-only parameter
+                graph.add_input_param(
+                    node_id,
+                    "High Cut".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::frequency(10000.0, 100.0, 20000.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Low Cut: knob-only parameter
+                graph.add_input_param(
+                    node_id,
+                    "Low Cut".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::frequency(20.0, 20.0, 2000.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Ping-Pong toggle (shown inline)
+                graph.add_input_param(
+                    node_id,
+                    "Ping-Pong".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::toggle(false, "P-P"),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline as checkbox
+                );
+
+                // Sync selector (shown inline)
+                graph.add_input_param(
+                    node_id,
+                    "Sync".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::select(
+                        0, // Off
+                        vec!["Off".to_string(), "1/4".to_string(), "1/8".to_string(), "1/8T".to_string(), "1/16".to_string(), "1/16T".to_string(), "1/32".to_string()],
+                        "Sync",
+                    ),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline as dropdown
+                );
+
+                // Output ports
+                graph.add_output_param(
+                    node_id,
+                    "Out L".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "Out R".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                );
+            }
         }
     }
 }
@@ -1297,7 +1427,7 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 14);
+        assert_eq!(templates.len(), 15);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
@@ -1312,6 +1442,7 @@ mod tests {
         assert!(templates.contains(&SynthNodeTemplate::SampleHold));
         assert!(templates.contains(&SynthNodeTemplate::Oscilloscope));
         assert!(templates.contains(&SynthNodeTemplate::StepSequencer));
+        assert!(templates.contains(&SynthNodeTemplate::StereoDelay));
     }
 
     #[test]
@@ -1330,6 +1461,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::SampleHold.module_id(), "util.sample_hold");
         assert_eq!(SynthNodeTemplate::Oscilloscope.module_id(), "util.oscilloscope");
         assert_eq!(SynthNodeTemplate::StepSequencer.module_id(), "seq.step");
+        assert_eq!(SynthNodeTemplate::StereoDelay.module_id(), "fx.delay");
     }
 
     #[test]
@@ -1348,6 +1480,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::SampleHold.category(), ModuleCategory::Utility);
         assert_eq!(SynthNodeTemplate::Oscilloscope.category(), ModuleCategory::Utility);
         assert_eq!(SynthNodeTemplate::StepSequencer.category(), ModuleCategory::Utility);
+        assert_eq!(SynthNodeTemplate::StereoDelay.category(), ModuleCategory::Effect);
     }
 
     #[test]
@@ -1408,6 +1541,10 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::StepSequencer.node_finder_label(&mut state),
             "Step Sequencer"
+        );
+        assert_eq!(
+            SynthNodeTemplate::StereoDelay.node_finder_label(&mut state),
+            "Stereo Delay"
         );
     }
 }
