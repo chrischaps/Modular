@@ -16,14 +16,15 @@ use crate::dsp::{
 /// A sine wave oscillator with frequency modulation support.
 ///
 /// This is a fundamental building block for synthesis, producing a pure
-/// sine wave that can be frequency-modulated via the FM input.
+/// sine wave that can be frequency-modulated via CV inputs.
 ///
 /// # Ports
 ///
-/// - **Frequency** (Control, Input): CV input for frequency control. When connected,
-///   this signal is added to the base frequency parameter.
-/// - **FM** (Control, Input): Frequency modulation input. The signal is scaled by
-///   the FM Depth parameter and added to the frequency.
+/// - **V/Oct** (Control, Input): 1V/Octave pitch CV input. Each unit of CV shifts
+///   the pitch by one octave (CV of +1 = double frequency, -1 = half frequency).
+/// - **FM** (Control, Input): Linear frequency modulation input. The signal is scaled
+///   by the FM Depth parameter and added to the frequency in Hz.
+/// - **Frequency** (Control, Input): When connected, overrides the Frequency parameter.
 /// - **Out** (Audio, Output): The generated sine wave output.
 ///
 /// # Parameters
@@ -49,11 +50,11 @@ impl SineOscillator {
             sample_rate: 44100.0,
             ports: vec![
                 // Input ports first (by convention)
-                // These map to UI inputs: Add Freq (0), FM (1), Frequency (2)
-                PortDefinition::input_with_default("freq_cv", "Add Freq", SignalType::Control, 0.0),
+                // V/Oct: 1V/Octave pitch CV (exponential scaling)
+                PortDefinition::input_with_default("v_oct", "V/Oct", SignalType::Control, 0.0),
+                // FM: Linear frequency modulation (scaled by FM Depth)
                 PortDefinition::input_with_default("fm", "FM", SignalType::Control, 0.0),
                 // Direct frequency input - when connected, overrides the Frequency parameter
-                // Expects Control signal in range that maps to 20-20000 Hz
                 PortDefinition::input_with_default("freq_in", "Frequency", SignalType::Control, 0.0),
                 // Output port
                 PortDefinition::output("out", "Out", SignalType::Audio),
@@ -73,7 +74,7 @@ impl SineOscillator {
     }
 
     /// Port index constants for clarity.
-    const PORT_FREQ_CV: usize = 0;
+    const PORT_V_OCT: usize = 0;
     const PORT_FM: usize = 1;
     const PORT_FREQ_IN: usize = 2;
     const PORT_OUT: usize = 0; // First (only) output
@@ -123,7 +124,7 @@ impl DspModule for SineOscillator {
         let fm_depth = params[Self::PARAM_FM_DEPTH];
 
         // Get input buffers (may be empty if not connected, use defaults)
-        let freq_cv = inputs.get(Self::PORT_FREQ_CV);
+        let v_oct_input = inputs.get(Self::PORT_V_OCT);
         let fm_input = inputs.get(Self::PORT_FM);
         let freq_in = inputs.get(Self::PORT_FREQ_IN);
 
@@ -155,23 +156,23 @@ impl DspModule for SineOscillator {
                 base_freq
             };
 
-            // Get CV modulation for frequency (additive offset)
-            let freq_cv_value = freq_cv
+            // Get V/Oct modulation (1V/Octave: each unit = one octave)
+            let v_oct_value = v_oct_input
                 .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
                 .unwrap_or(0.0);
 
-            // Get FM modulation
+            // Get FM modulation (linear Hz offset)
             let fm_value = fm_input
                 .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
                 .unwrap_or(0.0);
 
             // Calculate final frequency:
             // - Base frequency (from param or freq_in)
-            // - CV input adds directly to frequency (scaled)
-            // - FM input scaled by FM depth
-            let freq_cv_hz = freq_cv_value * 1000.0; // CV -1..1 maps to -1000..1000 Hz offset
+            // - V/Oct: exponential scaling (2^cv), so cv=1 doubles freq, cv=-1 halves it
+            // - FM: linear Hz offset scaled by FM depth
+            let pitched_freq = effective_base_freq * 2.0_f32.powf(v_oct_value);
             let fm_hz = fm_value * fm_depth;
-            let final_freq = (effective_base_freq + freq_cv_hz + fm_hz).max(0.0);
+            let final_freq = (pitched_freq + fm_hz).clamp(0.0, 20000.0);
 
             // Generate sine wave sample
             output.samples[i] = (self.phase * TAU).sin();
@@ -214,7 +215,7 @@ mod tests {
 
         // First three are inputs
         assert!(ports[0].is_input());
-        assert_eq!(ports[0].id, "freq_cv");
+        assert_eq!(ports[0].id, "v_oct");
         assert_eq!(ports[0].signal_type, SignalType::Control);
 
         assert!(ports[1].is_input());
@@ -341,8 +342,8 @@ mod tests {
         let sample_rate = 44100.0;
         osc.prepare(sample_rate, 256);
 
-        // Create dummy freq_cv input (first input)
-        let freq_cv_input = SignalBuffer::control(256);
+        // Create dummy V/Oct input (first input)
+        let v_oct_input = SignalBuffer::control(256);
 
         // Create FM input with constant value (second input)
         let mut fm_input = SignalBuffer::control(256);
@@ -352,7 +353,7 @@ mod tests {
         let ctx = ProcessContext::new(sample_rate, 256);
 
         // With FM depth of 100 Hz and FM input of 1.0, frequency should be 440 + 100 = 540 Hz
-        osc.process(&[&freq_cv_input, &fm_input], &mut outputs, &[440.0, 100.0], &ctx);
+        osc.process(&[&v_oct_input, &fm_input], &mut outputs, &[440.0, 100.0], &ctx);
 
         // Output should be valid
         for &sample in &outputs[0].samples {
@@ -365,6 +366,74 @@ mod tests {
         // Output should not be all zeros
         let has_nonzero = outputs[0].samples.iter().any(|&s| s.abs() > 0.001);
         assert!(has_nonzero, "FM modulated oscillator should produce non-zero output");
+    }
+
+    #[test]
+    fn test_sine_oscillator_v_oct_scaling() {
+        let sample_rate = 44100.0;
+        let num_samples = 44100; // 1 second
+
+        // Test with V/Oct = +1 (should double frequency, one octave up)
+        let mut osc = SineOscillator::new();
+        osc.prepare(sample_rate, num_samples);
+
+        let mut v_oct_input = SignalBuffer::control(num_samples);
+        v_oct_input.fill(1.0); // +1 octave
+
+        let mut outputs = vec![SignalBuffer::audio(num_samples)];
+        let ctx = ProcessContext::new(sample_rate, num_samples);
+
+        // Base frequency 440 Hz with V/Oct = +1 should give 880 Hz
+        osc.process(&[&v_oct_input], &mut outputs, &[440.0, 0.0], &ctx);
+
+        // Count zero crossings
+        let mut zero_crossings = 0;
+        for i in 1..num_samples {
+            if outputs[0].samples[i - 1] <= 0.0 && outputs[0].samples[i] > 0.0 {
+                zero_crossings += 1;
+            }
+        }
+
+        // At 880 Hz for 1 second, expect ~880 cycles
+        assert!(
+            (zero_crossings as f32 - 880.0).abs() < 10.0,
+            "Expected ~880 cycles with +1 octave, got {}",
+            zero_crossings
+        );
+    }
+
+    #[test]
+    fn test_sine_oscillator_v_oct_negative() {
+        let sample_rate = 44100.0;
+        let num_samples = 44100; // 1 second
+
+        // Test with V/Oct = -1 (should halve frequency, one octave down)
+        let mut osc = SineOscillator::new();
+        osc.prepare(sample_rate, num_samples);
+
+        let mut v_oct_input = SignalBuffer::control(num_samples);
+        v_oct_input.fill(-1.0); // -1 octave
+
+        let mut outputs = vec![SignalBuffer::audio(num_samples)];
+        let ctx = ProcessContext::new(sample_rate, num_samples);
+
+        // Base frequency 440 Hz with V/Oct = -1 should give 220 Hz
+        osc.process(&[&v_oct_input], &mut outputs, &[440.0, 0.0], &ctx);
+
+        // Count zero crossings
+        let mut zero_crossings = 0;
+        for i in 1..num_samples {
+            if outputs[0].samples[i - 1] <= 0.0 && outputs[0].samples[i] > 0.0 {
+                zero_crossings += 1;
+            }
+        }
+
+        // At 220 Hz for 1 second, expect ~220 cycles
+        assert!(
+            (zero_crossings as f32 - 220.0).abs() < 5.0,
+            "Expected ~220 cycles with -1 octave, got {}",
+            zero_crossings
+        );
     }
 
     #[test]

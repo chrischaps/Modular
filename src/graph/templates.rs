@@ -28,6 +28,8 @@ pub enum SynthNodeTemplate {
     Clock,
     /// VCA - voltage controlled amplifier for amplitude shaping.
     Vca,
+    /// Attenuverter - scale and invert control signals.
+    Attenuverter,
 }
 
 impl SynthNodeTemplate {
@@ -42,6 +44,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::AdsrEnvelope => "mod.adsr",
             SynthNodeTemplate::Clock => "util.clock",
             SynthNodeTemplate::Vca => "util.vca",
+            SynthNodeTemplate::Attenuverter => "util.attenuverter",
         }
     }
 
@@ -55,6 +58,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::AdsrEnvelope => ModuleCategory::Modulation,
             SynthNodeTemplate::Clock => ModuleCategory::Utility,
             SynthNodeTemplate::Vca => ModuleCategory::Utility,
+            SynthNodeTemplate::Attenuverter => ModuleCategory::Utility,
         }
     }
 }
@@ -73,6 +77,7 @@ impl NodeTemplateIter for AllNodeTemplates {
             SynthNodeTemplate::Lfo,
             SynthNodeTemplate::Clock,
             SynthNodeTemplate::Vca,
+            SynthNodeTemplate::Attenuverter,
             SynthNodeTemplate::AudioOutput,
         ]
     }
@@ -129,6 +134,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::AdsrEnvelope => Cow::Borrowed("ADSR Envelope"),
             SynthNodeTemplate::Clock => Cow::Borrowed("Clock"),
             SynthNodeTemplate::Vca => Cow::Borrowed("VCA"),
+            SynthNodeTemplate::Attenuverter => Cow::Borrowed("Attenuverter"),
         }
     }
 
@@ -145,6 +151,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::AdsrEnvelope => "ADSR Envelope".to_string(),
             SynthNodeTemplate::Clock => "Clock".to_string(),
             SynthNodeTemplate::Vca => "VCA".to_string(),
+            SynthNodeTemplate::Attenuverter => "Attenuverter".to_string(),
         }
     }
 
@@ -223,6 +230,16 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 KnobParam::knob_only("Level", "Level"),
                 KnobParam::knob_only("CV Amount", "CV Amt"),
             ]),
+            SynthNodeTemplate::Attenuverter => SynthNodeData::new(
+                "util.attenuverter",
+                "Attenuverter",
+                ModuleCategory::Utility,
+            ).with_knob_params(vec![
+                // Amount: -1 to +1 bipolar scaling
+                KnobParam::knob_only("Amount", "Amt"),
+                // Offset: DC offset
+                KnobParam::knob_only("Offset", "Offset"),
+            ]),
         }
     }
 
@@ -234,10 +251,10 @@ impl NodeTemplateTrait for SynthNodeTemplate {
     ) {
         match self {
             SynthNodeTemplate::SineOscillator => {
-                // Pure input ports (connection only, no knob)
+                // V/Oct: 1V/Octave pitch CV input (exponential scaling)
                 graph.add_input_param(
                     node_id,
-                    "Add Freq".to_string(),  // Renamed from "Freq CV"
+                    "V/Oct".to_string(),
                     SynthDataType::new(SignalType::Control),
                     SynthValueType::scalar(0.0, ""),
                     InputParamKind::ConnectionOnly,
@@ -627,6 +644,44 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthDataType::new(SignalType::Audio),
                 );
             }
+            SynthNodeTemplate::Attenuverter => {
+                // Control input port
+                graph.add_input_param(
+                    node_id,
+                    "In".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Amount: knob-only parameter (-1 to +1)
+                graph.add_input_param(
+                    node_id,
+                    "Amount".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(1.0, -1.0, 1.0, "", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Offset: knob-only parameter (-1 to +1)
+                graph.add_input_param(
+                    node_id,
+                    "Offset".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(0.0, -1.0, 1.0, "", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Control output port
+                graph.add_output_param(
+                    node_id,
+                    "Out".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                );
+            }
         }
     }
 }
@@ -638,13 +693,14 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 7);
+        assert_eq!(templates.len(), 8);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
         assert!(templates.contains(&SynthNodeTemplate::SvfFilter));
         assert!(templates.contains(&SynthNodeTemplate::AdsrEnvelope));
         assert!(templates.contains(&SynthNodeTemplate::Clock));
+        assert!(templates.contains(&SynthNodeTemplate::Attenuverter));
         assert!(templates.contains(&SynthNodeTemplate::Vca));
     }
 
@@ -657,6 +713,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::AdsrEnvelope.module_id(), "mod.adsr");
         assert_eq!(SynthNodeTemplate::Clock.module_id(), "util.clock");
         assert_eq!(SynthNodeTemplate::Vca.module_id(), "util.vca");
+        assert_eq!(SynthNodeTemplate::Attenuverter.module_id(), "util.attenuverter");
     }
 
     #[test]
@@ -668,6 +725,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::AdsrEnvelope.category(), ModuleCategory::Modulation);
         assert_eq!(SynthNodeTemplate::Clock.category(), ModuleCategory::Utility);
         assert_eq!(SynthNodeTemplate::Vca.category(), ModuleCategory::Utility);
+        assert_eq!(SynthNodeTemplate::Attenuverter.category(), ModuleCategory::Utility);
     }
 
     #[test]
@@ -700,6 +758,10 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::Vca.node_finder_label(&mut state),
             "VCA"
+        );
+        assert_eq!(
+            SynthNodeTemplate::Attenuverter.node_finder_label(&mut state),
+            "Attenuverter"
         );
     }
 }
