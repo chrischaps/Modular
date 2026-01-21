@@ -4,9 +4,10 @@
 //! the synthesizer's UI state, audio engine, and graph state.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use eframe::egui::{self, RichText, Layout, Align};
-use egui_node_graph2::{GraphEditorState, NodeResponse, NodeTemplateTrait};
+use egui_node_graph2::{GraphEditorState, NodeResponse, NodeTemplateTrait, InputParamKind};
 
 use crate::engine::{
     AudioEngine, AudioError, AudioProcessor, DeviceInfo, EngineChannels, EngineCommand, UiHandle,
@@ -14,6 +15,10 @@ use crate::engine::{
 use crate::graph::{
     validate_connection, AllNodeTemplates, AnyParameterId, SynthDataType, SynthGraphState,
     SynthNodeData, SynthNodeTemplate, SynthValueType,
+};
+use crate::persistence::{
+    ConnectionData, NodeData, ParameterValue, Patch, PatchError,
+    load_from_file, save_to_file,
 };
 use super::theme;
 
@@ -52,6 +57,12 @@ pub struct SynthApp {
     /// Cached parameter values for change detection.
     /// Key is (node_id as u64, param_index), value is the last sent value.
     cached_params: HashMap<(u64, usize), f32>,
+
+    /// Current patch file path (None if unsaved/new).
+    current_patch_path: Option<PathBuf>,
+
+    /// Status message for save/load operations (auto-clears after display).
+    status_message: Option<String>,
 }
 
 impl SynthApp {
@@ -110,6 +121,8 @@ impl SynthApp {
             audio_devices,
             selected_device_index,
             cached_params: HashMap::new(),
+            current_patch_path: None,
+            status_message: None,
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -181,6 +194,22 @@ impl SynthApp {
 
             if ui.button(RichText::new(play_text).color(play_color)).clicked() {
                 actions.toggle_playing = true;
+            }
+
+            ui.add_space(20.0);
+            ui.separator();
+            ui.add_space(20.0);
+
+            // File operations
+            ui.label(RichText::new("File").color(theme::text::SECONDARY));
+            ui.add_space(8.0);
+
+            if ui.button("📂 Open").on_hover_text("Ctrl+O").clicked() {
+                actions.load_patch = true;
+            }
+
+            if ui.button("💾 Save").on_hover_text("Ctrl+S").clicked() {
+                actions.save_patch = true;
             }
 
             ui.add_space(20.0);
@@ -775,6 +804,325 @@ impl SynthApp {
         }
     }
 
+    /// Create a Patch from the current graph state.
+    fn create_patch(&self, name: &str) -> Patch {
+        let mut patch = Patch::new(name);
+
+        // Collect nodes
+        for (node_id, node) in self.graph_state.graph.nodes.iter() {
+            // Get engine node ID for this graph node
+            let Some(engine_node_id) = self.user_state.get_engine_node_id(node_id) else {
+                continue;
+            };
+
+            // Get node position
+            let position = self.graph_state.node_positions
+                .get(node_id)
+                .map(|pos| (pos.x, pos.y))
+                .unwrap_or((0.0, 0.0));
+
+            let mut node_data = NodeData::new(
+                engine_node_id,
+                node.user_data.module_id,
+                position,
+            );
+
+            // Collect parameter values
+            for (_name, input_id) in &node.inputs {
+                let input = self.graph_state.graph.get_input(*input_id);
+
+                // Only save parameter values (not connection-only ports)
+                match input.kind {
+                    InputParamKind::ConstantOnly | InputParamKind::ConnectionOrConstant => {
+                        let param_value = match &input.value {
+                            SynthValueType::Scalar { value, .. } => ParameterValue::Scalar(*value),
+                            SynthValueType::Frequency { value, .. } => ParameterValue::Frequency(*value),
+                            SynthValueType::LinearHz { value, .. } => ParameterValue::LinearHz(*value),
+                            SynthValueType::Time { value, .. } => ParameterValue::Time(*value),
+                            SynthValueType::LinearRange { value, .. } => ParameterValue::LinearRange(*value),
+                            SynthValueType::Toggle { value, .. } => ParameterValue::Toggle(*value),
+                            SynthValueType::Select { value, .. } => ParameterValue::Select(*value),
+                        };
+                        node_data.parameters.push(param_value);
+                    }
+                    InputParamKind::ConnectionOnly => {
+                        // Skip connection-only inputs
+                    }
+                }
+            }
+
+            patch.nodes.push(node_data);
+        }
+
+        // Collect connections
+        for (input_id, output_id) in self.graph_state.graph.iter_connections() {
+            let input = self.graph_state.graph.get_input(input_id);
+            let output = self.graph_state.graph.get_output(output_id);
+
+            // Get node data to find port names
+            let from_node = self.graph_state.graph.nodes.get(output.node);
+            let to_node = self.graph_state.graph.nodes.get(input.node);
+
+            if let (Some(from_node), Some(to_node)) = (from_node, to_node) {
+                // Find output port name
+                let from_port = from_node.outputs
+                    .iter()
+                    .find(|(_, id)| *id == output_id)
+                    .map(|(name, _)| name.clone());
+
+                // Find input port name
+                let to_port = to_node.inputs
+                    .iter()
+                    .find(|(_, id)| *id == input_id)
+                    .map(|(name, _)| name.clone());
+
+                // Get engine node IDs
+                let from_engine_id = self.user_state.get_engine_node_id(output.node);
+                let to_engine_id = self.user_state.get_engine_node_id(input.node);
+
+                if let (Some(from_port), Some(to_port), Some(from_id), Some(to_id)) =
+                    (from_port, to_port, from_engine_id, to_engine_id)
+                {
+                    patch.connections.push(ConnectionData::new(from_id, from_port, to_id, to_port));
+                }
+            }
+        }
+
+        patch
+    }
+
+    /// Load a patch, replacing the current graph.
+    fn load_patch(&mut self, patch: &Patch) -> Result<(), PatchError> {
+        // Stop playback during load
+        let was_playing = self.is_playing;
+        if was_playing {
+            self.is_playing = false;
+            self.send_command(EngineCommand::SetPlaying(false));
+        }
+
+        // Clear the current graph
+        self.clear_graph();
+
+        // Map from patch node IDs to graph node IDs
+        let mut id_map: HashMap<u64, egui_node_graph2::NodeId> = HashMap::new();
+
+        // Create nodes
+        for node_data in &patch.nodes {
+            // Find the template for this module ID
+            let template = self.find_template_for_module(&node_data.module_id)
+                .ok_or_else(|| PatchError::UnknownModule(node_data.module_id.clone()))?;
+
+            // Create the node
+            let graph_node_id = self.graph_state.graph.add_node(
+                template.node_graph_label(&mut self.user_state),
+                template.user_data(&mut self.user_state),
+                |graph, node_id| template.build_node(graph, &mut self.user_state, node_id),
+            );
+
+            // Set node position
+            let pos = egui::pos2(node_data.position.0, node_data.position.1);
+            self.graph_state.node_positions.insert(graph_node_id, pos);
+            self.graph_state.node_order.push(graph_node_id);
+
+            // Allocate engine node ID (use the patch ID to maintain consistency)
+            // Note: We use our own ID allocation to keep engine and graph in sync
+            let engine_node_id = self.user_state.allocate_engine_node_id(graph_node_id);
+
+            // Send command to create the module in the audio engine
+            self.send_command(EngineCommand::AddModule {
+                node_id: engine_node_id,
+                module_id: template.module_id(),
+            });
+
+            // Set up output monitoring for LED indicators
+            // Collect indices first to avoid borrow issues
+            let led_output_indices: Vec<usize> = self.graph_state.graph.nodes
+                .get(graph_node_id)
+                .map(|node| node.user_data.led_indicators.iter().map(|led| led.output_index).collect())
+                .unwrap_or_default();
+
+            for output_index in led_output_indices {
+                self.send_command(EngineCommand::MonitorOutput {
+                    node_id: engine_node_id,
+                    output_index,
+                });
+            }
+
+            // Map patch ID to graph ID for connection restoration
+            id_map.insert(node_data.id, graph_node_id);
+
+            // Restore parameter values
+            if let Some(node) = self.graph_state.graph.nodes.get_mut(graph_node_id) {
+                let mut param_idx = 0;
+                for (_name, input_id) in &node.inputs {
+                    if let Some(input) = self.graph_state.graph.inputs.get_mut(*input_id) {
+                        match input.kind {
+                            InputParamKind::ConstantOnly | InputParamKind::ConnectionOrConstant => {
+                                if let Some(saved_value) = node_data.parameters.get(param_idx) {
+                                    input.value.set_actual_value(saved_value.as_f32());
+                                }
+                                param_idx += 1;
+                            }
+                            InputParamKind::ConnectionOnly => {
+                                // Skip
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Restore connections
+        for conn in &patch.connections {
+            // Find graph node IDs from patch IDs
+            let from_graph_id = id_map.get(&conn.from_node);
+            let to_graph_id = id_map.get(&conn.to_node);
+
+            if let (Some(&from_graph_id), Some(&to_graph_id)) = (from_graph_id, to_graph_id) {
+                // Find output port by name
+                let output_id = self.graph_state.graph.nodes.get(from_graph_id)
+                    .and_then(|node| {
+                        node.outputs.iter()
+                            .find(|(name, _)| *name == conn.from_port)
+                            .map(|(_, id)| *id)
+                    });
+
+                // Find input port by name
+                let input_id = self.graph_state.graph.nodes.get(to_graph_id)
+                    .and_then(|node| {
+                        node.inputs.iter()
+                            .find(|(name, _)| *name == conn.to_port)
+                            .map(|(_, id)| *id)
+                    });
+
+                if let (Some(output_id), Some(input_id)) = (output_id, input_id) {
+                    // Add connection to graph (pos=0 adds at beginning, order doesn't matter for audio)
+                    self.graph_state.graph.add_connection(output_id, input_id, 0);
+
+                    // Send connection command to engine
+                    if let Some(cmd) = self.build_connect_command(output_id, input_id) {
+                        self.send_command(cmd);
+                    }
+
+                    // Set up input monitoring if this is an exposed parameter
+                    if let Some(monitor_cmd) = self.build_monitor_input_command(input_id) {
+                        self.send_command(monitor_cmd);
+                    }
+                }
+            }
+        }
+
+        // Restore playback state
+        if was_playing {
+            self.is_playing = true;
+            self.send_command(EngineCommand::SetPlaying(true));
+        }
+
+        Ok(())
+    }
+
+    /// Clear the entire graph.
+    fn clear_graph(&mut self) {
+        // Send clear command to audio engine
+        self.send_command(EngineCommand::ClearGraph);
+
+        // Clear graph state
+        self.graph_state.graph = egui_node_graph2::Graph::default();
+        self.graph_state.node_positions.clear();
+        self.graph_state.node_order.clear();
+
+        // Clear user state
+        self.user_state.clear();
+
+        // Clear cached parameters
+        self.cached_params.clear();
+    }
+
+    /// Find the template for a given module ID.
+    fn find_template_for_module(&self, module_id: &str) -> Option<SynthNodeTemplate> {
+        use egui_node_graph2::NodeTemplateIter;
+        AllNodeTemplates.all_kinds()
+            .into_iter()
+            .find(|t| t.module_id() == module_id)
+    }
+
+    /// Show a save file dialog and save the current patch.
+    fn show_save_dialog(&mut self) {
+        let default_name = self.current_patch_path
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("patch.json");
+
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Synth Patch", &["json"])
+            .set_file_name(default_name)
+            .save_file()
+        {
+            // Derive patch name from filename
+            let name = path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Untitled");
+
+            let patch = self.create_patch(name);
+            match save_to_file(&patch, &path) {
+                Ok(()) => {
+                    self.current_patch_path = Some(path.clone());
+                    self.status_message = Some(format!("Saved: {}", path.display()));
+                }
+                Err(e) => {
+                    self.status_message = Some(format!("Save failed: {}", e));
+                }
+            }
+        }
+    }
+
+    /// Show a load file dialog and load the selected patch.
+    fn show_load_dialog(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Synth Patch", &["json"])
+            .pick_file()
+        {
+            match load_from_file(&path) {
+                Ok(patch) => {
+                    match self.load_patch(&patch) {
+                        Ok(()) => {
+                            self.current_patch_path = Some(path.clone());
+                            self.status_message = Some(format!("Loaded: {}", patch.name));
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("Load failed: {}", e));
+                        }
+                    }
+                }
+                Err(e) => {
+                    self.status_message = Some(format!("Load failed: {}", e));
+                }
+            }
+        }
+    }
+
+    /// Quick save to the current path, or show save dialog if no path.
+    fn quick_save(&mut self) {
+        if let Some(path) = self.current_patch_path.clone() {
+            let name = path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("Untitled");
+
+            let patch = self.create_patch(name);
+            match save_to_file(&patch, &path) {
+                Ok(()) => {
+                    self.status_message = Some(format!("Saved: {}", path.display()));
+                }
+                Err(e) => {
+                    self.status_message = Some(format!("Save failed: {}", e));
+                }
+            }
+        } else {
+            self.show_save_dialog();
+        }
+    }
+
     /// Validate a connection and return an error message if invalid.
     ///
     /// Returns None if the connection is valid, Some(error_msg) if invalid.
@@ -827,8 +1175,13 @@ impl SynthApp {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
 
-            // Priority order: validation message > audio error > status
-            if let Some(validation_msg) = self.user_state.validation_message() {
+            // Priority order: status message > validation message > audio error > default status
+            if let Some(ref status_msg) = self.status_message {
+                // Show status message (from save/load)
+                ui.label(RichText::new(status_msg)
+                    .color(theme::accent::SUCCESS)
+                    .small());
+            } else if let Some(validation_msg) = self.user_state.validation_message() {
                 // Show validation error with warning icon
                 ui.label(RichText::new(format!("⚠ {}", validation_msg))
                     .color(theme::accent::WARNING)
@@ -862,6 +1215,17 @@ impl SynthApp {
             }
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // Show current patch name if any
+                if let Some(ref path) = self.current_patch_path {
+                    if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+                        ui.label(RichText::new(name)
+                            .color(theme::text::SECONDARY)
+                            .small());
+                        ui.label(RichText::new("|")
+                            .color(theme::text::DISABLED)
+                            .small());
+                    }
+                }
                 ui.label(RichText::new("Modular Synth v0.1")
                     .color(theme::text::DISABLED)
                     .small());
@@ -876,6 +1240,8 @@ struct ToolbarActions {
     toggle_playing: bool,
     select_device: Option<usize>,
     refresh_devices: bool,
+    save_patch: bool,
+    load_patch: bool,
 }
 
 impl eframe::App for SynthApp {
@@ -889,10 +1255,29 @@ impl eframe::App for SynthApp {
         // Process events from the audio engine
         self.process_engine_events();
 
+        // Clear status message after it's been shown (user will see it on first frame)
+        // We clear it on the next frame after it was set
+        let had_status_message = self.status_message.is_some();
+
         // Request continuous repaints when playing (for LED indicators and other visualizations)
         if self.is_playing {
             ctx.request_repaint();
         }
+
+        // Handle keyboard shortcuts
+        let mut keyboard_save = false;
+        let mut keyboard_load = false;
+
+        ctx.input(|i| {
+            // Ctrl+S: Save
+            if i.modifiers.ctrl && i.key_pressed(egui::Key::S) {
+                keyboard_save = true;
+            }
+            // Ctrl+O: Open/Load
+            if i.modifiers.ctrl && i.key_pressed(egui::Key::O) {
+                keyboard_load = true;
+            }
+        });
 
         // Top toolbar panel
         let toolbar_actions = egui::TopBottomPanel::top("toolbar")
@@ -929,6 +1314,21 @@ impl eframe::App for SynthApp {
         }
         if let Some(device_index) = toolbar_actions.select_device {
             self.select_device(device_index);
+        }
+
+        // Handle save/load actions (from toolbar buttons or keyboard shortcuts)
+        if toolbar_actions.save_patch || keyboard_save {
+            self.quick_save();
+        }
+        if toolbar_actions.load_patch || keyboard_load {
+            self.show_load_dialog();
+        }
+
+        // Clear status message after showing it for one frame
+        // This gives user time to read it but doesn't persist forever
+        if had_status_message {
+            // Request one more repaint to clear the message
+            ctx.request_repaint_after(std::time::Duration::from_secs(2));
         }
     }
 }
