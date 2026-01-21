@@ -26,6 +26,8 @@ pub enum SynthNodeTemplate {
     AdsrEnvelope,
     /// Clock - periodic gate trigger generator.
     Clock,
+    /// VCA - voltage controlled amplifier for amplitude shaping.
+    Vca,
 }
 
 impl SynthNodeTemplate {
@@ -39,6 +41,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::SvfFilter => "filter.svf",
             SynthNodeTemplate::AdsrEnvelope => "mod.adsr",
             SynthNodeTemplate::Clock => "util.clock",
+            SynthNodeTemplate::Vca => "util.vca",
         }
     }
 
@@ -51,6 +54,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::SvfFilter => ModuleCategory::Filter,
             SynthNodeTemplate::AdsrEnvelope => ModuleCategory::Modulation,
             SynthNodeTemplate::Clock => ModuleCategory::Utility,
+            SynthNodeTemplate::Vca => ModuleCategory::Utility,
         }
     }
 }
@@ -68,6 +72,7 @@ impl NodeTemplateIter for AllNodeTemplates {
             SynthNodeTemplate::AdsrEnvelope,
             SynthNodeTemplate::Lfo,
             SynthNodeTemplate::Clock,
+            SynthNodeTemplate::Vca,
             SynthNodeTemplate::AudioOutput,
         ]
     }
@@ -123,6 +128,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::SvfFilter => Cow::Borrowed("SVF Filter"),
             SynthNodeTemplate::AdsrEnvelope => Cow::Borrowed("ADSR Envelope"),
             SynthNodeTemplate::Clock => Cow::Borrowed("Clock"),
+            SynthNodeTemplate::Vca => Cow::Borrowed("VCA"),
         }
     }
 
@@ -138,6 +144,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::SvfFilter => "SVF Filter".to_string(),
             SynthNodeTemplate::AdsrEnvelope => "ADSR Envelope".to_string(),
             SynthNodeTemplate::Clock => "Clock".to_string(),
+            SynthNodeTemplate::Vca => "VCA".to_string(),
         }
     }
 
@@ -201,6 +208,15 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 // Tempo and Gate Length as knobs
                 KnobParam::knob_only("Tempo", "BPM"),
                 KnobParam::knob_only("Gate Length", "Gate"),
+            ]),
+            SynthNodeTemplate::Vca => SynthNodeData::new(
+                "util.vca",
+                "VCA",
+                ModuleCategory::Utility,
+            ).with_knob_params(vec![
+                // Level and CV Amount as knobs
+                KnobParam::knob_only("Level", "Level"),
+                KnobParam::knob_only("CV Amount", "CV Amt"),
             ]),
         }
     }
@@ -528,6 +544,54 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthDataType::new(SignalType::Gate),
                 );
             }
+            SynthNodeTemplate::Vca => {
+                // Audio input port
+                graph.add_input_param(
+                    node_id,
+                    "In".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // CV input port
+                graph.add_input_param(
+                    node_id,
+                    "CV".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(1.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Level: knob-only parameter
+                graph.add_input_param(
+                    node_id,
+                    "Level".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(1.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // CV Amount: knob-only parameter
+                graph.add_input_param(
+                    node_id,
+                    "CV Amount".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(1.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Audio output port
+                graph.add_output_param(
+                    node_id,
+                    "Out".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                );
+            }
         }
     }
 }
@@ -539,13 +603,14 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 6);
+        assert_eq!(templates.len(), 7);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
         assert!(templates.contains(&SynthNodeTemplate::SvfFilter));
         assert!(templates.contains(&SynthNodeTemplate::AdsrEnvelope));
         assert!(templates.contains(&SynthNodeTemplate::Clock));
+        assert!(templates.contains(&SynthNodeTemplate::Vca));
     }
 
     #[test]
@@ -556,6 +621,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::SvfFilter.module_id(), "filter.svf");
         assert_eq!(SynthNodeTemplate::AdsrEnvelope.module_id(), "mod.adsr");
         assert_eq!(SynthNodeTemplate::Clock.module_id(), "util.clock");
+        assert_eq!(SynthNodeTemplate::Vca.module_id(), "util.vca");
     }
 
     #[test]
@@ -566,6 +632,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::SvfFilter.category(), ModuleCategory::Filter);
         assert_eq!(SynthNodeTemplate::AdsrEnvelope.category(), ModuleCategory::Modulation);
         assert_eq!(SynthNodeTemplate::Clock.category(), ModuleCategory::Utility);
+        assert_eq!(SynthNodeTemplate::Vca.category(), ModuleCategory::Utility);
     }
 
     #[test]
@@ -594,6 +661,10 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::Clock.node_finder_label(&mut state),
             "Clock"
+        );
+        assert_eq!(
+            SynthNodeTemplate::Vca.node_finder_label(&mut state),
+            "VCA"
         );
     }
 }

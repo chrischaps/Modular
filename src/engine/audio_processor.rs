@@ -4,7 +4,7 @@
 //! with command handling from the UI thread.
 
 use crate::dsp::{ModuleRegistry, ProcessContext};
-use crate::modules::{AdsrEnvelope, AudioOutput, Clock, Lfo, SineOscillator, SvfFilter};
+use crate::modules::{AdsrEnvelope, AudioOutput, Clock, Lfo, SineOscillator, SvfFilter, Vca};
 
 use super::audio_graph::AudioGraph;
 use super::channels::EngineHandle;
@@ -17,6 +17,7 @@ pub fn create_module_registry() -> ModuleRegistry {
     registry.register::<SvfFilter>();
     registry.register::<AdsrEnvelope>();
     registry.register::<Clock>();
+    registry.register::<Vca>();
     registry.register::<AudioOutput>();
     registry.register::<Lfo>();
     registry
@@ -202,9 +203,10 @@ mod tests {
         assert!(registry.contains("filter.svf"));
         assert!(registry.contains("mod.adsr"));
         assert!(registry.contains("util.clock"));
+        assert!(registry.contains("util.vca"));
         assert!(registry.contains("output.audio"));
         assert!(registry.contains("mod.lfo"));
-        assert_eq!(registry.len(), 6);
+        assert_eq!(registry.len(), 7);
     }
 
     #[test]
