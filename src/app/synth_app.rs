@@ -12,7 +12,9 @@ use egui_node_graph2::{GraphEditorState, NodeResponse, NodeTemplateTrait, InputP
 
 use crate::engine::{
     AudioEngine, AudioError, AudioProcessor, DeviceInfo, EngineChannels, EngineCommand, UiHandle,
+    MidiDeviceInfo, MidiEngine, TimestampedMidiEvent,
 };
+use rtrb::Consumer;
 use crate::graph::{
     validate_connection, AllNodeTemplates, AnyParameterId, SynthDataType, SynthGraphState,
     SynthNodeData, SynthNodeTemplate, SynthValueType,
@@ -82,6 +84,21 @@ pub struct SynthApp {
 
     /// Current CPU load percentage from the audio engine (0-100).
     cpu_load: f32,
+
+    /// MIDI engine for receiving MIDI input.
+    midi_engine: Option<MidiEngine>,
+
+    /// Consumer for receiving MIDI events from the MIDI engine.
+    midi_event_consumer: Option<Consumer<TimestampedMidiEvent>>,
+
+    /// Cached list of MIDI input devices.
+    midi_devices: Vec<MidiDeviceInfo>,
+
+    /// Index of currently selected MIDI device (None = no device).
+    selected_midi_device: Option<usize>,
+
+    /// MIDI error message to display.
+    midi_error_message: Option<String>,
 }
 
 impl SynthApp {
@@ -129,6 +146,19 @@ impl SynthApp {
             None
         };
 
+        // Initialize MIDI engine
+        let (midi_engine, midi_event_consumer, midi_devices, midi_error_message) =
+            match MidiEngine::new() {
+                Ok((mut engine, consumer)) => {
+                    let devices = engine.enumerate_devices();
+                    (Some(engine), Some(consumer), devices, None)
+                }
+                Err(e) => {
+                    eprintln!("MIDI initialization failed: {}", e);
+                    (None, None, Vec::new(), Some(e.to_string()))
+                }
+            };
+
         let app = Self {
             audio_engine,
             ui_handle,
@@ -147,6 +177,11 @@ impl SynthApp {
             gate_held_high: false,
             last_triggered_note: 60.0,
             cpu_load: 0.0,
+            midi_engine,
+            midi_event_consumer,
+            midi_devices,
+            selected_midi_device: None,
+            midi_error_message,
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -159,6 +194,48 @@ impl SynthApp {
     fn refresh_devices(&mut self) {
         if let Ok(ref engine) = self.audio_engine {
             self.audio_devices = engine.enumerate_devices();
+        }
+    }
+
+    /// Refresh the list of available MIDI devices
+    fn refresh_midi_devices(&mut self) {
+        if let Some(ref mut engine) = self.midi_engine {
+            self.midi_devices = engine.enumerate_devices();
+        }
+    }
+
+    /// Connect to a MIDI device by index
+    fn connect_midi_device(&mut self, index: usize) {
+        if let Some(ref mut engine) = self.midi_engine {
+            match engine.connect(index) {
+                Ok(()) => {
+                    self.selected_midi_device = Some(index);
+                    self.midi_error_message = None;
+                }
+                Err(e) => {
+                    self.midi_error_message = Some(e.to_string());
+                }
+            }
+        }
+    }
+
+    /// Disconnect from the current MIDI device
+    fn disconnect_midi_device(&mut self) {
+        if let Some(ref mut engine) = self.midi_engine {
+            engine.disconnect();
+            self.selected_midi_device = None;
+        }
+    }
+
+    /// Process pending MIDI events.
+    /// Currently just logs them; future modules will consume these events.
+    fn process_midi_events(&mut self) {
+        if let Some(ref mut consumer) = self.midi_event_consumer {
+            while let Ok(event) = consumer.pop() {
+                // For now, just log the events. Future MIDI modules will process these.
+                // The events are also logged in the MIDI callback for immediate feedback.
+                let _ = event; // Suppress unused warning
+            }
         }
     }
 
@@ -284,6 +361,66 @@ impl SynthApp {
                             ui.separator();
                             if ui.button("🔄 Refresh").clicked() {
                                 actions.refresh_devices = true;
+                            }
+                        });
+
+                    ui.add_space(20.0);
+                    ui.separator();
+                    ui.add_space(20.0);
+
+                    // MIDI input selector
+                    ui.label(RichText::new("MIDI In").color(theme::text::SECONDARY));
+                    ui.add_space(8.0);
+
+                    // Get current MIDI device name for display
+                    let current_midi = self.selected_midi_device
+                        .and_then(|idx| self.midi_devices.get(idx))
+                        .map(|d| d.name.as_str())
+                        .unwrap_or("None");
+
+                    // Truncate long device names
+                    let midi_display_name = if current_midi.len() > 25 {
+                        format!("{}...", &current_midi[..22])
+                    } else {
+                        current_midi.to_string()
+                    };
+
+                    // MIDI connection indicator
+                    let midi_connected = self.selected_midi_device.is_some()
+                        && self.midi_engine.as_ref().map(|e| e.is_connected()).unwrap_or(false);
+                    let midi_indicator = if midi_connected { "● " } else { "○ " };
+
+                    egui::ComboBox::from_id_salt("midi_device_selector")
+                        .selected_text(format!("{}{}", midi_indicator, midi_display_name))
+                        .width(180.0)
+                        .show_ui(ui, |ui| {
+                            // Option to disconnect / select none
+                            if ui.selectable_label(
+                                self.selected_midi_device.is_none(),
+                                "None (Disconnect)"
+                            ).clicked() {
+                                actions.disconnect_midi = true;
+                            }
+
+                            ui.separator();
+
+                            // List available MIDI devices
+                            if self.midi_devices.is_empty() {
+                                ui.label(RichText::new("No MIDI devices found")
+                                    .color(theme::text::DISABLED)
+                                    .italics());
+                            } else {
+                                for device in &self.midi_devices {
+                                    let is_selected = self.selected_midi_device == Some(device.index);
+                                    if ui.selectable_label(is_selected, &device.name).clicked() {
+                                        actions.connect_midi_device = Some(device.index);
+                                    }
+                                }
+                            }
+
+                            ui.separator();
+                            if ui.button("🔄 Refresh").clicked() {
+                                actions.refresh_midi_devices = true;
                             }
                         });
 
@@ -1440,6 +1577,10 @@ struct ToolbarActions {
     refresh_devices: bool,
     save_patch: bool,
     load_patch: bool,
+    // MIDI actions
+    connect_midi_device: Option<usize>,
+    disconnect_midi: bool,
+    refresh_midi_devices: bool,
 }
 
 impl eframe::App for SynthApp {
@@ -1528,6 +1669,20 @@ impl eframe::App for SynthApp {
         if toolbar_actions.load_patch || keyboard_load {
             self.show_load_dialog();
         }
+
+        // Handle MIDI actions
+        if toolbar_actions.refresh_midi_devices {
+            self.refresh_midi_devices();
+        }
+        if let Some(device_index) = toolbar_actions.connect_midi_device {
+            self.connect_midi_device(device_index);
+        }
+        if toolbar_actions.disconnect_midi {
+            self.disconnect_midi_device();
+        }
+
+        // Process pending MIDI events
+        self.process_midi_events();
 
         // Clear status message after showing it for one frame
         // This gives user time to read it but doesn't persist forever
