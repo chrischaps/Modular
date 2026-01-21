@@ -12,7 +12,7 @@ use egui_node_graph2::{GraphEditorState, NodeResponse, NodeTemplateTrait, InputP
 
 use crate::engine::{
     AudioEngine, AudioError, AudioProcessor, DeviceInfo, EngineChannels, EngineCommand, UiHandle,
-    MidiDeviceInfo, MidiEngine, TimestampedMidiEvent,
+    MidiDeviceInfo, MidiEngine, MidiEvent, TimestampedMidiEvent,
 };
 use rtrb::Consumer;
 use crate::graph::{
@@ -20,6 +20,7 @@ use crate::graph::{
     SynthNodeData, SynthNodeTemplate, SynthValueType,
 };
 use crate::modules::keyboard::{key_to_note, relative_to_midi};
+use crate::modules::midi_note::MidiNote;
 use crate::persistence::{
     ConnectionData, NodeData, ParameterValue, Patch, PatchError,
     load_from_file, save_to_file,
@@ -99,6 +100,26 @@ pub struct SynthApp {
 
     /// MIDI error message to display.
     midi_error_message: Option<String>,
+
+    // --- MIDI Note module state ---
+    /// Currently held MIDI notes for MIDI Note modules.
+    /// Stores (note_number, velocity, channel) in order of press for voice priority.
+    midi_held_notes: Vec<(u8, u8, u8)>,
+
+    /// Timestamp when the MIDI gate was last triggered (for minimum gate duration).
+    midi_last_gate_on: Option<Instant>,
+
+    /// Whether the MIDI gate is currently being held high (for minimum duration).
+    midi_gate_held_high: bool,
+
+    /// The last MIDI note that was triggered (to maintain pitch during gate hold).
+    midi_last_triggered_note: u8,
+
+    /// The last MIDI velocity that was triggered.
+    midi_last_velocity: u8,
+
+    /// Current aftertouch value (channel pressure).
+    midi_aftertouch: u8,
 }
 
 impl SynthApp {
@@ -182,6 +203,13 @@ impl SynthApp {
             midi_devices,
             selected_midi_device: None,
             midi_error_message,
+            // MIDI Note module state
+            midi_held_notes: Vec::new(),
+            midi_last_gate_on: None,
+            midi_gate_held_high: false,
+            midi_last_triggered_note: 60,
+            midi_last_velocity: 100,
+            midi_aftertouch: 0,
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -228,12 +256,161 @@ impl SynthApp {
     }
 
     /// Process pending MIDI events.
-    /// Stores events in user state for display by MIDI Monitor modules.
+    /// - Stores events in user state for display by MIDI Monitor modules.
+    /// - Routes note events to MIDI Note modules.
     fn process_midi_events(&mut self) {
+        let mut notes_changed = false;
+
         if let Some(ref mut consumer) = self.midi_event_consumer {
-            while let Ok(event) = consumer.pop() {
+            while let Ok(timestamped) = consumer.pop() {
+                let event = timestamped.event;
+
                 // Store the event for MIDI Monitor display
-                self.user_state.push_midi_event(event.event);
+                self.user_state.push_midi_event(event);
+
+                // Process MIDI events for MIDI Note modules
+                match event {
+                    MidiEvent::NoteOn { channel, note, velocity } => {
+                        // Add note if not already in list
+                        if !self.midi_held_notes.iter().any(|(n, _, _)| *n == note) {
+                            self.midi_held_notes.push((note, velocity, channel));
+                            notes_changed = true;
+                        }
+                    }
+                    MidiEvent::NoteOff { note, .. } => {
+                        // Remove note from list
+                        if let Some(pos) = self.midi_held_notes.iter().position(|(n, _, _)| *n == note) {
+                            self.midi_held_notes.remove(pos);
+                            notes_changed = true;
+                        }
+                    }
+                    MidiEvent::ChannelPressure { pressure, .. } => {
+                        // Update aftertouch
+                        if self.midi_aftertouch != pressure {
+                            self.midi_aftertouch = pressure;
+                            notes_changed = true;
+                        }
+                    }
+                    _ => {
+                        // Other events (CC, pitch bend, etc.) are not handled by MIDI Note module
+                    }
+                }
+            }
+        }
+
+        // Update MIDI Note modules if note state changed
+        if notes_changed {
+            self.sync_midi_note_modules();
+        }
+    }
+
+    /// Check if there are any MIDI Note modules in the graph.
+    fn has_midi_note_modules(&self) -> bool {
+        self.graph_state.graph.nodes.iter()
+            .any(|(_, node)| node.user_data.module_id == "input.midi_note")
+    }
+
+    /// Minimum MIDI gate duration in milliseconds.
+    const MIN_MIDI_GATE_DURATION_MS: u64 = 30;
+
+    /// Sync the current MIDI note state to all MIDI Note modules in the graph.
+    fn sync_midi_note_modules(&mut self) {
+        // Determine the active note based on voice priority (for now, always use "Last" priority)
+        let (active_note, active_velocity, should_gate_on) = if let Some(&(note, velocity, _channel)) = self.midi_held_notes.last() {
+            (note, velocity, true)
+        } else {
+            (self.midi_last_triggered_note, self.midi_last_velocity, false)
+        };
+
+        // Determine actual gate state considering minimum duration
+        let gate_value = if should_gate_on {
+            // Note is pressed - gate should be on
+            if !self.midi_gate_held_high {
+                // New note trigger
+                self.midi_last_gate_on = Some(Instant::now());
+                self.midi_gate_held_high = true;
+                self.midi_last_triggered_note = active_note;
+                self.midi_last_velocity = active_velocity;
+            }
+            1.0
+        } else if self.midi_gate_held_high {
+            // Note released but check minimum duration
+            if let Some(gate_time) = self.midi_last_gate_on {
+                let elapsed_ms = gate_time.elapsed().as_millis() as u64;
+                if elapsed_ms < Self::MIN_MIDI_GATE_DURATION_MS {
+                    // Keep gate high until minimum duration
+                    1.0
+                } else {
+                    // Minimum duration passed, can release
+                    self.midi_gate_held_high = false;
+                    self.midi_last_gate_on = None;
+                    0.0
+                }
+            } else {
+                self.midi_gate_held_high = false;
+                0.0
+            }
+        } else {
+            0.0
+        };
+
+        // Collect MIDI Note module engine IDs first to avoid borrow issues
+        let midi_note_nodes: Vec<u64> = self.graph_state.graph.nodes.iter()
+            .filter(|(_, node)| node.user_data.module_id == "input.midi_note")
+            .filter_map(|(node_id, _)| self.user_state.get_engine_node_id(node_id))
+            .collect();
+
+        // Use the triggered note when gate is high, otherwise active_note
+        let note_to_send = if self.midi_gate_held_high { self.midi_last_triggered_note } else { active_note };
+        let velocity_to_send = if self.midi_gate_held_high { self.midi_last_velocity } else { active_velocity };
+
+        // Update all MIDI Note modules
+        for engine_node_id in midi_note_nodes {
+            // Update Note parameter (param index 0)
+            self.send_command(EngineCommand::SetParameter {
+                node_id: engine_node_id,
+                param_index: MidiNote::PARAM_NOTE,
+                value: note_to_send as f32,
+            });
+
+            // Update Gate parameter (param index 1)
+            self.send_command(EngineCommand::SetParameter {
+                node_id: engine_node_id,
+                param_index: MidiNote::PARAM_GATE,
+                value: gate_value,
+            });
+
+            // Update Velocity parameter (param index 2) - raw 0-127 value
+            self.send_command(EngineCommand::SetParameter {
+                node_id: engine_node_id,
+                param_index: MidiNote::PARAM_VELOCITY,
+                value: velocity_to_send as f32,
+            });
+
+            // Update Aftertouch parameter (param index 3) - raw 0-127 value
+            self.send_command(EngineCommand::SetParameter {
+                node_id: engine_node_id,
+                param_index: MidiNote::PARAM_AFTERTOUCH,
+                value: self.midi_aftertouch as f32,
+            });
+
+            // Also update the cached params so sync_parameters doesn't overwrite
+            self.cached_params.insert((engine_node_id, MidiNote::PARAM_NOTE), note_to_send as f32);
+            self.cached_params.insert((engine_node_id, MidiNote::PARAM_GATE), gate_value);
+            self.cached_params.insert((engine_node_id, MidiNote::PARAM_VELOCITY), velocity_to_send as f32);
+            self.cached_params.insert((engine_node_id, MidiNote::PARAM_AFTERTOUCH), self.midi_aftertouch as f32);
+        }
+    }
+
+    /// Check if MIDI gate needs to be released after minimum duration.
+    fn update_midi_gate_timing(&mut self) {
+        if self.midi_gate_held_high && self.midi_held_notes.is_empty() {
+            // Note was released, check if we should release the gate now
+            if let Some(gate_time) = self.midi_last_gate_on {
+                if gate_time.elapsed().as_millis() as u64 >= Self::MIN_MIDI_GATE_DURATION_MS {
+                    // Time to release
+                    self.sync_midi_note_modules();
+                }
             }
         }
     }
@@ -921,8 +1098,9 @@ impl SynthApp {
                 continue;
             };
 
-            // Check if this is a keyboard module - we handle Note and Gate params separately
+            // Check if this is a keyboard or MIDI note module - we handle Note/Gate params separately
             let is_keyboard = node.user_data.module_id == "input.keyboard";
+            let is_midi_note = node.user_data.module_id == "input.midi_note";
 
             // Track which param index we're at (only count ConstantOnly params)
             let mut param_index = 0;
@@ -938,6 +1116,13 @@ impl SynthApp {
                         // Skip Note (0) and Gate (1) params for keyboard modules
                         // These are controlled by keyboard events, not the graph UI
                         if is_keyboard && param_index < 2 {
+                            param_index += 1;
+                            continue;
+                        }
+
+                        // Skip Note (0), Gate (1), Velocity (2), and Aftertouch (3) params for MIDI Note modules
+                        // These are controlled by MIDI events, not the graph UI
+                        if is_midi_note && param_index < 4 {
                             param_index += 1;
                             continue;
                         }
@@ -1598,8 +1783,8 @@ impl eframe::App for SynthApp {
         let had_status_message = self.status_message.is_some();
 
         // Request continuous repaints when playing (for LED indicators and other visualizations)
-        // Also repaint continuously when there are keyboard modules to catch all key events
-        if self.is_playing || self.has_keyboard_modules() {
+        // Also repaint continuously when there are keyboard or MIDI Note modules to catch all events
+        if self.is_playing || self.has_keyboard_modules() || self.has_midi_note_modules() {
             ctx.request_repaint();
         }
 
@@ -1623,6 +1808,7 @@ impl eframe::App for SynthApp {
 
         // Update gate timing (for minimum gate duration)
         self.update_gate_timing();
+        self.update_midi_gate_timing();
 
         // Top toolbar panel
         let toolbar_actions = egui::TopBottomPanel::top("toolbar")

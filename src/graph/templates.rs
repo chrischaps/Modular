@@ -34,6 +34,8 @@ pub enum SynthNodeTemplate {
     Keyboard,
     /// MIDI Monitor - display incoming MIDI events.
     MidiMonitor,
+    /// MIDI Note - convert MIDI note events to CV signals.
+    MidiNote,
 }
 
 impl SynthNodeTemplate {
@@ -51,6 +53,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::Attenuverter => "util.attenuverter",
             SynthNodeTemplate::Keyboard => "input.keyboard",
             SynthNodeTemplate::MidiMonitor => "util.midi_monitor",
+            SynthNodeTemplate::MidiNote => "input.midi_note",
         }
     }
 
@@ -67,6 +70,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::Attenuverter => ModuleCategory::Utility,
             SynthNodeTemplate::Keyboard => ModuleCategory::Source,
             SynthNodeTemplate::MidiMonitor => ModuleCategory::Utility,
+            SynthNodeTemplate::MidiNote => ModuleCategory::Source,
         }
     }
 }
@@ -81,6 +85,7 @@ impl NodeTemplateIter for AllNodeTemplates {
         vec![
             SynthNodeTemplate::SineOscillator,
             SynthNodeTemplate::Keyboard,
+            SynthNodeTemplate::MidiNote,
             SynthNodeTemplate::SvfFilter,
             SynthNodeTemplate::AdsrEnvelope,
             SynthNodeTemplate::Lfo,
@@ -147,6 +152,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::Attenuverter => Cow::Borrowed("Attenuverter"),
             SynthNodeTemplate::Keyboard => Cow::Borrowed("Keyboard"),
             SynthNodeTemplate::MidiMonitor => Cow::Borrowed("MIDI Monitor"),
+            SynthNodeTemplate::MidiNote => Cow::Borrowed("MIDI Note"),
         }
     }
 
@@ -166,6 +172,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::Attenuverter => "Attenuverter".to_string(),
             SynthNodeTemplate::Keyboard => "Keyboard".to_string(),
             SynthNodeTemplate::MidiMonitor => "MIDI Monitor".to_string(),
+            SynthNodeTemplate::MidiNote => "MIDI Note".to_string(),
         }
     }
 
@@ -275,6 +282,17 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 ModuleCategory::Utility,
             ),
             // Note: MidiMonitor has no knob_params - it uses custom rendering for the event log
+            SynthNodeTemplate::MidiNote => SynthNodeData::new(
+                "input.midi_note",
+                "MIDI Note",
+                ModuleCategory::Source,
+            ).with_knob_params(vec![
+                // Octave shift: -4 to +4
+                KnobParam::knob_only("Octave", "Oct"),
+            ]).with_led_indicators(vec![
+                // Gate output LED indicator (output index 1 = Gate port)
+                LedIndicator::gate(1, "Gate"),
+            ]),
         }
     }
 
@@ -874,6 +892,127 @@ impl NodeTemplateTrait for SynthNodeTemplate {
 
                 // No output ports - this is display-only
             }
+            SynthNodeTemplate::MidiNote => {
+                // Note: MIDI note number (0-127), controlled by MIDI events
+                // Hidden parameter - not shown inline
+                graph.add_input_param(
+                    node_id,
+                    "Note".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(60.0, 0.0, 127.0, "", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden - controlled by MIDI events
+                );
+
+                // Gate: controlled by MIDI events
+                // Hidden parameter - not shown inline
+                graph.add_input_param(
+                    node_id,
+                    "Gate".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::toggle(false, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden - controlled by MIDI events
+                );
+
+                // Velocity: controlled by MIDI events (0-127)
+                // Hidden parameter - not shown inline
+                graph.add_input_param(
+                    node_id,
+                    "Velocity".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(100.0, 0.0, 127.0, "", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden - controlled by MIDI events
+                );
+
+                // Aftertouch: controlled by MIDI events (0-127)
+                // Hidden parameter - not shown inline
+                graph.add_input_param(
+                    node_id,
+                    "Aftertouch".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(0.0, 0.0, 127.0, "", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden - controlled by MIDI events
+                );
+
+                // Channel filter (0=Omni, 1-16=specific)
+                graph.add_input_param(
+                    node_id,
+                    "Channel".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::select(
+                        0,
+                        vec![
+                            "Omni".to_string(), "1".to_string(), "2".to_string(), "3".to_string(),
+                            "4".to_string(), "5".to_string(), "6".to_string(), "7".to_string(),
+                            "8".to_string(), "9".to_string(), "10".to_string(), "11".to_string(),
+                            "12".to_string(), "13".to_string(), "14".to_string(), "15".to_string(),
+                            "16".to_string(),
+                        ],
+                        "Ch",
+                    ),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline as dropdown
+                );
+
+                // Octave shift: -4 to +4
+                graph.add_input_param(
+                    node_id,
+                    "Octave".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(0.0, -4.0, 4.0, "", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Priority: voice priority mode (shown inline as dropdown)
+                graph.add_input_param(
+                    node_id,
+                    "Priority".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::select(
+                        0,
+                        vec!["Last".to_string(), "Low".to_string(), "High".to_string()],
+                        "Priority",
+                    ),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline as dropdown
+                );
+
+                // Retrigger toggle (shown inline)
+                graph.add_input_param(
+                    node_id,
+                    "Retrigger".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::toggle(false, "Retrig"),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline as checkbox
+                );
+
+                // Output ports
+                graph.add_output_param(
+                    node_id,
+                    "Pitch".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "Gate".to_string(),
+                    SynthDataType::new(SignalType::Gate),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "Velocity".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "Aftertouch".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                );
+            }
         }
     }
 }
@@ -885,7 +1024,7 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 10);
+        assert_eq!(templates.len(), 11);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
@@ -896,6 +1035,7 @@ mod tests {
         assert!(templates.contains(&SynthNodeTemplate::Vca));
         assert!(templates.contains(&SynthNodeTemplate::Keyboard));
         assert!(templates.contains(&SynthNodeTemplate::MidiMonitor));
+        assert!(templates.contains(&SynthNodeTemplate::MidiNote));
     }
 
     #[test]
@@ -910,6 +1050,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::Attenuverter.module_id(), "util.attenuverter");
         assert_eq!(SynthNodeTemplate::Keyboard.module_id(), "input.keyboard");
         assert_eq!(SynthNodeTemplate::MidiMonitor.module_id(), "util.midi_monitor");
+        assert_eq!(SynthNodeTemplate::MidiNote.module_id(), "input.midi_note");
     }
 
     #[test]
@@ -924,6 +1065,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::Attenuverter.category(), ModuleCategory::Utility);
         assert_eq!(SynthNodeTemplate::Keyboard.category(), ModuleCategory::Source);
         assert_eq!(SynthNodeTemplate::MidiMonitor.category(), ModuleCategory::Utility);
+        assert_eq!(SynthNodeTemplate::MidiNote.category(), ModuleCategory::Source);
     }
 
     #[test]
@@ -968,6 +1110,10 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::MidiMonitor.node_finder_label(&mut state),
             "MIDI Monitor"
+        );
+        assert_eq!(
+            SynthNodeTemplate::MidiNote.node_finder_label(&mut state),
+            "MIDI Note"
         );
     }
 }
