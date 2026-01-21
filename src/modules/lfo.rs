@@ -5,12 +5,12 @@
 use std::f32::consts::TAU;
 
 use crate::dsp::{
-    module_trait::{DspModule, ModuleCategory, ModuleInfo},
     context::ProcessContext,
+    module_trait::{DspModule, ModuleCategory, ModuleInfo},
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
-    SignalType,
+    ParameterDisplay, SignalType,
 };
 
 /// Waveform shapes for the LFO.
@@ -38,19 +38,28 @@ impl LfoWaveform {
 /// A low-frequency oscillator for modulation.
 ///
 /// Generates control-rate signals for modulating other module parameters.
-/// Output range is -1.0 to 1.0 for bipolar modulation.
+/// Users can select the waveform shape and synchronize multiple LFOs together.
 ///
 /// # Ports
 ///
-/// - **Out** (Control, Output): The modulation signal (-1.0 to 1.0).
+/// **Inputs:**
+/// - **Rate** (Control): CV input for rate modulation. Exponential scaling.
+/// - **Sync** (Gate): Resets phase to offset on rising edge.
+///
+/// **Outputs:**
+/// - **Out** (Control): The modulation signal.
 ///
 /// # Parameters
 ///
-/// - **Rate** (0.01-20 Hz): Speed of the LFO oscillation.
-/// - **Waveform** (0-3): Shape of the waveform (Sine, Triangle, Square, Saw).
+/// - **Rate** (0.01-100 Hz): Speed of the LFO oscillation. Logarithmic display.
+/// - **Waveform** (0-3): Shape of the output (Sine, Triangle, Square, Saw).
+/// - **Phase** (0-360°): Phase offset for waveform start point.
+/// - **Bipolar** (toggle): When on, output is -1 to +1. When off, output is 0 to +1.
 pub struct Lfo {
     /// Current phase (0.0 to 1.0).
     phase: f32,
+    /// Previous sync state for edge detection.
+    prev_sync: bool,
     /// Sample rate from last prepare() call.
     sample_rate: f32,
     /// Port definitions.
@@ -64,45 +73,68 @@ impl Lfo {
     pub fn new() -> Self {
         Self {
             phase: 0.0,
+            prev_sync: false,
             sample_rate: 44100.0,
             ports: vec![
-                // Output port
+                // Input ports
+                PortDefinition::input_with_default("rate_cv", "Rate", SignalType::Control, 0.0),
+                PortDefinition::input_with_default("sync", "Sync", SignalType::Gate, 0.0),
+                // Single output port
                 PortDefinition::output("out", "Out", SignalType::Control),
             ],
             parameters: vec![
-                // Rate parameter (logarithmic feel, but simple linear for now)
+                // Rate parameter (logarithmic for musical response)
                 ParameterDefinition::new(
                     "rate",
                     "Rate",
                     0.01,
-                    20.0,
+                    100.0,
                     1.0, // Default 1 Hz
-                    crate::dsp::ParameterDisplay::linear("Hz"),
+                    ParameterDisplay::logarithmic("Hz"),
                 ),
-                // Waveform selection (0=Sine, 1=Triangle, 2=Square, 3=Saw)
+                // Waveform selection
                 ParameterDefinition::choice(
                     "waveform",
                     "Waveform",
                     &["Sine", "Triangle", "Square", "Saw"],
                     0, // Default Sine
                 ),
+                // Phase offset (0-360 degrees)
+                ParameterDefinition::new(
+                    "phase",
+                    "Phase",
+                    0.0,
+                    360.0,
+                    0.0,
+                    ParameterDisplay::linear("°"),
+                ),
+                // Bipolar toggle
+                ParameterDefinition::toggle("bipolar", "Bipolar", true),
             ],
         }
     }
 
+    /// Port index constants.
+    const PORT_RATE_CV: usize = 0;
+    const PORT_SYNC: usize = 1;
+    const PORT_OUT: usize = 0;
+
     /// Parameter index constants.
     const PARAM_RATE: usize = 0;
     const PARAM_WAVEFORM: usize = 1;
+    const PARAM_PHASE: usize = 2;
+    const PARAM_BIPOLAR: usize = 3;
 
-    /// Port index constants.
-    const PORT_OUT: usize = 0;
+    /// Sync threshold for detecting high/low states.
+    const SYNC_THRESHOLD: f32 = 0.5;
 
     /// Generate a sample for the given phase (0.0-1.0) and waveform.
+    /// Returns value in bipolar form (-1 to +1).
     fn generate_sample(phase: f32, waveform: LfoWaveform) -> f32 {
         match waveform {
             LfoWaveform::Sine => (phase * TAU).sin(),
             LfoWaveform::Triangle => {
-                // Triangle: 0->0.25 = 0->1, 0.25->0.75 = 1->-1, 0.75->1 = -1->0
+                // Triangle: 0->0.25 ramps 0->1, 0.25->0.75 ramps 1->-1, 0.75->1 ramps -1->0
                 if phase < 0.25 {
                     phase * 4.0
                 } else if phase < 0.75 {
@@ -115,10 +147,16 @@ impl Lfo {
                 if phase < 0.5 { 1.0 } else { -1.0 }
             }
             LfoWaveform::Saw => {
-                // Sawtooth: 0->1 = 0->1, then wraps to -1
+                // Sawtooth: linear ramp from -1 to +1
                 2.0 * phase - 1.0
             }
         }
+    }
+
+    /// Convert bipolar signal (-1 to +1) to unipolar (0 to +1).
+    #[inline]
+    fn to_unipolar(value: f32) -> f32 {
+        (value + 1.0) * 0.5
     }
 }
 
@@ -153,24 +191,63 @@ impl DspModule for Lfo {
 
     fn process(
         &mut self,
-        _inputs: &[&SignalBuffer],
+        inputs: &[&SignalBuffer],
         outputs: &mut [SignalBuffer],
         params: &[f32],
         context: &ProcessContext,
     ) {
-        let rate = params[Self::PARAM_RATE];
+        let base_rate = params[Self::PARAM_RATE];
         let waveform = LfoWaveform::from_param(params[Self::PARAM_WAVEFORM]);
+        let phase_offset = params[Self::PARAM_PHASE] / 360.0; // Convert degrees to 0-1
+        let is_bipolar = params[Self::PARAM_BIPOLAR] > 0.5;
+
+        // Get input buffers
+        let rate_cv = inputs.get(Self::PORT_RATE_CV);
+        let sync_in = inputs.get(Self::PORT_SYNC);
 
         // Get output buffer
         let output = &mut outputs[Self::PORT_OUT];
 
         // Process each sample
         for i in 0..context.block_size {
+            // Check for sync reset (rising edge detection)
+            let sync_value = sync_in
+                .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
+                .unwrap_or(0.0);
+            let sync_high = sync_value > Self::SYNC_THRESHOLD;
+            let sync_rising = sync_high && !self.prev_sync;
+            self.prev_sync = sync_high;
+
+            // Reset phase on sync rising edge
+            if sync_rising {
+                self.phase = 0.0;
+            }
+
+            // Calculate effective phase with offset
+            let effective_phase = (self.phase + phase_offset).fract();
+
             // Generate the waveform sample
-            output.samples[i] = Self::generate_sample(self.phase, waveform);
+            let sample = Self::generate_sample(effective_phase, waveform);
+
+            // Apply bipolar/unipolar scaling
+            output.samples[i] = if is_bipolar {
+                sample
+            } else {
+                Self::to_unipolar(sample)
+            };
+
+            // Get rate CV modulation
+            let rate_cv_value = rate_cv
+                .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
+                .unwrap_or(0.0);
+
+            // Rate CV scales the rate multiplicatively
+            // CV of 0 = base rate, CV of +1 = double rate, CV of -1 = half rate
+            let rate_multiplier = 2.0_f32.powf(rate_cv_value);
+            let final_rate = (base_rate * rate_multiplier).clamp(0.001, 1000.0);
 
             // Advance phase
-            let phase_increment = rate / self.sample_rate;
+            let phase_increment = final_rate / self.sample_rate;
             self.phase += phase_increment;
 
             // Wrap phase to [0, 1)
@@ -183,6 +260,7 @@ impl DspModule for Lfo {
 
     fn reset(&mut self) {
         self.phase = 0.0;
+        self.prev_sync = false;
     }
 }
 
@@ -203,10 +281,22 @@ mod tests {
         let lfo = Lfo::new();
         let ports = lfo.ports();
 
-        assert_eq!(ports.len(), 1);
-        assert!(ports[0].is_output());
-        assert_eq!(ports[0].id, "out");
+        // 2 inputs + 1 output = 3 ports
+        assert_eq!(ports.len(), 3);
+
+        // Input ports
+        assert!(ports[0].is_input());
+        assert_eq!(ports[0].id, "rate_cv");
         assert_eq!(ports[0].signal_type, SignalType::Control);
+
+        assert!(ports[1].is_input());
+        assert_eq!(ports[1].id, "sync");
+        assert_eq!(ports[1].signal_type, SignalType::Gate);
+
+        // Output port
+        assert!(ports[2].is_output());
+        assert_eq!(ports[2].id, "out");
+        assert_eq!(ports[2].signal_type, SignalType::Control);
     }
 
     #[test]
@@ -214,43 +304,27 @@ mod tests {
         let lfo = Lfo::new();
         let params = lfo.parameters();
 
-        assert_eq!(params.len(), 2);
+        assert_eq!(params.len(), 4);
 
         // Rate parameter
         assert_eq!(params[0].id, "rate");
         assert!((params[0].min - 0.01).abs() < f32::EPSILON);
-        assert!((params[0].max - 20.0).abs() < f32::EPSILON);
+        assert!((params[0].max - 100.0).abs() < f32::EPSILON);
         assert!((params[0].default - 1.0).abs() < f32::EPSILON);
 
         // Waveform parameter
         assert_eq!(params[1].id, "waveform");
         assert!((params[1].min - 0.0).abs() < f32::EPSILON);
         assert!((params[1].max - 3.0).abs() < f32::EPSILON);
-    }
 
-    #[test]
-    fn test_lfo_generates_output() {
-        let mut lfo = Lfo::new();
-        lfo.prepare(44100.0, 256);
+        // Phase parameter
+        assert_eq!(params[2].id, "phase");
+        assert!((params[2].min - 0.0).abs() < f32::EPSILON);
+        assert!((params[2].max - 360.0).abs() < f32::EPSILON);
 
-        let mut outputs = vec![SignalBuffer::control(256)];
-        let ctx = ProcessContext::new(44100.0, 256);
-
-        // Sine wave at 1 Hz
-        lfo.process(&[], &mut outputs, &[1.0, 0.0], &ctx);
-
-        // Output should not be all zeros
-        let has_nonzero = outputs[0].samples.iter().any(|&s| s.abs() > 0.001);
-        assert!(has_nonzero, "LFO should produce non-zero output");
-
-        // Output should be within valid control range (-1 to 1)
-        for &sample in &outputs[0].samples {
-            assert!(
-                sample >= -1.0 && sample <= 1.0,
-                "Sample {} out of range",
-                sample
-            );
-        }
+        // Bipolar parameter
+        assert_eq!(params[3].id, "bipolar");
+        assert!((params[3].default - 1.0).abs() < f32::EPSILON); // Default on
     }
 
     #[test]
@@ -263,48 +337,209 @@ mod tests {
     }
 
     #[test]
-    fn test_lfo_sine_wave() {
+    fn test_lfo_generates_output() {
+        let mut lfo = Lfo::new();
+        lfo.prepare(44100.0, 256);
+
+        let mut outputs = vec![SignalBuffer::control(256)];
+        let ctx = ProcessContext::new(44100.0, 256);
+
+        // 1 Hz, Sine, 0° phase, bipolar
+        lfo.process(&[], &mut outputs, &[1.0, 0.0, 0.0, 1.0], &ctx);
+
+        // Output should have non-zero values
+        let has_nonzero = outputs[0].samples.iter().any(|&s| s.abs() > 0.001);
+        assert!(has_nonzero, "LFO should produce non-zero signal");
+    }
+
+    #[test]
+    fn test_lfo_bipolar_range() {
         let mut lfo = Lfo::new();
         lfo.prepare(44100.0, 44100);
 
         let mut outputs = vec![SignalBuffer::control(44100)];
         let ctx = ProcessContext::new(44100.0, 44100);
 
-        // Generate 1 second of sine wave at 1 Hz
-        lfo.process(&[], &mut outputs, &[1.0, 0.0], &ctx);
+        // 1 Hz, Sine, 0° phase, bipolar
+        lfo.process(&[], &mut outputs, &[1.0, 0.0, 0.0, 1.0], &ctx);
 
-        // First sample should be near 0 (sin(0) = 0)
-        assert!(outputs[0].samples[0].abs() < 0.01, "First sample should be near 0");
+        // Output should be within -1 to +1
+        for &sample in &outputs[0].samples {
+            assert!(
+                sample >= -1.0 && sample <= 1.0,
+                "Bipolar sample {} out of range",
+                sample
+            );
+        }
+    }
 
-        // At 1/4 period (11025 samples), should be near 1
+    #[test]
+    fn test_lfo_unipolar_range() {
+        let mut lfo = Lfo::new();
+        lfo.prepare(44100.0, 44100);
+
+        let mut outputs = vec![SignalBuffer::control(44100)];
+        let ctx = ProcessContext::new(44100.0, 44100);
+
+        // 1 Hz, Sine, 0° phase, unipolar (bipolar = 0)
+        lfo.process(&[], &mut outputs, &[1.0, 0.0, 0.0, 0.0], &ctx);
+
+        // Output should be within 0 to +1
+        for &sample in &outputs[0].samples {
+            assert!(
+                sample >= 0.0 && sample <= 1.0,
+                "Unipolar sample {} out of range",
+                sample
+            );
+        }
+    }
+
+    #[test]
+    fn test_lfo_sync_reset() {
+        let mut lfo = Lfo::new();
+        lfo.prepare(44100.0, 1000);
+
+        // Run LFO to advance phase
+        let mut outputs = vec![SignalBuffer::control(1000)];
+        let ctx = ProcessContext::new(44100.0, 1000);
+        lfo.process(&[], &mut outputs, &[1.0, 0.0, 0.0, 1.0], &ctx);
+
+        // Now send a sync pulse
+        let mut sync = SignalBuffer::control(100);
+        sync.samples[50] = 1.0; // Rising edge at sample 50
+
+        let rate_cv = SignalBuffer::control(100);
+        let mut outputs2 = vec![SignalBuffer::control(100)];
+        let ctx2 = ProcessContext::new(44100.0, 100);
+        lfo.process(&[&rate_cv, &sync], &mut outputs2, &[1.0, 0.0, 0.0, 1.0], &ctx2);
+
+        // After sync, sine should be near 0 (sin(0) = 0)
         assert!(
-            (outputs[0].samples[11025] - 1.0).abs() < 0.01,
-            "Sample at 1/4 period should be near 1"
+            outputs2[0].samples[51].abs() < 0.1,
+            "Sine should be near 0 after sync reset, got {}",
+            outputs2[0].samples[51]
         );
     }
 
     #[test]
-    fn test_lfo_square_wave() {
+    fn test_lfo_phase_offset() {
+        let mut lfo1 = Lfo::new();
+        let mut lfo2 = Lfo::new();
+        lfo1.prepare(44100.0, 256);
+        lfo2.prepare(44100.0, 256);
+
+        let mut outputs1 = vec![SignalBuffer::control(256)];
+        let mut outputs2 = vec![SignalBuffer::control(256)];
+        let ctx = ProcessContext::new(44100.0, 256);
+
+        // LFO 1: 0° offset, LFO 2: 90° offset
+        lfo1.process(&[], &mut outputs1, &[1.0, 0.0, 0.0, 1.0], &ctx);
+        lfo2.process(&[], &mut outputs2, &[1.0, 0.0, 90.0, 1.0], &ctx);
+
+        // First sample of sine with 0° should be near 0
+        assert!(
+            outputs1[0].samples[0].abs() < 0.01,
+            "Sine at 0° should start near 0"
+        );
+
+        // First sample of sine with 90° offset should be near 1
+        assert!(
+            (outputs2[0].samples[0] - 1.0).abs() < 0.1,
+            "Sine at 90° should start near 1, got {}",
+            outputs2[0].samples[0]
+        );
+    }
+
+    #[test]
+    fn test_lfo_rate_cv_modulation() {
         let mut lfo = Lfo::new();
         lfo.prepare(44100.0, 44100);
 
+        // Create rate CV input with +1 value (should double the rate)
+        let mut rate_cv = SignalBuffer::control(44100);
+        rate_cv.fill(1.0);
+
+        let sync = SignalBuffer::control(44100);
         let mut outputs = vec![SignalBuffer::control(44100)];
         let ctx = ProcessContext::new(44100.0, 44100);
 
-        // Generate 1 second of square wave at 1 Hz
-        lfo.process(&[], &mut outputs, &[1.0, 2.0], &ctx); // 2.0 = Square
+        // Base rate 1 Hz with +1 CV = 2 Hz
+        lfo.process(&[&rate_cv, &sync], &mut outputs, &[1.0, 0.0, 0.0, 1.0], &ctx);
 
-        // First half should be 1.0
-        assert!(
-            (outputs[0].samples[11025] - 1.0).abs() < 0.01,
-            "First half should be 1.0"
-        );
+        // Count zero crossings of sine to verify doubled rate
+        let mut zero_crossings = 0;
+        for i in 1..44100 {
+            if outputs[0].samples[i - 1] <= 0.0 && outputs[0].samples[i] > 0.0 {
+                zero_crossings += 1;
+            }
+        }
 
-        // Second half should be -1.0
+        // At 2 Hz for 1 second, expect ~2 cycles
         assert!(
-            (outputs[0].samples[33075] - (-1.0)).abs() < 0.01,
-            "Second half should be -1.0"
+            zero_crossings >= 1 && zero_crossings <= 3,
+            "Expected ~2 zero crossings for 2 Hz, got {}",
+            zero_crossings
         );
+    }
+
+    #[test]
+    fn test_lfo_waveform_shapes() {
+        // Test that waveform generation produces correct shapes
+
+        // Sine at key phases
+        assert!((Lfo::generate_sample(0.0, LfoWaveform::Sine) - 0.0).abs() < 0.01);
+        assert!((Lfo::generate_sample(0.25, LfoWaveform::Sine) - 1.0).abs() < 0.01);
+        assert!((Lfo::generate_sample(0.5, LfoWaveform::Sine) - 0.0).abs() < 0.01);
+        assert!((Lfo::generate_sample(0.75, LfoWaveform::Sine) - (-1.0)).abs() < 0.01);
+
+        // Triangle at key phases
+        assert!((Lfo::generate_sample(0.0, LfoWaveform::Triangle) - 0.0).abs() < 0.01);
+        assert!((Lfo::generate_sample(0.25, LfoWaveform::Triangle) - 1.0).abs() < 0.01);
+        assert!((Lfo::generate_sample(0.5, LfoWaveform::Triangle) - 0.0).abs() < 0.01);
+        assert!((Lfo::generate_sample(0.75, LfoWaveform::Triangle) - (-1.0)).abs() < 0.01);
+
+        // Square at key phases
+        assert!((Lfo::generate_sample(0.0, LfoWaveform::Square) - 1.0).abs() < 0.01);
+        assert!((Lfo::generate_sample(0.25, LfoWaveform::Square) - 1.0).abs() < 0.01);
+        assert!((Lfo::generate_sample(0.5, LfoWaveform::Square) - (-1.0)).abs() < 0.01);
+        assert!((Lfo::generate_sample(0.75, LfoWaveform::Square) - (-1.0)).abs() < 0.01);
+
+        // Saw at key phases
+        assert!((Lfo::generate_sample(0.0, LfoWaveform::Saw) - (-1.0)).abs() < 0.01);
+        assert!((Lfo::generate_sample(0.25, LfoWaveform::Saw) - (-0.5)).abs() < 0.01);
+        assert!((Lfo::generate_sample(0.5, LfoWaveform::Saw) - 0.0).abs() < 0.01);
+        assert!((Lfo::generate_sample(0.75, LfoWaveform::Saw) - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_lfo_different_waveforms() {
+        let mut lfo = Lfo::new();
+        lfo.prepare(44100.0, 44100);
+
+        // Test each waveform produces different output
+        let mut sine_out = vec![SignalBuffer::control(44100)];
+        let mut tri_out = vec![SignalBuffer::control(44100)];
+        let mut sq_out = vec![SignalBuffer::control(44100)];
+        let mut saw_out = vec![SignalBuffer::control(44100)];
+        let ctx = ProcessContext::new(44100.0, 44100);
+
+        lfo.reset();
+        lfo.process(&[], &mut sine_out, &[1.0, 0.0, 0.0, 1.0], &ctx);
+        lfo.reset();
+        lfo.process(&[], &mut tri_out, &[1.0, 1.0, 0.0, 1.0], &ctx);
+        lfo.reset();
+        lfo.process(&[], &mut sq_out, &[1.0, 2.0, 0.0, 1.0], &ctx);
+        lfo.reset();
+        lfo.process(&[], &mut saw_out, &[1.0, 3.0, 0.0, 1.0], &ctx);
+
+        // Verify waveforms are different by comparing at quarter period
+        let quarter = 11025; // 1/4 second at 44100 Hz
+
+        // At quarter period: sine=1, tri=1, square=1, saw=-0.5
+        assert!((sine_out[0].samples[quarter] - 1.0).abs() < 0.1);
+        assert!((tri_out[0].samples[quarter] - 1.0).abs() < 0.1);
+        assert!((sq_out[0].samples[quarter] - 1.0).abs() < 0.1);
+        assert!((saw_out[0].samples[quarter] - (-0.5)).abs() < 0.1);
     }
 
     #[test]
@@ -315,19 +550,47 @@ mod tests {
         // Generate some samples
         let mut outputs = vec![SignalBuffer::control(256)];
         let ctx = ProcessContext::new(44100.0, 256);
-        lfo.process(&[], &mut outputs, &[1.0, 0.0], &ctx);
+        lfo.process(&[], &mut outputs, &[1.0, 0.0, 0.0, 1.0], &ctx);
 
         // Reset
         lfo.reset();
 
-        // Generate first sample after reset - should be sin(0) = 0
+        // Generate first sample after reset - sine should be near 0
         let mut outputs2 = vec![SignalBuffer::control(1)];
         let ctx2 = ProcessContext::new(44100.0, 1);
-        lfo.process(&[], &mut outputs2, &[1.0, 0.0], &ctx2);
+        lfo.process(&[], &mut outputs2, &[1.0, 0.0, 0.0, 1.0], &ctx2);
 
         assert!(
             outputs2[0].samples[0].abs() < 0.01,
-            "First sample after reset should be near 0"
+            "Sine after reset should be near 0"
+        );
+    }
+
+    #[test]
+    fn test_lfo_high_rate() {
+        // Test that LFO works correctly at higher rates (100 Hz)
+        let mut lfo = Lfo::new();
+        lfo.prepare(44100.0, 44100);
+
+        let mut outputs = vec![SignalBuffer::control(44100)];
+        let ctx = ProcessContext::new(44100.0, 44100);
+
+        // 100 Hz rate
+        lfo.process(&[], &mut outputs, &[100.0, 0.0, 0.0, 1.0], &ctx);
+
+        // Count zero crossings - should be ~100 for 100 Hz
+        let mut zero_crossings = 0;
+        for i in 1..44100 {
+            if outputs[0].samples[i - 1] <= 0.0 && outputs[0].samples[i] > 0.0 {
+                zero_crossings += 1;
+            }
+        }
+
+        // Allow some tolerance
+        assert!(
+            zero_crossings >= 95 && zero_crossings <= 105,
+            "Expected ~100 cycles at 100 Hz, got {}",
+            zero_crossings
         );
     }
 
@@ -358,7 +621,7 @@ mod tests {
         let module = module.unwrap();
         assert_eq!(module.info().id, "mod.lfo");
         assert_eq!(module.info().name, "LFO");
-        assert_eq!(module.ports().len(), 1);
-        assert_eq!(module.parameters().len(), 2);
+        assert_eq!(module.ports().len(), 3); // 2 inputs + 1 output
+        assert_eq!(module.parameters().len(), 4); // Rate, Waveform, Phase, Bipolar
     }
 }

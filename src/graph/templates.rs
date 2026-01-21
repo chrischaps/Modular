@@ -174,8 +174,10 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 "LFO",
                 ModuleCategory::Modulation,
             ).with_knob_params(vec![
-                // Rate: knob-only parameter
-                KnobParam::knob_only("Rate", "Rate"),
+                // Rate: exposed parameter (Rate CV input + knob)
+                KnobParam::exposed("Rate", "Rate"),
+                // Phase: knob-only parameter
+                KnobParam::knob_only("Phase", "Phase"),
             ]),
             SynthNodeTemplate::SvfFilter => SynthNodeData::new(
                 "filter.svf",
@@ -328,14 +330,24 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 );
             }
             SynthNodeTemplate::Lfo => {
-                // Rate: knob-only parameter for LFO speed
+                // Rate: exposed parameter (Rate CV input + knob at bottom)
                 graph.add_input_param(
                     node_id,
                     "Rate".to_string(),
                     SynthDataType::new(SignalType::Control),
-                    SynthValueType::linear_hz(1.0, 0.01, 20.0, ""),
-                    InputParamKind::ConstantOnly,
-                    false, // Hidden inline - shown in bottom knob row
+                    SynthValueType::frequency(1.0, 0.01, 100.0, ""),
+                    InputParamKind::ConnectionOrConstant,
+                    true, // Port shown inline, widget skipped via knob_params check
+                );
+
+                // Sync input port
+                graph.add_input_param(
+                    node_id,
+                    "Sync".to_string(),
+                    SynthDataType::new(SignalType::Gate),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
                 );
 
                 // Waveform selector - shown inline
@@ -349,10 +361,30 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                         "Wave",
                     ),
                     InputParamKind::ConstantOnly,
-                    true, // Shown inline
+                    true, // Shown inline as dropdown
                 );
 
-                // Output port - Control signal
+                // Phase: knob-only parameter (0-360 degrees)
+                graph.add_input_param(
+                    node_id,
+                    "Phase".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(0.0, 0.0, 360.0, "°", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Bipolar toggle - shown inline
+                graph.add_input_param(
+                    node_id,
+                    "Bipolar".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::toggle(true, "Bipolar"),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline as checkbox
+                );
+
+                // Single output port
                 graph.add_output_param(
                     node_id,
                     "Out".to_string(),
