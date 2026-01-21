@@ -7,9 +7,9 @@ authors = ["Chris"]
 license = "MIT"
 
 [dependencies]
-eframe = "0.29"
-egui = "0.29"
-egui_node_graph2 = { git = "https://github.com/chrischaps/egui_node_graph2", branch = "egui-0.29" }
+eframe = "0.30"
+egui = "0.30"
+egui_node_graph2 = { git = "https://github.com/chrischaps/egui_node_graph2", branch = "main" }
 cpal = "0.15"
 midir = "0.10"
 rtrb = "0.3"
