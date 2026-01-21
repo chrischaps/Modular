@@ -32,17 +32,17 @@ pub mod background {
 pub mod signal {
     use super::Color32;
 
-    /// Audio signal - blue
+    /// Audio signal - blue (#42A5F5)
     pub const AUDIO: Color32 = Color32::from_rgb(66, 165, 245);
 
-    /// Control/CV signal - orange
-    pub const CONTROL: Color32 = Color32::from_rgb(255, 183, 77);
+    /// Control/CV signal - orange/red (#FF7043)
+    pub const CONTROL: Color32 = Color32::from_rgb(255, 112, 67);
 
-    /// Gate signal - green
-    pub const GATE: Color32 = Color32::from_rgb(129, 199, 132);
+    /// Gate signal - green (#66BB6A)
+    pub const GATE: Color32 = Color32::from_rgb(102, 187, 106);
 
-    /// MIDI signal - purple
-    pub const MIDI: Color32 = Color32::from_rgb(186, 104, 200);
+    /// MIDI signal - purple (#AB47BC)
+    pub const MIDI: Color32 = Color32::from_rgb(171, 71, 188);
 }
 
 /// Module header colors by category
