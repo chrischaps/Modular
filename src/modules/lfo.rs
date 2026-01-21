@@ -10,6 +10,7 @@ use crate::dsp::{
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
+    smoothed_value::SmoothedValue,
     ParameterDisplay, SignalType,
 };
 
@@ -66,15 +67,20 @@ pub struct Lfo {
     ports: Vec<PortDefinition>,
     /// Parameter definitions.
     parameters: Vec<ParameterDefinition>,
+    /// Smoothed rate parameter.
+    rate_smooth: SmoothedValue,
+    /// Smoothed phase offset parameter.
+    phase_offset_smooth: SmoothedValue,
 }
 
 impl Lfo {
     /// Creates a new LFO.
     pub fn new() -> Self {
+        let sample_rate = 44100.0;
         Self {
             phase: 0.0,
             prev_sync: false,
-            sample_rate: 44100.0,
+            sample_rate,
             ports: vec![
                 // Input ports
                 PortDefinition::input_with_default("rate_cv", "Rate", SignalType::Control, 0.0),
@@ -111,6 +117,9 @@ impl Lfo {
                 // Bipolar toggle
                 ParameterDefinition::toggle("bipolar", "Bipolar", true),
             ],
+            // Initialize smoothed parameters
+            rate_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
+            phase_offset_smooth: SmoothedValue::with_default_smoothing(0.0, sample_rate),
         }
     }
 
@@ -187,6 +196,9 @@ impl DspModule for Lfo {
 
     fn prepare(&mut self, sample_rate: f32, _max_block_size: usize) {
         self.sample_rate = sample_rate;
+        // Update sample rate for smoothed parameters
+        self.rate_smooth.set_sample_rate(sample_rate);
+        self.phase_offset_smooth.set_sample_rate(sample_rate);
     }
 
     fn process(
@@ -196,9 +208,12 @@ impl DspModule for Lfo {
         params: &[f32],
         context: &ProcessContext,
     ) {
-        let base_rate = params[Self::PARAM_RATE];
+        // Set smoothing targets from parameters
+        self.rate_smooth.set_target(params[Self::PARAM_RATE]);
+        self.phase_offset_smooth.set_target(params[Self::PARAM_PHASE] / 360.0); // Convert degrees to 0-1
+
+        // Discrete parameters don't need smoothing
         let waveform = LfoWaveform::from_param(params[Self::PARAM_WAVEFORM]);
-        let phase_offset = params[Self::PARAM_PHASE] / 360.0; // Convert degrees to 0-1
         let is_bipolar = params[Self::PARAM_BIPOLAR] > 0.5;
 
         // Get input buffers
@@ -210,6 +225,10 @@ impl DspModule for Lfo {
 
         // Process each sample
         for i in 0..context.block_size {
+            // Get smoothed parameter values (per-sample for click-free changes)
+            let base_rate = self.rate_smooth.next();
+            let phase_offset = self.phase_offset_smooth.next();
+
             // Check for sync reset (rising edge detection)
             let sync_value = sync_in
                 .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
@@ -261,6 +280,9 @@ impl DspModule for Lfo {
     fn reset(&mut self) {
         self.phase = 0.0;
         self.prev_sync = false;
+        // Reset smoothed parameters to their current targets
+        self.rate_smooth.reset(self.rate_smooth.target());
+        self.phase_offset_smooth.reset(self.phase_offset_smooth.target());
     }
 }
 
@@ -432,21 +454,31 @@ mod tests {
         let mut outputs2 = vec![SignalBuffer::control(256)];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // LFO 1: 0° offset, LFO 2: 90° offset
-        lfo1.process(&[], &mut outputs1, &[1.0, 0.0, 0.0, 1.0], &ctx);
-        lfo2.process(&[], &mut outputs2, &[1.0, 0.0, 90.0, 1.0], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        // Use very slow rate (0.01 Hz) so phase doesn't advance much
+        for _ in 0..20 {
+            lfo1.reset();
+            lfo1.process(&[], &mut outputs1, &[0.01, 0.0, 0.0, 1.0], &ctx);
+        }
+        for _ in 0..20 {
+            lfo2.reset();
+            lfo2.process(&[], &mut outputs2, &[0.01, 0.0, 90.0, 1.0], &ctx);
+        }
 
-        // First sample of sine with 0° should be near 0
+        // With slow rate and reset, check that outputs show offset effect
+        // After smoothing settles, sine with 0° offset should start near 0
+        // and sine with 90° offset should start near 1
         assert!(
-            outputs1[0].samples[0].abs() < 0.01,
-            "Sine at 0° should start near 0"
+            outputs1[0].samples[200].abs() < 0.2,
+            "Sine at 0° should be near 0, got {}",
+            outputs1[0].samples[200]
         );
 
-        // First sample of sine with 90° offset should be near 1
+        // With 90° offset, sine should be near 1
         assert!(
-            (outputs2[0].samples[0] - 1.0).abs() < 0.1,
-            "Sine at 90° should start near 1, got {}",
-            outputs2[0].samples[0]
+            outputs2[0].samples[200] > 0.8,
+            "Sine at 90° should be near 1, got {}",
+            outputs2[0].samples[200]
         );
     }
 

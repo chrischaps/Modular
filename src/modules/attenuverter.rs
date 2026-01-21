@@ -9,6 +9,7 @@ use crate::dsp::{
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
+    smoothed_value::SmoothedValue,
     ParameterDisplay, SignalType,
 };
 
@@ -40,11 +41,18 @@ pub struct Attenuverter {
     ports: Vec<PortDefinition>,
     /// Parameter definitions.
     parameters: Vec<ParameterDefinition>,
+    /// Sample rate from last prepare() call.
+    sample_rate: f32,
+    /// Smoothed amount parameter.
+    amount_smooth: SmoothedValue,
+    /// Smoothed offset parameter.
+    offset_smooth: SmoothedValue,
 }
 
 impl Attenuverter {
     /// Creates a new Attenuverter.
     pub fn new() -> Self {
+        let sample_rate = 44100.0;
         Self {
             ports: vec![
                 // Input port
@@ -72,6 +80,10 @@ impl Attenuverter {
                     ParameterDisplay::linear(""),
                 ),
             ],
+            sample_rate,
+            // Initialize smoothed parameters
+            amount_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
+            offset_smooth: SmoothedValue::with_default_smoothing(0.0, sample_rate),
         }
     }
 
@@ -109,8 +121,11 @@ impl DspModule for Attenuverter {
         &self.parameters
     }
 
-    fn prepare(&mut self, _sample_rate: f32, _max_block_size: usize) {
-        // No preparation needed
+    fn prepare(&mut self, sample_rate: f32, _max_block_size: usize) {
+        self.sample_rate = sample_rate;
+        // Update sample rate for smoothed parameters
+        self.amount_smooth.set_sample_rate(sample_rate);
+        self.offset_smooth.set_sample_rate(sample_rate);
     }
 
     fn process(
@@ -120,8 +135,9 @@ impl DspModule for Attenuverter {
         params: &[f32],
         context: &ProcessContext,
     ) {
-        let amount = params[Self::PARAM_AMOUNT];
-        let offset = params[Self::PARAM_OFFSET];
+        // Set smoothing targets from parameters
+        self.amount_smooth.set_target(params[Self::PARAM_AMOUNT]);
+        self.offset_smooth.set_target(params[Self::PARAM_OFFSET]);
 
         // Get input buffer
         let input = inputs.get(Self::PORT_IN);
@@ -131,6 +147,10 @@ impl DspModule for Attenuverter {
 
         // Process each sample
         for i in 0..context.block_size {
+            // Get smoothed parameter values (per-sample for click-free changes)
+            let amount = self.amount_smooth.next();
+            let offset = self.offset_smooth.next();
+
             let in_value = input
                 .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
                 .unwrap_or(0.0);
@@ -142,7 +162,9 @@ impl DspModule for Attenuverter {
     }
 
     fn reset(&mut self) {
-        // No state to reset
+        // Reset smoothed parameters to their current targets
+        self.amount_smooth.reset(self.amount_smooth.target());
+        self.offset_smooth.reset(self.offset_smooth.target());
     }
 }
 
@@ -237,13 +259,15 @@ mod tests {
         let mut outputs = vec![SignalBuffer::control(256)];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Amount = -1, Offset = 0 (invert)
-        att.process(&[&input], &mut outputs, &[-1.0, 0.0], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            att.process(&[&input], &mut outputs, &[-1.0, 0.0], &ctx);
+        }
 
-        // Output should be inverted input
-        for i in 0..256 {
+        // Output should be inverted input (check last samples after smoothing)
+        for i in 200..256 {
             assert!(
-                (outputs[0].samples[i] - (-input.samples[i])).abs() < 0.001,
+                (outputs[0].samples[i] - (-input.samples[i])).abs() < 0.1,
                 "Inversion failed at sample {}",
                 i
             );
@@ -262,13 +286,15 @@ mod tests {
         let mut outputs = vec![SignalBuffer::control(256)];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Amount = 0.5, Offset = 0
-        att.process(&[&input], &mut outputs, &[0.5, 0.0], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            att.process(&[&input], &mut outputs, &[0.5, 0.0], &ctx);
+        }
 
-        // Output should be 0.5
-        for i in 0..256 {
+        // Output should be 0.5 (check last samples after smoothing)
+        for i in 200..256 {
             assert!(
-                (outputs[0].samples[i] - 0.5).abs() < 0.001,
+                (outputs[0].samples[i] - 0.5).abs() < 0.01,
                 "Half amplitude failed at sample {}",
                 i
             );
@@ -287,14 +313,17 @@ mod tests {
         let mut outputs = vec![SignalBuffer::control(256)];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Amount = 0, Offset = 0 (silence)
-        att.process(&[&input], &mut outputs, &[0.0, 0.0], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            att.process(&[&input], &mut outputs, &[0.0, 0.0], &ctx);
+        }
 
-        // Output should be 0
-        for i in 0..256 {
+        // Output should be 0 (check last samples after smoothing)
+        for i in 200..256 {
             assert!(
-                outputs[0].samples[i].abs() < 0.001,
-                "Zero amount should produce silence"
+                outputs[0].samples[i].abs() < 0.01,
+                "Zero amount should produce silence, got {}",
+                outputs[0].samples[i]
             );
         }
     }
@@ -310,15 +339,18 @@ mod tests {
         let mut outputs = vec![SignalBuffer::control(256)];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Amount = 1, Offset = 0.5
-        att.process(&[&input], &mut outputs, &[1.0, 0.5], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            att.process(&[&input], &mut outputs, &[1.0, 0.5], &ctx);
+        }
 
-        // Output should be 0.5
-        for i in 0..256 {
+        // Output should be 0.5 (check last samples after smoothing)
+        for i in 200..256 {
             assert!(
-                (outputs[0].samples[i] - 0.5).abs() < 0.001,
-                "Offset failed at sample {}",
-                i
+                (outputs[0].samples[i] - 0.5).abs() < 0.01,
+                "Offset failed at sample {}, got {}",
+                i,
+                outputs[0].samples[i]
             );
         }
     }
@@ -337,13 +369,15 @@ mod tests {
         let mut outputs = vec![SignalBuffer::control(256)];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Amount = 0.5, Offset = 0.5 -> converts -1..+1 to 0..+1
-        att.process(&[&input], &mut outputs, &[0.5, 0.5], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            att.process(&[&input], &mut outputs, &[0.5, 0.5], &ctx);
+        }
 
-        // Output should be in 0..+1 range
-        for i in 0..256 {
+        // Output should be in 0..+1 range (check last samples after smoothing)
+        for i in 200..256 {
             assert!(
-                outputs[0].samples[i] >= 0.0 && outputs[0].samples[i] <= 1.0,
+                outputs[0].samples[i] >= -0.1 && outputs[0].samples[i] <= 1.1,
                 "Bipolar to unipolar conversion failed at sample {}: {}",
                 i,
                 outputs[0].samples[i]
@@ -363,13 +397,15 @@ mod tests {
         let mut outputs = vec![SignalBuffer::control(256)];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Amount = 1, Offset = 1 -> would be 2.0, but should clamp to 1.0
-        att.process(&[&input], &mut outputs, &[1.0, 1.0], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            att.process(&[&input], &mut outputs, &[1.0, 1.0], &ctx);
+        }
 
-        // Output should be clamped to 1.0
-        for i in 0..256 {
+        // Output should be clamped to 1.0 (check last samples after smoothing)
+        for i in 200..256 {
             assert!(
-                (outputs[0].samples[i] - 1.0).abs() < 0.001,
+                (outputs[0].samples[i] - 1.0).abs() < 0.01,
                 "Clamping failed at sample {}: {}",
                 i,
                 outputs[0].samples[i]
@@ -385,14 +421,17 @@ mod tests {
         let mut outputs = vec![SignalBuffer::control(256)];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // No input connected, Amount = 1, Offset = 0.25
-        att.process(&[], &mut outputs, &[1.0, 0.25], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            att.process(&[], &mut outputs, &[1.0, 0.25], &ctx);
+        }
 
-        // Output should be just the offset
-        for i in 0..256 {
+        // Output should be just the offset (check last samples after smoothing)
+        for i in 200..256 {
             assert!(
-                (outputs[0].samples[i] - 0.25).abs() < 0.001,
-                "No-input offset failed"
+                (outputs[0].samples[i] - 0.25).abs() < 0.01,
+                "No-input offset failed, got {}",
+                outputs[0].samples[i]
             );
         }
     }

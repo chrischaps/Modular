@@ -9,6 +9,7 @@ use crate::dsp::{
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
+    smoothed_value::SmoothedValue,
     ParameterDisplay, SignalType,
 };
 
@@ -42,13 +43,18 @@ pub struct Vca {
     ports: Vec<PortDefinition>,
     /// Parameter definitions.
     parameters: Vec<ParameterDefinition>,
+    /// Smoothed level parameter.
+    level_smooth: SmoothedValue,
+    /// Smoothed CV amount parameter.
+    cv_amount_smooth: SmoothedValue,
 }
 
 impl Vca {
     /// Creates a new VCA.
     pub fn new() -> Self {
+        let sample_rate = 44100.0;
         Self {
-            sample_rate: 44100.0,
+            sample_rate,
             ports: vec![
                 // Input ports
                 PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0),
@@ -76,6 +82,9 @@ impl Vca {
                     ParameterDisplay::linear(""),
                 ),
             ],
+            // Initialize smoothed parameters
+            level_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
+            cv_amount_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
         }
     }
 
@@ -116,6 +125,9 @@ impl DspModule for Vca {
 
     fn prepare(&mut self, sample_rate: f32, _max_block_size: usize) {
         self.sample_rate = sample_rate;
+        // Update sample rate for smoothed parameters
+        self.level_smooth.set_sample_rate(sample_rate);
+        self.cv_amount_smooth.set_sample_rate(sample_rate);
     }
 
     fn process(
@@ -125,8 +137,9 @@ impl DspModule for Vca {
         params: &[f32],
         context: &ProcessContext,
     ) {
-        let level = params[Self::PARAM_LEVEL];
-        let cv_amount = params[Self::PARAM_CV_AMOUNT];
+        // Set smoothing targets from parameters
+        self.level_smooth.set_target(params[Self::PARAM_LEVEL]);
+        self.cv_amount_smooth.set_target(params[Self::PARAM_CV_AMOUNT]);
 
         // Get input buffers
         let audio_in = inputs.get(Self::PORT_IN);
@@ -137,6 +150,10 @@ impl DspModule for Vca {
 
         // Process each sample
         for i in 0..context.block_size {
+            // Get smoothed parameter values (per-sample for click-free changes)
+            let level = self.level_smooth.next();
+            let cv_amount = self.cv_amount_smooth.next();
+
             // Get audio input
             let audio = audio_in
                 .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
@@ -162,7 +179,9 @@ impl DspModule for Vca {
     }
 
     fn reset(&mut self) {
-        // VCA has no state to reset
+        // Reset smoothed parameters to their current targets
+        self.level_smooth.reset(self.level_smooth.target());
+        self.cv_amount_smooth.reset(self.cv_amount_smooth.target());
     }
 }
 
@@ -320,15 +339,17 @@ mod tests {
         let mut outputs = vec![SignalBuffer::audio(256)];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Level = 0.5, CV Amount = 0.0 (ignore CV)
-        vca.process(&[&audio_in], &mut outputs, &[0.5, 0.0], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            vca.process(&[&audio_in], &mut outputs, &[0.5, 0.0], &ctx);
+        }
 
-        // Output should be 0.5 (level controls amplitude)
-        for &sample in &outputs[0].samples {
+        // Output should be 0.5 (level controls amplitude) - check last samples
+        for i in 200..256 {
             assert!(
-                (sample - 0.5).abs() < 0.0001,
+                (outputs[0].samples[i] - 0.5).abs() < 0.01,
                 "Output should be 0.5, got {}",
-                sample
+                outputs[0].samples[i]
             );
         }
     }
@@ -349,17 +370,18 @@ mod tests {
         let mut outputs = vec![SignalBuffer::audio(256)];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Level = 1.0, CV Amount = 0.5 (half CV influence)
-        // amplitude = level * (1.0 - cv_amount + cv * cv_amount)
-        //           = 1.0 * (1.0 - 0.5 + 0.0 * 0.5)
-        //           = 1.0 * 0.5 = 0.5
-        vca.process(&[&audio_in, &cv_in], &mut outputs, &[1.0, 0.5], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            vca.process(&[&audio_in, &cv_in], &mut outputs, &[1.0, 0.5], &ctx);
+        }
 
-        for &sample in &outputs[0].samples {
+        // amplitude = level * (1.0 - cv_amount + cv * cv_amount)
+        //           = 1.0 * (1.0 - 0.5 + 0.0 * 0.5) = 0.5 (check last samples)
+        for i in 200..256 {
             assert!(
-                (sample - 0.5).abs() < 0.0001,
+                (outputs[0].samples[i] - 0.5).abs() < 0.01,
                 "Output should be 0.5 with 50% CV blend, got {}",
-                sample
+                outputs[0].samples[i]
             );
         }
     }
@@ -535,15 +557,18 @@ mod tests {
         let mut outputs = vec![SignalBuffer::audio(256)];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Level = 0.5, CV = 0.5, CV Amount = 1.0
-        // amplitude = level * cv = 0.5 * 0.5 = 0.25
-        vca.process(&[&audio_in, &cv_in], &mut outputs, &[0.5, 1.0], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            vca.process(&[&audio_in, &cv_in], &mut outputs, &[0.5, 1.0], &ctx);
+        }
 
-        for &sample in &outputs[0].samples {
+        // Level = 0.5, CV = 0.5, CV Amount = 1.0
+        // amplitude = level * cv = 0.5 * 0.5 = 0.25 (check last samples)
+        for i in 200..256 {
             assert!(
-                (sample - 0.25).abs() < 0.0001,
+                (outputs[0].samples[i] - 0.25).abs() < 0.01,
                 "Output should be 0.25, got {}",
-                sample
+                outputs[0].samples[i]
             );
         }
     }

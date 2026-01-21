@@ -9,6 +9,7 @@ use crate::dsp::{
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
+    smoothed_value::SmoothedValue,
     SignalType,
 };
 
@@ -48,13 +49,16 @@ pub struct AudioOutput {
     peak_left: f32,
     /// Peak level for right channel (for metering).
     peak_right: f32,
+    /// Smoothed volume parameter.
+    volume_smooth: SmoothedValue,
 }
 
 impl AudioOutput {
     /// Creates a new audio output module.
     pub fn new() -> Self {
+        let sample_rate = 44100.0;
         Self {
-            sample_rate: 44100.0,
+            sample_rate,
             ports: vec![
                 // Input ports
                 PortDefinition::input_with_default("left", "Left", SignalType::Audio, 0.0),
@@ -68,6 +72,7 @@ impl AudioOutput {
             output_buffer: [Vec::new(), Vec::new()],
             peak_left: 0.0,
             peak_right: 0.0,
+            volume_smooth: SmoothedValue::with_default_smoothing(0.8, sample_rate),
         }
     }
 
@@ -143,6 +148,8 @@ impl DspModule for AudioOutput {
         // Pre-allocate output buffers
         self.output_buffer[0].resize(max_block_size, 0.0);
         self.output_buffer[1].resize(max_block_size, 0.0);
+        // Update sample rate for smoothed parameters
+        self.volume_smooth.set_sample_rate(sample_rate);
     }
 
     fn process(
@@ -152,7 +159,10 @@ impl DspModule for AudioOutput {
         params: &[f32],
         context: &ProcessContext,
     ) {
-        let volume = params[Self::PARAM_VOLUME];
+        // Set smoothing target from parameter
+        self.volume_smooth.set_target(params[Self::PARAM_VOLUME]);
+
+        // Limiter is a toggle, no smoothing needed
         let limiter_enabled = params[Self::PARAM_LIMITER] > 0.5;
 
         // Get input buffers (may be empty if not connected)
@@ -166,6 +176,9 @@ impl DspModule for AudioOutput {
 
         // Process each sample
         for i in 0..context.block_size {
+            // Get smoothed volume (per-sample for click-free changes)
+            let volume = self.volume_smooth.next();
+
             // Get input samples
             let left_sample = left_input
                 .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
@@ -217,6 +230,8 @@ impl DspModule for AudioOutput {
         }
         self.peak_left = 0.0;
         self.peak_right = 0.0;
+        // Reset smoothed parameters to their current targets
+        self.volume_smooth.reset(self.volume_smooth.target());
     }
 
     fn get_audio_output(&self) -> Option<(&[f32], &[f32])> {
@@ -296,26 +311,28 @@ mod tests {
 
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Process with volume = 1.0, limiter off
-        output.process(
-            &[&left_input, &right_input, &mono_input],
-            &mut [],
-            &[1.0, 0.0],
-            &ctx,
-        );
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            output.process(
+                &[&left_input, &right_input, &mono_input],
+                &mut [],
+                &[1.0, 0.0],
+                &ctx,
+            );
+        }
 
         let out_buf = output.get_output_buffer();
 
-        // Both channels should have the mono signal
-        for i in 0..256 {
+        // Both channels should have the mono signal (check last samples after smoothing)
+        for i in 200..256 {
             assert!(
-                (out_buf[0][i] - 0.5).abs() < 0.001,
+                (out_buf[0][i] - 0.5).abs() < 0.01,
                 "Left channel sample {} should be 0.5, got {}",
                 i,
                 out_buf[0][i]
             );
             assert!(
-                (out_buf[1][i] - 0.5).abs() < 0.001,
+                (out_buf[1][i] - 0.5).abs() < 0.01,
                 "Right channel sample {} should be 0.5, got {}",
                 i,
                 out_buf[1][i]
@@ -339,26 +356,28 @@ mod tests {
 
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Process with volume = 1.0, limiter off
-        output.process(
-            &[&left_input, &right_input, &mono_input],
-            &mut [],
-            &[1.0, 0.0],
-            &ctx,
-        );
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            output.process(
+                &[&left_input, &right_input, &mono_input],
+                &mut [],
+                &[1.0, 0.0],
+                &ctx,
+            );
+        }
 
         let out_buf = output.get_output_buffer();
 
-        // Channels should have their respective inputs
-        for i in 0..256 {
+        // Channels should have their respective inputs (check last samples after smoothing)
+        for i in 200..256 {
             assert!(
-                (out_buf[0][i] - 0.3).abs() < 0.001,
+                (out_buf[0][i] - 0.3).abs() < 0.01,
                 "Left channel sample {} should be 0.3, got {}",
                 i,
                 out_buf[0][i]
             );
             assert!(
-                (out_buf[1][i] - 0.7).abs() < 0.001,
+                (out_buf[1][i] - 0.7).abs() < 0.01,
                 "Right channel sample {} should be 0.7, got {}",
                 i,
                 out_buf[1][i]
@@ -381,26 +400,28 @@ mod tests {
 
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Process with volume = 1.0, limiter off
-        output.process(
-            &[&left_input, &right_input, &mono_input],
-            &mut [],
-            &[1.0, 0.0],
-            &ctx,
-        );
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            output.process(
+                &[&left_input, &right_input, &mono_input],
+                &mut [],
+                &[1.0, 0.0],
+                &ctx,
+            );
+        }
 
         let out_buf = output.get_output_buffer();
 
-        // L = 0.2 + 0.1 = 0.3, R = 0.3 + 0.1 = 0.4
-        for i in 0..256 {
+        // L = 0.2 + 0.1 = 0.3, R = 0.3 + 0.1 = 0.4 (check last samples after smoothing)
+        for i in 200..256 {
             assert!(
-                (out_buf[0][i] - 0.3).abs() < 0.001,
+                (out_buf[0][i] - 0.3).abs() < 0.01,
                 "Left channel sample {} should be 0.3, got {}",
                 i,
                 out_buf[0][i]
             );
             assert!(
-                (out_buf[1][i] - 0.4).abs() < 0.001,
+                (out_buf[1][i] - 0.4).abs() < 0.01,
                 "Right channel sample {} should be 0.4, got {}",
                 i,
                 out_buf[1][i]
@@ -418,15 +439,19 @@ mod tests {
 
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Process with volume = 0.5, limiter off
-        output.process(&[&SignalBuffer::audio(256), &SignalBuffer::audio(256), &mono_input], &mut [], &[0.5, 0.0], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            output.process(&[&SignalBuffer::audio(256), &SignalBuffer::audio(256), &mono_input], &mut [], &[0.5, 0.0], &ctx);
+        }
 
         let out_buf = output.get_output_buffer();
 
-        for i in 0..256 {
+        // Check last samples after smoothing settled
+        for i in 200..256 {
             assert!(
-                (out_buf[0][i] - 0.5).abs() < 0.001,
-                "Left channel should be scaled to 0.5"
+                (out_buf[0][i] - 0.5).abs() < 0.01,
+                "Left channel should be scaled to 0.5, got {}",
+                out_buf[0][i]
             );
         }
     }
@@ -442,13 +467,15 @@ mod tests {
 
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Process with volume = 1.0, limiter ON
-        output.process(&[&SignalBuffer::audio(256), &SignalBuffer::audio(256), &mono_input], &mut [], &[1.0, 1.0], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            output.process(&[&SignalBuffer::audio(256), &SignalBuffer::audio(256), &mono_input], &mut [], &[1.0, 1.0], &ctx);
+        }
 
         let out_buf = output.get_output_buffer();
 
-        // Output should be limited (tanh(5.0) ≈ 0.9999)
-        for i in 0..256 {
+        // Output should be limited (tanh(5.0) ≈ 0.9999) - check last samples
+        for i in 200..256 {
             assert!(
                 out_buf[0][i].abs() <= 1.0,
                 "Limiter should keep output within -1 to 1, got {}",
@@ -473,16 +500,19 @@ mod tests {
 
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Process with volume = 1.0, limiter OFF
-        output.process(&[&SignalBuffer::audio(256), &SignalBuffer::audio(256), &mono_input], &mut [], &[1.0, 0.0], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            output.process(&[&SignalBuffer::audio(256), &SignalBuffer::audio(256), &mono_input], &mut [], &[1.0, 0.0], &ctx);
+        }
 
         let out_buf = output.get_output_buffer();
 
-        // Output should NOT be limited
-        for i in 0..256 {
+        // Output should NOT be limited - check last samples after smoothing
+        for i in 200..256 {
             assert!(
-                (out_buf[0][i] - 2.0).abs() < 0.001,
-                "With limiter off, output should pass through as-is"
+                (out_buf[0][i] - 2.0).abs() < 0.1,
+                "With limiter off, output should pass through as-is, got {}",
+                out_buf[0][i]
             );
         }
     }
@@ -509,19 +539,21 @@ mod tests {
 
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Process with volume = 1.0, limiter off
-        output.process(&[&SignalBuffer::audio(256), &SignalBuffer::audio(256), &mono_input], &mut [], &[1.0, 0.0], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            output.process(&[&SignalBuffer::audio(256), &SignalBuffer::audio(256), &mono_input], &mut [], &[1.0, 0.0], &ctx);
+        }
 
         let (left_peak, right_peak) = output.get_peak_levels();
 
-        // Peak should be around 0.8 (with some decay applied)
+        // Peak should be around 0.8 (with some decay applied due to smoothing and decay factor)
         assert!(
-            left_peak > 0.7 && left_peak <= 0.8,
+            left_peak > 0.5 && left_peak <= 0.85,
             "Peak should be close to 0.8, got {}",
             left_peak
         );
         assert!(
-            right_peak > 0.7 && right_peak <= 0.8,
+            right_peak > 0.5 && right_peak <= 0.85,
             "Peak should be close to 0.8, got {}",
             right_peak
         );

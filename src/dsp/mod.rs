@@ -9,6 +9,7 @@ pub mod parameter;
 pub mod port;
 pub mod registry;
 pub mod signal;
+pub mod smoothed_value;
 
 // Re-export commonly used types
 pub use context::{ProcessContext, TransportState};
@@ -17,3 +18,4 @@ pub use parameter::{ParameterDefinition, ParameterDisplay};
 pub use port::{PortDefinition, PortDirection};
 pub use registry::{ModuleFactory, ModuleRegistry};
 pub use signal::{MidiEvent, MidiMessage, SignalBuffer, SignalType};
+pub use smoothed_value::SmoothedValue;

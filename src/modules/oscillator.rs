@@ -12,6 +12,7 @@ use crate::dsp::{
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
+    smoothed_value::SmoothedValue,
     ParameterDisplay, SignalType,
 };
 
@@ -72,14 +73,21 @@ pub struct SineOscillator {
     ports: Vec<PortDefinition>,
     /// Parameter definitions.
     parameters: Vec<ParameterDefinition>,
+    /// Smoothed frequency parameter.
+    freq_smooth: SmoothedValue,
+    /// Smoothed FM depth parameter.
+    fm_depth_smooth: SmoothedValue,
+    /// Smoothed pulse width parameter.
+    pulse_width_smooth: SmoothedValue,
 }
 
 impl SineOscillator {
     /// Creates a new oscillator.
     pub fn new() -> Self {
+        let sample_rate = 44100.0;
         Self {
             phase: 0.0,
-            sample_rate: 44100.0,
+            sample_rate,
             ports: vec![
                 // Input ports first (by convention)
                 // V/Oct: 1V/Octave pitch CV (exponential scaling)
@@ -120,6 +128,10 @@ impl SineOscillator {
                     ParameterDisplay::linear(""),
                 ),
             ],
+            // Initialize smoothed parameters with defaults
+            freq_smooth: SmoothedValue::with_default_smoothing(440.0, sample_rate),
+            fm_depth_smooth: SmoothedValue::with_default_smoothing(0.0, sample_rate),
+            pulse_width_smooth: SmoothedValue::with_default_smoothing(0.5, sample_rate),
         }
     }
 
@@ -254,6 +266,10 @@ impl DspModule for SineOscillator {
 
     fn prepare(&mut self, sample_rate: f32, _max_block_size: usize) {
         self.sample_rate = sample_rate;
+        // Update sample rate for smoothed parameters
+        self.freq_smooth.set_sample_rate(sample_rate);
+        self.fm_depth_smooth.set_sample_rate(sample_rate);
+        self.pulse_width_smooth.set_sample_rate(sample_rate);
     }
 
     fn process(
@@ -263,10 +279,13 @@ impl DspModule for SineOscillator {
         params: &[f32],
         context: &ProcessContext,
     ) {
-        let base_freq = params[Self::PARAM_FREQUENCY];
-        let fm_depth = params[Self::PARAM_FM_DEPTH];
+        // Set smoothing targets from parameters
+        self.freq_smooth.set_target(params[Self::PARAM_FREQUENCY]);
+        self.fm_depth_smooth.set_target(params[Self::PARAM_FM_DEPTH]);
+        self.pulse_width_smooth.set_target(params[Self::PARAM_PULSE_WIDTH]);
+
+        // Waveform is discrete, no smoothing needed
         let waveform = OscWaveform::from_param(params[Self::PARAM_WAVEFORM]);
-        let base_pulse_width = params[Self::PARAM_PULSE_WIDTH];
 
         // Get input buffers (may be empty if not connected, use defaults)
         let v_oct_input = inputs.get(Self::PORT_V_OCT);
@@ -285,6 +304,11 @@ impl DspModule for SineOscillator {
 
         // Process each sample
         for i in 0..context.block_size {
+            // Get smoothed parameter values (per-sample for click-free changes)
+            let base_freq = self.freq_smooth.next();
+            let fm_depth = self.fm_depth_smooth.next();
+            let base_pulse_width = self.pulse_width_smooth.next();
+
             // Determine base frequency: either from freq_in (if connected) or parameter
             let effective_base_freq = if freq_in_connected {
                 // freq_in is a Control signal (-1 to 1), map to frequency range (20-20000 Hz)
@@ -353,6 +377,10 @@ impl DspModule for SineOscillator {
 
     fn reset(&mut self) {
         self.phase = 0.0;
+        // Reset smoothed parameters to their current targets (no smoothing on restart)
+        self.freq_smooth.reset(self.freq_smooth.target());
+        self.fm_depth_smooth.reset(self.fm_depth_smooth.target());
+        self.pulse_width_smooth.reset(self.pulse_width_smooth.target());
     }
 }
 

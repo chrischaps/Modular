@@ -11,6 +11,7 @@ use crate::dsp::{
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
+    smoothed_value::SmoothedValue,
     SignalType,
 };
 
@@ -45,13 +46,20 @@ pub struct SvfFilter {
     ports: Vec<PortDefinition>,
     /// Parameter definitions.
     parameters: Vec<ParameterDefinition>,
+    /// Smoothed cutoff parameter.
+    cutoff_smooth: SmoothedValue,
+    /// Smoothed resonance parameter.
+    resonance_smooth: SmoothedValue,
+    /// Smoothed drive parameter.
+    drive_smooth: SmoothedValue,
 }
 
 impl SvfFilter {
     /// Creates a new SVF filter.
     pub fn new() -> Self {
+        let sample_rate = 44100.0;
         Self {
-            sample_rate: 44100.0,
+            sample_rate,
             low: 0.0,
             band: 0.0,
             ports: vec![
@@ -83,6 +91,10 @@ impl SvfFilter {
                     crate::dsp::ParameterDisplay::Linear { unit: "x" },
                 ),
             ],
+            // Initialize smoothed parameters
+            cutoff_smooth: SmoothedValue::with_default_smoothing(1000.0, sample_rate),
+            resonance_smooth: SmoothedValue::with_default_smoothing(0.5, sample_rate),
+            drive_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
         }
     }
 
@@ -156,6 +168,10 @@ impl DspModule for SvfFilter {
 
     fn prepare(&mut self, sample_rate: f32, _max_block_size: usize) {
         self.sample_rate = sample_rate;
+        // Update sample rate for smoothed parameters
+        self.cutoff_smooth.set_sample_rate(sample_rate);
+        self.resonance_smooth.set_sample_rate(sample_rate);
+        self.drive_smooth.set_sample_rate(sample_rate);
     }
 
     fn process(
@@ -165,10 +181,10 @@ impl DspModule for SvfFilter {
         params: &[f32],
         context: &ProcessContext,
     ) {
-        let base_cutoff = params[Self::PARAM_CUTOFF];
-        let base_resonance = params[Self::PARAM_RESONANCE];
-        // Map drive from 0-1 (UI) to 1-10 (DSP) so signal always passes through
-        let drive = 1.0 + params[Self::PARAM_DRIVE] * 9.0;
+        // Set smoothing targets from parameters
+        self.cutoff_smooth.set_target(params[Self::PARAM_CUTOFF]);
+        self.resonance_smooth.set_target(params[Self::PARAM_RESONANCE]);
+        self.drive_smooth.set_target(params[Self::PARAM_DRIVE]);
 
         // Get input buffers
         let audio_in = inputs.get(Self::PORT_IN);
@@ -184,6 +200,12 @@ impl DspModule for SvfFilter {
 
         // Process each sample
         for i in 0..context.block_size {
+            // Get smoothed parameter values (per-sample for click-free changes)
+            let base_cutoff = self.cutoff_smooth.next();
+            let base_resonance = self.resonance_smooth.next();
+            // Map drive from 0-1 (UI) to 1-10 (DSP) so signal always passes through
+            let drive = 1.0 + self.drive_smooth.next() * 9.0;
+
             // Get input sample with drive
             let input = audio_in
                 .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
@@ -232,6 +254,10 @@ impl DspModule for SvfFilter {
     fn reset(&mut self) {
         self.low = 0.0;
         self.band = 0.0;
+        // Reset smoothed parameters to their current targets
+        self.cutoff_smooth.reset(self.cutoff_smooth.target());
+        self.resonance_smooth.reset(self.resonance_smooth.target());
+        self.drive_smooth.reset(self.drive_smooth.target());
     }
 }
 
@@ -559,13 +585,18 @@ mod tests {
 
     #[test]
     fn test_svf_filter_drive() {
-        let mut filter = SvfFilter::new();
-        filter.prepare(44100.0, 256);
+        // Use two separate filter instances to avoid smoothing interference
+        let mut filter1 = SvfFilter::new();
+        filter1.prepare(44100.0, 256);
+        let mut filter2 = SvfFilter::new();
+        filter2.prepare(44100.0, 256);
 
         let mut input = SignalBuffer::audio(256);
         for i in 0..256 {
             input.samples[i] = 0.5;
         }
+
+        let ctx = ProcessContext::new(44100.0, 256);
 
         // Process with drive = 0.0 (UI value) -> actual drive = 1.0 (unity)
         let mut outputs1 = vec![
@@ -573,10 +604,10 @@ mod tests {
             SignalBuffer::audio(256),
             SignalBuffer::audio(256),
         ];
-        let ctx = ProcessContext::new(44100.0, 256);
-        filter.process(&[&input], &mut outputs1, &[1000.0, 0.5, 0.0], &ctx);
-
-        filter.reset();
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            filter1.process(&[&input], &mut outputs1, &[1000.0, 0.5, 0.0], &ctx);
+        }
 
         // Process with drive = 0.5 (UI value) -> actual drive = 5.5
         let mut outputs2 = vec![
@@ -584,11 +615,15 @@ mod tests {
             SignalBuffer::audio(256),
             SignalBuffer::audio(256),
         ];
-        filter.process(&[&input], &mut outputs2, &[1000.0, 0.5, 0.5], &ctx);
+        // Process multiple times to let parameter smoothing settle
+        for _ in 0..20 {
+            filter2.process(&[&input], &mut outputs2, &[1000.0, 0.5, 0.5], &ctx);
+        }
 
         // With higher drive, the output should be louder (until saturation)
-        let rms1: f32 = (outputs1[0].samples.iter().map(|s| s * s).sum::<f32>() / 256.0).sqrt();
-        let rms2: f32 = (outputs2[0].samples.iter().map(|s| s * s).sum::<f32>() / 256.0).sqrt();
+        // Compare last 56 samples after smoothing has settled
+        let rms1: f32 = (outputs1[0].samples[200..].iter().map(|s| s * s).sum::<f32>() / 56.0).sqrt();
+        let rms2: f32 = (outputs2[0].samples[200..].iter().map(|s| s * s).sum::<f32>() / 56.0).sqrt();
 
         assert!(
             rms2 > rms1,
