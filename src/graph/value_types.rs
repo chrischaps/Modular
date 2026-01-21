@@ -38,6 +38,14 @@ pub enum SynthValueType {
         max: f32,
         label: String,
     },
+    /// A linear range with custom min/max and unit (e.g., BPM, percentage).
+    LinearRange {
+        value: f32,
+        min: f32,
+        max: f32,
+        unit: String,
+        label: String,
+    },
     /// A boolean toggle.
     Toggle {
         value: bool,
@@ -90,6 +98,23 @@ impl SynthValueType {
         }
     }
 
+    /// Create a new linear range parameter with custom min/max and unit.
+    pub fn linear_range(
+        value: f32,
+        min: f32,
+        max: f32,
+        unit: impl Into<String>,
+        label: impl Into<String>,
+    ) -> Self {
+        Self::LinearRange {
+            value,
+            min,
+            max,
+            unit: unit.into(),
+            label: label.into(),
+        }
+    }
+
     /// Create a new toggle parameter.
     pub fn toggle(value: bool, label: impl Into<String>) -> Self {
         Self::Toggle {
@@ -126,6 +151,10 @@ impl SynthValueType {
                 // Linear normalization for time
                 (value - min) / (max - min)
             }
+            Self::LinearRange { value, min, max, .. } => {
+                // Linear normalization
+                (value - min) / (max - min)
+            }
             Self::Toggle { value, .. } => if *value { 1.0 } else { 0.0 },
             Self::Select { value, options, .. } => {
                 if options.is_empty() {
@@ -144,6 +173,7 @@ impl SynthValueType {
     /// - Frequency: Hz
     /// - LinearHz: Hz
     /// - Time: seconds
+    /// - LinearRange: value in its unit
     /// - Toggle: 0.0 or 1.0
     /// - Select: index as f32
     pub fn actual_value(&self) -> f32 {
@@ -152,6 +182,7 @@ impl SynthValueType {
             Self::Frequency { value, .. } => *value,  // Hz
             Self::LinearHz { value, .. } => *value,   // Hz (linear)
             Self::Time { value, .. } => *value,       // seconds
+            Self::LinearRange { value, .. } => *value, // value in its unit
             Self::Toggle { value, .. } => if *value { 1.0 } else { 0.0 },
             Self::Select { value, .. } => *value as f32,
         }
@@ -167,6 +198,7 @@ impl SynthValueType {
             Self::Frequency { value, min, max, .. } => *value = new_value.clamp(*min, *max),
             Self::LinearHz { value, min, max, .. } => *value = new_value.clamp(*min, *max),
             Self::Time { value, min, max, .. } => *value = new_value.clamp(*min, *max),
+            Self::LinearRange { value, min, max, .. } => *value = new_value.clamp(*min, *max),
             Self::Toggle { value, .. } => *value = new_value > 0.5,
             Self::Select { value, options, .. } => {
                 *value = (new_value as usize).min(options.len().saturating_sub(1));
@@ -231,6 +263,10 @@ impl WidgetValueTrait for SynthValueType {
                 ui.label(display_label);
             }
             Self::Time { label, .. } => {
+                let display_label = if label.is_empty() { param_name } else { label.as_str() };
+                ui.label(display_label);
+            }
+            Self::LinearRange { label, .. } => {
                 let display_label = if label.is_empty() { param_name } else { label.as_str() };
                 ui.label(display_label);
             }

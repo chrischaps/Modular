@@ -271,7 +271,7 @@ impl SynthApp {
     }
 
     /// Process events from the audio engine.
-    /// This handles InputValue events for knob animation feedback.
+    /// This handles InputValue events for knob animation and OutputValue events for LED indicators.
     fn process_engine_events(&mut self) {
         if let Some(ref mut handle) = self.ui_handle {
             // Drain all available events
@@ -280,6 +280,10 @@ impl SynthApp {
                     crate::engine::EngineEvent::InputValue { node_id, input_index, value } => {
                         // Store the input value for UI feedback
                         self.user_state.set_input_value(node_id, input_index, value);
+                    }
+                    crate::engine::EngineEvent::OutputValue { node_id, output_index, value } => {
+                        // Store the output value for LED indicators
+                        self.user_state.set_output_value(node_id, output_index, value);
                     }
                     // Other events are not currently handled by the app
                     // (OutputLevel, CpuLoad, Started, Stopped, Error)
@@ -333,6 +337,14 @@ impl SynthApp {
                                     node_id: engine_node_id,
                                     module_id,
                                 });
+
+                                // Set up output monitoring for any LED indicators
+                                for led_indicator in &node.user_data.led_indicators {
+                                    commands_to_send.push(EngineCommand::MonitorOutput {
+                                        node_id: engine_node_id,
+                                        output_index: led_indicator.output_index,
+                                    });
+                                }
                             }
                         }
                         NodeResponse::DeleteNodeFull { node_id, .. } => {
@@ -476,6 +488,16 @@ impl SynthApp {
                     node_id: engine_node_id,
                     module_id: template.module_id(),
                 });
+
+                // Set up output monitoring for any LED indicators
+                if let Some(node) = self.graph_state.graph.nodes.get(node_id) {
+                    for led_indicator in &node.user_data.led_indicators {
+                        commands_to_send.push(EngineCommand::MonitorOutput {
+                            node_id: engine_node_id,
+                            output_index: led_indicator.output_index,
+                        });
+                    }
+                }
 
                 close_menu = true;
             }
@@ -866,6 +888,11 @@ impl eframe::App for SynthApp {
 
         // Process events from the audio engine
         self.process_engine_events();
+
+        // Request continuous repaints when playing (for LED indicators and other visualizations)
+        if self.is_playing {
+            ctx.request_repaint();
+        }
 
         // Top toolbar panel
         let toolbar_actions = egui::TopBottomPanel::top("toolbar")

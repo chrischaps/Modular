@@ -13,6 +13,8 @@ use crate::app::theme;
 pub enum ParamFormat {
     /// Raw numeric value with optional decimal places.
     Raw { decimals: usize },
+    /// Raw numeric value with a custom unit suffix.
+    RawWithUnit { decimals: usize, unit: &'static str },
     /// Percentage (0-100%).
     Percent,
     /// Frequency in Hz/kHz.
@@ -31,6 +33,9 @@ impl ParamFormat {
         match self {
             ParamFormat::Raw { decimals } => {
                 format!("{:.prec$}", value, prec = decimals)
+            }
+            ParamFormat::RawWithUnit { decimals, unit } => {
+                format!("{:.prec$} {}", value, unit, prec = decimals)
             }
             ParamFormat::Percent => {
                 format!("{:.0}%", value * 100.0)

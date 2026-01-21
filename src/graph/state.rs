@@ -43,6 +43,11 @@ pub struct SynthGraphState {
     /// Key: (engine_node_id, input_port_index), Value: sampled signal value.
     /// These values animate the knobs when their inputs are connected.
     pub input_values: HashMap<(EngineNodeId, usize), f32>,
+
+    /// Current output values received from the audio engine for LED indicators.
+    /// Key: (engine_node_id, output_port_index), Value: sampled signal value.
+    /// These values light up LED indicators on nodes.
+    pub output_values: HashMap<(EngineNodeId, usize), f32>,
 }
 
 impl Default for SynthGraphState {
@@ -55,6 +60,7 @@ impl Default for SynthGraphState {
             validation_message_time: None,
             context_menu_pos: None,
             input_values: HashMap::new(),
+            output_values: HashMap::new(),
         }
     }
 }
@@ -91,6 +97,7 @@ impl SynthGraphState {
         self.validation_message_time = None;
         self.context_menu_pos = None;
         self.input_values.clear();
+        self.output_values.clear();
     }
 
     /// Set a validation error message to display.
@@ -130,6 +137,22 @@ impl SynthGraphState {
     /// Clear input values for a specific node (e.g., when node is deleted).
     pub fn clear_input_values_for_node(&mut self, engine_node_id: EngineNodeId) {
         self.input_values.retain(|(node_id, _), _| *node_id != engine_node_id);
+    }
+
+    /// Update an output value from the audio engine feedback.
+    pub fn set_output_value(&mut self, engine_node_id: EngineNodeId, output_index: usize, value: f32) {
+        self.output_values.insert((engine_node_id, output_index), value);
+    }
+
+    /// Get the current output value for a node's output port.
+    /// Returns None if no value has been received yet.
+    pub fn get_output_value(&self, engine_node_id: EngineNodeId, output_index: usize) -> Option<f32> {
+        self.output_values.get(&(engine_node_id, output_index)).copied()
+    }
+
+    /// Clear output values for a specific node (e.g., when node is deleted).
+    pub fn clear_output_values_for_node(&mut self, engine_node_id: EngineNodeId) {
+        self.output_values.retain(|(node_id, _), _| *node_id != engine_node_id);
     }
 }
 

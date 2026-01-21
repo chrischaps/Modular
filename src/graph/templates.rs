@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use egui_node_graph2::{Graph, InputParamKind, NodeTemplateIter, NodeTemplateTrait};
 
 use crate::dsp::{ModuleCategory, SignalType};
-use super::{SynthDataType, SynthGraphState, SynthNodeData, SynthValueType, KnobParam};
+use super::{SynthDataType, SynthGraphState, SynthNodeData, SynthValueType, KnobParam, LedIndicator};
 
 /// Templates for all available synth modules.
 ///
@@ -208,6 +208,9 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 // Tempo and Gate Length as knobs
                 KnobParam::knob_only("Tempo", "BPM"),
                 KnobParam::knob_only("Gate Length", "Gate"),
+            ]).with_led_indicators(vec![
+                // Gate output LED indicator
+                LedIndicator::gate(0, "Gate"),
             ]),
             SynthNodeTemplate::Vca => SynthNodeData::new(
                 "util.vca",
@@ -493,22 +496,22 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     true,
                 );
 
-                // Tempo: knob-only parameter
+                // Tempo: knob-only parameter (20-300 BPM)
                 graph.add_input_param(
                     node_id,
                     "Tempo".to_string(),
                     SynthDataType::new(SignalType::Control),
-                    SynthValueType::scalar(120.0 / 300.0, ""), // Normalized: 120 BPM in 20-300 range
+                    SynthValueType::linear_range(120.0, 20.0, 300.0, "BPM", ""),
                     InputParamKind::ConstantOnly,
                     false, // Hidden inline - shown in bottom knob row
                 );
 
-                // Gate Length: knob-only parameter
+                // Gate Length: knob-only parameter (1-99%)
                 graph.add_input_param(
                     node_id,
                     "Gate Length".to_string(),
                     SynthDataType::new(SignalType::Control),
-                    SynthValueType::scalar(0.5, ""), // 50%
+                    SynthValueType::linear_range(50.0, 1.0, 99.0, "%", ""),
                     InputParamKind::ConstantOnly,
                     false, // Hidden inline - shown in bottom knob row
                 );

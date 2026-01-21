@@ -14,7 +14,7 @@ use eframe::egui::{self, Color32, RichText};
 use egui_node_graph2::{NodeDataTrait, NodeResponse, UserResponseTrait};
 
 use crate::dsp::ModuleCategory;
-use crate::widgets::{knob, KnobConfig, ParamFormat};
+use crate::widgets::{knob, led, KnobConfig, LedConfig, ParamFormat};
 use super::{SynthResponse, SynthValueType};
 
 /// Describes a knob parameter that appears in the bottom section of a node.
@@ -54,6 +54,40 @@ impl KnobParam {
     }
 }
 
+/// Describes an LED indicator that appears in the node's bottom section.
+///
+/// LED indicators show the state of output ports (e.g., gate triggers, activity).
+#[derive(Clone, Debug)]
+pub struct LedIndicator {
+    /// The output port index to monitor (0-based index among output ports).
+    pub output_index: usize,
+    /// Short label displayed below the LED.
+    pub label: String,
+    /// LED configuration (color, size, etc.).
+    pub config: LedConfig,
+}
+
+impl LedIndicator {
+    /// Create a new LED indicator for an output port.
+    pub fn new(output_index: usize, label: impl Into<String>, config: LedConfig) -> Self {
+        Self {
+            output_index,
+            label: label.into(),
+            config,
+        }
+    }
+
+    /// Create a green gate indicator (for trigger/gate outputs).
+    pub fn gate(output_index: usize, label: impl Into<String>) -> Self {
+        Self::new(output_index, label, LedConfig::green().with_size(10.0))
+    }
+
+    /// Create an orange activity indicator (for control signals).
+    pub fn activity(output_index: usize, label: impl Into<String>) -> Self {
+        Self::new(output_index, label, LedConfig::orange().with_size(10.0))
+    }
+}
+
 /// Data stored per node in the graph.
 ///
 /// This contains information about which module type this node represents
@@ -68,6 +102,8 @@ pub struct SynthNodeData {
     pub category: ModuleCategory,
     /// Knob parameters to display in the bottom section of the node.
     pub knob_params: Vec<KnobParam>,
+    /// LED indicators to display in the bottom section of the node.
+    pub led_indicators: Vec<LedIndicator>,
 }
 
 impl SynthNodeData {
@@ -78,12 +114,19 @@ impl SynthNodeData {
             display_name: display_name.into(),
             category,
             knob_params: Vec::new(),
+            led_indicators: Vec::new(),
         }
     }
 
     /// Builder method to add knob parameters.
     pub fn with_knob_params(mut self, knob_params: Vec<KnobParam>) -> Self {
         self.knob_params = knob_params;
+        self
+    }
+
+    /// Builder method to add LED indicators.
+    pub fn with_led_indicators(mut self, led_indicators: Vec<LedIndicator>) -> Self {
+        self.led_indicators = led_indicators;
         self
     }
 
@@ -244,6 +287,45 @@ impl SynthNodeData {
                     knob(ui, &mut display_val, &config);
                 });
                 if !is_connected && (display_val - original_val).abs() > 0.0001 {
+                    responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
+                        node_id,
+                        param_name: param_name.to_string(),
+                        value: display_val,
+                    }));
+                }
+            }
+            SynthValueType::LinearRange { value: val, min, max, unit, .. } => {
+                // Map common unit strings to static format specifiers
+                let format = match unit.as_str() {
+                    "BPM" => ParamFormat::RawWithUnit { decimals: 0, unit: "BPM" },
+                    "%" => ParamFormat::RawWithUnit { decimals: 0, unit: "%" },
+                    "dB" => ParamFormat::Decibels,
+                    "st" => ParamFormat::Semitones,
+                    _ => ParamFormat::Raw { decimals: 1 },
+                };
+                let config = KnobConfig {
+                    size,
+                    range: *min..=*max,
+                    default: (*min + *max) / 2.0,
+                    format,
+                    logarithmic: false,
+                    label: Some(label.to_string()),
+                    show_value: true,
+                    ..Default::default()
+                };
+                let original_val = *val;
+                let mut display_val = signal_value
+                    .map(|sv| sv.clamp(*min, *max))
+                    .unwrap_or(original_val);
+                ui.scope(|ui| {
+                    ui.style_mut().visuals.widgets.inactive.fg_stroke.color =
+                        ui.style().visuals.widgets.inactive.fg_stroke.color.gamma_multiply(alpha);
+                    if is_connected {
+                        ui.disable();
+                    }
+                    knob(ui, &mut display_val, &config);
+                });
+                if !is_connected && (display_val - original_val).abs() > 0.01 {
                     responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
                         node_id,
                         param_name: param_name.to_string(),
@@ -428,6 +510,29 @@ impl NodeDataTrait for SynthNodeData {
                             });
                         }
                     }
+                }
+            });
+        }
+
+        // Render LED indicators if this node has any
+        if !self.led_indicators.is_empty() {
+            // Add spacing before LEDs
+            ui.add_space(4.0);
+
+            // Render LEDs in a horizontal layout
+            ui.horizontal(|ui| {
+                for led_indicator in &self.led_indicators {
+                    // Get the output value from the audio engine
+                    let brightness = engine_node_id
+                        .and_then(|eid| user_state.get_output_value(eid, led_indicator.output_index))
+                        .unwrap_or(0.0);
+
+                    // Render the LED with label
+                    ui.vertical(|ui| {
+                        ui.set_min_width(20.0);
+                        let config = led_indicator.config.clone().with_label(&led_indicator.label);
+                        led(ui, brightness, &config);
+                    });
                 }
             });
         }

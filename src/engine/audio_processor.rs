@@ -100,6 +100,9 @@ impl AudioProcessor {
         // Send monitored input values to UI for knob animation
         self.send_input_values();
 
+        // Send monitored output values to UI for LED indicators
+        self.send_output_values();
+
         // Extract output from AudioOutput modules and write to output buffer
         self.extract_output(output, channels, num_frames);
     }
@@ -110,6 +113,17 @@ impl AudioProcessor {
             self.engine_handle.send_event_lossy(EngineEvent::InputValue {
                 node_id,
                 input_index,
+                value,
+            });
+        }
+    }
+
+    /// Sends monitored output values to the UI thread.
+    fn send_output_values(&mut self) {
+        for (node_id, output_index, value) in self.graph.drain_sampled_output_values() {
+            self.engine_handle.send_event_lossy(EngineEvent::OutputValue {
+                node_id,
+                output_index,
                 value,
             });
         }

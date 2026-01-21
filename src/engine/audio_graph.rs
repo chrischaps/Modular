@@ -90,6 +90,12 @@ pub struct AudioGraph {
     /// Temporary storage for sampled input values to send to UI.
     /// Populated during process(), consumed by the caller.
     sampled_input_values: Vec<(NodeId, PortIndex, f32)>,
+    /// Outputs that should report values back to UI for LED indicators.
+    /// Key: (node_id, output_port_index).
+    monitored_outputs: HashSet<(NodeId, PortIndex)>,
+    /// Temporary storage for sampled output values to send to UI.
+    /// Populated during process(), consumed by the caller.
+    sampled_output_values: Vec<(NodeId, PortIndex, f32)>,
 }
 
 impl AudioGraph {
@@ -106,6 +112,8 @@ impl AudioGraph {
             needs_sort: false,
             monitored_inputs: HashSet::new(),
             sampled_input_values: Vec::new(),
+            monitored_outputs: HashSet::new(),
+            sampled_output_values: Vec::new(),
         }
     }
 
@@ -122,6 +130,8 @@ impl AudioGraph {
             needs_sort: false,
             monitored_inputs: HashSet::new(),
             sampled_input_values: Vec::new(),
+            monitored_outputs: HashSet::new(),
+            sampled_output_values: Vec::new(),
         }
     }
 
@@ -357,6 +367,8 @@ impl AudioGraph {
         self.needs_sort = false;
         self.monitored_inputs.clear();
         self.sampled_input_values.clear();
+        self.monitored_outputs.clear();
+        self.sampled_output_values.clear();
     }
 
     /// Start monitoring an input port for UI feedback.
@@ -373,6 +385,22 @@ impl AudioGraph {
     /// Call this after process() to get the values to send.
     pub fn drain_sampled_input_values(&mut self) -> Vec<(NodeId, PortIndex, f32)> {
         std::mem::take(&mut self.sampled_input_values)
+    }
+
+    /// Start monitoring an output port for UI feedback (e.g., LED indicators).
+    pub fn monitor_output(&mut self, node_id: NodeId, output_index: PortIndex) {
+        self.monitored_outputs.insert((node_id, output_index));
+    }
+
+    /// Stop monitoring an output port.
+    pub fn unmonitor_output(&mut self, node_id: NodeId, output_index: PortIndex) {
+        self.monitored_outputs.remove(&(node_id, output_index));
+    }
+
+    /// Drain sampled output values for sending to UI.
+    /// Call this after process() to get the values to send.
+    pub fn drain_sampled_output_values(&mut self) -> Vec<(NodeId, PortIndex, f32)> {
+        std::mem::take(&mut self.sampled_output_values)
     }
 
     // ========================================================================
@@ -457,8 +485,9 @@ impl AudioGraph {
                 self.add_module(node_id, module_id)
             }
             EngineCommand::RemoveModule { node_id } => {
-                // Also remove any monitored inputs for this node
+                // Also remove any monitored inputs/outputs for this node
                 self.monitored_inputs.retain(|(n, _)| *n != node_id);
+                self.monitored_outputs.retain(|(n, _)| *n != node_id);
                 self.remove_module(node_id)
             }
             EngineCommand::Connect {
@@ -493,6 +522,14 @@ impl AudioGraph {
                 self.unmonitor_input(node_id, input_index);
                 true
             }
+            EngineCommand::MonitorOutput { node_id, output_index } => {
+                self.monitor_output(node_id, output_index);
+                true
+            }
+            EngineCommand::UnmonitorOutput { node_id, output_index } => {
+                self.unmonitor_output(node_id, output_index);
+                true
+            }
         }
     }
 
@@ -504,7 +541,8 @@ impl AudioGraph {
     ///
     /// This is the main audio processing method, called from the audio callback.
     /// It processes all modules in topological order.
-    /// After processing, call `drain_sampled_input_values()` to get monitored input values.
+    /// After processing, call `drain_sampled_input_values()` and `drain_sampled_output_values()`
+    /// to get monitored values.
     pub fn process(&mut self, context: &ProcessContext) {
         // Ensure processing order is up to date
         self.update_processing_order();
@@ -512,16 +550,18 @@ impl AudioGraph {
         // Clear all output buffers
         self.buffers.clear_all();
 
-        // Clear sampled input values from previous block
+        // Clear sampled values from previous block
         self.sampled_input_values.clear();
+        self.sampled_output_values.clear();
 
         // Process modules in topological order
         for &node_id in &self.processing_order.clone() {
             self.process_module(node_id, context);
         }
 
-        // Sample monitored inputs after processing
+        // Sample monitored inputs and outputs after processing
         self.sample_monitored_inputs();
+        self.sample_monitored_outputs();
     }
 
     /// Samples the values of monitored inputs for UI feedback.
@@ -561,6 +601,22 @@ impl AudioGraph {
                         self.sampled_input_values.push((node_id, input_index, port_def.default_value));
                     }
                 }
+            }
+        }
+    }
+
+    /// Samples the values of monitored outputs for UI feedback (LED indicators).
+    fn sample_monitored_outputs(&mut self) {
+        // Collect monitored outputs that we need to sample
+        let monitored: Vec<(NodeId, PortIndex)> = self.monitored_outputs.iter().copied().collect();
+
+        for (node_id, output_index) in monitored {
+            // Get the output buffer for this port
+            if let Some(buf) = self.buffers.get(node_id, output_index) {
+                // For gate signals, use max value in buffer (to catch brief pulses)
+                // For other signals, use first sample
+                let value = buf.samples.iter().copied().fold(0.0_f32, f32::max);
+                self.sampled_output_values.push((node_id, output_index, value));
             }
         }
     }

@@ -82,6 +82,23 @@ pub enum EngineCommand {
         /// The input port index to stop monitoring.
         input_index: PortIndex,
     },
+
+    /// Start monitoring an output port for UI feedback (e.g., LED indicators).
+    /// The engine will send OutputValue events with the signal values.
+    MonitorOutput {
+        /// The node containing the output.
+        node_id: NodeId,
+        /// The output port index to monitor.
+        output_index: PortIndex,
+    },
+
+    /// Stop monitoring an output port.
+    UnmonitorOutput {
+        /// The node containing the output.
+        node_id: NodeId,
+        /// The output port index to stop monitoring.
+        output_index: PortIndex,
+    },
 }
 
 /// Events sent from the audio engine to the UI thread.
@@ -116,6 +133,17 @@ pub enum EngineEvent {
         /// The input port index.
         input_index: PortIndex,
         /// The sampled value (typically first sample or average of block).
+        value: f32,
+    },
+
+    /// Reports the current value at a monitored output port.
+    /// Used for LED indicators and other output visualizations.
+    OutputValue {
+        /// The node containing the output.
+        node_id: NodeId,
+        /// The output port index.
+        output_index: PortIndex,
+        /// The sampled value (typically first sample or max of block).
         value: f32,
     },
 }

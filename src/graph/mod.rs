@@ -12,7 +12,7 @@ mod validation;
 mod value_types;
 
 pub use data_types::SynthDataType;
-pub use node_data::{KnobParam, SynthNodeData};
+pub use node_data::{KnobParam, LedIndicator, SynthNodeData};
 pub use responses::SynthResponse;
 pub use state::{create_editor_state, SynthGraphEditorState, SynthGraphState};
 pub use templates::{AllNodeTemplates, SynthNodeTemplate};
