@@ -573,7 +573,8 @@ impl NodeDataTrait for SynthNodeData {
         // This allows the entire title bar to be draggable
         let rect = ui.available_rect_before_wrap();
         let painter = ui.painter();
-        let icon_color = ui.visuals().strong_text_color();
+        // Use white for icons to ensure visibility against colored title bars
+        let icon_color = Color32::WHITE;
 
         // Left icon (category icon) - vector drawn for cross-platform reliability
         let icon_size = 14.0;
