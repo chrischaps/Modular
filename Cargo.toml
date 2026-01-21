@@ -16,3 +16,6 @@ rtrb = "0.3"
 rfd = "0.15"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+[patch.crates-io]
+egui_node_graph2 = { path = "patches/egui_node_graph2" }
