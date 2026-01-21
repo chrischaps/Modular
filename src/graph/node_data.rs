@@ -453,17 +453,34 @@ impl NodeDataTrait for SynthNodeData {
     where
         Self::Response: UserResponseTrait,
     {
-        // Add icons to the top bar
-        ui.horizontal(|ui| {
-            // Left icon
-            ui.label(RichText::new(self.category_icon()).size(14.0).strong());
+        // Draw icons directly with painter to avoid intercepting mouse events
+        // This allows the entire title bar to be draggable
+        let rect = ui.available_rect_before_wrap();
+        let painter = ui.painter();
+        let text_color = ui.visuals().strong_text_color();
 
-            // Spacer to push the right icon to the end
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // Right icon
-                ui.label(RichText::new(self.secondary_icon()).size(12.0));
-            });
-        });
+        // Left icon (category icon)
+        let left_font = egui::FontId::proportional(14.0);
+        painter.text(
+            egui::pos2(rect.left() + 4.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            self.category_icon(),
+            left_font,
+            text_color,
+        );
+
+        // Right icon (secondary icon)
+        let right_font = egui::FontId::proportional(12.0);
+        painter.text(
+            egui::pos2(rect.right() - 4.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            self.secondary_icon(),
+            right_font,
+            text_color,
+        );
+
+        // Allocate the space without creating any interactive widgets
+        ui.allocate_space(ui.available_size());
 
         Vec::new()
     }
