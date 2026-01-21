@@ -3,6 +3,8 @@
 //! Handles audio processing in the audio callback, integrating the AudioGraph
 //! with command handling from the UI thread.
 
+use std::time::Instant;
+
 use crate::dsp::{ModuleRegistry, ProcessContext};
 use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Clock, KeyboardInput, Lfo, SineOscillator, SvfFilter, Vca};
 
@@ -41,6 +43,10 @@ pub struct AudioProcessor {
     context: ProcessContext,
     /// Whether audio processing is active.
     is_playing: bool,
+    /// Frame counter for throttling CPU load events.
+    frame_counter: u32,
+    /// Running average of CPU load (0.0-100.0).
+    cpu_load_avg: f32,
 }
 
 impl AudioProcessor {
@@ -60,8 +66,18 @@ impl AudioProcessor {
             engine_handle,
             context,
             is_playing: false,
+            frame_counter: 0,
+            cpu_load_avg: 0.0,
         }
     }
+
+    /// How often to send CPU load events (in audio callbacks).
+    /// At 44100Hz with 256 sample blocks, this is about 172 callbacks/sec.
+    /// Sending every 8 callbacks gives ~21Hz update rate.
+    const CPU_REPORT_INTERVAL: u32 = 8;
+
+    /// Smoothing factor for CPU load averaging (0-1, higher = more responsive).
+    const CPU_SMOOTHING: f32 = 0.3;
 
     /// Processes a block of audio.
     ///
@@ -83,8 +99,13 @@ impl AudioProcessor {
         }
 
         if !self.is_playing {
+            // Reset CPU load when not playing
+            self.cpu_load_avg = 0.0;
             return;
         }
+
+        // Start timing for CPU measurement
+        let start_time = Instant::now();
 
         // Calculate number of frames in this callback
         let num_frames = output.len() / channels;
@@ -107,6 +128,22 @@ impl AudioProcessor {
 
         // Extract output from AudioOutput modules and write to output buffer
         self.extract_output(output, channels, num_frames);
+
+        // Calculate CPU load
+        let elapsed = start_time.elapsed();
+        let available_time = num_frames as f64 / self.context.sample_rate as f64;
+        let cpu_percent = (elapsed.as_secs_f64() / available_time * 100.0) as f32;
+
+        // Smooth the CPU load value using exponential moving average
+        self.cpu_load_avg = Self::CPU_SMOOTHING * cpu_percent
+            + (1.0 - Self::CPU_SMOOTHING) * self.cpu_load_avg;
+
+        // Send CPU load event at regular intervals (to avoid flooding UI)
+        self.frame_counter += 1;
+        if self.frame_counter >= Self::CPU_REPORT_INTERVAL {
+            self.frame_counter = 0;
+            self.engine_handle.send_event_lossy(EngineEvent::CpuLoad(self.cpu_load_avg));
+        }
     }
 
     /// Sends monitored input values to the UI thread.

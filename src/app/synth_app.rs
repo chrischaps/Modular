@@ -22,6 +22,7 @@ use crate::persistence::{
     ConnectionData, NodeData, ParameterValue, Patch, PatchError,
     load_from_file, save_to_file,
 };
+use crate::widgets::{cpu_meter, CpuMeterConfig};
 use super::theme;
 
 /// Type alias for our graph editor state
@@ -78,6 +79,9 @@ pub struct SynthApp {
 
     /// The last note that was triggered (to maintain pitch during gate hold).
     last_triggered_note: f32,
+
+    /// Current CPU load percentage from the audio engine (0-100).
+    cpu_load: f32,
 }
 
 impl SynthApp {
@@ -142,6 +146,7 @@ impl SynthApp {
             last_gate_on: None,
             gate_held_high: false,
             last_triggered_note: 60.0,
+            cpu_load: 0.0,
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -282,8 +287,9 @@ impl SynthApp {
                             }
                         });
 
-                    // Status indicator
+                    // Status indicator (right-to-left layout: items appear from right to left)
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        // Running status (rightmost)
                         let status_color = if is_running {
                             theme::accent::SUCCESS
                         } else {
@@ -292,11 +298,19 @@ impl SynthApp {
                         let status_text = if is_running { "● Running" } else { "○ Stopped" };
                         ui.label(RichText::new(status_text).color(status_color).small());
 
+                        // Sample rate info
                         ui.label(RichText::new(format!(
                             "{}Hz • {}ch",
                             engine.sample_rate(),
                             engine.channels()
                         )).color(theme::text::SECONDARY).small());
+
+                        ui.add_space(8.0);
+
+                        // CPU meter (only show when playing)
+                        if self.is_playing {
+                            cpu_meter(ui, self.cpu_load, &CpuMeterConfig::compact());
+                        }
                     });
                 }
                 Err(e) => {
@@ -319,7 +333,8 @@ impl SynthApp {
     }
 
     /// Process events from the audio engine.
-    /// This handles InputValue events for knob animation and OutputValue events for LED indicators.
+    /// This handles InputValue events for knob animation, OutputValue events for LED indicators,
+    /// and CpuLoad events for CPU metering.
     fn process_engine_events(&mut self) {
         if let Some(ref mut handle) = self.ui_handle {
             // Drain all available events
@@ -333,8 +348,12 @@ impl SynthApp {
                         // Store the output value for LED indicators
                         self.user_state.set_output_value(node_id, output_index, value);
                     }
+                    crate::engine::EngineEvent::CpuLoad(load) => {
+                        // Update CPU load for display
+                        self.cpu_load = load;
+                    }
                     // Other events are not currently handled by the app
-                    // (OutputLevel, CpuLoad, Started, Stopped, Error)
+                    // (OutputLevel, Started, Stopped, Error)
                     _ => {}
                 }
             }

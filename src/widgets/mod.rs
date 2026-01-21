@@ -1,13 +1,14 @@
 //! Widgets module
 //!
 //! Custom UI controls for the synthesizer interface.
-//! Includes knobs, faders, waveform displays, spectrum displays, and LED indicators.
+//! Includes knobs, faders, waveform displays, spectrum displays, LED indicators, and CPU meters.
 
 pub mod knob;
 pub mod fader;
 pub mod waveform_display;
 pub mod spectrum_display;
 pub mod led;
+pub mod cpu_meter;
 
 // Future submodules:
 // pub mod vu_meter;
@@ -24,3 +25,4 @@ pub use spectrum_display::{
     FilterResponseType, generate_filter_response,
 };
 pub use led::{led, LedConfig};
+pub use cpu_meter::{cpu_meter, CpuMeterConfig, cpu_load_color};
