@@ -865,6 +865,9 @@ impl SynthApp {
                 // Store editor rect for coordinate conversion
                 editor_rect = ui.available_rect_before_wrap();
 
+                // Reset widget context menu flag before drawing
+                self.user_state.widget_context_menu_open = false;
+
                 // Draw the node graph editor
                 let graph_response = self.graph_state.draw_graph_editor(
                     ui,
@@ -992,27 +995,10 @@ impl SynthApp {
         // Detect right-click in editor to open context menu
         // Only show "add node" menu when clicking on empty canvas, not on nodes/widgets
         if ctx.input(|i| i.pointer.secondary_clicked()) && cursor_in_editor {
-            // Only open if not already showing a menu
-            if self.user_state.context_menu_pos.is_none() {
+            // Only open if not already showing a menu and no widget context menu is open
+            if self.user_state.context_menu_pos.is_none() && !self.user_state.widget_context_menu_open {
                 if let Some(click_pos) = ctx.input(|i| i.pointer.interact_pos()) {
-                    // Check if we clicked on any node (check node bounds)
-                    let clicked_on_node = self.graph_state.graph.nodes.iter().any(|(node_id, _)| {
-                        if let Some(node_pos) = self.graph_state.node_positions.get(node_id) {
-                            // Approximate node size (width ~160, height varies but ~150 is reasonable)
-                            let node_rect = egui::Rect::from_min_size(
-                                *node_pos,
-                                egui::vec2(180.0, 180.0),
-                            );
-                            node_rect.contains(click_pos)
-                        } else {
-                            false
-                        }
-                    });
-
-                    // Only show add-node menu if we didn't click on a node
-                    if !clicked_on_node {
-                        self.user_state.context_menu_pos = Some(click_pos);
-                    }
+                    self.user_state.context_menu_pos = Some(click_pos);
                 }
             }
         }

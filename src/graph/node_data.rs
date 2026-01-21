@@ -776,7 +776,7 @@ impl NodeDataTrait for SynthNodeData {
 
                             // Handle right-click context menu for MIDI Learn
                             if let Some(engine_id) = engine_node_id {
-                                interact_response.context_menu(|ui| {
+                                let menu_response = interact_response.context_menu(|ui| {
                                     if midi_config.has_midi_mapping {
                                         let cc_text = midi_config.cc_number
                                             .map(|cc| format!("CC #{}", cc))
@@ -814,6 +814,10 @@ impl NodeDataTrait for SynthNodeData {
                                         }
                                     }
                                 });
+                                // Set flag if context menu is open to prevent add-node menu
+                                if menu_response.is_some() {
+                                    user_state.widget_context_menu_open = true;
+                                }
                             }
                         }
                     }

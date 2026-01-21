@@ -87,6 +87,10 @@ pub struct SynthGraphState {
     /// Target parameter for MIDI Learn (if active).
     /// Tuple of (engine_node_id, param_index).
     pub midi_learn_target: Option<(EngineNodeId, usize)>,
+
+    /// Flag set when a widget context menu is shown this frame.
+    /// Used to prevent the add-node menu from also appearing.
+    pub widget_context_menu_open: bool,
 }
 
 impl Default for SynthGraphState {
@@ -105,6 +109,7 @@ impl Default for SynthGraphState {
             midi_mappings: HashMap::new(),
             midi_learn_active: false,
             midi_learn_target: None,
+            widget_context_menu_open: false,
         }
     }
 }
@@ -147,6 +152,7 @@ impl SynthGraphState {
         self.midi_mappings.clear();
         self.midi_learn_active = false;
         self.midi_learn_target = None;
+        self.widget_context_menu_open = false;
     }
 
     /// Get the MIDI mapping info for a parameter, if any.
