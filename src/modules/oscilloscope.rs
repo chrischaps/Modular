@@ -16,10 +16,6 @@ use crate::dsp::{
 /// Number of samples to capture for display.
 const SCOPE_BUFFER_SIZE: usize = 512;
 
-/// How often to send buffer updates (in audio blocks).
-/// At 44100Hz with 256 sample blocks, this is ~172Hz. Sending every 4 blocks = ~43Hz.
-const UPDATE_INTERVAL_BLOCKS: u32 = 4;
-
 /// Trigger modes for the oscilloscope.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 #[repr(u8)]
@@ -45,6 +41,17 @@ impl TriggerMode {
             _ => TriggerMode::Auto,
         }
     }
+}
+
+/// Capture state for synchronized triggering.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum CaptureState {
+    /// Waiting for a trigger event.
+    WaitingForTrigger,
+    /// Trigger detected, collecting post-trigger samples.
+    Capturing { samples_remaining: usize },
+    /// Capture complete, ready to send to UI.
+    Ready,
 }
 
 /// A real-time oscilloscope module for waveform visualization.
@@ -81,14 +88,14 @@ pub struct Oscilloscope {
     sample_rate: f32,
     /// Previous sample value for trigger edge detection.
     prev_trigger_sample: f32,
-    /// Whether we're currently waiting for a trigger.
-    waiting_for_trigger: bool,
-    /// Whether we've captured a buffer since last trigger.
-    triggered: bool,
-    /// Samples since last trigger (for auto-trigger timeout).
-    samples_since_trigger: usize,
-    /// Block counter for throttling updates.
-    block_counter: u32,
+    /// Previous external trigger value for edge detection.
+    prev_ext_trigger: f32,
+    /// Current capture state.
+    capture_state: CaptureState,
+    /// Position in buffer where trigger occurred.
+    trigger_pos: usize,
+    /// Samples since last successful capture (for auto-trigger timeout).
+    samples_since_capture: usize,
     /// Buffer ready for UI consumption.
     buffer_ready: bool,
     /// Captured buffer for channel 1 (to send to UI).
@@ -105,6 +112,13 @@ pub struct Oscilloscope {
     parameters: Vec<ParameterDefinition>,
 }
 
+/// Number of samples to show before the trigger point (pre-trigger).
+/// About 25% of the buffer gives good context.
+const PRE_TRIGGER_SAMPLES: usize = SCOPE_BUFFER_SIZE / 4;
+
+/// Number of samples to capture after the trigger point.
+const POST_TRIGGER_SAMPLES: usize = SCOPE_BUFFER_SIZE - PRE_TRIGGER_SAMPLES;
+
 impl Oscilloscope {
     /// Creates a new oscilloscope module.
     pub fn new() -> Self {
@@ -114,10 +128,10 @@ impl Oscilloscope {
             write_pos: 0,
             sample_rate: 44100.0,
             prev_trigger_sample: 0.0,
-            waiting_for_trigger: true,
-            triggered: false,
-            samples_since_trigger: 0,
-            block_counter: 0,
+            prev_ext_trigger: 0.0,
+            capture_state: CaptureState::WaitingForTrigger,
+            trigger_pos: 0,
+            samples_since_capture: 0,
             buffer_ready: false,
             captured_ch1: vec![0.0; SCOPE_BUFFER_SIZE],
             captured_ch2: vec![0.0; SCOPE_BUFFER_SIZE],
@@ -175,15 +189,37 @@ impl Oscilloscope {
         triggered
     }
 
-    /// Capture the current buffer to send to UI.
-    fn capture_buffer(&mut self, triggered: bool) {
-        // Copy buffer contents in order (oldest to newest)
+    /// Check for rising edge on external trigger.
+    fn check_ext_trigger(&mut self, ext_trig_val: f32) -> bool {
+        let triggered = self.prev_ext_trigger < Self::EXT_TRIGGER_THRESHOLD
+            && ext_trig_val >= Self::EXT_TRIGGER_THRESHOLD;
+        self.prev_ext_trigger = ext_trig_val;
+        triggered
+    }
+
+    /// Capture the buffer starting from a specific trigger position.
+    /// The trigger point will be at PRE_TRIGGER_SAMPLES from the start.
+    fn capture_buffer_from_trigger(&mut self, triggered: bool) {
+        // Start reading from (trigger_pos - PRE_TRIGGER_SAMPLES) in the ring buffer
+        let start_pos = (self.trigger_pos + SCOPE_BUFFER_SIZE - PRE_TRIGGER_SAMPLES) % SCOPE_BUFFER_SIZE;
+
+        for i in 0..SCOPE_BUFFER_SIZE {
+            let idx = (start_pos + i) % SCOPE_BUFFER_SIZE;
+            self.captured_ch1[i] = self.buffer1[idx];
+            self.captured_ch2[i] = self.buffer2[idx];
+        }
+        self.captured_triggered = triggered;
+        self.buffer_ready = true;
+    }
+
+    /// Capture buffer for free-running mode (just copy current buffer).
+    fn capture_buffer_free(&mut self) {
         for i in 0..SCOPE_BUFFER_SIZE {
             let idx = (self.write_pos + i) % SCOPE_BUFFER_SIZE;
             self.captured_ch1[i] = self.buffer1[idx];
             self.captured_ch2[i] = self.buffer2[idx];
         }
-        self.captured_triggered = triggered;
+        self.captured_triggered = false;
         self.buffer_ready = true;
     }
 }
@@ -250,84 +286,128 @@ impl DspModule for Oscilloscope {
             // Write to ring buffer
             self.buffer1[self.write_pos] = sample1;
             self.buffer2[self.write_pos] = sample2;
-            self.write_pos = (self.write_pos + 1) % SCOPE_BUFFER_SIZE;
 
-            // Trigger logic
+            // Track time for auto-trigger
+            self.samples_since_capture += 1;
+
+            // Handle different trigger modes
             match trigger_mode {
                 TriggerMode::Free => {
-                    // No trigger logic, just continuously update
-                    self.triggered = false;
+                    // Free-running: capture at regular intervals
+                    if self.samples_since_capture >= SCOPE_BUFFER_SIZE {
+                        self.capture_buffer_free();
+                        self.samples_since_capture = 0;
+                    }
                 }
+
                 TriggerMode::Single => {
                     if !self.single_shot_done {
-                        // Check for trigger
-                        let ext_triggered = ext_trig_val >= Self::EXT_TRIGGER_THRESHOLD
-                            && self.waiting_for_trigger;
-                        let signal_triggered = self.check_signal_trigger(sample1, trigger_level);
+                        match self.capture_state {
+                            CaptureState::WaitingForTrigger => {
+                                let ext_triggered = self.check_ext_trigger(ext_trig_val);
+                                let signal_triggered = self.check_signal_trigger(sample1, trigger_level);
 
-                        if ext_triggered || signal_triggered {
-                            self.triggered = true;
-                            self.single_shot_done = true;
-                            self.waiting_for_trigger = false;
+                                if ext_triggered || signal_triggered {
+                                    // Trigger detected! Record position and start capturing
+                                    self.trigger_pos = self.write_pos;
+                                    self.capture_state = CaptureState::Capturing {
+                                        samples_remaining: POST_TRIGGER_SAMPLES,
+                                    };
+                                }
+                            }
+                            CaptureState::Capturing { samples_remaining } => {
+                                if samples_remaining <= 1 {
+                                    // Done capturing
+                                    self.capture_buffer_from_trigger(true);
+                                    self.capture_state = CaptureState::Ready;
+                                    self.single_shot_done = true;
+                                    self.samples_since_capture = 0;
+                                } else {
+                                    self.capture_state = CaptureState::Capturing {
+                                        samples_remaining: samples_remaining - 1,
+                                    };
+                                }
+                            }
+                            CaptureState::Ready => {
+                                // Single-shot done, stay in ready state
+                            }
                         }
                     }
                 }
+
                 TriggerMode::Normal => {
-                    // Only capture when triggered
-                    let ext_triggered = ext_trig_val >= Self::EXT_TRIGGER_THRESHOLD
-                        && self.waiting_for_trigger;
-                    let signal_triggered = self.check_signal_trigger(sample1, trigger_level);
+                    match self.capture_state {
+                        CaptureState::WaitingForTrigger => {
+                            let ext_triggered = self.check_ext_trigger(ext_trig_val);
+                            let signal_triggered = self.check_signal_trigger(sample1, trigger_level);
 
-                    if ext_triggered || signal_triggered {
-                        self.triggered = true;
-                        self.waiting_for_trigger = false;
-                        self.samples_since_trigger = 0;
-                    } else {
-                        self.waiting_for_trigger = ext_trig_val < Self::EXT_TRIGGER_THRESHOLD;
-                    }
-                }
-                TriggerMode::Auto => {
-                    // Trigger on signal or auto-trigger after timeout
-                    let ext_triggered = ext_trig_val >= Self::EXT_TRIGGER_THRESHOLD
-                        && self.waiting_for_trigger;
-                    let signal_triggered = self.check_signal_trigger(sample1, trigger_level);
-
-                    if ext_triggered || signal_triggered {
-                        self.triggered = true;
-                        self.waiting_for_trigger = false;
-                        self.samples_since_trigger = 0;
-                    } else {
-                        self.samples_since_trigger += 1;
-                        if self.samples_since_trigger >= Self::AUTO_TRIGGER_TIMEOUT {
-                            self.triggered = false; // Auto-trigger (not real trigger)
-                            self.samples_since_trigger = 0;
+                            if ext_triggered || signal_triggered {
+                                self.trigger_pos = self.write_pos;
+                                self.capture_state = CaptureState::Capturing {
+                                    samples_remaining: POST_TRIGGER_SAMPLES,
+                                };
+                            }
+                            // Normal mode: no auto-trigger, just wait
                         }
-                        self.waiting_for_trigger = ext_trig_val < Self::EXT_TRIGGER_THRESHOLD;
+                        CaptureState::Capturing { samples_remaining } => {
+                            if samples_remaining <= 1 {
+                                self.capture_buffer_from_trigger(true);
+                                self.capture_state = CaptureState::WaitingForTrigger;
+                                self.samples_since_capture = 0;
+                            } else {
+                                self.capture_state = CaptureState::Capturing {
+                                    samples_remaining: samples_remaining - 1,
+                                };
+                            }
+                        }
+                        CaptureState::Ready => {
+                            // Go back to waiting
+                            self.capture_state = CaptureState::WaitingForTrigger;
+                        }
+                    }
+                }
+
+                TriggerMode::Auto => {
+                    match self.capture_state {
+                        CaptureState::WaitingForTrigger => {
+                            let ext_triggered = self.check_ext_trigger(ext_trig_val);
+                            let signal_triggered = self.check_signal_trigger(sample1, trigger_level);
+
+                            if ext_triggered || signal_triggered {
+                                self.trigger_pos = self.write_pos;
+                                self.capture_state = CaptureState::Capturing {
+                                    samples_remaining: POST_TRIGGER_SAMPLES,
+                                };
+                            } else if self.samples_since_capture >= Self::AUTO_TRIGGER_TIMEOUT {
+                                // Auto-trigger: use current position
+                                self.trigger_pos = self.write_pos;
+                                self.capture_state = CaptureState::Capturing {
+                                    samples_remaining: POST_TRIGGER_SAMPLES,
+                                };
+                            }
+                        }
+                        CaptureState::Capturing { samples_remaining } => {
+                            if samples_remaining <= 1 {
+                                // Check if this was a real trigger or auto-trigger
+                                let was_triggered = self.samples_since_capture < Self::AUTO_TRIGGER_TIMEOUT;
+                                self.capture_buffer_from_trigger(was_triggered);
+                                self.capture_state = CaptureState::WaitingForTrigger;
+                                self.samples_since_capture = 0;
+                            } else {
+                                self.capture_state = CaptureState::Capturing {
+                                    samples_remaining: samples_remaining - 1,
+                                };
+                            }
+                        }
+                        CaptureState::Ready => {
+                            self.capture_state = CaptureState::WaitingForTrigger;
+                        }
                     }
                 }
             }
-        }
 
-        // Throttle buffer updates
-        self.block_counter += 1;
-        if self.block_counter >= UPDATE_INTERVAL_BLOCKS {
-            self.block_counter = 0;
-
-            // Capture the buffer if conditions are met
-            match trigger_mode {
-                TriggerMode::Free => {
-                    self.capture_buffer(false);
-                }
-                TriggerMode::Single => {
-                    if self.single_shot_done && !self.buffer_ready {
-                        self.capture_buffer(true);
-                    }
-                }
-                TriggerMode::Normal | TriggerMode::Auto => {
-                    self.capture_buffer(self.triggered);
-                    self.triggered = false;
-                }
-            }
+            // Advance write position after all processing
+            self.write_pos = (self.write_pos + 1) % SCOPE_BUFFER_SIZE;
         }
     }
 
@@ -336,10 +416,10 @@ impl DspModule for Oscilloscope {
         self.buffer2.fill(0.0);
         self.write_pos = 0;
         self.prev_trigger_sample = 0.0;
-        self.waiting_for_trigger = true;
-        self.triggered = false;
-        self.samples_since_trigger = 0;
-        self.block_counter = 0;
+        self.prev_ext_trigger = 0.0;
+        self.capture_state = CaptureState::WaitingForTrigger;
+        self.trigger_pos = 0;
+        self.samples_since_capture = 0;
         self.buffer_ready = false;
         self.single_shot_done = false;
         self.captured_ch1.fill(0.0);
@@ -438,8 +518,9 @@ mod tests {
 
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Process several blocks (free-running mode)
-        for _ in 0..(UPDATE_INTERVAL_BLOCKS + 1) {
+        // Process enough blocks to fill the buffer (free-running mode captures every SCOPE_BUFFER_SIZE samples)
+        // We need at least SCOPE_BUFFER_SIZE samples, so 2 blocks of 256 = 512 samples
+        for _ in 0..3 {
             scope.process(&[&input1], &mut [], &[3.0, 0.0], &ctx); // Mode 3 = Free
         }
 
@@ -464,14 +545,14 @@ mod tests {
         // Write some data
         scope.buffer1[0] = 1.0;
         scope.write_pos = 100;
-        scope.triggered = true;
+        scope.capture_state = CaptureState::Capturing { samples_remaining: 50 };
 
         // Reset
         scope.reset();
 
         assert_eq!(scope.buffer1[0], 0.0);
         assert_eq!(scope.write_pos, 0);
-        assert!(!scope.triggered);
+        assert_eq!(scope.capture_state, CaptureState::WaitingForTrigger);
     }
 
     #[test]
