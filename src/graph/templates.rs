@@ -30,6 +30,8 @@ pub enum SynthNodeTemplate {
     Vca,
     /// Attenuverter - scale and invert control signals.
     Attenuverter,
+    /// Keyboard - virtual keyboard for playing notes from computer keyboard.
+    Keyboard,
 }
 
 impl SynthNodeTemplate {
@@ -45,6 +47,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::Clock => "util.clock",
             SynthNodeTemplate::Vca => "util.vca",
             SynthNodeTemplate::Attenuverter => "util.attenuverter",
+            SynthNodeTemplate::Keyboard => "input.keyboard",
         }
     }
 
@@ -59,6 +62,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::Clock => ModuleCategory::Utility,
             SynthNodeTemplate::Vca => ModuleCategory::Utility,
             SynthNodeTemplate::Attenuverter => ModuleCategory::Utility,
+            SynthNodeTemplate::Keyboard => ModuleCategory::Source,
         }
     }
 }
@@ -72,6 +76,7 @@ impl NodeTemplateIter for AllNodeTemplates {
     fn all_kinds(&self) -> Vec<Self::Item> {
         vec![
             SynthNodeTemplate::SineOscillator,
+            SynthNodeTemplate::Keyboard,
             SynthNodeTemplate::SvfFilter,
             SynthNodeTemplate::AdsrEnvelope,
             SynthNodeTemplate::Lfo,
@@ -135,6 +140,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::Clock => Cow::Borrowed("Clock"),
             SynthNodeTemplate::Vca => Cow::Borrowed("VCA"),
             SynthNodeTemplate::Attenuverter => Cow::Borrowed("Attenuverter"),
+            SynthNodeTemplate::Keyboard => Cow::Borrowed("Keyboard"),
         }
     }
 
@@ -152,6 +158,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::Clock => "Clock".to_string(),
             SynthNodeTemplate::Vca => "VCA".to_string(),
             SynthNodeTemplate::Attenuverter => "Attenuverter".to_string(),
+            SynthNodeTemplate::Keyboard => "Keyboard".to_string(),
         }
     }
 
@@ -241,6 +248,19 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 KnobParam::knob_only("Amount", "Amt"),
                 // Offset: DC offset
                 KnobParam::knob_only("Offset", "Offset"),
+            ]),
+            SynthNodeTemplate::Keyboard => SynthNodeData::new(
+                "input.keyboard",
+                "Keyboard",
+                ModuleCategory::Source,
+            ).with_knob_params(vec![
+                // Octave shift: -2 to +2
+                KnobParam::knob_only("Octave", "Oct"),
+                // Velocity: 0-1
+                KnobParam::knob_only("Velocity", "Vel"),
+            ]).with_led_indicators(vec![
+                // Gate output LED indicator
+                LedIndicator::gate(0, "Gate"),
             ]),
         }
     }
@@ -718,6 +738,80 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthDataType::new(SignalType::Control),
                 );
             }
+            SynthNodeTemplate::Keyboard => {
+                // Note: MIDI note number (0-127), controlled by UI keyboard events
+                // Hidden parameter - not shown inline
+                graph.add_input_param(
+                    node_id,
+                    "Note".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(60.0, 0.0, 127.0, "", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden - controlled by keyboard events
+                );
+
+                // Gate: controlled by UI keyboard events
+                // Hidden parameter - not shown inline
+                graph.add_input_param(
+                    node_id,
+                    "Gate".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::toggle(false, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden - controlled by keyboard events
+                );
+
+                // Octave: shift keyboard up/down (-2 to +2)
+                graph.add_input_param(
+                    node_id,
+                    "Octave".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(0.0, -2.0, 2.0, "", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Velocity: fixed velocity for all notes
+                graph.add_input_param(
+                    node_id,
+                    "Velocity".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(1.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Priority: key priority mode (shown inline as dropdown)
+                graph.add_input_param(
+                    node_id,
+                    "Priority".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::select(
+                        0,
+                        vec!["Last".to_string(), "Lowest".to_string(), "Highest".to_string()],
+                        "Priority",
+                    ),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline as dropdown
+                );
+
+                // Output ports
+                graph.add_output_param(
+                    node_id,
+                    "Gate".to_string(),
+                    SynthDataType::new(SignalType::Gate),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "Pitch".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "Velocity".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                );
+            }
         }
     }
 }
@@ -729,7 +823,7 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 8);
+        assert_eq!(templates.len(), 9);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
@@ -738,6 +832,7 @@ mod tests {
         assert!(templates.contains(&SynthNodeTemplate::Clock));
         assert!(templates.contains(&SynthNodeTemplate::Attenuverter));
         assert!(templates.contains(&SynthNodeTemplate::Vca));
+        assert!(templates.contains(&SynthNodeTemplate::Keyboard));
     }
 
     #[test]
@@ -750,6 +845,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::Clock.module_id(), "util.clock");
         assert_eq!(SynthNodeTemplate::Vca.module_id(), "util.vca");
         assert_eq!(SynthNodeTemplate::Attenuverter.module_id(), "util.attenuverter");
+        assert_eq!(SynthNodeTemplate::Keyboard.module_id(), "input.keyboard");
     }
 
     #[test]
@@ -762,6 +858,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::Clock.category(), ModuleCategory::Utility);
         assert_eq!(SynthNodeTemplate::Vca.category(), ModuleCategory::Utility);
         assert_eq!(SynthNodeTemplate::Attenuverter.category(), ModuleCategory::Utility);
+        assert_eq!(SynthNodeTemplate::Keyboard.category(), ModuleCategory::Source);
     }
 
     #[test]
@@ -798,6 +895,10 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::Attenuverter.node_finder_label(&mut state),
             "Attenuverter"
+        );
+        assert_eq!(
+            SynthNodeTemplate::Keyboard.node_finder_label(&mut state),
+            "Keyboard"
         );
     }
 }

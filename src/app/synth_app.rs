@@ -16,6 +16,7 @@ use crate::graph::{
     validate_connection, AllNodeTemplates, AnyParameterId, SynthDataType, SynthGraphState,
     SynthNodeData, SynthNodeTemplate, SynthValueType,
 };
+use crate::modules::keyboard::{key_to_note, relative_to_midi};
 use crate::persistence::{
     ConnectionData, NodeData, ParameterValue, Patch, PatchError,
     load_from_file, save_to_file,
@@ -63,6 +64,10 @@ pub struct SynthApp {
 
     /// Status message for save/load operations (auto-clears after display).
     status_message: Option<String>,
+
+    /// Currently pressed keyboard keys for virtual keyboard.
+    /// Stores (relative_note, egui::Key) in order of press for key priority.
+    pressed_keys: Vec<(i32, egui::Key)>,
 }
 
 impl SynthApp {
@@ -123,6 +128,7 @@ impl SynthApp {
             cached_params: HashMap::new(),
             current_patch_path: None,
             status_message: None,
+            pressed_keys: Vec::new(),
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -1232,6 +1238,99 @@ impl SynthApp {
             });
         });
     }
+
+    /// Handle keyboard events for the virtual keyboard module.
+    ///
+    /// Updates pressed_keys state and syncs with all Keyboard modules in the graph.
+    fn handle_keyboard_events(&mut self, ctx: &egui::Context) {
+        let mut keys_changed = false;
+
+        ctx.input(|i| {
+            // Check for newly pressed keys (that map to notes)
+            for event in &i.events {
+                match event {
+                    egui::Event::Key { key, pressed, modifiers, .. } => {
+                        // Skip if ctrl/alt/etc is held (those are shortcuts, not notes)
+                        if modifiers.ctrl || modifiers.alt || modifiers.command {
+                            continue;
+                        }
+
+                        if let Some(relative_note) = key_to_note(*key) {
+                            if *pressed {
+                                // Add key if not already in list
+                                if !self.pressed_keys.iter().any(|(_, k)| k == key) {
+                                    self.pressed_keys.push((relative_note, *key));
+                                    keys_changed = true;
+                                }
+                            } else {
+                                // Remove key from list
+                                if let Some(pos) = self.pressed_keys.iter().position(|(_, k)| k == key) {
+                                    self.pressed_keys.remove(pos);
+                                    keys_changed = true;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        });
+
+        // Update Keyboard modules if key state changed
+        if keys_changed {
+            self.sync_keyboard_modules();
+        }
+    }
+
+    /// Sync the current keyboard state to all Keyboard modules in the graph.
+    ///
+    /// Updates the Note and Gate parameters based on the currently pressed keys.
+    fn sync_keyboard_modules(&mut self) {
+        // Determine the active note based on key priority (for now, always use "Last" priority)
+        // The Keyboard module has a Priority parameter, but for simplicity we implement Last here
+        // and the module just outputs the values we set.
+        let (active_note, gate_active) = if let Some((note, _key)) = self.pressed_keys.last() {
+            // Use octave 0 for now - the module will apply its own octave shift
+            let midi_note = relative_to_midi(*note, 0);
+            (midi_note as f32, true)
+        } else {
+            // No keys pressed - keep last note, gate off
+            (60.0, false)
+        };
+
+        let gate_value = if gate_active { 1.0 } else { 0.0 };
+
+        // Collect Keyboard module engine IDs first to avoid borrow issues
+        let keyboard_nodes: Vec<u64> = self.graph_state.graph.nodes.iter()
+            .filter(|(_, node)| node.user_data.module_id == "input.keyboard")
+            .filter_map(|(node_id, _)| self.user_state.get_engine_node_id(node_id))
+            .collect();
+
+        // Parameters are in order: Note(0), Gate(1), Octave(2), Velocity(3), Priority(4)
+        let note_param_idx = 0;
+        let gate_param_idx = 1;
+
+        // Update all Keyboard modules
+        for engine_node_id in keyboard_nodes {
+            // Update Note parameter
+            self.send_command(EngineCommand::SetParameter {
+                node_id: engine_node_id,
+                param_index: note_param_idx,
+                value: active_note,
+            });
+
+            // Update Gate parameter
+            self.send_command(EngineCommand::SetParameter {
+                node_id: engine_node_id,
+                param_index: gate_param_idx,
+                value: gate_value,
+            });
+
+            // Also update the cached params so sync_parameters doesn't overwrite
+            self.cached_params.insert((engine_node_id, note_param_idx), active_note);
+            self.cached_params.insert((engine_node_id, gate_param_idx), gate_value);
+        }
+    }
 }
 
 /// Actions collected from the toolbar for deferred execution
@@ -1278,6 +1377,9 @@ impl eframe::App for SynthApp {
                 keyboard_load = true;
             }
         });
+
+        // Handle musical keyboard input (QWERTY to notes)
+        self.handle_keyboard_events(ctx);
 
         // Top toolbar panel
         let toolbar_actions = egui::TopBottomPanel::top("toolbar")
