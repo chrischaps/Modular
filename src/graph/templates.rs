@@ -38,6 +38,8 @@ pub enum SynthNodeTemplate {
     MidiNote,
     /// Sample & Hold - sample input on trigger, hold until next trigger.
     SampleHold,
+    /// Oscilloscope - real-time waveform visualization.
+    Oscilloscope,
 }
 
 impl SynthNodeTemplate {
@@ -57,6 +59,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::MidiMonitor => "util.midi_monitor",
             SynthNodeTemplate::MidiNote => "input.midi_note",
             SynthNodeTemplate::SampleHold => "util.sample_hold",
+            SynthNodeTemplate::Oscilloscope => "util.oscilloscope",
         }
     }
 
@@ -75,6 +78,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::MidiMonitor => ModuleCategory::Utility,
             SynthNodeTemplate::MidiNote => ModuleCategory::Source,
             SynthNodeTemplate::SampleHold => ModuleCategory::Utility,
+            SynthNodeTemplate::Oscilloscope => ModuleCategory::Utility,
         }
     }
 }
@@ -97,6 +101,7 @@ impl NodeTemplateIter for AllNodeTemplates {
             SynthNodeTemplate::Vca,
             SynthNodeTemplate::Attenuverter,
             SynthNodeTemplate::SampleHold,
+            SynthNodeTemplate::Oscilloscope,
             SynthNodeTemplate::MidiMonitor,
             SynthNodeTemplate::AudioOutput,
         ]
@@ -159,6 +164,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::MidiMonitor => Cow::Borrowed("MIDI Monitor"),
             SynthNodeTemplate::MidiNote => Cow::Borrowed("MIDI Note"),
             SynthNodeTemplate::SampleHold => Cow::Borrowed("Sample & Hold"),
+            SynthNodeTemplate::Oscilloscope => Cow::Borrowed("Oscilloscope"),
         }
     }
 
@@ -180,6 +186,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::MidiMonitor => "MIDI Monitor".to_string(),
             SynthNodeTemplate::MidiNote => "MIDI Note".to_string(),
             SynthNodeTemplate::SampleHold => "Sample & Hold".to_string(),
+            SynthNodeTemplate::Oscilloscope => "Oscilloscope".to_string(),
         }
     }
 
@@ -307,6 +314,14 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             ).with_knob_params(vec![
                 // Slew: glide time to new value (0-1s)
                 KnobParam::knob_only("Slew", "Slew"),
+            ]),
+            SynthNodeTemplate::Oscilloscope => SynthNodeData::new(
+                "util.oscilloscope",
+                "Oscilloscope",
+                ModuleCategory::Utility,
+            ).with_knob_params(vec![
+                // Trigger Level: threshold for triggering
+                KnobParam::knob_only("Trigger Level", "Trig"),
             ]),
         }
     }
@@ -1066,6 +1081,63 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthDataType::new(SignalType::Control),
                 );
             }
+            SynthNodeTemplate::Oscilloscope => {
+                // Input 1: Primary signal (audio or control)
+                graph.add_input_param(
+                    node_id,
+                    "In 1".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Input 2: Secondary signal (audio or control)
+                graph.add_input_param(
+                    node_id,
+                    "In 2".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // External trigger input
+                graph.add_input_param(
+                    node_id,
+                    "Trig".to_string(),
+                    SynthDataType::new(SignalType::Gate),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Trigger Mode: dropdown selector (shown inline)
+                graph.add_input_param(
+                    node_id,
+                    "Mode".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::select(
+                        0, // Auto
+                        vec!["Auto".to_string(), "Normal".to_string(), "Single".to_string(), "Free".to_string()],
+                        "Mode",
+                    ),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline as dropdown
+                );
+
+                // Trigger Level: knob-only parameter (-1 to +1)
+                graph.add_input_param(
+                    node_id,
+                    "Trigger Level".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(0.0, -1.0, 1.0, "", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // No output ports - display only
+            }
         }
     }
 }
@@ -1077,7 +1149,7 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 12);
+        assert_eq!(templates.len(), 13);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
@@ -1090,6 +1162,7 @@ mod tests {
         assert!(templates.contains(&SynthNodeTemplate::MidiMonitor));
         assert!(templates.contains(&SynthNodeTemplate::MidiNote));
         assert!(templates.contains(&SynthNodeTemplate::SampleHold));
+        assert!(templates.contains(&SynthNodeTemplate::Oscilloscope));
     }
 
     #[test]
@@ -1106,6 +1179,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::MidiMonitor.module_id(), "util.midi_monitor");
         assert_eq!(SynthNodeTemplate::MidiNote.module_id(), "input.midi_note");
         assert_eq!(SynthNodeTemplate::SampleHold.module_id(), "util.sample_hold");
+        assert_eq!(SynthNodeTemplate::Oscilloscope.module_id(), "util.oscilloscope");
     }
 
     #[test]
@@ -1122,6 +1196,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::MidiMonitor.category(), ModuleCategory::Utility);
         assert_eq!(SynthNodeTemplate::MidiNote.category(), ModuleCategory::Source);
         assert_eq!(SynthNodeTemplate::SampleHold.category(), ModuleCategory::Utility);
+        assert_eq!(SynthNodeTemplate::Oscilloscope.category(), ModuleCategory::Utility);
     }
 
     #[test]
@@ -1174,6 +1249,10 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::SampleHold.node_finder_label(&mut state),
             "Sample & Hold"
+        );
+        assert_eq!(
+            SynthNodeTemplate::Oscilloscope.node_finder_label(&mut state),
+            "Oscilloscope"
         );
     }
 }

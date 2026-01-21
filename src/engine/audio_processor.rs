@@ -6,7 +6,7 @@
 use std::time::Instant;
 
 use crate::dsp::{ModuleRegistry, ProcessContext};
-use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Clock, KeyboardInput, Lfo, MidiMonitor, MidiNote, SampleHold, SineOscillator, SvfFilter, Vca};
+use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Clock, KeyboardInput, Lfo, MidiMonitor, MidiNote, Oscilloscope, SampleHold, SineOscillator, SvfFilter, Vca};
 
 use super::audio_graph::AudioGraph;
 use super::channels::EngineHandle;
@@ -27,6 +27,7 @@ pub fn create_module_registry() -> ModuleRegistry {
     registry.register::<MidiMonitor>();
     registry.register::<MidiNote>();
     registry.register::<SampleHold>();
+    registry.register::<Oscilloscope>();
     registry
 }
 
@@ -129,6 +130,9 @@ impl AudioProcessor {
         // Send monitored output values to UI for LED indicators
         self.send_output_values();
 
+        // Send oscilloscope buffer data to UI for waveform display
+        self.send_scope_buffers();
+
         // Extract output from AudioOutput modules and write to output buffer
         self.extract_output(output, channels, num_frames);
 
@@ -167,6 +171,18 @@ impl AudioProcessor {
                 node_id,
                 output_index,
                 value,
+            });
+        }
+    }
+
+    /// Sends oscilloscope buffer data to the UI thread.
+    fn send_scope_buffers(&mut self) {
+        for (node_id, channel1, channel2, triggered) in self.graph.drain_scope_buffers() {
+            self.engine_handle.send_event_lossy(EngineEvent::ScopeBuffer {
+                node_id,
+                channel1: channel1.into_boxed_slice(),
+                channel2: channel2.into_boxed_slice(),
+                triggered,
             });
         }
     }
@@ -267,7 +283,8 @@ mod tests {
         assert!(registry.contains("util.midi_monitor"));
         assert!(registry.contains("input.midi_note"));
         assert!(registry.contains("util.sample_hold"));
-        assert_eq!(registry.len(), 12);
+        assert!(registry.contains("util.oscilloscope"));
+        assert_eq!(registry.len(), 13);
     }
 
     #[test]

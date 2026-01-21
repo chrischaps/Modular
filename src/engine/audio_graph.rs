@@ -96,6 +96,9 @@ pub struct AudioGraph {
     /// Temporary storage for sampled output values to send to UI.
     /// Populated during process(), consumed by the caller.
     sampled_output_values: Vec<(NodeId, PortIndex, f32)>,
+    /// Pending scope buffer data to send to UI.
+    /// Populated during process(), consumed by the caller.
+    pending_scope_buffers: Vec<(NodeId, Vec<f32>, Vec<f32>, bool)>,
 }
 
 impl AudioGraph {
@@ -114,6 +117,7 @@ impl AudioGraph {
             sampled_input_values: Vec::new(),
             monitored_outputs: HashSet::new(),
             sampled_output_values: Vec::new(),
+            pending_scope_buffers: Vec::new(),
         }
     }
 
@@ -132,6 +136,7 @@ impl AudioGraph {
             sampled_input_values: Vec::new(),
             monitored_outputs: HashSet::new(),
             sampled_output_values: Vec::new(),
+            pending_scope_buffers: Vec::new(),
         }
     }
 
@@ -403,6 +408,12 @@ impl AudioGraph {
         std::mem::take(&mut self.sampled_output_values)
     }
 
+    /// Drain pending scope buffer data for sending to UI.
+    /// Call this after process() to get oscilloscope waveform captures.
+    pub fn drain_scope_buffers(&mut self) -> Vec<(NodeId, Vec<f32>, Vec<f32>, bool)> {
+        std::mem::take(&mut self.pending_scope_buffers)
+    }
+
     // ========================================================================
     // Topological Sort
     // ========================================================================
@@ -562,6 +573,9 @@ impl AudioGraph {
         // Sample monitored inputs and outputs after processing
         self.sample_monitored_inputs();
         self.sample_monitored_outputs();
+
+        // Collect scope data from oscilloscope modules
+        self.collect_scope_data();
     }
 
     /// Samples the values of monitored inputs for UI feedback.
@@ -617,6 +631,20 @@ impl AudioGraph {
                 // For other signals, use first sample
                 let value = buf.samples.iter().copied().fold(0.0_f32, f32::max);
                 self.sampled_output_values.push((node_id, output_index, value));
+            }
+        }
+    }
+
+    /// Collects scope buffer data from oscilloscope modules.
+    fn collect_scope_data(&mut self) {
+        // Collect node IDs to iterate over (to avoid borrowing issues)
+        let node_ids: Vec<NodeId> = self.modules.keys().copied().collect();
+
+        for node_id in node_ids {
+            if let Some(data) = self.modules.get_mut(&node_id) {
+                if let Some((ch1, ch2, triggered)) = data.module.take_scope_data() {
+                    self.pending_scope_buffers.push((node_id, ch1, ch2, triggered));
+                }
             }
         }
     }

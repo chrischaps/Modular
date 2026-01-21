@@ -9,6 +9,7 @@ pub mod waveform_display;
 pub mod spectrum_display;
 pub mod led;
 pub mod cpu_meter;
+pub mod oscilloscope_display;
 
 // Future submodules:
 // pub mod vu_meter;
@@ -26,3 +27,4 @@ pub use spectrum_display::{
 };
 pub use led::{led, LedConfig};
 pub use cpu_meter::{cpu_meter, CpuMeterConfig, cpu_load_color};
+pub use oscilloscope_display::{oscilloscope_display, OscilloscopeConfig, TriggerMode};

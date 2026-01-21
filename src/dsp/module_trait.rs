@@ -266,6 +266,17 @@ pub trait DspModule: Send + 'static {
     fn get_peak_levels(&self) -> Option<(f32, f32)> {
         None
     }
+
+    /// Returns captured scope buffer data for oscilloscope modules.
+    ///
+    /// Returns `Some((channel1, channel2, triggered))` when the oscilloscope has
+    /// a new waveform capture ready to display. Returns `None` otherwise.
+    ///
+    /// The returned data is consumed (the module should clear its internal flag
+    /// indicating new data is available).
+    fn take_scope_data(&mut self) -> Option<(Vec<f32>, Vec<f32>, bool)> {
+        None
+    }
 }
 
 #[cfg(test)]

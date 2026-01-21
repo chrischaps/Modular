@@ -317,6 +317,7 @@ mod tests {
             version: PATCH_VERSION + 1,
             nodes: vec![],
             connections: vec![],
+            midi_mappings: vec![],
         };
         assert!(!future_patch.is_compatible());
     }

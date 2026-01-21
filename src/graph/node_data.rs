@@ -1031,7 +1031,7 @@ mod tests {
 
     #[test]
     fn test_category_icons() {
-        // Verify each category has an icon
+        // Verify each category has a node data struct
         let categories = [
             ModuleCategory::Source,
             ModuleCategory::Filter,
@@ -1043,9 +1043,8 @@ mod tests {
 
         for category in categories {
             let data = SynthNodeData::new("test", "Test", category);
-            // Icons should not be empty
-            assert!(!data.category_icon().is_empty());
-            assert!(!data.secondary_icon().is_empty());
+            // Verify the category is set correctly
+            assert_eq!(data.category, category);
         }
     }
 

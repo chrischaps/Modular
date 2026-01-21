@@ -103,7 +103,7 @@ pub enum EngineCommand {
 
 /// Events sent from the audio engine to the UI thread.
 /// These provide feedback for metering and status display.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum EngineEvent {
     /// Current output levels for metering display.
     OutputLevel {
@@ -146,6 +146,19 @@ pub enum EngineEvent {
         /// The sampled value (typically first sample or max of block).
         value: f32,
     },
+
+    /// Oscilloscope buffer data for waveform display.
+    /// Sent when an oscilloscope module captures a triggered waveform.
+    ScopeBuffer {
+        /// The oscilloscope node that captured this data.
+        node_id: NodeId,
+        /// Channel 1 waveform samples.
+        channel1: Box<[f32]>,
+        /// Channel 2 waveform samples (empty if not connected).
+        channel2: Box<[f32]>,
+        /// Whether this capture was triggered (true) or free-running (false).
+        triggered: bool,
+    },
 }
 
 #[cfg(test)]
@@ -174,17 +187,35 @@ mod tests {
     }
 
     #[test]
-    fn test_event_copy() {
+    fn test_event_clone() {
         let event = EngineEvent::OutputLevel {
             left: 0.5,
             right: 0.7,
         };
-        let copied = event;
-        if let EngineEvent::OutputLevel { left, right } = copied {
+        let cloned = event.clone();
+        if let EngineEvent::OutputLevel { left, right } = cloned {
             assert!((left - 0.5).abs() < f32::EPSILON);
             assert!((right - 0.7).abs() < f32::EPSILON);
         } else {
-            panic!("Copy failed");
+            panic!("Clone failed");
+        }
+    }
+
+    #[test]
+    fn test_scope_buffer_event() {
+        let event = EngineEvent::ScopeBuffer {
+            node_id: 1,
+            channel1: vec![0.0, 0.5, 1.0, 0.5, 0.0].into_boxed_slice(),
+            channel2: vec![].into_boxed_slice(),
+            triggered: true,
+        };
+        if let EngineEvent::ScopeBuffer { node_id, channel1, channel2, triggered } = event {
+            assert_eq!(node_id, 1);
+            assert_eq!(channel1.len(), 5);
+            assert!(channel2.is_empty());
+            assert!(triggered);
+        } else {
+            panic!("Wrong event type");
         }
     }
 
