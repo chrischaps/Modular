@@ -1239,10 +1239,15 @@ impl SynthApp {
         });
     }
 
+    /// Check if there are any Keyboard modules in the graph.
+    fn has_keyboard_modules(&self) -> bool {
+        self.graph_state.graph.nodes.iter()
+            .any(|(_, node)| node.user_data.module_id == "input.keyboard")
+    }
+
     /// Handle keyboard events for the virtual keyboard module.
     ///
-    /// Polls key states directly (rather than events) to avoid issues with
-    /// the node graph consuming keyboard events.
+    /// Uses raw input events to capture keyboard input before the UI consumes them.
     fn handle_keyboard_events(&mut self, ctx: &egui::Context) {
         // Skip if modifier keys are held (those are shortcuts, not notes)
         let skip_keyboard = ctx.input(|i| {
@@ -1252,57 +1257,39 @@ impl SynthApp {
             return;
         }
 
-        // All keys that can map to notes
-        const NOTE_KEYS: &[egui::Key] = &[
-            egui::Key::Z, egui::Key::X, egui::Key::C, egui::Key::V,
-            egui::Key::B, egui::Key::N, egui::Key::M, egui::Key::Comma,
-            egui::Key::Period, egui::Key::Slash,
-            egui::Key::S, egui::Key::D, egui::Key::F, egui::Key::G,
-            egui::Key::H, egui::Key::J, egui::Key::K, egui::Key::L,
-            egui::Key::Semicolon,
-            egui::Key::Q, egui::Key::W, egui::Key::E, egui::Key::R,
-            egui::Key::T, egui::Key::Y, egui::Key::U, egui::Key::I,
-            egui::Key::O, egui::Key::P,
-        ];
-
-        // Build new pressed_keys list from current key states
-        let mut new_pressed: Vec<(i32, egui::Key)> = Vec::new();
+        // Process raw keyboard events - these haven't been consumed yet
+        let mut keys_changed = false;
 
         ctx.input(|i| {
-            for &key in NOTE_KEYS {
-                if i.key_down(key) {
-                    if let Some(note) = key_to_note(key) {
-                        new_pressed.push((note, key));
+            // Check raw events for key presses/releases
+            for event in &i.raw.events {
+                if let egui::Event::Key { key, pressed, repeat, .. } = event {
+                    // Skip key repeat events
+                    if *repeat {
+                        continue;
+                    }
+
+                    if let Some(relative_note) = key_to_note(*key) {
+                        if *pressed {
+                            // Add key if not already in list
+                            if !self.pressed_keys.iter().any(|(_, k)| k == key) {
+                                self.pressed_keys.push((relative_note, *key));
+                                keys_changed = true;
+                            }
+                        } else {
+                            // Remove key from list
+                            if let Some(pos) = self.pressed_keys.iter().position(|(_, k)| k == key) {
+                                self.pressed_keys.remove(pos);
+                                keys_changed = true;
+                            }
+                        }
                     }
                 }
             }
         });
 
-        // Sort by note to maintain consistent order (for lowest/highest priority)
-        // But preserve insertion order for "last" priority by checking old list
-        let mut final_pressed: Vec<(i32, egui::Key)> = Vec::new();
-
-        // First, keep keys that were already pressed (in their original order)
-        for &(note, key) in &self.pressed_keys {
-            if new_pressed.iter().any(|(_, k)| *k == key) {
-                final_pressed.push((note, key));
-            }
-        }
-
-        // Then add newly pressed keys
-        for (note, key) in new_pressed {
-            if !final_pressed.iter().any(|(_, k)| *k == key) {
-                final_pressed.push((note, key));
-            }
-        }
-
-        // Check if state changed
-        let changed = final_pressed.len() != self.pressed_keys.len()
-            || final_pressed.iter().zip(self.pressed_keys.iter())
-                .any(|((_, k1), (_, k2))| k1 != k2);
-
-        if changed {
-            self.pressed_keys = final_pressed;
+        // Update Keyboard modules if key state changed
+        if keys_changed {
             self.sync_keyboard_modules();
         }
     }
@@ -1384,7 +1371,8 @@ impl eframe::App for SynthApp {
         let had_status_message = self.status_message.is_some();
 
         // Request continuous repaints when playing (for LED indicators and other visualizations)
-        if self.is_playing {
+        // Also repaint continuously when there are keyboard modules to catch all key events
+        if self.is_playing || self.has_keyboard_modules() {
             ctx.request_repaint();
         }
 
