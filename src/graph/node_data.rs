@@ -760,6 +760,315 @@ impl NodeDataTrait for SynthNodeData {
             crate::widgets::oscilloscope_display(ui, channel1, channel2, &config);
         }
 
+        // Special rendering for Step Sequencer module
+        if self.module_id == "seq.step" {
+            // Add separator
+            ui.add_space(4.0);
+            let category_color = self.category.color();
+            let separator_color = Color32::from_rgba_unmultiplied(
+                category_color.r(),
+                category_color.g(),
+                category_color.b(),
+                64,
+            );
+            ui.painter().hline(
+                ui.available_rect_before_wrap().x_range(),
+                ui.cursor().top(),
+                egui::Stroke::new(1.0, separator_color),
+            );
+            ui.add_space(4.0);
+
+            // Get step data from the node's input parameters
+            let (num_steps, current_step_output, step_data) = if let Some(node) = graph.nodes.get(node_id) {
+                let mut steps = 8usize;
+                let mut pitches = [60u8; 16];
+                let mut gates = [true; 16];
+
+                for (name, input_id) in &node.inputs {
+                    let input = graph.get_input(*input_id);
+
+                    if name == "Steps" {
+                        if let SynthValueType::LinearRange { value, .. } = &input.value {
+                            steps = (*value as usize).clamp(1, 16);
+                        }
+                    }
+
+                    // Parse step parameters
+                    for step in 1..=16 {
+                        if *name == format!("Step {} Pitch", step) {
+                            if let SynthValueType::LinearRange { value, .. } = &input.value {
+                                pitches[step - 1] = *value as u8;
+                            }
+                        }
+                        if *name == format!("Step {} Gate", step) {
+                            if let SynthValueType::Toggle { value, .. } = &input.value {
+                                gates[step - 1] = *value;
+                            }
+                        }
+                    }
+                }
+
+                // Get current step from output (Step port is output index 3)
+                let current = engine_node_id
+                    .and_then(|eid| user_state.get_output_value(eid, 3))
+                    .map(|v| ((v * (steps - 1).max(1) as f32).round() as usize).min(steps - 1))
+                    .unwrap_or(0);
+
+                (steps, current, (pitches, gates))
+            } else {
+                (8, 0, ([60u8; 16], [true; 16]))
+            };
+
+            let (pitches, gates) = step_data;
+
+            // Render step grid (two rows of 8)
+            ui.vertical(|ui| {
+                ui.set_min_width(220.0);
+
+                // Step size
+                let step_size = 24.0;
+                let step_spacing = 3.0;
+
+                // Row 1: Steps 1-8
+                ui.horizontal(|ui| {
+                    for step in 0..8.min(num_steps) {
+                        let is_current = step == current_step_output;
+                        let has_gate = gates[step];
+                        let pitch = pitches[step];
+
+                        // Step button appearance
+                        let base_color = if has_gate {
+                            Color32::from_rgb(100, 200, 100) // Green for gate on
+                        } else {
+                            Color32::from_rgb(60, 60, 70) // Dark for gate off
+                        };
+
+                        let color = if is_current {
+                            // Brighten current step
+                            Color32::from_rgb(
+                                (base_color.r() as u16 + 100).min(255) as u8,
+                                (base_color.g() as u16 + 100).min(255) as u8,
+                                (base_color.b() as u16 + 50).min(255) as u8,
+                            )
+                        } else {
+                            base_color
+                        };
+
+                        // Draw step button
+                        let (rect, response) = ui.allocate_exact_size(
+                            egui::vec2(step_size, step_size + 12.0),
+                            egui::Sense::click(),
+                        );
+
+                        let step_rect = egui::Rect::from_min_size(
+                            rect.min,
+                            egui::vec2(step_size, step_size),
+                        );
+
+                        // Background
+                        ui.painter().rect_filled(step_rect, 3.0, color);
+
+                        // Current step indicator (border)
+                        if is_current {
+                            ui.painter().rect_stroke(
+                                step_rect,
+                                3.0,
+                                egui::Stroke::new(2.0, Color32::WHITE),
+                            );
+                        }
+
+                        // Note name below
+                        let note_name = crate::modules::sequencer::note_to_name(pitch);
+                        let text_pos = egui::pos2(
+                            rect.center().x,
+                            step_rect.bottom() + 2.0,
+                        );
+                        ui.painter().text(
+                            text_pos,
+                            egui::Align2::CENTER_TOP,
+                            &note_name,
+                            egui::FontId::proportional(8.0),
+                            Color32::from_gray(180),
+                        );
+
+                        // Handle click to toggle gate
+                        if response.clicked() {
+                            let param_name = format!("Step {} Gate", step + 1);
+                            let new_value = if gates[step] { 0.0 } else { 1.0 };
+                            responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
+                                node_id,
+                                param_name,
+                                value: new_value,
+                            }));
+                        }
+
+                        // Handle right-click to edit pitch
+                        response.context_menu(|ui| {
+                            ui.label(RichText::new(format!("Step {}", step + 1)).strong());
+                            ui.separator();
+
+                            // Pitch adjustment
+                            let current_pitch = pitches[step] as i32;
+                            if ui.button("Pitch +12 (Octave Up)").clicked() {
+                                let new_pitch = (current_pitch + 12).min(127) as f32;
+                                responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
+                                    node_id,
+                                    param_name: format!("Step {} Pitch", step + 1),
+                                    value: new_pitch,
+                                }));
+                                ui.close_menu();
+                            }
+                            if ui.button("Pitch +1 (Semitone Up)").clicked() {
+                                let new_pitch = (current_pitch + 1).min(127) as f32;
+                                responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
+                                    node_id,
+                                    param_name: format!("Step {} Pitch", step + 1),
+                                    value: new_pitch,
+                                }));
+                                ui.close_menu();
+                            }
+                            if ui.button("Pitch -1 (Semitone Down)").clicked() {
+                                let new_pitch = (current_pitch - 1).max(0) as f32;
+                                responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
+                                    node_id,
+                                    param_name: format!("Step {} Pitch", step + 1),
+                                    value: new_pitch,
+                                }));
+                                ui.close_menu();
+                            }
+                            if ui.button("Pitch -12 (Octave Down)").clicked() {
+                                let new_pitch = (current_pitch - 12).max(0) as f32;
+                                responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
+                                    node_id,
+                                    param_name: format!("Step {} Pitch", step + 1),
+                                    value: new_pitch,
+                                }));
+                                ui.close_menu();
+                            }
+                        });
+
+                        ui.add_space(step_spacing);
+                    }
+                });
+
+                // Row 2: Steps 9-16 (if num_steps > 8)
+                if num_steps > 8 {
+                    ui.add_space(2.0);
+                    ui.horizontal(|ui| {
+                        for step in 8..16.min(num_steps) {
+                            let is_current = step == current_step_output;
+                            let has_gate = gates[step];
+                            let pitch = pitches[step];
+
+                            let base_color = if has_gate {
+                                Color32::from_rgb(100, 200, 100)
+                            } else {
+                                Color32::from_rgb(60, 60, 70)
+                            };
+
+                            let color = if is_current {
+                                Color32::from_rgb(
+                                    (base_color.r() as u16 + 100).min(255) as u8,
+                                    (base_color.g() as u16 + 100).min(255) as u8,
+                                    (base_color.b() as u16 + 50).min(255) as u8,
+                                )
+                            } else {
+                                base_color
+                            };
+
+                            let (rect, response) = ui.allocate_exact_size(
+                                egui::vec2(step_size, step_size + 12.0),
+                                egui::Sense::click(),
+                            );
+
+                            let step_rect = egui::Rect::from_min_size(
+                                rect.min,
+                                egui::vec2(step_size, step_size),
+                            );
+
+                            ui.painter().rect_filled(step_rect, 3.0, color);
+
+                            if is_current {
+                                ui.painter().rect_stroke(
+                                    step_rect,
+                                    3.0,
+                                    egui::Stroke::new(2.0, Color32::WHITE),
+                                );
+                            }
+
+                            let note_name = crate::modules::sequencer::note_to_name(pitch);
+                            let text_pos = egui::pos2(
+                                rect.center().x,
+                                step_rect.bottom() + 2.0,
+                            );
+                            ui.painter().text(
+                                text_pos,
+                                egui::Align2::CENTER_TOP,
+                                &note_name,
+                                egui::FontId::proportional(8.0),
+                                Color32::from_gray(180),
+                            );
+
+                            if response.clicked() {
+                                let param_name = format!("Step {} Gate", step + 1);
+                                let new_value = if gates[step] { 0.0 } else { 1.0 };
+                                responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
+                                    node_id,
+                                    param_name,
+                                    value: new_value,
+                                }));
+                            }
+
+                            response.context_menu(|ui| {
+                                ui.label(RichText::new(format!("Step {}", step + 1)).strong());
+                                ui.separator();
+
+                                let current_pitch = pitches[step] as i32;
+                                if ui.button("Pitch +12 (Octave Up)").clicked() {
+                                    let new_pitch = (current_pitch + 12).min(127) as f32;
+                                    responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
+                                        node_id,
+                                        param_name: format!("Step {} Pitch", step + 1),
+                                        value: new_pitch,
+                                    }));
+                                    ui.close_menu();
+                                }
+                                if ui.button("Pitch +1 (Semitone Up)").clicked() {
+                                    let new_pitch = (current_pitch + 1).min(127) as f32;
+                                    responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
+                                        node_id,
+                                        param_name: format!("Step {} Pitch", step + 1),
+                                        value: new_pitch,
+                                    }));
+                                    ui.close_menu();
+                                }
+                                if ui.button("Pitch -1 (Semitone Down)").clicked() {
+                                    let new_pitch = (current_pitch - 1).max(0) as f32;
+                                    responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
+                                        node_id,
+                                        param_name: format!("Step {} Pitch", step + 1),
+                                        value: new_pitch,
+                                    }));
+                                    ui.close_menu();
+                                }
+                                if ui.button("Pitch -12 (Octave Down)").clicked() {
+                                    let new_pitch = (current_pitch - 12).max(0) as f32;
+                                    responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
+                                        node_id,
+                                        param_name: format!("Step {} Pitch", step + 1),
+                                        value: new_pitch,
+                                    }));
+                                    ui.close_menu();
+                                }
+                            });
+
+                            ui.add_space(step_spacing);
+                        }
+                    });
+                }
+            });
+        }
+
         // Render horizontal row of knobs if this node has knob parameters
         if !self.knob_params.is_empty() {
             // Add some spacing before the knob row

@@ -40,6 +40,8 @@ pub enum SynthNodeTemplate {
     SampleHold,
     /// Oscilloscope - real-time waveform visualization.
     Oscilloscope,
+    /// Step Sequencer - 16-step sequencer with pitch, gate, and velocity.
+    StepSequencer,
 }
 
 impl SynthNodeTemplate {
@@ -60,6 +62,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::MidiNote => "input.midi_note",
             SynthNodeTemplate::SampleHold => "util.sample_hold",
             SynthNodeTemplate::Oscilloscope => "util.oscilloscope",
+            SynthNodeTemplate::StepSequencer => "seq.step",
         }
     }
 
@@ -79,6 +82,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::MidiNote => ModuleCategory::Source,
             SynthNodeTemplate::SampleHold => ModuleCategory::Utility,
             SynthNodeTemplate::Oscilloscope => ModuleCategory::Utility,
+            SynthNodeTemplate::StepSequencer => ModuleCategory::Utility,
         }
     }
 }
@@ -102,6 +106,7 @@ impl NodeTemplateIter for AllNodeTemplates {
             SynthNodeTemplate::Attenuverter,
             SynthNodeTemplate::SampleHold,
             SynthNodeTemplate::Oscilloscope,
+            SynthNodeTemplate::StepSequencer,
             SynthNodeTemplate::MidiMonitor,
             SynthNodeTemplate::AudioOutput,
         ]
@@ -165,6 +170,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::MidiNote => Cow::Borrowed("MIDI Note"),
             SynthNodeTemplate::SampleHold => Cow::Borrowed("Sample & Hold"),
             SynthNodeTemplate::Oscilloscope => Cow::Borrowed("Oscilloscope"),
+            SynthNodeTemplate::StepSequencer => Cow::Borrowed("Step Sequencer"),
         }
     }
 
@@ -187,6 +193,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::MidiNote => "MIDI Note".to_string(),
             SynthNodeTemplate::SampleHold => "Sample & Hold".to_string(),
             SynthNodeTemplate::Oscilloscope => "Oscilloscope".to_string(),
+            SynthNodeTemplate::StepSequencer => "Step Sequencer".to_string(),
         }
     }
 
@@ -322,6 +329,21 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             ).with_knob_params(vec![
                 // Trigger Level: threshold for triggering
                 KnobParam::knob_only("Trigger Level", "Trig"),
+            ]),
+            SynthNodeTemplate::StepSequencer => SynthNodeData::new(
+                "seq.step",
+                "Step Sequencer",
+                ModuleCategory::Utility,
+            ).with_knob_params(vec![
+                // Steps: sequence length (1-16)
+                KnobParam::knob_only("Steps", "Steps"),
+                // Gate Length: percentage of step duration
+                KnobParam::knob_only("Gate Length", "Gate"),
+            ]).with_led_indicators(vec![
+                // Gate output LED
+                LedIndicator::gate(1, "Gate"),
+                // EOC output LED
+                LedIndicator::activity(4, "EOC"),
             ]),
         }
     }
@@ -1138,6 +1160,132 @@ impl NodeTemplateTrait for SynthNodeTemplate {
 
                 // No output ports - display only
             }
+            SynthNodeTemplate::StepSequencer => {
+                // Clock input port
+                graph.add_input_param(
+                    node_id,
+                    "Clock".to_string(),
+                    SynthDataType::new(SignalType::Gate),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Reset input port
+                graph.add_input_param(
+                    node_id,
+                    "Reset".to_string(),
+                    SynthDataType::new(SignalType::Gate),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Run input port (default high = running)
+                graph.add_input_param(
+                    node_id,
+                    "Run".to_string(),
+                    SynthDataType::new(SignalType::Gate),
+                    SynthValueType::scalar(1.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Steps: knob-only parameter (1-16)
+                graph.add_input_param(
+                    node_id,
+                    "Steps".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(8.0, 1.0, 16.0, "", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Direction: dropdown selector (shown inline)
+                graph.add_input_param(
+                    node_id,
+                    "Direction".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::select(
+                        0, // Forward
+                        vec!["Fwd".to_string(), "Bwd".to_string(), "P-P".to_string(), "Rnd".to_string()],
+                        "Dir",
+                    ),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline as dropdown
+                );
+
+                // Gate Length: knob-only parameter (1-99%)
+                graph.add_input_param(
+                    node_id,
+                    "Gate Length".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(50.0, 1.0, 99.0, "%", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Per-step parameters (16 steps x 3 params = 48 params, hidden)
+                // These are controlled via the custom sequencer UI
+                for step in 1..=16 {
+                    // Pitch: MIDI note number (0-127)
+                    graph.add_input_param(
+                        node_id,
+                        format!("Step {} Pitch", step),
+                        SynthDataType::new(SignalType::Control),
+                        SynthValueType::linear_range(60.0, 0.0, 127.0, "", ""),
+                        InputParamKind::ConstantOnly,
+                        false, // Hidden - controlled via custom UI
+                    );
+
+                    // Gate: on/off toggle
+                    graph.add_input_param(
+                        node_id,
+                        format!("Step {} Gate", step),
+                        SynthDataType::new(SignalType::Control),
+                        SynthValueType::toggle(true, ""),
+                        InputParamKind::ConstantOnly,
+                        false, // Hidden - controlled via custom UI
+                    );
+
+                    // Velocity: 0-127
+                    graph.add_input_param(
+                        node_id,
+                        format!("Step {} Velocity", step),
+                        SynthDataType::new(SignalType::Control),
+                        SynthValueType::linear_range(100.0, 0.0, 127.0, "", ""),
+                        InputParamKind::ConstantOnly,
+                        false, // Hidden - controlled via custom UI
+                    );
+                }
+
+                // Output ports
+                graph.add_output_param(
+                    node_id,
+                    "Pitch".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "Gate".to_string(),
+                    SynthDataType::new(SignalType::Gate),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "Velocity".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "Step".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "EOC".to_string(),
+                    SynthDataType::new(SignalType::Gate),
+                );
+            }
         }
     }
 }
@@ -1149,7 +1297,7 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 13);
+        assert_eq!(templates.len(), 14);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
@@ -1163,6 +1311,7 @@ mod tests {
         assert!(templates.contains(&SynthNodeTemplate::MidiNote));
         assert!(templates.contains(&SynthNodeTemplate::SampleHold));
         assert!(templates.contains(&SynthNodeTemplate::Oscilloscope));
+        assert!(templates.contains(&SynthNodeTemplate::StepSequencer));
     }
 
     #[test]
@@ -1180,6 +1329,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::MidiNote.module_id(), "input.midi_note");
         assert_eq!(SynthNodeTemplate::SampleHold.module_id(), "util.sample_hold");
         assert_eq!(SynthNodeTemplate::Oscilloscope.module_id(), "util.oscilloscope");
+        assert_eq!(SynthNodeTemplate::StepSequencer.module_id(), "seq.step");
     }
 
     #[test]
@@ -1197,6 +1347,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::MidiNote.category(), ModuleCategory::Source);
         assert_eq!(SynthNodeTemplate::SampleHold.category(), ModuleCategory::Utility);
         assert_eq!(SynthNodeTemplate::Oscilloscope.category(), ModuleCategory::Utility);
+        assert_eq!(SynthNodeTemplate::StepSequencer.category(), ModuleCategory::Utility);
     }
 
     #[test]
@@ -1253,6 +1404,10 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::Oscilloscope.node_finder_label(&mut state),
             "Oscilloscope"
+        );
+        assert_eq!(
+            SynthNodeTemplate::StepSequencer.node_finder_label(&mut state),
+            "Step Sequencer"
         );
     }
 }

@@ -15,6 +15,7 @@ pub mod oscillator;
 pub mod oscilloscope;
 pub mod output;
 pub mod sample_hold;
+pub mod sequencer;
 pub mod vca;
 
 // Re-export commonly used types
@@ -30,4 +31,5 @@ pub use oscillator::SineOscillator;
 pub use oscilloscope::Oscilloscope;
 pub use output::AudioOutput;
 pub use sample_hold::SampleHold;
+pub use sequencer::StepSequencer;
 pub use vca::Vca;
