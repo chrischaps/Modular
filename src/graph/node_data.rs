@@ -682,91 +682,101 @@ impl NodeDataTrait for SynthNodeData {
                             };
 
                             // Render the knob based on value type
-                            let knob_response = ui.vertical(|ui| {
-                                ui.set_min_width(KNOB_SIZE + 8.0);
+                            let knob_response = ui.scope(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(KNOB_SIZE + 8.0);
 
-                                // Visual indicator for MIDI mapping or learn mode
-                                let show_midi_indicator = midi_config.has_midi_mapping || midi_config.is_learn_target;
-                                let show_connection_indicator = is_connected && !show_midi_indicator;
+                                    // Visual indicator for MIDI mapping or learn mode
+                                    let show_midi_indicator = midi_config.has_midi_mapping || midi_config.is_learn_target;
+                                    let show_connection_indicator = is_connected && !show_midi_indicator;
 
-                                if show_midi_indicator {
-                                    // MIDI CC badge - purple for mapped, blinking for learn mode
-                                    let badge_color = if midi_config.is_learn_target {
-                                        // Blink effect for learn mode
-                                        let time = ui.ctx().input(|i| i.time);
-                                        let blink = ((time * 4.0).sin() > 0.0) as u8;
-                                        Color32::from_rgba_unmultiplied(180, 100, 200, 128 + blink * 127)
-                                    } else {
-                                        Color32::from_rgb(180, 100, 200) // Purple for MIDI
-                                    };
+                                    if show_midi_indicator {
+                                        // MIDI CC badge - purple for mapped, blinking for learn mode
+                                        let badge_color = if midi_config.is_learn_target {
+                                            // Blink effect for learn mode
+                                            let time = ui.ctx().input(|i| i.time);
+                                            let blink = ((time * 4.0).sin() > 0.0) as u8;
+                                            Color32::from_rgba_unmultiplied(180, 100, 200, 128 + blink * 127)
+                                        } else {
+                                            Color32::from_rgb(180, 100, 200) // Purple for MIDI
+                                        };
 
-                                    let dot_size = 8.0;
-                                    let available_width = ui.available_width();
-                                    let badge_center = egui::pos2(
-                                        ui.cursor().left() + available_width / 2.0,
-                                        ui.cursor().top() + dot_size / 2.0,
-                                    );
-
-                                    // Draw badge background
-                                    ui.painter().circle_filled(badge_center, dot_size / 2.0 + 1.0, badge_color);
-
-                                    // Draw "M" letter on badge
-                                    let text_pos = badge_center - egui::vec2(3.0, 4.0);
-                                    ui.painter().text(
-                                        text_pos,
-                                        egui::Align2::LEFT_TOP,
-                                        "M",
-                                        egui::FontId::proportional(8.0),
-                                        Color32::WHITE,
-                                    );
-
-                                    ui.add_space(dot_size + 2.0);
-
-                                    // Request repaint for blinking effect
-                                    if midi_config.is_learn_target {
-                                        ui.ctx().request_repaint();
-                                    }
-                                } else if show_connection_indicator {
-                                    // Orange color for Control signal (matches signal type color)
-                                    let indicator_color = if signal_value.is_some() {
-                                        Color32::from_rgb(255, 165, 0) // Orange for active signal
-                                    } else {
-                                        Color32::from_rgb(100, 200, 100) // Green for connected but no signal yet
-                                    };
-                                    // Draw a small colored dot centered above the knob
-                                    let dot_size = 6.0;
-                                    let available_width = ui.available_width();
-                                    let dot_rect = egui::Rect::from_center_size(
-                                        egui::pos2(
+                                        let dot_size = 8.0;
+                                        let available_width = ui.available_width();
+                                        let badge_center = egui::pos2(
                                             ui.cursor().left() + available_width / 2.0,
                                             ui.cursor().top() + dot_size / 2.0,
-                                        ),
-                                        egui::vec2(dot_size, dot_size),
-                                    );
-                                    ui.painter().circle_filled(dot_rect.center(), dot_size / 2.0, indicator_color);
-                                    ui.add_space(dot_size + 2.0);
-                                }
+                                        );
 
-                                // Render knob based on the value type
-                                // Note: We need to clone to render since we can't mutate through the graph reference
-                                // The actual parameter change will be handled through the normal widget flow
-                                Self::render_knob_for_value(
-                                    ui,
-                                    &input.value,
-                                    &knob_param.label,
-                                    KNOB_SIZE,
-                                    is_connected,
-                                    node_id,
-                                    &knob_param.param_name,
-                                    &mut responses,
-                                    signal_value,
-                                    &midi_config,
-                                );
+                                        // Draw badge background
+                                        ui.painter().circle_filled(badge_center, dot_size / 2.0 + 1.0, badge_color);
+
+                                        // Draw "M" letter on badge
+                                        let text_pos = badge_center - egui::vec2(3.0, 4.0);
+                                        ui.painter().text(
+                                            text_pos,
+                                            egui::Align2::LEFT_TOP,
+                                            "M",
+                                            egui::FontId::proportional(8.0),
+                                            Color32::WHITE,
+                                        );
+
+                                        ui.add_space(dot_size + 2.0);
+
+                                        // Request repaint for blinking effect
+                                        if midi_config.is_learn_target {
+                                            ui.ctx().request_repaint();
+                                        }
+                                    } else if show_connection_indicator {
+                                        // Orange color for Control signal (matches signal type color)
+                                        let indicator_color = if signal_value.is_some() {
+                                            Color32::from_rgb(255, 165, 0) // Orange for active signal
+                                        } else {
+                                            Color32::from_rgb(100, 200, 100) // Green for connected but no signal yet
+                                        };
+                                        // Draw a small colored dot centered above the knob
+                                        let dot_size = 6.0;
+                                        let available_width = ui.available_width();
+                                        let dot_rect = egui::Rect::from_center_size(
+                                            egui::pos2(
+                                                ui.cursor().left() + available_width / 2.0,
+                                                ui.cursor().top() + dot_size / 2.0,
+                                            ),
+                                            egui::vec2(dot_size, dot_size),
+                                        );
+                                        ui.painter().circle_filled(dot_rect.center(), dot_size / 2.0, indicator_color);
+                                        ui.add_space(dot_size + 2.0);
+                                    }
+
+                                    // Render knob based on the value type
+                                    // Note: We need to clone to render since we can't mutate through the graph reference
+                                    // The actual parameter change will be handled through the normal widget flow
+                                    Self::render_knob_for_value(
+                                        ui,
+                                        &input.value,
+                                        &knob_param.label,
+                                        KNOB_SIZE,
+                                        is_connected,
+                                        node_id,
+                                        &knob_param.param_name,
+                                        &mut responses,
+                                        signal_value,
+                                        &midi_config,
+                                    );
+                                });
                             });
+
+                            // Create an interactive rect over the knob area for context menu
+                            let knob_rect = knob_response.response.rect;
+                            let interact_response = ui.interact(
+                                knob_rect,
+                                egui::Id::new(("knob_context", node_id, current_param_index)),
+                                egui::Sense::click(),
+                            );
 
                             // Handle right-click context menu for MIDI Learn
                             if let Some(engine_id) = engine_node_id {
-                                knob_response.response.context_menu(|ui| {
+                                interact_response.context_menu(|ui| {
                                     if midi_config.has_midi_mapping {
                                         let cc_text = midi_config.cc_number
                                             .map(|cc| format!("CC #{}", cc))
