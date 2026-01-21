@@ -24,6 +24,8 @@ pub enum SynthNodeTemplate {
     SvfFilter,
     /// ADSR Envelope - attack-decay-sustain-release envelope generator.
     AdsrEnvelope,
+    /// Clock - periodic gate trigger generator.
+    Clock,
 }
 
 impl SynthNodeTemplate {
@@ -36,6 +38,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::Lfo => "mod.lfo",
             SynthNodeTemplate::SvfFilter => "filter.svf",
             SynthNodeTemplate::AdsrEnvelope => "mod.adsr",
+            SynthNodeTemplate::Clock => "util.clock",
         }
     }
 
@@ -47,6 +50,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::Lfo => ModuleCategory::Modulation,
             SynthNodeTemplate::SvfFilter => ModuleCategory::Filter,
             SynthNodeTemplate::AdsrEnvelope => ModuleCategory::Modulation,
+            SynthNodeTemplate::Clock => ModuleCategory::Utility,
         }
     }
 }
@@ -63,6 +67,7 @@ impl NodeTemplateIter for AllNodeTemplates {
             SynthNodeTemplate::SvfFilter,
             SynthNodeTemplate::AdsrEnvelope,
             SynthNodeTemplate::Lfo,
+            SynthNodeTemplate::Clock,
             SynthNodeTemplate::AudioOutput,
         ]
     }
@@ -117,6 +122,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::Lfo => Cow::Borrowed("LFO"),
             SynthNodeTemplate::SvfFilter => Cow::Borrowed("SVF Filter"),
             SynthNodeTemplate::AdsrEnvelope => Cow::Borrowed("ADSR Envelope"),
+            SynthNodeTemplate::Clock => Cow::Borrowed("Clock"),
         }
     }
 
@@ -131,6 +137,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::Lfo => "LFO".to_string(),
             SynthNodeTemplate::SvfFilter => "SVF Filter".to_string(),
             SynthNodeTemplate::AdsrEnvelope => "ADSR Envelope".to_string(),
+            SynthNodeTemplate::Clock => "Clock".to_string(),
         }
     }
 
@@ -185,6 +192,15 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 KnobParam::knob_only("Decay", "Dec"),
                 KnobParam::knob_only("Sustain", "Sus"),
                 KnobParam::knob_only("Release", "Rel"),
+            ]),
+            SynthNodeTemplate::Clock => SynthNodeData::new(
+                "util.clock",
+                "Clock",
+                ModuleCategory::Utility,
+            ).with_knob_params(vec![
+                // Tempo and Gate Length as knobs
+                KnobParam::knob_only("Tempo", "BPM"),
+                KnobParam::knob_only("Gate Length", "Gate"),
             ]),
         }
     }
@@ -450,6 +466,68 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthDataType::new(SignalType::Control),
                 );
             }
+            SynthNodeTemplate::Clock => {
+                // Sync input port
+                graph.add_input_param(
+                    node_id,
+                    "Sync".to_string(),
+                    SynthDataType::new(SignalType::Gate),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Tempo: knob-only parameter
+                graph.add_input_param(
+                    node_id,
+                    "Tempo".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(120.0 / 300.0, ""), // Normalized: 120 BPM in 20-300 range
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Gate Length: knob-only parameter
+                graph.add_input_param(
+                    node_id,
+                    "Gate Length".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(0.5, ""), // 50%
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Division: discrete selection (shown inline)
+                graph.add_input_param(
+                    node_id,
+                    "Division".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::select(
+                        2, // Quarter note default
+                        vec!["1".to_string(), "1/2".to_string(), "1/4".to_string(), "1/8".to_string(), "1/16".to_string()],
+                        "Div",
+                    ),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline as dropdown
+                );
+
+                // Run toggle (shown inline)
+                graph.add_input_param(
+                    node_id,
+                    "Run".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::toggle(true, "Run"),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline as checkbox
+                );
+
+                // Gate output port
+                graph.add_output_param(
+                    node_id,
+                    "Gate".to_string(),
+                    SynthDataType::new(SignalType::Gate),
+                );
+            }
         }
     }
 }
@@ -461,12 +539,13 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 5);
+        assert_eq!(templates.len(), 6);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
         assert!(templates.contains(&SynthNodeTemplate::SvfFilter));
         assert!(templates.contains(&SynthNodeTemplate::AdsrEnvelope));
+        assert!(templates.contains(&SynthNodeTemplate::Clock));
     }
 
     #[test]
@@ -476,6 +555,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::Lfo.module_id(), "mod.lfo");
         assert_eq!(SynthNodeTemplate::SvfFilter.module_id(), "filter.svf");
         assert_eq!(SynthNodeTemplate::AdsrEnvelope.module_id(), "mod.adsr");
+        assert_eq!(SynthNodeTemplate::Clock.module_id(), "util.clock");
     }
 
     #[test]
@@ -485,6 +565,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::Lfo.category(), ModuleCategory::Modulation);
         assert_eq!(SynthNodeTemplate::SvfFilter.category(), ModuleCategory::Filter);
         assert_eq!(SynthNodeTemplate::AdsrEnvelope.category(), ModuleCategory::Modulation);
+        assert_eq!(SynthNodeTemplate::Clock.category(), ModuleCategory::Utility);
     }
 
     #[test]
@@ -509,6 +590,10 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::AdsrEnvelope.node_finder_label(&mut state),
             "ADSR Envelope"
+        );
+        assert_eq!(
+            SynthNodeTemplate::Clock.node_finder_label(&mut state),
+            "Clock"
         );
     }
 }
