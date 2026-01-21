@@ -483,15 +483,24 @@ impl SynthApp {
                 use egui_node_graph2::InputParamKind;
                 match input.kind {
                     InputParamKind::ConstantOnly | InputParamKind::ConnectionOrConstant => {
-                        // Get the normalized value
-                        let normalized_value = input.value.normalized_value();
+                        // Get the actual value (not normalized) for the audio engine
+                        // This ensures frequency values are in Hz, time values in seconds, etc.
+                        let actual_value = input.value.actual_value();
 
                         // Create cache key
                         let cache_key = (engine_node_id, param_index);
 
-                        // Check if value has changed
+                        // Check if value has changed (use relative tolerance for large values like frequency)
                         let needs_update = match self.cached_params.get(&cache_key) {
-                            Some(&cached_value) => (normalized_value - cached_value).abs() > 0.0001,
+                            Some(&cached_value) => {
+                                let diff = (actual_value - cached_value).abs();
+                                let threshold = if actual_value.abs() > 10.0 {
+                                    actual_value.abs() * 0.0001 // Relative tolerance for large values
+                                } else {
+                                    0.0001 // Absolute tolerance for small values
+                                };
+                                diff > threshold
+                            }
                             None => true, // New parameter, needs initial sync
                         };
 
@@ -499,9 +508,9 @@ impl SynthApp {
                             commands_to_send.push(EngineCommand::SetParameter {
                                 node_id: engine_node_id,
                                 param_index,
-                                value: normalized_value,
+                                value: actual_value,
                             });
-                            self.cached_params.insert(cache_key, normalized_value);
+                            self.cached_params.insert(cache_key, actual_value);
                         }
 
                         param_index += 1;

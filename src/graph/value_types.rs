@@ -115,6 +115,24 @@ impl SynthValueType {
             }
         }
     }
+
+    /// Get the actual/raw value (not normalized).
+    ///
+    /// This returns the value in its natural units:
+    /// - Scalar: 0.0-1.0 (already in natural range)
+    /// - Frequency: Hz
+    /// - Time: seconds
+    /// - Toggle: 0.0 or 1.0
+    /// - Select: index as f32
+    pub fn actual_value(&self) -> f32 {
+        match self {
+            Self::Scalar { value, .. } => *value,
+            Self::Frequency { value, .. } => *value,  // Hz
+            Self::Time { value, .. } => *value,       // seconds
+            Self::Toggle { value, .. } => if *value { 1.0 } else { 0.0 },
+            Self::Select { value, .. } => *value as f32,
+        }
+    }
 }
 
 impl Default for SynthValueType {
