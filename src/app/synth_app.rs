@@ -481,12 +481,20 @@ impl SynthApp {
             ui.label(RichText::new("File").color(theme::text::SECONDARY));
             ui.add_space(8.0);
 
+            if ui.button("📄 New").on_hover_text("Clear patch").clicked() {
+                actions.new_patch = true;
+            }
+
             if ui.button("📂 Open").on_hover_text("Ctrl+O").clicked() {
                 actions.load_patch = true;
             }
 
             if ui.button("💾 Save").on_hover_text("Ctrl+S").clicked() {
                 actions.save_patch = true;
+            }
+
+            if ui.button("💾 Save As").on_hover_text("Save to new file").clicked() {
+                actions.save_as_patch = true;
             }
 
             ui.add_space(20.0);
@@ -1407,6 +1415,13 @@ impl SynthApp {
         self.cached_params.clear();
     }
 
+    /// Start a new patch - clears the graph and resets the current file path.
+    fn new_patch(&mut self) {
+        self.clear_graph();
+        self.current_patch_path = None;
+        self.status_message = Some("New patch created".to_string());
+    }
+
     /// Find the template for a given module ID.
     fn find_template_for_module(&self, module_id: &str) -> Option<SynthNodeTemplate> {
         use egui_node_graph2::NodeTemplateIter;
@@ -1760,7 +1775,9 @@ struct ToolbarActions {
     select_device: Option<usize>,
     refresh_devices: bool,
     save_patch: bool,
+    save_as_patch: bool,
     load_patch: bool,
+    new_patch: bool,
     // MIDI actions
     connect_midi_device: Option<usize>,
     disconnect_midi: bool,
@@ -1851,8 +1868,14 @@ impl eframe::App for SynthApp {
         if toolbar_actions.save_patch || keyboard_save {
             self.quick_save();
         }
+        if toolbar_actions.save_as_patch {
+            self.show_save_dialog();
+        }
         if toolbar_actions.load_patch || keyboard_load {
             self.show_load_dialog();
+        }
+        if toolbar_actions.new_patch {
+            self.new_patch();
         }
 
         // Handle MIDI actions
