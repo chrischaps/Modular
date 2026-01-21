@@ -4,7 +4,7 @@
 //! with command handling from the UI thread.
 
 use crate::dsp::{ModuleRegistry, ProcessContext};
-use crate::modules::{AudioOutput, Lfo, SineOscillator, SvfFilter};
+use crate::modules::{AdsrEnvelope, AudioOutput, Lfo, SineOscillator, SvfFilter};
 
 use super::audio_graph::AudioGraph;
 use super::channels::EngineHandle;
@@ -15,6 +15,7 @@ pub fn create_module_registry() -> ModuleRegistry {
     let mut registry = ModuleRegistry::new();
     registry.register::<SineOscillator>();
     registry.register::<SvfFilter>();
+    registry.register::<AdsrEnvelope>();
     registry.register::<AudioOutput>();
     registry.register::<Lfo>();
     registry
@@ -198,9 +199,10 @@ mod tests {
         let registry = create_module_registry();
         assert!(registry.contains("osc.sine"));
         assert!(registry.contains("filter.svf"));
+        assert!(registry.contains("mod.adsr"));
         assert!(registry.contains("output.audio"));
         assert!(registry.contains("mod.lfo"));
-        assert_eq!(registry.len(), 4);
+        assert_eq!(registry.len(), 5);
     }
 
     #[test]

@@ -22,6 +22,8 @@ pub enum SynthNodeTemplate {
     Lfo,
     /// State Variable Filter - multi-mode filter with LP, HP, BP outputs.
     SvfFilter,
+    /// ADSR Envelope - attack-decay-sustain-release envelope generator.
+    AdsrEnvelope,
 }
 
 impl SynthNodeTemplate {
@@ -33,6 +35,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::AudioOutput => "output.audio",
             SynthNodeTemplate::Lfo => "mod.lfo",
             SynthNodeTemplate::SvfFilter => "filter.svf",
+            SynthNodeTemplate::AdsrEnvelope => "mod.adsr",
         }
     }
 
@@ -43,6 +46,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::AudioOutput => ModuleCategory::Output,
             SynthNodeTemplate::Lfo => ModuleCategory::Modulation,
             SynthNodeTemplate::SvfFilter => ModuleCategory::Filter,
+            SynthNodeTemplate::AdsrEnvelope => ModuleCategory::Modulation,
         }
     }
 }
@@ -57,6 +61,7 @@ impl NodeTemplateIter for AllNodeTemplates {
         vec![
             SynthNodeTemplate::SineOscillator,
             SynthNodeTemplate::SvfFilter,
+            SynthNodeTemplate::AdsrEnvelope,
             SynthNodeTemplate::Lfo,
             SynthNodeTemplate::AudioOutput,
         ]
@@ -111,6 +116,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::AudioOutput => Cow::Borrowed("Audio Output"),
             SynthNodeTemplate::Lfo => Cow::Borrowed("LFO"),
             SynthNodeTemplate::SvfFilter => Cow::Borrowed("SVF Filter"),
+            SynthNodeTemplate::AdsrEnvelope => Cow::Borrowed("ADSR Envelope"),
         }
     }
 
@@ -124,6 +130,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::AudioOutput => "Audio Output".to_string(),
             SynthNodeTemplate::Lfo => "LFO".to_string(),
             SynthNodeTemplate::SvfFilter => "SVF Filter".to_string(),
+            SynthNodeTemplate::AdsrEnvelope => "ADSR Envelope".to_string(),
         }
     }
 
@@ -167,6 +174,17 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 KnobParam::exposed("Resonance", "Res"),
                 // Drive: knob-only
                 KnobParam::knob_only("Drive", "Drive"),
+            ]),
+            SynthNodeTemplate::AdsrEnvelope => SynthNodeData::new(
+                "mod.adsr",
+                "ADSR Envelope",
+                ModuleCategory::Modulation,
+            ).with_knob_params(vec![
+                // All ADSR parameters are knob-only (no CV input ports)
+                KnobParam::knob_only("Attack", "Atk"),
+                KnobParam::knob_only("Decay", "Dec"),
+                KnobParam::knob_only("Sustain", "Sus"),
+                KnobParam::knob_only("Release", "Rel"),
             ]),
         }
     }
@@ -364,6 +382,74 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthDataType::new(SignalType::Audio),
                 );
             }
+            SynthNodeTemplate::AdsrEnvelope => {
+                // Gate input port
+                graph.add_input_param(
+                    node_id,
+                    "Gate".to_string(),
+                    SynthDataType::new(SignalType::Gate),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Retrigger input port
+                graph.add_input_param(
+                    node_id,
+                    "Retrig".to_string(),
+                    SynthDataType::new(SignalType::Gate),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Attack: knob-only parameter (logarithmic time)
+                graph.add_input_param(
+                    node_id,
+                    "Attack".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::time(0.01, 0.001, 10.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Decay: knob-only parameter (logarithmic time)
+                graph.add_input_param(
+                    node_id,
+                    "Decay".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::time(0.1, 0.001, 10.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Sustain: knob-only parameter (0-1 level)
+                graph.add_input_param(
+                    node_id,
+                    "Sustain".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(0.7, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Release: knob-only parameter (logarithmic time)
+                graph.add_input_param(
+                    node_id,
+                    "Release".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::time(0.3, 0.001, 10.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Output port - Control signal
+                graph.add_output_param(
+                    node_id,
+                    "Out".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                );
+            }
         }
     }
 }
@@ -375,11 +461,12 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 4);
+        assert_eq!(templates.len(), 5);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
         assert!(templates.contains(&SynthNodeTemplate::SvfFilter));
+        assert!(templates.contains(&SynthNodeTemplate::AdsrEnvelope));
     }
 
     #[test]
@@ -388,6 +475,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::AudioOutput.module_id(), "output.audio");
         assert_eq!(SynthNodeTemplate::Lfo.module_id(), "mod.lfo");
         assert_eq!(SynthNodeTemplate::SvfFilter.module_id(), "filter.svf");
+        assert_eq!(SynthNodeTemplate::AdsrEnvelope.module_id(), "mod.adsr");
     }
 
     #[test]
@@ -396,6 +484,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::AudioOutput.category(), ModuleCategory::Output);
         assert_eq!(SynthNodeTemplate::Lfo.category(), ModuleCategory::Modulation);
         assert_eq!(SynthNodeTemplate::SvfFilter.category(), ModuleCategory::Filter);
+        assert_eq!(SynthNodeTemplate::AdsrEnvelope.category(), ModuleCategory::Modulation);
     }
 
     #[test]
@@ -416,6 +505,10 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::SvfFilter.node_finder_label(&mut state),
             "SVF Filter"
+        );
+        assert_eq!(
+            SynthNodeTemplate::AdsrEnvelope.node_finder_label(&mut state),
+            "ADSR Envelope"
         );
     }
 }
