@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use eframe::egui::{self, RichText, Layout, Align};
 use egui_node_graph2::{GraphEditorState, NodeResponse, NodeTemplateTrait, InputParamKind};
@@ -68,6 +69,15 @@ pub struct SynthApp {
     /// Currently pressed keyboard keys for virtual keyboard.
     /// Stores (relative_note, egui::Key) in order of press for key priority.
     pressed_keys: Vec<(i32, egui::Key)>,
+
+    /// Timestamp when the gate was last triggered (for minimum gate duration).
+    last_gate_on: Option<Instant>,
+
+    /// Whether the gate is currently being held high (for minimum duration).
+    gate_held_high: bool,
+
+    /// The last note that was triggered (to maintain pitch during gate hold).
+    last_triggered_note: f32,
 }
 
 impl SynthApp {
@@ -129,6 +139,9 @@ impl SynthApp {
             current_patch_path: None,
             status_message: None,
             pressed_keys: Vec::new(),
+            last_gate_on: None,
+            gate_held_high: false,
+            last_triggered_note: 60.0,
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -753,6 +766,9 @@ impl SynthApp {
                 continue;
             };
 
+            // Check if this is a keyboard module - we handle Note and Gate params separately
+            let is_keyboard = node.user_data.module_id == "input.keyboard";
+
             // Track which param index we're at (only count ConstantOnly params)
             let mut param_index = 0;
 
@@ -764,6 +780,13 @@ impl SynthApp {
                 use egui_node_graph2::InputParamKind;
                 match input.kind {
                     InputParamKind::ConstantOnly | InputParamKind::ConnectionOrConstant => {
+                        // Skip Note (0) and Gate (1) params for keyboard modules
+                        // These are controlled by keyboard events, not the graph UI
+                        if is_keyboard && param_index < 2 {
+                            param_index += 1;
+                            continue;
+                        }
+
                         // Get the actual value (not normalized) for the audio engine
                         // This ensures frequency values are in Hz, time values in seconds, etc.
                         let actual_value = input.value.actual_value();
@@ -1294,23 +1317,52 @@ impl SynthApp {
         }
     }
 
+    /// Minimum gate duration in milliseconds to ensure audio thread sees the trigger.
+    const MIN_GATE_DURATION_MS: u64 = 30;
+
     /// Sync the current keyboard state to all Keyboard modules in the graph.
     ///
     /// Updates the Note and Gate parameters based on the currently pressed keys.
+    /// Implements minimum gate duration to ensure reliable triggering.
     fn sync_keyboard_modules(&mut self) {
         // Determine the active note based on key priority (for now, always use "Last" priority)
-        // The Keyboard module has a Priority parameter, but for simplicity we implement Last here
-        // and the module just outputs the values we set.
-        let (active_note, gate_active) = if let Some((note, _key)) = self.pressed_keys.last() {
-            // Use octave 0 for now - the module will apply its own octave shift
+        let (active_note, should_gate_on) = if let Some((note, _key)) = self.pressed_keys.last() {
             let midi_note = relative_to_midi(*note, 0);
             (midi_note as f32, true)
         } else {
-            // No keys pressed - keep last note, gate off
-            (60.0, false)
+            (self.last_triggered_note, false)
         };
 
-        let gate_value = if gate_active { 1.0 } else { 0.0 };
+        // Determine actual gate state considering minimum duration
+        let gate_value = if should_gate_on {
+            // Key is pressed - gate should be on
+            if !self.gate_held_high {
+                // New note trigger
+                self.last_gate_on = Some(Instant::now());
+                self.gate_held_high = true;
+                self.last_triggered_note = active_note;
+            }
+            1.0
+        } else if self.gate_held_high {
+            // Key released but check minimum duration
+            if let Some(gate_time) = self.last_gate_on {
+                let elapsed_ms = gate_time.elapsed().as_millis() as u64;
+                if elapsed_ms < Self::MIN_GATE_DURATION_MS {
+                    // Keep gate high until minimum duration
+                    1.0
+                } else {
+                    // Minimum duration passed, can release
+                    self.gate_held_high = false;
+                    self.last_gate_on = None;
+                    0.0
+                }
+            } else {
+                self.gate_held_high = false;
+                0.0
+            }
+        } else {
+            0.0
+        };
 
         // Collect Keyboard module engine IDs first to avoid borrow issues
         let keyboard_nodes: Vec<u64> = self.graph_state.graph.nodes.iter()
@@ -1322,13 +1374,16 @@ impl SynthApp {
         let note_param_idx = 0;
         let gate_param_idx = 1;
 
+        // Use the triggered note when gate is high, otherwise active_note
+        let note_to_send = if self.gate_held_high { self.last_triggered_note } else { active_note };
+
         // Update all Keyboard modules
         for engine_node_id in keyboard_nodes {
             // Update Note parameter
             self.send_command(EngineCommand::SetParameter {
                 node_id: engine_node_id,
                 param_index: note_param_idx,
-                value: active_note,
+                value: note_to_send,
             });
 
             // Update Gate parameter
@@ -1339,8 +1394,21 @@ impl SynthApp {
             });
 
             // Also update the cached params so sync_parameters doesn't overwrite
-            self.cached_params.insert((engine_node_id, note_param_idx), active_note);
+            self.cached_params.insert((engine_node_id, note_param_idx), note_to_send);
             self.cached_params.insert((engine_node_id, gate_param_idx), gate_value);
+        }
+    }
+
+    /// Check if gate needs to be released after minimum duration.
+    fn update_gate_timing(&mut self) {
+        if self.gate_held_high && self.pressed_keys.is_empty() {
+            // Key was released, check if we should release the gate now
+            if let Some(gate_time) = self.last_gate_on {
+                if gate_time.elapsed().as_millis() as u64 >= Self::MIN_GATE_DURATION_MS {
+                    // Time to release
+                    self.sync_keyboard_modules();
+                }
+            }
         }
     }
 }
@@ -1393,6 +1461,9 @@ impl eframe::App for SynthApp {
 
         // Handle musical keyboard input (QWERTY to notes)
         self.handle_keyboard_events(ctx);
+
+        // Update gate timing (for minimum gate duration)
+        self.update_gate_timing();
 
         // Top toolbar panel
         let toolbar_actions = egui::TopBottomPanel::top("toolbar")
