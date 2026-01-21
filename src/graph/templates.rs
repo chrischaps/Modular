@@ -44,6 +44,8 @@ pub enum SynthNodeTemplate {
     StepSequencer,
     /// Stereo Delay - delay effect with feedback, filtering, and ping-pong.
     StereoDelay,
+    /// Reverb - Freeverb-style stereo reverb effect.
+    Reverb,
 }
 
 impl SynthNodeTemplate {
@@ -66,6 +68,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::Oscilloscope => "util.oscilloscope",
             SynthNodeTemplate::StepSequencer => "seq.step",
             SynthNodeTemplate::StereoDelay => "fx.delay",
+            SynthNodeTemplate::Reverb => "fx.reverb",
         }
     }
 
@@ -87,6 +90,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::Oscilloscope => ModuleCategory::Utility,
             SynthNodeTemplate::StepSequencer => ModuleCategory::Utility,
             SynthNodeTemplate::StereoDelay => ModuleCategory::Effect,
+            SynthNodeTemplate::Reverb => ModuleCategory::Effect,
         }
     }
 }
@@ -112,6 +116,7 @@ impl NodeTemplateIter for AllNodeTemplates {
             SynthNodeTemplate::Oscilloscope,
             SynthNodeTemplate::StepSequencer,
             SynthNodeTemplate::StereoDelay,
+            SynthNodeTemplate::Reverb,
             SynthNodeTemplate::MidiMonitor,
             SynthNodeTemplate::AudioOutput,
         ]
@@ -177,6 +182,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::Oscilloscope => Cow::Borrowed("Oscilloscope"),
             SynthNodeTemplate::StepSequencer => Cow::Borrowed("Step Sequencer"),
             SynthNodeTemplate::StereoDelay => Cow::Borrowed("Stereo Delay"),
+            SynthNodeTemplate::Reverb => Cow::Borrowed("Reverb"),
         }
     }
 
@@ -201,6 +207,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::Oscilloscope => "Oscilloscope".to_string(),
             SynthNodeTemplate::StepSequencer => "Step Sequencer".to_string(),
             SynthNodeTemplate::StereoDelay => "Stereo Delay".to_string(),
+            SynthNodeTemplate::Reverb => "Reverb".to_string(),
         }
     }
 
@@ -367,6 +374,24 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 KnobParam::knob_only("High Cut", "HiCut"),
                 // Low Cut: knob-only
                 KnobParam::knob_only("Low Cut", "LoCut"),
+            ]),
+            SynthNodeTemplate::Reverb => SynthNodeData::new(
+                "fx.reverb",
+                "Reverb",
+                ModuleCategory::Effect,
+            ).with_knob_params(vec![
+                // Size: knob-only
+                KnobParam::knob_only("Size", "Size"),
+                // Decay: knob-only
+                KnobParam::knob_only("Decay", "Decay"),
+                // Damping: knob-only
+                KnobParam::knob_only("Damping", "Damp"),
+                // Pre-Delay: knob-only
+                KnobParam::knob_only("Pre-Delay", "PreD"),
+                // Mix: knob-only
+                KnobParam::knob_only("Mix", "Mix"),
+                // Width: knob-only
+                KnobParam::knob_only("Width", "Width"),
             ]),
         }
     }
@@ -1416,6 +1441,99 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthDataType::new(SignalType::Audio),
                 );
             }
+            SynthNodeTemplate::Reverb => {
+                // Left input port
+                graph.add_input_param(
+                    node_id,
+                    "In L".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Right input port (normalled from L)
+                graph.add_input_param(
+                    node_id,
+                    "In R".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Size: knob-only parameter (0-1)
+                graph.add_input_param(
+                    node_id,
+                    "Size".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(0.5, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Decay: knob-only parameter (0.1-30s logarithmic)
+                graph.add_input_param(
+                    node_id,
+                    "Decay".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::time(2.0, 0.1, 30.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Damping: knob-only parameter (0-1)
+                graph.add_input_param(
+                    node_id,
+                    "Damping".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(0.5, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Pre-Delay: knob-only parameter (0-100ms)
+                graph.add_input_param(
+                    node_id,
+                    "Pre-Delay".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(0.0, 0.0, 100.0, "ms", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Mix: knob-only parameter (0-1)
+                graph.add_input_param(
+                    node_id,
+                    "Mix".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(0.3, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Width: knob-only parameter (0-1)
+                graph.add_input_param(
+                    node_id,
+                    "Width".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(1.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Output ports
+                graph.add_output_param(
+                    node_id,
+                    "Out L".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "Out R".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                );
+            }
         }
     }
 }
@@ -1427,7 +1545,7 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 15);
+        assert_eq!(templates.len(), 16);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
@@ -1443,6 +1561,7 @@ mod tests {
         assert!(templates.contains(&SynthNodeTemplate::Oscilloscope));
         assert!(templates.contains(&SynthNodeTemplate::StepSequencer));
         assert!(templates.contains(&SynthNodeTemplate::StereoDelay));
+        assert!(templates.contains(&SynthNodeTemplate::Reverb));
     }
 
     #[test]
@@ -1462,6 +1581,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::Oscilloscope.module_id(), "util.oscilloscope");
         assert_eq!(SynthNodeTemplate::StepSequencer.module_id(), "seq.step");
         assert_eq!(SynthNodeTemplate::StereoDelay.module_id(), "fx.delay");
+        assert_eq!(SynthNodeTemplate::Reverb.module_id(), "fx.reverb");
     }
 
     #[test]
@@ -1481,6 +1601,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::Oscilloscope.category(), ModuleCategory::Utility);
         assert_eq!(SynthNodeTemplate::StepSequencer.category(), ModuleCategory::Utility);
         assert_eq!(SynthNodeTemplate::StereoDelay.category(), ModuleCategory::Effect);
+        assert_eq!(SynthNodeTemplate::Reverb.category(), ModuleCategory::Effect);
     }
 
     #[test]
@@ -1545,6 +1666,10 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::StereoDelay.node_finder_label(&mut state),
             "Stereo Delay"
+        );
+        assert_eq!(
+            SynthNodeTemplate::Reverb.node_finder_label(&mut state),
+            "Reverb"
         );
     }
 }
