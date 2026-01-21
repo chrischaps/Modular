@@ -228,13 +228,12 @@ impl SynthApp {
     }
 
     /// Process pending MIDI events.
-    /// Currently just logs them; future modules will consume these events.
+    /// Stores events in user state for display by MIDI Monitor modules.
     fn process_midi_events(&mut self) {
         if let Some(ref mut consumer) = self.midi_event_consumer {
             while let Ok(event) = consumer.pop() {
-                // For now, just log the events. Future MIDI modules will process these.
-                // The events are also logged in the MIDI callback for immediate feedback.
-                let _ = event; // Suppress unused warning
+                // Store the event for MIDI Monitor display
+                self.user_state.push_midi_event(event.event);
             }
         }
     }

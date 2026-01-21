@@ -32,6 +32,8 @@ pub enum SynthNodeTemplate {
     Attenuverter,
     /// Keyboard - virtual keyboard for playing notes from computer keyboard.
     Keyboard,
+    /// MIDI Monitor - display incoming MIDI events.
+    MidiMonitor,
 }
 
 impl SynthNodeTemplate {
@@ -48,6 +50,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::Vca => "util.vca",
             SynthNodeTemplate::Attenuverter => "util.attenuverter",
             SynthNodeTemplate::Keyboard => "input.keyboard",
+            SynthNodeTemplate::MidiMonitor => "util.midi_monitor",
         }
     }
 
@@ -63,6 +66,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::Vca => ModuleCategory::Utility,
             SynthNodeTemplate::Attenuverter => ModuleCategory::Utility,
             SynthNodeTemplate::Keyboard => ModuleCategory::Source,
+            SynthNodeTemplate::MidiMonitor => ModuleCategory::Utility,
         }
     }
 }
@@ -83,6 +87,7 @@ impl NodeTemplateIter for AllNodeTemplates {
             SynthNodeTemplate::Clock,
             SynthNodeTemplate::Vca,
             SynthNodeTemplate::Attenuverter,
+            SynthNodeTemplate::MidiMonitor,
             SynthNodeTemplate::AudioOutput,
         ]
     }
@@ -141,6 +146,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::Vca => Cow::Borrowed("VCA"),
             SynthNodeTemplate::Attenuverter => Cow::Borrowed("Attenuverter"),
             SynthNodeTemplate::Keyboard => Cow::Borrowed("Keyboard"),
+            SynthNodeTemplate::MidiMonitor => Cow::Borrowed("MIDI Monitor"),
         }
     }
 
@@ -159,6 +165,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::Vca => "VCA".to_string(),
             SynthNodeTemplate::Attenuverter => "Attenuverter".to_string(),
             SynthNodeTemplate::Keyboard => "Keyboard".to_string(),
+            SynthNodeTemplate::MidiMonitor => "MIDI Monitor".to_string(),
         }
     }
 
@@ -262,6 +269,12 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 // Gate output LED indicator
                 LedIndicator::gate(0, "Gate"),
             ]),
+            SynthNodeTemplate::MidiMonitor => SynthNodeData::new(
+                "util.midi_monitor",
+                "MIDI Monitor",
+                ModuleCategory::Utility,
+            ),
+            // Note: MidiMonitor has no knob_params - it uses custom rendering for the event log
         }
     }
 
@@ -812,6 +825,55 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthDataType::new(SignalType::Control),
                 );
             }
+            SynthNodeTemplate::MidiMonitor => {
+                // Channel filter (0 = all, 1-16 = specific channel)
+                graph.add_input_param(
+                    node_id,
+                    "Channel".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::select(
+                        0,
+                        vec![
+                            "All".to_string(), "1".to_string(), "2".to_string(), "3".to_string(),
+                            "4".to_string(), "5".to_string(), "6".to_string(), "7".to_string(),
+                            "8".to_string(), "9".to_string(), "10".to_string(), "11".to_string(),
+                            "12".to_string(), "13".to_string(), "14".to_string(), "15".to_string(),
+                            "16".to_string(),
+                        ],
+                        "Ch",
+                    ),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline as dropdown
+                );
+
+                // Toggle filters for event types
+                graph.add_input_param(
+                    node_id,
+                    "Notes".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::toggle(true, "Notes"),
+                    InputParamKind::ConstantOnly,
+                    true,
+                );
+                graph.add_input_param(
+                    node_id,
+                    "CC".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::toggle(true, "CC"),
+                    InputParamKind::ConstantOnly,
+                    true,
+                );
+                graph.add_input_param(
+                    node_id,
+                    "Pitch Bend".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::toggle(true, "PB"),
+                    InputParamKind::ConstantOnly,
+                    true,
+                );
+
+                // No output ports - this is display-only
+            }
         }
     }
 }
@@ -823,7 +885,7 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 9);
+        assert_eq!(templates.len(), 10);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
@@ -833,6 +895,7 @@ mod tests {
         assert!(templates.contains(&SynthNodeTemplate::Attenuverter));
         assert!(templates.contains(&SynthNodeTemplate::Vca));
         assert!(templates.contains(&SynthNodeTemplate::Keyboard));
+        assert!(templates.contains(&SynthNodeTemplate::MidiMonitor));
     }
 
     #[test]
@@ -846,6 +909,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::Vca.module_id(), "util.vca");
         assert_eq!(SynthNodeTemplate::Attenuverter.module_id(), "util.attenuverter");
         assert_eq!(SynthNodeTemplate::Keyboard.module_id(), "input.keyboard");
+        assert_eq!(SynthNodeTemplate::MidiMonitor.module_id(), "util.midi_monitor");
     }
 
     #[test]
@@ -859,6 +923,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::Vca.category(), ModuleCategory::Utility);
         assert_eq!(SynthNodeTemplate::Attenuverter.category(), ModuleCategory::Utility);
         assert_eq!(SynthNodeTemplate::Keyboard.category(), ModuleCategory::Source);
+        assert_eq!(SynthNodeTemplate::MidiMonitor.category(), ModuleCategory::Utility);
     }
 
     #[test]
@@ -899,6 +964,10 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::Keyboard.node_finder_label(&mut state),
             "Keyboard"
+        );
+        assert_eq!(
+            SynthNodeTemplate::MidiMonitor.node_finder_label(&mut state),
+            "MIDI Monitor"
         );
     }
 }

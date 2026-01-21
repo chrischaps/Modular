@@ -4,15 +4,28 @@
 
 use egui::Pos2;
 use egui_node_graph2::{GraphEditorState, NodeId};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 use crate::engine::NodeId as EngineNodeId;
+use crate::engine::midi_engine::MidiEvent;
 use super::{SynthDataType, SynthNodeData, SynthValueType};
 use super::templates::SynthNodeTemplate;
 
 /// Duration to show validation messages before auto-clearing.
 const VALIDATION_MESSAGE_DURATION_SECS: f32 = 3.0;
+
+/// Maximum number of MIDI events to store for display.
+const MAX_MIDI_EVENTS: usize = 10;
+
+/// A MIDI event with display timestamp for the MIDI Monitor.
+#[derive(Clone, Debug)]
+pub struct DisplayMidiEvent {
+    /// The MIDI event.
+    pub event: MidiEvent,
+    /// Relative timestamp (seconds since first event).
+    pub timestamp: f32,
+}
 
 /// User state for the graph editor.
 ///
@@ -48,6 +61,12 @@ pub struct SynthGraphState {
     /// Key: (engine_node_id, output_port_index), Value: sampled signal value.
     /// These values light up LED indicators on nodes.
     pub output_values: HashMap<(EngineNodeId, usize), f32>,
+
+    /// Recent MIDI events for display in MIDI Monitor modules.
+    pub midi_events: VecDeque<DisplayMidiEvent>,
+
+    /// Timestamp of the first MIDI event received (for relative timestamps).
+    midi_first_event_time: Option<Instant>,
 }
 
 impl Default for SynthGraphState {
@@ -61,6 +80,8 @@ impl Default for SynthGraphState {
             context_menu_pos: None,
             input_values: HashMap::new(),
             output_values: HashMap::new(),
+            midi_events: VecDeque::new(),
+            midi_first_event_time: None,
         }
     }
 }
@@ -98,6 +119,8 @@ impl SynthGraphState {
         self.context_menu_pos = None;
         self.input_values.clear();
         self.output_values.clear();
+        self.midi_events.clear();
+        self.midi_first_event_time = None;
     }
 
     /// Set a validation error message to display.
@@ -153,6 +176,38 @@ impl SynthGraphState {
     /// Clear output values for a specific node (e.g., when node is deleted).
     pub fn clear_output_values_for_node(&mut self, engine_node_id: EngineNodeId) {
         self.output_values.retain(|(node_id, _), _| *node_id != engine_node_id);
+    }
+
+    /// Add a MIDI event for display in MIDI Monitor modules.
+    ///
+    /// Events are stored with a relative timestamp from the first event.
+    /// Only the most recent MAX_MIDI_EVENTS are kept.
+    pub fn push_midi_event(&mut self, event: MidiEvent) {
+        let now = Instant::now();
+        let timestamp = if let Some(first_time) = self.midi_first_event_time {
+            first_time.elapsed().as_secs_f32()
+        } else {
+            self.midi_first_event_time = Some(now);
+            0.0
+        };
+
+        self.midi_events.push_back(DisplayMidiEvent { event, timestamp });
+
+        // Keep only the most recent events
+        while self.midi_events.len() > MAX_MIDI_EVENTS {
+            self.midi_events.pop_front();
+        }
+    }
+
+    /// Get the recent MIDI events for display.
+    pub fn midi_events(&self) -> &VecDeque<DisplayMidiEvent> {
+        &self.midi_events
+    }
+
+    /// Clear all stored MIDI events.
+    pub fn clear_midi_events(&mut self) {
+        self.midi_events.clear();
+        self.midi_first_event_time = None;
     }
 }
 

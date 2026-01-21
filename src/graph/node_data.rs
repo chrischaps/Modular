@@ -14,8 +14,65 @@ use eframe::egui::{self, Color32, RichText};
 use egui_node_graph2::{NodeDataTrait, NodeResponse, UserResponseTrait};
 
 use crate::dsp::ModuleCategory;
+use crate::engine::midi_engine::MidiEvent;
 use crate::widgets::{knob, led, KnobConfig, LedConfig, ParamFormat};
 use super::{SynthResponse, SynthValueType};
+
+/// MIDI event colors for the MIDI Monitor display.
+mod midi_colors {
+    use super::Color32;
+
+    /// Note On/Off events (green)
+    pub const NOTE: Color32 = Color32::from_rgb(100, 200, 100);
+    /// Control Change events (orange)
+    pub const CC: Color32 = Color32::from_rgb(255, 165, 0);
+    /// Pitch Bend events (purple)
+    pub const PITCH_BEND: Color32 = Color32::from_rgb(180, 100, 200);
+    /// Other events (gray)
+    pub const OTHER: Color32 = Color32::from_rgb(150, 150, 150);
+}
+
+/// Convert a MIDI note number to a note name (e.g., 60 -> "C4").
+fn note_to_name(note: u8) -> String {
+    const NOTES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    let octave = (note / 12) as i32 - 1; // MIDI note 60 = C4
+    let name = NOTES[(note % 12) as usize];
+    format!("{}{}", name, octave)
+}
+
+/// Format a MIDI event for display.
+fn format_midi_event(event: &MidiEvent) -> (String, Color32) {
+    match event {
+        MidiEvent::NoteOn { channel, note, velocity } => (
+            format!("NoteOn Ch{} {} vel={}", channel + 1, note_to_name(*note), velocity),
+            midi_colors::NOTE,
+        ),
+        MidiEvent::NoteOff { channel, note, .. } => (
+            format!("NoteOff Ch{} {}", channel + 1, note_to_name(*note)),
+            midi_colors::NOTE,
+        ),
+        MidiEvent::ControlChange { channel, controller, value } => (
+            format!("CC Ch{} #{} val={}", channel + 1, controller, value),
+            midi_colors::CC,
+        ),
+        MidiEvent::PitchBend { channel, value } => (
+            format!("PitchBend Ch{} {}", channel + 1, value),
+            midi_colors::PITCH_BEND,
+        ),
+        MidiEvent::ChannelPressure { channel, pressure } => (
+            format!("Pressure Ch{} {}", channel + 1, pressure),
+            midi_colors::OTHER,
+        ),
+        MidiEvent::PolyPressure { channel, note, pressure } => (
+            format!("PolyPres Ch{} {} {}", channel + 1, note_to_name(*note), pressure),
+            midi_colors::OTHER,
+        ),
+        MidiEvent::ProgramChange { channel, program } => (
+            format!("Program Ch{} #{}", channel + 1, program),
+            midi_colors::OTHER,
+        ),
+    }
+}
 
 /// Describes a knob parameter that appears in the bottom section of a node.
 ///
@@ -407,6 +464,107 @@ impl NodeDataTrait for SynthNodeData {
 
         // Get the engine node ID for looking up input values
         let engine_node_id = user_state.get_engine_node_id(node_id);
+
+        // Special rendering for MIDI Monitor module
+        if self.module_id == "util.midi_monitor" {
+            // Get filter settings from the node's input parameters
+            let (channel_filter, show_notes, show_cc, show_pitch_bend) = if let Some(node) = graph.nodes.get(node_id) {
+                let mut channel = 0usize; // 0 = all channels
+                let mut notes = true;
+                let mut cc = true;
+                let mut pb = true;
+
+                for (name, input_id) in &node.inputs {
+                    let input = graph.get_input(*input_id);
+                    match name.as_str() {
+                        "Channel" => {
+                            if let SynthValueType::Select { value, .. } = &input.value {
+                                channel = *value;
+                            }
+                        }
+                        "Notes" => {
+                            if let SynthValueType::Toggle { value, .. } = &input.value {
+                                notes = *value;
+                            }
+                        }
+                        "CC" => {
+                            if let SynthValueType::Toggle { value, .. } = &input.value {
+                                cc = *value;
+                            }
+                        }
+                        "Pitch Bend" => {
+                            if let SynthValueType::Toggle { value, .. } = &input.value {
+                                pb = *value;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                (channel, notes, cc, pb)
+            } else {
+                (0, true, true, true)
+            };
+
+            // Add separator
+            ui.add_space(4.0);
+            let category_color = self.category.color();
+            let separator_color = Color32::from_rgba_unmultiplied(
+                category_color.r(),
+                category_color.g(),
+                category_color.b(),
+                64,
+            );
+            ui.painter().hline(
+                ui.available_rect_before_wrap().x_range(),
+                ui.cursor().top(),
+                egui::Stroke::new(1.0, separator_color),
+            );
+            ui.add_space(4.0);
+
+            // Render MIDI event log
+            let midi_events = user_state.midi_events();
+
+            if midi_events.is_empty() {
+                ui.label(RichText::new("No MIDI events").small().weak().italics());
+            } else {
+                // Display events (most recent first for better visibility)
+                ui.vertical(|ui| {
+                    ui.set_min_width(180.0);
+                    ui.set_max_height(120.0);
+
+                    for event in midi_events.iter().rev().take(8) {
+                        // Apply channel filter (0 = all, 1-16 = specific channel)
+                        if channel_filter > 0 {
+                            let event_channel = event.event.channel() as usize + 1;
+                            if event_channel != channel_filter {
+                                continue;
+                            }
+                        }
+
+                        // Apply event type filters
+                        let should_show = match &event.event {
+                            MidiEvent::NoteOn { .. } | MidiEvent::NoteOff { .. } => show_notes,
+                            MidiEvent::ControlChange { .. } => show_cc,
+                            MidiEvent::PitchBend { .. } => show_pitch_bend,
+                            _ => true, // Always show other events
+                        };
+
+                        if !should_show {
+                            continue;
+                        }
+
+                        // Format and display the event
+                        let (text, color) = format_midi_event(&event.event);
+                        let timestamp = format!("{:.1}s", event.timestamp);
+
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(&timestamp).small().weak().monospace());
+                            ui.label(RichText::new(&text).small().color(color).monospace());
+                        });
+                    }
+                });
+            }
+        }
 
         // Render horizontal row of knobs if this node has knob parameters
         if !self.knob_params.is_empty() {
