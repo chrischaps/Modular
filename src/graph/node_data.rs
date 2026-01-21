@@ -708,6 +708,58 @@ impl NodeDataTrait for SynthNodeData {
             }
         }
 
+        // Special rendering for Oscilloscope module
+        if self.module_id == "util.oscilloscope" {
+            // Add separator
+            ui.add_space(4.0);
+            let category_color = self.category.color();
+            let separator_color = Color32::from_rgba_unmultiplied(
+                category_color.r(),
+                category_color.g(),
+                category_color.b(),
+                64,
+            );
+            ui.painter().hline(
+                ui.available_rect_before_wrap().x_range(),
+                ui.cursor().top(),
+                egui::Stroke::new(1.0, separator_color),
+            );
+            ui.add_space(4.0);
+
+            // Get scope data from user state
+            let scope_data = engine_node_id
+                .and_then(|eid| user_state.get_scope_data(eid));
+
+            // Get trigger level from the node's input parameters
+            let trigger_level = if let Some(node) = graph.nodes.get(node_id) {
+                let mut level = 0.0f32;
+                for (name, input_id) in &node.inputs {
+                    if name == "Trigger Level" {
+                        let input = graph.get_input(*input_id);
+                        if let SynthValueType::LinearRange { value, .. } = &input.value {
+                            level = *value;
+                        }
+                    }
+                }
+                level
+            } else {
+                0.0
+            };
+
+            // Render the oscilloscope display
+            let (channel1, channel2) = if let Some(data) = scope_data {
+                (data.channel1.as_slice(), data.channel2.as_slice())
+            } else {
+                (&[] as &[f32], &[] as &[f32])
+            };
+
+            let config = crate::widgets::OscilloscopeConfig::new(200.0, 120.0)
+                .with_trigger_level(trigger_level)
+                .with_trigger_indicator(true);
+
+            crate::widgets::oscilloscope_display(ui, channel1, channel2, &config);
+        }
+
         // Render horizontal row of knobs if this node has knob parameters
         if !self.knob_params.is_empty() {
             // Add some spacing before the knob row

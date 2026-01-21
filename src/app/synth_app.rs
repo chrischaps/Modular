@@ -822,7 +822,7 @@ impl SynthApp {
 
     /// Process events from the audio engine.
     /// This handles InputValue events for knob animation, OutputValue events for LED indicators,
-    /// and CpuLoad events for CPU metering.
+    /// ScopeBuffer events for oscilloscope display, and CpuLoad events for CPU metering.
     fn process_engine_events(&mut self) {
         if let Some(ref mut handle) = self.ui_handle {
             // Drain all available events
@@ -835,6 +835,15 @@ impl SynthApp {
                     crate::engine::EngineEvent::OutputValue { node_id, output_index, value } => {
                         // Store the output value for LED indicators
                         self.user_state.set_output_value(node_id, output_index, value);
+                    }
+                    crate::engine::EngineEvent::ScopeBuffer { node_id, channel1, channel2, triggered } => {
+                        // Store the oscilloscope waveform data for display
+                        self.user_state.set_scope_data(
+                            node_id,
+                            channel1.into_vec(),
+                            channel2.into_vec(),
+                            triggered,
+                        );
                     }
                     crate::engine::EngineEvent::CpuLoad(load) => {
                         // Update CPU load for display

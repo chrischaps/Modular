@@ -27,6 +27,17 @@ pub struct DisplayMidiEvent {
     pub timestamp: f32,
 }
 
+/// Oscilloscope waveform data for display.
+#[derive(Clone, Debug, Default)]
+pub struct ScopeData {
+    /// Channel 1 waveform samples.
+    pub channel1: Vec<f32>,
+    /// Channel 2 waveform samples.
+    pub channel2: Vec<f32>,
+    /// Whether this capture was triggered (vs free-running).
+    pub triggered: bool,
+}
+
 /// Info about a MIDI CC mapping for display in the UI.
 #[derive(Clone, Debug)]
 pub struct MidiMappingInfo {
@@ -91,6 +102,10 @@ pub struct SynthGraphState {
     /// Flag set when a widget context menu is shown this frame.
     /// Used to prevent the add-node menu from also appearing.
     pub widget_context_menu_open: bool,
+
+    /// Oscilloscope waveform data received from the audio engine.
+    /// Key: engine_node_id, Value: scope waveform data.
+    pub scope_data: HashMap<EngineNodeId, ScopeData>,
 }
 
 impl Default for SynthGraphState {
@@ -110,6 +125,7 @@ impl Default for SynthGraphState {
             midi_learn_active: false,
             midi_learn_target: None,
             widget_context_menu_open: false,
+            scope_data: HashMap::new(),
         }
     }
 }
@@ -153,6 +169,7 @@ impl SynthGraphState {
         self.midi_learn_active = false;
         self.midi_learn_target = None;
         self.widget_context_menu_open = false;
+        self.scope_data.clear();
     }
 
     /// Get the MIDI mapping info for a parameter, if any.
@@ -263,6 +280,34 @@ impl SynthGraphState {
     pub fn clear_midi_events(&mut self) {
         self.midi_events.clear();
         self.midi_first_event_time = None;
+    }
+
+    /// Update oscilloscope waveform data from the audio engine.
+    pub fn set_scope_data(
+        &mut self,
+        engine_node_id: EngineNodeId,
+        channel1: Vec<f32>,
+        channel2: Vec<f32>,
+        triggered: bool,
+    ) {
+        self.scope_data.insert(
+            engine_node_id,
+            ScopeData {
+                channel1,
+                channel2,
+                triggered,
+            },
+        );
+    }
+
+    /// Get the current scope data for an oscilloscope node.
+    pub fn get_scope_data(&self, engine_node_id: EngineNodeId) -> Option<&ScopeData> {
+        self.scope_data.get(&engine_node_id)
+    }
+
+    /// Clear scope data for a specific node (e.g., when node is deleted).
+    pub fn clear_scope_data_for_node(&mut self, engine_node_id: EngineNodeId) {
+        self.scope_data.remove(&engine_node_id);
     }
 }
 
