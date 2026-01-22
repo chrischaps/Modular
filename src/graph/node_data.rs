@@ -15,7 +15,7 @@ use egui_node_graph2::{NodeDataTrait, NodeResponse, UserResponseTrait};
 
 use crate::dsp::ModuleCategory;
 use crate::engine::midi_engine::MidiEvent;
-use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, ParamFormat, WaveformConfig, WaveformType};
+use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, ParamFormat, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams};
 use super::{SynthResponse, SynthValueType};
 
 /// MIDI event colors for the MIDI Monitor display.
@@ -1133,6 +1133,72 @@ impl NodeDataTrait for SynthNodeData {
             ui.horizontal(|ui| {
                 ui.add_space((ui.available_width() - 140.0) / 2.0); // Center the display
                 waveform_display(ui, &samples, &config);
+            });
+        }
+
+        // Special rendering for ADSR Envelope module - envelope shape display
+        if self.module_id == "mod.adsr" {
+            // Add separator
+            ui.add_space(4.0);
+            let category_color = self.category.color();
+            let separator_color = Color32::from_rgba_unmultiplied(
+                category_color.r(),
+                category_color.g(),
+                category_color.b(),
+                64,
+            );
+            ui.painter().hline(
+                ui.available_rect_before_wrap().x_range(),
+                ui.cursor().top(),
+                egui::Stroke::new(1.0, separator_color),
+            );
+            ui.add_space(4.0);
+
+            // Get ADSR parameters from node inputs
+            let adsr_params = if let Some(node) = graph.nodes.get(node_id) {
+                let mut attack = 0.01f32;
+                let mut decay = 0.1f32;
+                let mut sustain = 0.7f32;
+                let mut release = 0.3f32;
+
+                for (name, input_id) in &node.inputs {
+                    let input = graph.get_input(*input_id);
+                    match name.as_str() {
+                        "Attack" => {
+                            if let SynthValueType::Time { value, .. } = &input.value {
+                                attack = *value;
+                            }
+                        }
+                        "Decay" => {
+                            if let SynthValueType::Time { value, .. } = &input.value {
+                                decay = *value;
+                            }
+                        }
+                        "Sustain" => {
+                            if let SynthValueType::Scalar { value, .. } = &input.value {
+                                sustain = *value;
+                            }
+                        }
+                        "Release" => {
+                            if let SynthValueType::Time { value, .. } = &input.value {
+                                release = *value;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                AdsrParams::new(attack, decay, sustain, release)
+            } else {
+                AdsrParams::default()
+            };
+
+            // Display ADSR envelope visualization
+            let config = AdsrConfig::default()
+                .with_size(140.0, 50.0);
+
+            ui.horizontal(|ui| {
+                ui.add_space((ui.available_width() - 140.0) / 2.0); // Center the display
+                adsr_display(ui, &adsr_params, &config);
             });
         }
 
