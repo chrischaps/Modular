@@ -52,6 +52,8 @@ pub enum SynthNodeTemplate {
     Distortion,
     /// Chorus - stereo chorus/flanger with multiple voices.
     Chorus,
+    /// Compressor - dynamics compressor with sidechain and gain reduction output.
+    Compressor,
 }
 
 impl SynthNodeTemplate {
@@ -78,6 +80,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::ParametricEq => "fx.eq",
             SynthNodeTemplate::Distortion => "fx.distortion",
             SynthNodeTemplate::Chorus => "fx.chorus",
+            SynthNodeTemplate::Compressor => "fx.compressor",
         }
     }
 
@@ -103,6 +106,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::ParametricEq => ModuleCategory::Effect,
             SynthNodeTemplate::Distortion => ModuleCategory::Effect,
             SynthNodeTemplate::Chorus => ModuleCategory::Effect,
+            SynthNodeTemplate::Compressor => ModuleCategory::Effect,
         }
     }
 }
@@ -132,6 +136,7 @@ impl NodeTemplateIter for AllNodeTemplates {
             SynthNodeTemplate::ParametricEq,
             SynthNodeTemplate::Distortion,
             SynthNodeTemplate::Chorus,
+            SynthNodeTemplate::Compressor,
             SynthNodeTemplate::MidiMonitor,
             SynthNodeTemplate::AudioOutput,
         ]
@@ -201,6 +206,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::ParametricEq => Cow::Borrowed("3-Band EQ"),
             SynthNodeTemplate::Distortion => Cow::Borrowed("Distortion"),
             SynthNodeTemplate::Chorus => Cow::Borrowed("Chorus"),
+            SynthNodeTemplate::Compressor => Cow::Borrowed("Compressor"),
         }
     }
 
@@ -229,6 +235,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::ParametricEq => "3-Band EQ".to_string(),
             SynthNodeTemplate::Distortion => "Distortion".to_string(),
             SynthNodeTemplate::Chorus => "Chorus".to_string(),
+            SynthNodeTemplate::Compressor => "Compressor".to_string(),
         }
     }
 
@@ -460,6 +467,26 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 // Feedback: knob-only
                 KnobParam::knob_only("Feedback", "FB"),
                 // Mix: knob-only (wet/dry)
+                KnobParam::knob_only("Mix", "Mix"),
+            ]),
+            SynthNodeTemplate::Compressor => SynthNodeData::new(
+                "fx.compressor",
+                "Compressor",
+                ModuleCategory::Effect,
+            ).with_knob_params(vec![
+                // Threshold: exposed param (CV input + knob)
+                KnobParam::exposed("Threshold", "Thresh"),
+                // Ratio: knob-only
+                KnobParam::knob_only("Ratio", "Ratio"),
+                // Attack: knob-only
+                KnobParam::knob_only("Attack", "Atk"),
+                // Release: knob-only
+                KnobParam::knob_only("Release", "Rel"),
+                // Knee: knob-only
+                KnobParam::knob_only("Knee", "Knee"),
+                // Makeup: knob-only
+                KnobParam::knob_only("Makeup", "Mkup"),
+                // Mix: knob-only (parallel compression)
                 KnobParam::knob_only("Mix", "Mix"),
             ]),
         }
@@ -1862,6 +1889,109 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthDataType::new(SignalType::Audio),
                 );
             }
+            SynthNodeTemplate::Compressor => {
+                // Main audio input
+                graph.add_input_param(
+                    node_id,
+                    "In".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Sidechain input (normalled from main input)
+                graph.add_input_param(
+                    node_id,
+                    "Sidechain".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Threshold: exposed parameter (CV input + knob at bottom)
+                graph.add_input_param(
+                    node_id,
+                    "Threshold".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(-20.0, -60.0, 0.0, "dB", ""),
+                    InputParamKind::ConnectionOrConstant,
+                    true, // Port shown inline
+                );
+
+                // Ratio: knob-only parameter
+                graph.add_input_param(
+                    node_id,
+                    "Ratio".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(4.0, 1.0, 20.0, ":1", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Attack: knob-only parameter
+                graph.add_input_param(
+                    node_id,
+                    "Attack".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::time(10.0, 0.1, 100.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false,
+                );
+
+                // Release: knob-only parameter
+                graph.add_input_param(
+                    node_id,
+                    "Release".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::time(100.0, 10.0, 1000.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false,
+                );
+
+                // Knee: knob-only parameter
+                graph.add_input_param(
+                    node_id,
+                    "Knee".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(6.0, 0.0, 12.0, "dB", ""),
+                    InputParamKind::ConstantOnly,
+                    false,
+                );
+
+                // Makeup: knob-only parameter
+                graph.add_input_param(
+                    node_id,
+                    "Makeup".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(0.0, 0.0, 24.0, "dB", ""),
+                    InputParamKind::ConstantOnly,
+                    false,
+                );
+
+                // Mix: knob-only parameter (parallel compression)
+                graph.add_input_param(
+                    node_id,
+                    "Mix".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(1.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false,
+                );
+
+                // Output ports
+                graph.add_output_param(
+                    node_id,
+                    "Out".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "GR".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                );
+            }
         }
     }
 }
@@ -1873,13 +2003,14 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 19);
+        assert_eq!(templates.len(), 20);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
         assert!(templates.contains(&SynthNodeTemplate::SvfFilter));
         assert!(templates.contains(&SynthNodeTemplate::AdsrEnvelope));
         assert!(templates.contains(&SynthNodeTemplate::Clock));
+        assert!(templates.contains(&SynthNodeTemplate::Compressor));
         assert!(templates.contains(&SynthNodeTemplate::Attenuverter));
         assert!(templates.contains(&SynthNodeTemplate::Vca));
         assert!(templates.contains(&SynthNodeTemplate::Keyboard));
@@ -1916,6 +2047,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::ParametricEq.module_id(), "fx.eq");
         assert_eq!(SynthNodeTemplate::Distortion.module_id(), "fx.distortion");
         assert_eq!(SynthNodeTemplate::Chorus.module_id(), "fx.chorus");
+        assert_eq!(SynthNodeTemplate::Compressor.module_id(), "fx.compressor");
     }
 
     #[test]
@@ -1939,6 +2071,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::ParametricEq.category(), ModuleCategory::Effect);
         assert_eq!(SynthNodeTemplate::Distortion.category(), ModuleCategory::Effect);
         assert_eq!(SynthNodeTemplate::Chorus.category(), ModuleCategory::Effect);
+        assert_eq!(SynthNodeTemplate::Compressor.category(), ModuleCategory::Effect);
     }
 
     #[test]

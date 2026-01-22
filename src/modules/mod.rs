@@ -6,6 +6,7 @@
 pub mod attenuverter;
 pub mod chorus;
 pub mod clock;
+pub mod compressor;
 pub mod delay;
 pub mod distortion;
 pub mod envelope;
@@ -27,6 +28,7 @@ pub mod vca;
 pub use attenuverter::Attenuverter;
 pub use chorus::Chorus;
 pub use clock::Clock;
+pub use compressor::Compressor;
 pub use delay::StereoDelay;
 pub use distortion::Distortion;
 pub use envelope::AdsrEnvelope;
