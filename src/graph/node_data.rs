@@ -15,7 +15,7 @@ use egui_node_graph2::{NodeDataTrait, NodeResponse, UserResponseTrait};
 
 use crate::dsp::ModuleCategory;
 use crate::engine::midi_engine::MidiEvent;
-use crate::widgets::{knob, led, KnobConfig, LedConfig, ParamFormat};
+use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, ParamFormat, WaveformConfig, WaveformType};
 use super::{SynthResponse, SynthValueType};
 
 /// MIDI event colors for the MIDI Monitor display.
@@ -1066,6 +1066,73 @@ impl NodeDataTrait for SynthNodeData {
                         }
                     });
                 }
+            });
+        }
+
+        // Special rendering for Oscillator module - waveform preview
+        if self.module_id == "osc.sine" {
+            // Add separator
+            ui.add_space(4.0);
+            let category_color = self.category.color();
+            let separator_color = Color32::from_rgba_unmultiplied(
+                category_color.r(),
+                category_color.g(),
+                category_color.b(),
+                64,
+            );
+            ui.painter().hline(
+                ui.available_rect_before_wrap().x_range(),
+                ui.cursor().top(),
+                egui::Stroke::new(1.0, separator_color),
+            );
+            ui.add_space(4.0);
+
+            // Get waveform type and pulse width from node parameters
+            let (waveform_idx, pulse_width) = if let Some(node) = graph.nodes.get(node_id) {
+                let mut wave_idx = 0usize;
+                let mut pw = 0.5f32;
+
+                for (name, input_id) in &node.inputs {
+                    let input = graph.get_input(*input_id);
+                    match name.as_str() {
+                        "Waveform" => {
+                            if let SynthValueType::Select { value, .. } = &input.value {
+                                wave_idx = *value;
+                            }
+                        }
+                        "Pulse Width" => {
+                            if let SynthValueType::LinearRange { value, .. } = &input.value {
+                                pw = *value;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                (wave_idx, pw)
+            } else {
+                (0, 0.5)
+            };
+
+            // Convert waveform index to WaveformType
+            let waveform_type = match waveform_idx {
+                0 => WaveformType::Sine,
+                1 => WaveformType::Saw,
+                2 => WaveformType::Pulse { width: pulse_width }, // Square with PWM
+                3 => WaveformType::Triangle,
+                _ => WaveformType::Sine,
+            };
+
+            // Generate single cycle of the waveform
+            let num_samples = 128;
+            let samples = generate_waveform_cycle(waveform_type, num_samples);
+
+            // Display waveform with oscillator preset config
+            let config = WaveformConfig::oscillator()
+                .with_size(140.0, 50.0);
+
+            ui.horizontal(|ui| {
+                ui.add_space((ui.available_width() - 140.0) / 2.0); // Center the display
+                waveform_display(ui, &samples, &config);
             });
         }
 

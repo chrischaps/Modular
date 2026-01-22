@@ -294,7 +294,11 @@ mod tests {
         assert!(registry.contains("seq.step"));
         assert!(registry.contains("fx.delay"));
         assert!(registry.contains("fx.reverb"));
-        assert_eq!(registry.len(), 16);
+        assert!(registry.contains("fx.eq"));
+        assert!(registry.contains("fx.distortion"));
+        assert!(registry.contains("fx.chorus"));
+        assert!(registry.contains("fx.compressor"));
+        assert_eq!(registry.len(), 20);
     }
 
     #[test]
