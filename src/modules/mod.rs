@@ -4,6 +4,7 @@
 //! Includes oscillators, filters, envelopes, LFOs, utilities, and output modules.
 
 pub mod attenuverter;
+pub mod chorus;
 pub mod clock;
 pub mod delay;
 pub mod distortion;
@@ -24,6 +25,7 @@ pub mod vca;
 
 // Re-export commonly used types
 pub use attenuverter::Attenuverter;
+pub use chorus::Chorus;
 pub use clock::Clock;
 pub use delay::StereoDelay;
 pub use distortion::Distortion;
