@@ -626,25 +626,17 @@ impl NodeDataTrait for SynthNodeData {
     where
         Self::Response: UserResponseTrait,
     {
-        // Draw icons directly with painter to avoid intercepting mouse events
-        // This allows the entire title bar to be draggable
+        // Draw the left category icon directly with painter
+        // Note: We only draw the LEFT icon (category) since it's positioned relative to
+        // the left edge which is stable. The right icon would be positioned based on
+        // MAX_NODE_SIZE which causes it to appear outside narrow nodes.
         let rect = ui.available_rect_before_wrap();
         let painter = ui.painter();
-        // Use white for icons to ensure visibility against colored title bars
         let icon_color = Color32::WHITE;
 
-        // Left icon (category icon) - vector drawn for cross-platform reliability
         let icon_size = 14.0 * zoom;
         let left_center = egui::pos2(rect.left() + icon_size * 0.6, rect.center().y);
         self.draw_category_icon(painter, left_center, icon_size, icon_color);
-
-        // Right icon (secondary icon) - smaller
-        let secondary_size = 12.0 * zoom;
-        let right_center = egui::pos2(rect.right() - secondary_size * 0.6, rect.center().y);
-        self.draw_secondary_icon(painter, right_center, secondary_size, icon_color);
-
-        // Allocate the space without creating any interactive widgets
-        ui.allocate_space(ui.available_size());
 
         Vec::new()
     }
@@ -1486,30 +1478,14 @@ impl NodeDataTrait for SynthNodeData {
 
         // Render horizontal row of knobs if this node has knob parameters
         if !self.knob_params.is_empty() {
-            // Add some spacing before the knob row
-            ui.add_space(4.0 * zoom);
+            // Add spacing before the knob row (separator removed - it was expanding to fill available width)
+            ui.add_space(8.0 * zoom);
 
-            // Draw separator line with zoom-scaled margins
-            let category_color = self.category.color();
-            let separator_color = Color32::from_rgba_unmultiplied(
-                category_color.r(),
-                category_color.g(),
-                category_color.b(),
-                64,
-            );
-            let margin = 4.0 * zoom;
-            let rect = ui.available_rect_before_wrap();
-            ui.painter().hline(
-                (rect.left() + margin)..=(rect.right() - margin),
-                ui.cursor().top(),
-                egui::Stroke::new(1.0 * zoom, separator_color),
-            );
-            ui.add_space(4.0 * zoom);
+            // Render knobs - just use a simple horizontal layout
+            // Centering would require knowing the final node width which we don't have yet
+            let knob_size = 36.0 * zoom;
 
-            // Render knobs in a horizontal layout
             ui.horizontal(|ui| {
-                let knob_size = 36.0 * zoom;
-
                 for knob_param in &self.knob_params {
                     // Find the corresponding input parameter by name
                     if let Some(node) = graph.nodes.get(node_id) {
@@ -1733,7 +1709,7 @@ impl NodeDataTrait for SynthNodeData {
                         }
                     }
                 }
-            });
+                });
         }
 
         // Render LED indicators if this node has any
@@ -1775,6 +1751,33 @@ impl NodeDataTrait for SynthNodeData {
         });
 
         responses
+    }
+
+    fn output_ui(
+        &self,
+        ui: &mut egui::Ui,
+        _node_id: egui_node_graph2::NodeId,
+        _graph: &egui_node_graph2::Graph<Self, Self::DataType, Self::ValueType>,
+        _user_state: &mut Self::UserState,
+        param_name: &str,
+    ) -> Vec<NodeResponse<Self::Response, Self>>
+    where
+        Self::Response: UserResponseTrait,
+    {
+        // Calculate the text width and allocate exactly that much space
+        // This allows the node to be narrow while still showing the label
+        let font_id = egui::TextStyle::Body.resolve(ui.style());
+        let text_color = ui.visuals().widgets.noninteractive.fg_stroke.color;
+        let galley = ui.painter().layout_no_wrap(param_name.to_string(), font_id, text_color);
+        let text_size = galley.size();
+
+        // Allocate exactly the text size, not the full available width
+        let (rect, _) = ui.allocate_exact_size(text_size, egui::Sense::hover());
+
+        // Draw text at the allocated position
+        ui.painter().galley(rect.min, galley, text_color);
+
+        Vec::new()
     }
 
     fn titlebar_color(
