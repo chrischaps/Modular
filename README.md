@@ -1,1 +1,1 @@
-[Screenshot of interface](Screenshot.png)
+![Screenshot of interface](Screenshot.png)
