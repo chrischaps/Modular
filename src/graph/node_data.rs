@@ -15,7 +15,7 @@ use egui_node_graph2::{NodeDataTrait, NodeResponse, UserResponseTrait};
 
 use crate::dsp::ModuleCategory;
 use crate::engine::midi_engine::MidiEvent;
-use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, ParamFormat, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, SpectrumConfig, generate_filter_response, FilterResponseType};
+use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, ParamFormat, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, SpectrumConfig, SpectrumStyle, generate_filter_response, FilterResponseType};
 use super::{SynthResponse, SynthValueType};
 
 /// MIDI event colors for the MIDI Monitor display.
@@ -1251,16 +1251,161 @@ impl NodeDataTrait for SynthNodeData {
                 FilterResponseType::LowPass,
                 cutoff_hz,
                 resonance,
-                64, // Number of points for smooth curve
+                128, // More points for smoother curve
             );
 
-            // Display filter response with lowpass preset config
-            let config = SpectrumConfig::lowpass()
-                .with_size(140.0, 50.0);
+            // Display filter response with custom config optimized for seeing resonance
+            // Range: -24dB to +12dB shows both rolloff and resonance peak clearly
+            let config = SpectrumConfig::default()
+                .with_size(140.0, 50.0)
+                .with_db_range(-24.0, 12.0)
+                .with_style(SpectrumStyle::Line)
+                .with_glow(true);
 
             ui.horizontal(|ui| {
                 ui.add_space((ui.available_width() - 140.0) / 2.0); // Center the display
                 spectrum_display(ui, &response_points, &config);
+            });
+        }
+
+        // Special rendering for LFO module - waveform preview with phase marker
+        if self.module_id == "mod.lfo" {
+            // Add separator
+            ui.add_space(4.0);
+            let category_color = self.category.color();
+            let separator_color = Color32::from_rgba_unmultiplied(
+                category_color.r(),
+                category_color.g(),
+                category_color.b(),
+                64,
+            );
+            ui.painter().hline(
+                ui.available_rect_before_wrap().x_range(),
+                ui.cursor().top(),
+                egui::Stroke::new(1.0, separator_color),
+            );
+            ui.add_space(4.0);
+
+            // Get waveform type and parameters from node inputs
+            let (waveform_idx, is_bipolar, rate_hz) = if let Some(node) = graph.nodes.get(node_id) {
+                let mut wave_idx = 0usize;
+                let mut bipolar = true;
+                let mut rate = 1.0f32;
+
+                for (name, input_id) in &node.inputs {
+                    let input = graph.get_input(*input_id);
+                    match name.as_str() {
+                        "Waveform" => {
+                            if let SynthValueType::Select { value, .. } = &input.value {
+                                wave_idx = *value;
+                            }
+                        }
+                        "Bipolar" => {
+                            if let SynthValueType::Toggle { value, .. } = &input.value {
+                                bipolar = *value;
+                            }
+                        }
+                        "Rate" => {
+                            if let SynthValueType::Frequency { value, .. } = &input.value {
+                                rate = *value;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                (wave_idx, bipolar, rate)
+            } else {
+                (0, true, 1.0)
+            };
+
+            // Convert waveform index to WaveformType
+            // LFO waveforms: 0=Sine, 1=Triangle, 2=Square, 3=Saw
+            let waveform_type = match waveform_idx {
+                0 => WaveformType::Sine,
+                1 => WaveformType::Triangle,
+                2 => WaveformType::Square,
+                3 => WaveformType::Saw,
+                _ => WaveformType::Sine,
+            };
+
+            // Generate single cycle of the waveform
+            let num_samples = 128;
+            let mut samples = generate_waveform_cycle(waveform_type, num_samples);
+
+            // Convert to unipolar if needed (0 to 1 range)
+            if !is_bipolar {
+                for sample in &mut samples {
+                    *sample = (*sample + 1.0) * 0.5;
+                }
+            }
+
+            // Display waveform with LFO preset config (orange for control signals)
+            let config = WaveformConfig::lfo()
+                .with_size(140.0, 50.0);
+
+            // Calculate animated phase position based on time and rate
+            let time = ui.ctx().input(|i| i.time);
+            let phase = ((time * rate_hz as f64) % 1.0) as f32;
+
+            ui.horizontal(|ui| {
+                ui.add_space((ui.available_width() - 140.0) / 2.0); // Center the display
+
+                // Draw the waveform first
+                let response = waveform_display(ui, &samples, &config);
+                let rect = response.rect;
+
+                if ui.is_rect_visible(rect) {
+                    let painter = ui.painter();
+
+                    // Draw position marker (vertical line showing current phase)
+                    let marker_x = rect.left() + phase * rect.width();
+                    let marker_color = Color32::from_rgba_unmultiplied(255, 255, 255, 180);
+                    painter.line_segment(
+                        [
+                            egui::Pos2::new(marker_x, rect.top() + 2.0),
+                            egui::Pos2::new(marker_x, rect.bottom() - 2.0),
+                        ],
+                        egui::Stroke::new(1.5, marker_color),
+                    );
+
+                    // Draw small triangle indicator at top of marker
+                    let triangle_size = 4.0;
+                    let triangle = vec![
+                        egui::Pos2::new(marker_x, rect.top() + triangle_size + 2.0),
+                        egui::Pos2::new(marker_x - triangle_size, rect.top() + 2.0),
+                        egui::Pos2::new(marker_x + triangle_size, rect.top() + 2.0),
+                    ];
+                    painter.add(egui::Shape::convex_polygon(
+                        triangle,
+                        marker_color,
+                        egui::Stroke::NONE,
+                    ));
+
+                    // Draw center line for bipolar mode (shows zero crossing)
+                    if is_bipolar {
+                        let center_y = rect.center().y;
+                        painter.line_segment(
+                            [
+                                egui::Pos2::new(rect.left() + 2.0, center_y),
+                                egui::Pos2::new(rect.right() - 2.0, center_y),
+                            ],
+                            egui::Stroke::new(0.5, Color32::from_rgba_unmultiplied(255, 165, 0, 100)),
+                        );
+                    } else {
+                        // Draw bottom line for unipolar mode (shows zero baseline)
+                        let bottom_y = rect.bottom() - 4.0;
+                        painter.line_segment(
+                            [
+                                egui::Pos2::new(rect.left() + 2.0, bottom_y),
+                                egui::Pos2::new(rect.right() - 2.0, bottom_y),
+                            ],
+                            egui::Stroke::new(0.5, Color32::from_rgba_unmultiplied(255, 165, 0, 100)),
+                        );
+                    }
+                }
+
+                // Request continuous repaint for animation
+                ui.ctx().request_repaint();
             });
         }
 
