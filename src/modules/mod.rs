@@ -6,6 +6,7 @@
 pub mod attenuverter;
 pub mod clock;
 pub mod delay;
+pub mod distortion;
 pub mod envelope;
 pub mod eq;
 pub mod filter;
@@ -25,6 +26,7 @@ pub mod vca;
 pub use attenuverter::Attenuverter;
 pub use clock::Clock;
 pub use delay::StereoDelay;
+pub use distortion::Distortion;
 pub use envelope::AdsrEnvelope;
 pub use eq::ParametricEq;
 pub use filter::SvfFilter;

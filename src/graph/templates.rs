@@ -48,6 +48,8 @@ pub enum SynthNodeTemplate {
     Reverb,
     /// Parametric EQ - 3-band equalizer with low shelf, mid parametric, high shelf.
     ParametricEq,
+    /// Distortion - multi-algorithm distortion/saturation effect.
+    Distortion,
 }
 
 impl SynthNodeTemplate {
@@ -72,6 +74,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::StereoDelay => "fx.delay",
             SynthNodeTemplate::Reverb => "fx.reverb",
             SynthNodeTemplate::ParametricEq => "fx.eq",
+            SynthNodeTemplate::Distortion => "fx.distortion",
         }
     }
 
@@ -95,6 +98,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::StereoDelay => ModuleCategory::Effect,
             SynthNodeTemplate::Reverb => ModuleCategory::Effect,
             SynthNodeTemplate::ParametricEq => ModuleCategory::Effect,
+            SynthNodeTemplate::Distortion => ModuleCategory::Effect,
         }
     }
 }
@@ -122,6 +126,7 @@ impl NodeTemplateIter for AllNodeTemplates {
             SynthNodeTemplate::StereoDelay,
             SynthNodeTemplate::Reverb,
             SynthNodeTemplate::ParametricEq,
+            SynthNodeTemplate::Distortion,
             SynthNodeTemplate::MidiMonitor,
             SynthNodeTemplate::AudioOutput,
         ]
@@ -189,6 +194,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::StereoDelay => Cow::Borrowed("Stereo Delay"),
             SynthNodeTemplate::Reverb => Cow::Borrowed("Reverb"),
             SynthNodeTemplate::ParametricEq => Cow::Borrowed("3-Band EQ"),
+            SynthNodeTemplate::Distortion => Cow::Borrowed("Distortion"),
         }
     }
 
@@ -215,6 +221,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::StereoDelay => "Stereo Delay".to_string(),
             SynthNodeTemplate::Reverb => "Reverb".to_string(),
             SynthNodeTemplate::ParametricEq => "3-Band EQ".to_string(),
+            SynthNodeTemplate::Distortion => "Distortion".to_string(),
         }
     }
 
@@ -416,6 +423,20 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 KnobParam::knob_only("High Freq", "HiFrq"),
                 KnobParam::knob_only("High Gain", "HiGn"),
                 // Output gain
+                KnobParam::knob_only("Output", "Out"),
+            ]),
+            SynthNodeTemplate::Distortion => SynthNodeData::new(
+                "fx.distortion",
+                "Distortion",
+                ModuleCategory::Effect,
+            ).with_knob_params(vec![
+                // Drive: exposed param (CV input + knob)
+                KnobParam::exposed("Drive", "Drive"),
+                // Tone: knob-only (brightness)
+                KnobParam::knob_only("Tone", "Tone"),
+                // Mix: knob-only (wet/dry)
+                KnobParam::knob_only("Mix", "Mix"),
+                // Output: knob-only (makeup gain)
                 KnobParam::knob_only("Output", "Out"),
             ]),
         }
@@ -1649,6 +1670,78 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthDataType::new(SignalType::Audio),
                 );
             }
+            SynthNodeTemplate::Distortion => {
+                // Audio input port
+                graph.add_input_param(
+                    node_id,
+                    "In".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Drive: exposed parameter (CV input + knob at bottom)
+                graph.add_input_param(
+                    node_id,
+                    "Drive".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(0.5, ""),
+                    InputParamKind::ConnectionOrConstant,
+                    true, // Port shown inline
+                );
+
+                // Tone: knob-only parameter (brightness)
+                graph.add_input_param(
+                    node_id,
+                    "Tone".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(0.5, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Type: distortion algorithm selector (shown inline)
+                graph.add_input_param(
+                    node_id,
+                    "Type".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::select(
+                        0, // Soft
+                        vec!["Soft".to_string(), "Hard".to_string(), "Fold".to_string(), "Bit".to_string()],
+                        "Type",
+                    ),
+                    InputParamKind::ConstantOnly,
+                    true, // Shown inline as dropdown
+                );
+
+                // Mix: knob-only parameter (wet/dry)
+                graph.add_input_param(
+                    node_id,
+                    "Mix".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::scalar(1.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Output: knob-only parameter (makeup gain)
+                graph.add_input_param(
+                    node_id,
+                    "Output".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(0.0, -12.0, 12.0, "dB", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Output port
+                graph.add_output_param(
+                    node_id,
+                    "Out".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                );
+            }
         }
     }
 }
@@ -1660,7 +1753,7 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 17);
+        assert_eq!(templates.len(), 18);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
@@ -1676,6 +1769,7 @@ mod tests {
         assert!(templates.contains(&SynthNodeTemplate::Oscilloscope));
         assert!(templates.contains(&SynthNodeTemplate::StepSequencer));
         assert!(templates.contains(&SynthNodeTemplate::StereoDelay));
+        assert!(templates.contains(&SynthNodeTemplate::Distortion));
         assert!(templates.contains(&SynthNodeTemplate::Reverb));
         assert!(templates.contains(&SynthNodeTemplate::ParametricEq));
     }
@@ -1699,6 +1793,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::StereoDelay.module_id(), "fx.delay");
         assert_eq!(SynthNodeTemplate::Reverb.module_id(), "fx.reverb");
         assert_eq!(SynthNodeTemplate::ParametricEq.module_id(), "fx.eq");
+        assert_eq!(SynthNodeTemplate::Distortion.module_id(), "fx.distortion");
     }
 
     #[test]
@@ -1720,6 +1815,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::StereoDelay.category(), ModuleCategory::Effect);
         assert_eq!(SynthNodeTemplate::Reverb.category(), ModuleCategory::Effect);
         assert_eq!(SynthNodeTemplate::ParametricEq.category(), ModuleCategory::Effect);
+        assert_eq!(SynthNodeTemplate::Distortion.category(), ModuleCategory::Effect);
     }
 
     #[test]
@@ -1792,6 +1888,10 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::ParametricEq.node_finder_label(&mut state),
             "3-Band EQ"
+        );
+        assert_eq!(
+            SynthNodeTemplate::Distortion.node_finder_label(&mut state),
+            "Distortion"
         );
     }
 }
