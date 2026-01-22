@@ -1357,51 +1357,48 @@ impl NodeDataTrait for SynthNodeData {
                 if ui.is_rect_visible(rect) {
                     let painter = ui.painter();
 
-                    // Draw position marker (vertical line showing current phase)
+                    // Calculate dot position on the waveform
                     let marker_x = rect.left() + phase * rect.width();
-                    let marker_color = Color32::from_rgba_unmultiplied(255, 255, 255, 180);
-                    painter.line_segment(
-                        [
-                            egui::Pos2::new(marker_x, rect.top() + 2.0),
-                            egui::Pos2::new(marker_x, rect.bottom() - 2.0),
-                        ],
-                        egui::Stroke::new(1.5, marker_color),
+
+                    // Get sample value at current phase by interpolating
+                    let sample_index_f = phase * (samples.len() - 1) as f32;
+                    let sample_index = sample_index_f as usize;
+                    let frac = sample_index_f - sample_index as f32;
+                    let sample_value = if sample_index + 1 < samples.len() {
+                        samples[sample_index] * (1.0 - frac) + samples[sample_index + 1] * frac
+                    } else {
+                        samples[sample_index]
+                    };
+
+                    // Convert sample value to Y position
+                    // Waveform display uses center as 0, with amplitude scaled to half height
+                    let amplitude = rect.height() * 0.5 * 0.9; // 0.9 is the default scale in waveform_display
+                    let center_y = rect.center().y;
+                    let marker_y = center_y - sample_value * amplitude;
+
+                    // Draw glow effect (larger, semi-transparent circle)
+                    let glow_color = Color32::from_rgba_unmultiplied(255, 200, 100, 80);
+                    painter.circle_filled(
+                        egui::Pos2::new(marker_x, marker_y),
+                        8.0,
+                        glow_color,
                     );
 
-                    // Draw small triangle indicator at top of marker
-                    let triangle_size = 4.0;
-                    let triangle = vec![
-                        egui::Pos2::new(marker_x, rect.top() + triangle_size + 2.0),
-                        egui::Pos2::new(marker_x - triangle_size, rect.top() + 2.0),
-                        egui::Pos2::new(marker_x + triangle_size, rect.top() + 2.0),
-                    ];
-                    painter.add(egui::Shape::convex_polygon(
-                        triangle,
-                        marker_color,
-                        egui::Stroke::NONE,
-                    ));
+                    // Draw main dot (white with orange tint)
+                    let dot_color = Color32::from_rgb(255, 220, 180);
+                    painter.circle_filled(
+                        egui::Pos2::new(marker_x, marker_y),
+                        4.0,
+                        dot_color,
+                    );
 
-                    // Draw center line for bipolar mode (shows zero crossing)
-                    if is_bipolar {
-                        let center_y = rect.center().y;
-                        painter.line_segment(
-                            [
-                                egui::Pos2::new(rect.left() + 2.0, center_y),
-                                egui::Pos2::new(rect.right() - 2.0, center_y),
-                            ],
-                            egui::Stroke::new(0.5, Color32::from_rgba_unmultiplied(255, 165, 0, 100)),
-                        );
-                    } else {
-                        // Draw bottom line for unipolar mode (shows zero baseline)
-                        let bottom_y = rect.bottom() - 4.0;
-                        painter.line_segment(
-                            [
-                                egui::Pos2::new(rect.left() + 2.0, bottom_y),
-                                egui::Pos2::new(rect.right() - 2.0, bottom_y),
-                            ],
-                            egui::Stroke::new(0.5, Color32::from_rgba_unmultiplied(255, 165, 0, 100)),
-                        );
-                    }
+                    // Draw bright center
+                    let center_color = Color32::WHITE;
+                    painter.circle_filled(
+                        egui::Pos2::new(marker_x, marker_y),
+                        2.0,
+                        center_color,
+                    );
                 }
 
                 // Request continuous repaint for animation
