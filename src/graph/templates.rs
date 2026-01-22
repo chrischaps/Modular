@@ -30,6 +30,8 @@ pub enum SynthNodeTemplate {
     Vca,
     /// Attenuverter - scale and invert control signals.
     Attenuverter,
+    /// Mixer - 2-channel summing mixer.
+    Mixer,
     /// Keyboard - virtual keyboard for playing notes from computer keyboard.
     Keyboard,
     /// MIDI Monitor - display incoming MIDI events.
@@ -69,6 +71,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::Clock => "util.clock",
             SynthNodeTemplate::Vca => "util.vca",
             SynthNodeTemplate::Attenuverter => "util.attenuverter",
+            SynthNodeTemplate::Mixer => "util.mixer",
             SynthNodeTemplate::Keyboard => "input.keyboard",
             SynthNodeTemplate::MidiMonitor => "util.midi_monitor",
             SynthNodeTemplate::MidiNote => "input.midi_note",
@@ -95,6 +98,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::Clock => ModuleCategory::Utility,
             SynthNodeTemplate::Vca => ModuleCategory::Utility,
             SynthNodeTemplate::Attenuverter => ModuleCategory::Utility,
+            SynthNodeTemplate::Mixer => ModuleCategory::Utility,
             SynthNodeTemplate::Keyboard => ModuleCategory::Source,
             SynthNodeTemplate::MidiMonitor => ModuleCategory::Utility,
             SynthNodeTemplate::MidiNote => ModuleCategory::Source,
@@ -128,6 +132,7 @@ impl NodeTemplateIter for AllNodeTemplates {
             SynthNodeTemplate::Clock,
             SynthNodeTemplate::Vca,
             SynthNodeTemplate::Attenuverter,
+            SynthNodeTemplate::Mixer,
             SynthNodeTemplate::SampleHold,
             SynthNodeTemplate::Oscilloscope,
             SynthNodeTemplate::StepSequencer,
@@ -195,6 +200,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::Clock => Cow::Borrowed("Clock"),
             SynthNodeTemplate::Vca => Cow::Borrowed("VCA"),
             SynthNodeTemplate::Attenuverter => Cow::Borrowed("Attenuverter"),
+            SynthNodeTemplate::Mixer => Cow::Borrowed("Mixer"),
             SynthNodeTemplate::Keyboard => Cow::Borrowed("Keyboard"),
             SynthNodeTemplate::MidiMonitor => Cow::Borrowed("MIDI Monitor"),
             SynthNodeTemplate::MidiNote => Cow::Borrowed("MIDI Note"),
@@ -224,6 +230,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::Clock => "Clock".to_string(),
             SynthNodeTemplate::Vca => "VCA".to_string(),
             SynthNodeTemplate::Attenuverter => "Attenuverter".to_string(),
+            SynthNodeTemplate::Mixer => "Mixer".to_string(),
             SynthNodeTemplate::Keyboard => "Keyboard".to_string(),
             SynthNodeTemplate::MidiMonitor => "MIDI Monitor".to_string(),
             SynthNodeTemplate::MidiNote => "MIDI Note".to_string(),
@@ -325,6 +332,14 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 KnobParam::knob_only("Amount", "Amt"),
                 // Offset: DC offset
                 KnobParam::knob_only("Offset", "Offset"),
+            ]),
+            SynthNodeTemplate::Mixer => SynthNodeData::new(
+                "util.mixer",
+                "Mixer",
+                ModuleCategory::Utility,
+            ).with_knob_params(vec![
+                KnobParam::knob_only("Level 1", "Lv 1"),
+                KnobParam::knob_only("Level 2", "Lv 2"),
             ]),
             SynthNodeTemplate::Keyboard => SynthNodeData::new(
                 "input.keyboard",
@@ -968,6 +983,54 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     node_id,
                     "Out".to_string(),
                     SynthDataType::new(SignalType::Control),
+                );
+            }
+            SynthNodeTemplate::Mixer => {
+                // Channel 1 audio input
+                graph.add_input_param(
+                    node_id,
+                    "Ch 1".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Channel 2 audio input
+                graph.add_input_param(
+                    node_id,
+                    "Ch 2".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Level 1: knob-only parameter (0 to 1)
+                graph.add_input_param(
+                    node_id,
+                    "Level 1".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(1.0, 0.0, 1.0, "", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Level 2: knob-only parameter (0 to 1)
+                graph.add_input_param(
+                    node_id,
+                    "Level 2".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(1.0, 0.0, 1.0, "", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Audio output port
+                graph.add_output_param(
+                    node_id,
+                    "Out".to_string(),
+                    SynthDataType::new(SignalType::Audio),
                 );
             }
             SynthNodeTemplate::Keyboard => {
@@ -2008,10 +2071,11 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 20);
+        assert_eq!(templates.len(), 21);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
+        assert!(templates.contains(&SynthNodeTemplate::Mixer));
         assert!(templates.contains(&SynthNodeTemplate::SvfFilter));
         assert!(templates.contains(&SynthNodeTemplate::AdsrEnvelope));
         assert!(templates.contains(&SynthNodeTemplate::Clock));
