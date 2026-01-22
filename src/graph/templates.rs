@@ -46,6 +46,8 @@ pub enum SynthNodeTemplate {
     StereoDelay,
     /// Reverb - Freeverb-style stereo reverb effect.
     Reverb,
+    /// Parametric EQ - 3-band equalizer with low shelf, mid parametric, high shelf.
+    ParametricEq,
 }
 
 impl SynthNodeTemplate {
@@ -69,6 +71,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::StepSequencer => "seq.step",
             SynthNodeTemplate::StereoDelay => "fx.delay",
             SynthNodeTemplate::Reverb => "fx.reverb",
+            SynthNodeTemplate::ParametricEq => "fx.eq",
         }
     }
 
@@ -91,6 +94,7 @@ impl SynthNodeTemplate {
             SynthNodeTemplate::StepSequencer => ModuleCategory::Utility,
             SynthNodeTemplate::StereoDelay => ModuleCategory::Effect,
             SynthNodeTemplate::Reverb => ModuleCategory::Effect,
+            SynthNodeTemplate::ParametricEq => ModuleCategory::Effect,
         }
     }
 }
@@ -117,6 +121,7 @@ impl NodeTemplateIter for AllNodeTemplates {
             SynthNodeTemplate::StepSequencer,
             SynthNodeTemplate::StereoDelay,
             SynthNodeTemplate::Reverb,
+            SynthNodeTemplate::ParametricEq,
             SynthNodeTemplate::MidiMonitor,
             SynthNodeTemplate::AudioOutput,
         ]
@@ -183,6 +188,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::StepSequencer => Cow::Borrowed("Step Sequencer"),
             SynthNodeTemplate::StereoDelay => Cow::Borrowed("Stereo Delay"),
             SynthNodeTemplate::Reverb => Cow::Borrowed("Reverb"),
+            SynthNodeTemplate::ParametricEq => Cow::Borrowed("3-Band EQ"),
         }
     }
 
@@ -208,6 +214,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             SynthNodeTemplate::StepSequencer => "Step Sequencer".to_string(),
             SynthNodeTemplate::StereoDelay => "Stereo Delay".to_string(),
             SynthNodeTemplate::Reverb => "Reverb".to_string(),
+            SynthNodeTemplate::ParametricEq => "3-Band EQ".to_string(),
         }
     }
 
@@ -392,6 +399,24 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 KnobParam::knob_only("Mix", "Mix"),
                 // Width: knob-only
                 KnobParam::knob_only("Width", "Width"),
+            ]),
+            SynthNodeTemplate::ParametricEq => SynthNodeData::new(
+                "fx.eq",
+                "3-Band EQ",
+                ModuleCategory::Effect,
+            ).with_knob_params(vec![
+                // Low shelf controls
+                KnobParam::knob_only("Low Freq", "LoFrq"),
+                KnobParam::knob_only("Low Gain", "LoGn"),
+                // Mid parametric controls
+                KnobParam::knob_only("Mid Freq", "MdFrq"),
+                KnobParam::knob_only("Mid Gain", "MdGn"),
+                KnobParam::knob_only("Mid Q", "MdQ"),
+                // High shelf controls
+                KnobParam::knob_only("High Freq", "HiFrq"),
+                KnobParam::knob_only("High Gain", "HiGn"),
+                // Output gain
+                KnobParam::knob_only("Output", "Out"),
             ]),
         }
     }
@@ -1534,6 +1559,96 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     SynthDataType::new(SignalType::Audio),
                 );
             }
+            SynthNodeTemplate::ParametricEq => {
+                // Audio input port
+                graph.add_input_param(
+                    node_id,
+                    "In".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                    SynthValueType::scalar(0.0, ""),
+                    InputParamKind::ConnectionOnly,
+                    true,
+                );
+
+                // Low shelf controls (knob-only)
+                graph.add_input_param(
+                    node_id,
+                    "Low Freq".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::frequency(100.0, 20.0, 500.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+                graph.add_input_param(
+                    node_id,
+                    "Low Gain".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(0.0, -15.0, 15.0, "dB", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Mid parametric controls (knob-only)
+                graph.add_input_param(
+                    node_id,
+                    "Mid Freq".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::frequency(1000.0, 100.0, 10000.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+                graph.add_input_param(
+                    node_id,
+                    "Mid Gain".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(0.0, -15.0, 15.0, "dB", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+                graph.add_input_param(
+                    node_id,
+                    "Mid Q".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::frequency(1.0, 0.1, 10.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // High shelf controls (knob-only)
+                graph.add_input_param(
+                    node_id,
+                    "High Freq".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::frequency(8000.0, 2000.0, 20000.0, ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+                graph.add_input_param(
+                    node_id,
+                    "High Gain".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(0.0, -15.0, 15.0, "dB", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Output gain (knob-only)
+                graph.add_input_param(
+                    node_id,
+                    "Output".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::linear_range(0.0, -12.0, 12.0, "dB", ""),
+                    InputParamKind::ConstantOnly,
+                    false, // Hidden inline - shown in bottom knob row
+                );
+
+                // Output port
+                graph.add_output_param(
+                    node_id,
+                    "Out".to_string(),
+                    SynthDataType::new(SignalType::Audio),
+                );
+            }
         }
     }
 }
@@ -1545,7 +1660,7 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let templates = AllNodeTemplates.all_kinds();
-        assert_eq!(templates.len(), 16);
+        assert_eq!(templates.len(), 17);
         assert!(templates.contains(&SynthNodeTemplate::SineOscillator));
         assert!(templates.contains(&SynthNodeTemplate::AudioOutput));
         assert!(templates.contains(&SynthNodeTemplate::Lfo));
@@ -1562,6 +1677,7 @@ mod tests {
         assert!(templates.contains(&SynthNodeTemplate::StepSequencer));
         assert!(templates.contains(&SynthNodeTemplate::StereoDelay));
         assert!(templates.contains(&SynthNodeTemplate::Reverb));
+        assert!(templates.contains(&SynthNodeTemplate::ParametricEq));
     }
 
     #[test]
@@ -1582,6 +1698,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::StepSequencer.module_id(), "seq.step");
         assert_eq!(SynthNodeTemplate::StereoDelay.module_id(), "fx.delay");
         assert_eq!(SynthNodeTemplate::Reverb.module_id(), "fx.reverb");
+        assert_eq!(SynthNodeTemplate::ParametricEq.module_id(), "fx.eq");
     }
 
     #[test]
@@ -1602,6 +1719,7 @@ mod tests {
         assert_eq!(SynthNodeTemplate::StepSequencer.category(), ModuleCategory::Utility);
         assert_eq!(SynthNodeTemplate::StereoDelay.category(), ModuleCategory::Effect);
         assert_eq!(SynthNodeTemplate::Reverb.category(), ModuleCategory::Effect);
+        assert_eq!(SynthNodeTemplate::ParametricEq.category(), ModuleCategory::Effect);
     }
 
     #[test]
@@ -1670,6 +1788,10 @@ mod tests {
         assert_eq!(
             SynthNodeTemplate::Reverb.node_finder_label(&mut state),
             "Reverb"
+        );
+        assert_eq!(
+            SynthNodeTemplate::ParametricEq.node_finder_label(&mut state),
+            "3-Band EQ"
         );
     }
 }

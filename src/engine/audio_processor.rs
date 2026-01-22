@@ -6,7 +6,7 @@
 use std::time::Instant;
 
 use crate::dsp::{ModuleRegistry, ProcessContext};
-use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Clock, KeyboardInput, Lfo, MidiMonitor, MidiNote, Oscilloscope, Reverb, SampleHold, SineOscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
+use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Clock, KeyboardInput, Lfo, MidiMonitor, MidiNote, Oscilloscope, ParametricEq, Reverb, SampleHold, SineOscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
 
 use super::audio_graph::AudioGraph;
 use super::channels::EngineHandle;
@@ -31,6 +31,7 @@ pub fn create_module_registry() -> ModuleRegistry {
     registry.register::<StepSequencer>();
     registry.register::<StereoDelay>();
     registry.register::<Reverb>();
+    registry.register::<ParametricEq>();
     registry
 }
 
