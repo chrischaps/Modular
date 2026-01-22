@@ -130,21 +130,23 @@ impl AdsrParams {
 /// - y is in range [0, 1] representing amplitude
 ///
 /// The curve uses exponential shapes matching the actual audio engine implementation.
+/// Time segments are scaled to ensure visual clarity - each segment gets a minimum
+/// visual width so the envelope shape is always readable.
 pub fn generate_adsr_curve(params: &AdsrParams, num_points: usize) -> Vec<(f32, f32)> {
     let mut points = Vec::with_capacity(num_points);
 
-    // Calculate total time for visualization
-    // Scale times logarithmically for better display of short vs long envelopes
-    let attack_time = params.attack;
-    let decay_time = params.decay;
-    let sustain_time = 0.2; // Fixed hold time for visualization
-    let release_time = params.release;
-    let total_time = attack_time + decay_time + sustain_time + release_time;
+    // Use logarithmic scaling for times to better visualize short vs long segments
+    // This prevents very short attack/decay from being invisible
+    let attack_log = (1.0 + params.attack).ln();
+    let decay_log = (1.0 + params.decay).ln();
+    let sustain_log = (1.0 + 0.15_f32).ln(); // Fixed visual sustain hold
+    let release_log = (1.0 + params.release).ln();
+    let total_log = attack_log + decay_log + sustain_log + release_log;
 
-    // Normalize times to fit display
-    let attack_end = attack_time / total_time;
-    let decay_end = (attack_time + decay_time) / total_time;
-    let sustain_end = (attack_time + decay_time + sustain_time) / total_time;
+    // Calculate segment boundaries with logarithmic scaling
+    let attack_end = attack_log / total_log;
+    let decay_end = (attack_log + decay_log) / total_log;
+    let sustain_end = (attack_log + decay_log + sustain_log) / total_log;
 
     for i in 0..num_points {
         let x = i as f32 / (num_points - 1) as f32;
@@ -187,6 +189,22 @@ pub fn generate_adsr_curve(params: &AdsrParams, num_points: usize) -> Vec<(f32, 
     }
 
     points
+}
+
+/// Get the segment boundaries for label positioning.
+/// Returns (attack_end, decay_end, sustain_end) as normalized x positions.
+pub fn get_adsr_segment_boundaries(params: &AdsrParams) -> (f32, f32, f32) {
+    let attack_log = (1.0 + params.attack).ln();
+    let decay_log = (1.0 + params.decay).ln();
+    let sustain_log = (1.0 + 0.15_f32).ln();
+    let release_log = (1.0 + params.release).ln();
+    let total_log = attack_log + decay_log + sustain_log + release_log;
+
+    let attack_end = attack_log / total_log;
+    let decay_end = (attack_log + decay_log) / total_log;
+    let sustain_end = (attack_log + decay_log + sustain_log) / total_log;
+
+    (attack_end, decay_end, sustain_end)
 }
 
 /// Display an ADSR envelope visualization.
@@ -316,17 +334,14 @@ pub fn adsr_display(ui: &mut Ui, params: &AdsrParams, config: &AdsrConfig) -> Re
             let label_color = Color32::from_rgba_unmultiplied(255, 255, 255, 120);
             let font = egui::FontId::proportional(9.0);
 
-            // Calculate segment positions
-            let total_time =
-                params.attack + params.decay + 0.2 + params.release;
-            let attack_x = rect.left() + (params.attack / total_time) * rect.width() * 0.5;
-            let decay_x = rect.left()
-                + ((params.attack + params.decay * 0.5) / total_time) * rect.width();
-            let sustain_x = rect.left()
-                + ((params.attack + params.decay + 0.1) / total_time) * rect.width();
-            let release_x = rect.left()
-                + ((params.attack + params.decay + 0.2 + params.release * 0.5) / total_time)
-                    * rect.width();
+            // Get segment boundaries using the same logarithmic scaling as the curve
+            let (attack_end, decay_end, sustain_end) = get_adsr_segment_boundaries(params);
+
+            // Position labels at the center of each segment
+            let attack_x = rect.left() + (attack_end * 0.5) * rect.width();
+            let decay_x = rect.left() + ((attack_end + decay_end) * 0.5) * rect.width();
+            let sustain_x = rect.left() + ((decay_end + sustain_end) * 0.5) * rect.width();
+            let release_x = rect.left() + ((sustain_end + 1.0) * 0.5) * rect.width();
 
             // Draw labels centered under each segment
             painter.text(
@@ -470,10 +485,13 @@ mod tests {
         let params = AdsrParams::new(0.01, 0.1, 0.5, 0.3);
         let curve = generate_adsr_curve(&params, 200);
 
-        // Find points in the sustain region (roughly middle of curve)
+        // Use helper to get segment boundaries
+        let (_, decay_end, sustain_end) = get_adsr_segment_boundaries(&params);
+
+        // Find points in the sustain region
         let sustain_points: Vec<f32> = curve
             .iter()
-            .filter(|(x, _)| *x > 0.3 && *x < 0.6)
+            .filter(|(x, _)| *x > decay_end + 0.02 && *x < sustain_end - 0.02)
             .map(|(_, y)| *y)
             .collect();
 
@@ -493,10 +511,13 @@ mod tests {
         let params = AdsrParams::new(0.01, 0.1, 0.0, 0.3);
         let curve = generate_adsr_curve(&params, 100);
 
+        // Use helper to get segment boundaries
+        let (_, decay_end, sustain_end) = get_adsr_segment_boundaries(&params);
+
         // With zero sustain, should decay to near zero
         let sustain_points: Vec<f32> = curve
             .iter()
-            .filter(|(x, _)| *x > 0.3 && *x < 0.6)
+            .filter(|(x, _)| *x > decay_end + 0.02 && *x < sustain_end - 0.02)
             .map(|(_, y)| *y)
             .collect();
 
@@ -512,14 +533,13 @@ mod tests {
         let params = AdsrParams::new(0.01, 0.1, 1.0, 0.3);
         let curve = generate_adsr_curve(&params, 100);
 
-        // Calculate where sustain phase is
-        // total_time = 0.01 + 0.1 + 0.2 + 0.3 = 0.61
-        // decay_end = (0.01 + 0.1) / 0.61 = 0.18
-        // sustain_end = (0.01 + 0.1 + 0.2) / 0.61 = 0.508
-        // Filter for sustain region only (0.2 to 0.5)
+        // Use helper to get segment boundaries with logarithmic scaling
+        let (_, decay_end, sustain_end) = get_adsr_segment_boundaries(&params);
+
+        // Filter for sustain region only (between decay_end and sustain_end)
         let sustain_points: Vec<f32> = curve
             .iter()
-            .filter(|(x, _)| *x > 0.2 && *x < 0.5)
+            .filter(|(x, _)| *x > decay_end + 0.02 && *x < sustain_end - 0.02)
             .map(|(_, y)| *y)
             .collect();
 
