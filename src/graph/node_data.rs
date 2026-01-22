@@ -15,7 +15,7 @@ use egui_node_graph2::{NodeDataTrait, NodeResponse, UserResponseTrait};
 
 use crate::dsp::ModuleCategory;
 use crate::engine::midi_engine::MidiEvent;
-use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, ParamFormat, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams};
+use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, ParamFormat, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, SpectrumConfig, generate_filter_response, FilterResponseType};
 use super::{SynthResponse, SynthValueType};
 
 /// MIDI event colors for the MIDI Monitor display.
@@ -1199,6 +1199,68 @@ impl NodeDataTrait for SynthNodeData {
             ui.horizontal(|ui| {
                 ui.add_space((ui.available_width() - 140.0) / 2.0); // Center the display
                 adsr_display(ui, &adsr_params, &config);
+            });
+        }
+
+        // Special rendering for SVF Filter module - frequency response display
+        if self.module_id == "filter.svf" {
+            // Add separator
+            ui.add_space(4.0);
+            let category_color = self.category.color();
+            let separator_color = Color32::from_rgba_unmultiplied(
+                category_color.r(),
+                category_color.g(),
+                category_color.b(),
+                64,
+            );
+            ui.painter().hline(
+                ui.available_rect_before_wrap().x_range(),
+                ui.cursor().top(),
+                egui::Stroke::new(1.0, separator_color),
+            );
+            ui.add_space(4.0);
+
+            // Get cutoff and resonance parameters from node inputs
+            let (cutoff_hz, resonance) = if let Some(node) = graph.nodes.get(node_id) {
+                let mut cutoff = 1000.0f32;
+                let mut res = 0.5f32;
+
+                for (name, input_id) in &node.inputs {
+                    let input = graph.get_input(*input_id);
+                    match name.as_str() {
+                        "Cutoff" => {
+                            if let SynthValueType::Frequency { value, .. } = &input.value {
+                                cutoff = *value;
+                            }
+                        }
+                        "Resonance" => {
+                            if let SynthValueType::Scalar { value, .. } = &input.value {
+                                res = *value;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                (cutoff, res)
+            } else {
+                (1000.0, 0.5)
+            };
+
+            // Generate filter response curve for lowpass (primary output)
+            let response_points = generate_filter_response(
+                FilterResponseType::LowPass,
+                cutoff_hz,
+                resonance,
+                64, // Number of points for smooth curve
+            );
+
+            // Display filter response with lowpass preset config
+            let config = SpectrumConfig::lowpass()
+                .with_size(140.0, 50.0);
+
+            ui.horizontal(|ui| {
+                ui.add_space((ui.available_width() - 140.0) / 2.0); // Center the display
+                spectrum_display(ui, &response_points, &config);
             });
         }
 
