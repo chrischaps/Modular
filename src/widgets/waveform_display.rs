@@ -194,11 +194,14 @@ impl WaveformConfig {
 pub fn waveform_display(ui: &mut Ui, samples: &[f32], config: &WaveformConfig) -> Response {
     let (rect, response) = ui.allocate_exact_size(config.size, Sense::hover());
 
+    // Calculate zoom scale factor based on height (default 60.0)
+    let zoom_scale = config.size.y / 60.0;
+
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
 
         // Draw background
-        draw_waveform_background(painter, rect, config.grid_style);
+        draw_waveform_background(painter, rect, config.grid_style, zoom_scale);
 
         // Skip if no samples
         if samples.is_empty() {
@@ -240,7 +243,7 @@ pub fn waveform_display(ui: &mut Ui, samples: &[f32], config: &WaveformConfig) -
                 Pos2::new(rect.left(), zero_y),
                 Pos2::new(rect.right(), zero_y),
             ],
-            Stroke::new(0.5, Color32::from_rgba_unmultiplied(255, 255, 255, 30)),
+            Stroke::new(0.5 * zoom_scale, Color32::from_rgba_unmultiplied(255, 255, 255, 30)),
         );
     }
 
@@ -248,11 +251,11 @@ pub fn waveform_display(ui: &mut Ui, samples: &[f32], config: &WaveformConfig) -
 }
 
 /// Draw the grid background for the waveform display.
-fn draw_waveform_background(painter: &egui::Painter, rect: Rect, style: GridStyle) {
+fn draw_waveform_background(painter: &egui::Painter, rect: Rect, style: GridStyle, zoom_scale: f32) {
     // Dark background
     painter.rect_filled(
         rect,
-        2.0,
+        2.0 * zoom_scale,
         Color32::from_rgb(20, 22, 30),
     );
 
@@ -267,7 +270,7 @@ fn draw_waveform_background(painter: &egui::Painter, rect: Rect, style: GridStyl
                 let x = rect.left() + rect.width() * (i as f32 / num_divisions as f32);
                 painter.line_segment(
                     [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-                    Stroke::new(0.5, grid_color),
+                    Stroke::new(0.5 * zoom_scale, grid_color),
                 );
             }
 
@@ -276,7 +279,7 @@ fn draw_waveform_background(painter: &egui::Painter, rect: Rect, style: GridStyl
                 let y = rect.top() + rect.height() * (i as f32 / num_divisions as f32);
                 painter.line_segment(
                     [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
-                    Stroke::new(0.5, grid_color),
+                    Stroke::new(0.5 * zoom_scale, grid_color),
                 );
             }
         }
@@ -293,11 +296,11 @@ fn draw_waveform_background(painter: &egui::Painter, rect: Rect, style: GridStyl
                 if i % (num_minor / num_major) != 0 {
                     painter.line_segment(
                         [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-                        Stroke::new(0.5, minor_color),
+                        Stroke::new(0.5 * zoom_scale, minor_color),
                     );
                     painter.line_segment(
                         [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
-                        Stroke::new(0.5, minor_color),
+                        Stroke::new(0.5 * zoom_scale, minor_color),
                     );
                 }
             }
@@ -308,11 +311,11 @@ fn draw_waveform_background(painter: &egui::Painter, rect: Rect, style: GridStyl
                 let y = rect.top() + rect.height() * (i as f32 / num_major as f32);
                 painter.line_segment(
                     [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-                    Stroke::new(0.5, major_color),
+                    Stroke::new(0.5 * zoom_scale, major_color),
                 );
                 painter.line_segment(
                     [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
-                    Stroke::new(0.5, major_color),
+                    Stroke::new(0.5 * zoom_scale, major_color),
                 );
             }
         }
@@ -321,8 +324,8 @@ fn draw_waveform_background(painter: &egui::Painter, rect: Rect, style: GridStyl
     // Border
     painter.rect_stroke(
         rect,
-        2.0,
-        Stroke::new(1.0, Color32::from_rgb(50, 55, 70)),
+        2.0 * zoom_scale,
+        Stroke::new(1.0 * zoom_scale, Color32::from_rgb(50, 55, 70)),
     );
 }
 

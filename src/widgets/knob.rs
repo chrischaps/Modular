@@ -189,9 +189,11 @@ impl KnobConfig {
 /// - Double-click to reset to default
 pub fn knob(ui: &mut Ui, value: &mut f32, config: &KnobConfig) -> Response {
     let desired_size = Vec2::splat(config.size);
+    // Scale label/value heights proportionally with knob size (base 36.0 -> 16.0 ratio)
+    let text_height = config.size * (16.0 / 36.0);
     let total_height = config.size
-        + if config.show_value { 16.0 } else { 0.0 }
-        + if config.label.is_some() { 16.0 } else { 0.0 };
+        + if config.show_value { text_height } else { 0.0 }
+        + if config.label.is_some() { text_height } else { 0.0 };
 
     let (rect, response) = ui.allocate_exact_size(
         Vec2::new(config.size, total_height),
@@ -237,7 +239,10 @@ pub fn knob(ui: &mut Ui, value: &mut f32, config: &KnobConfig) -> Response {
         let painter = ui.painter();
         let knob_rect = Rect::from_min_size(rect.min, desired_size);
         let center = knob_rect.center();
-        let radius = config.size / 2.0 - 2.0;
+
+        // Scale factor relative to default size (50.0) for proportional scaling
+        let scale = config.size / 50.0;
+        let radius = config.size / 2.0 - 2.0 * scale;
 
         // Normalize value for display (0.0 to 1.0)
         let normalized = if config.logarithmic {
@@ -258,8 +263,8 @@ pub fn knob(ui: &mut Ui, value: &mut f32, config: &KnobConfig) -> Response {
 
         // Draw outer ring (shadow)
         painter.circle(
-            center + Vec2::new(1.0, 2.0),
-            radius + 1.0,
+            center + Vec2::new(1.0 * scale, 2.0 * scale),
+            radius + 1.0 * scale,
             Color32::from_rgba_unmultiplied(0, 0, 0, 60),
             Stroke::NONE,
         );
@@ -295,15 +300,16 @@ pub fn knob(ui: &mut Ui, value: &mut f32, config: &KnobConfig) -> Response {
         draw_value_arc(
             painter,
             center,
-            radius - 4.0,
+            radius - 4.0 * scale,
             start_angle,
             angle,
             theme::accent::PRIMARY,
+            scale,
         );
 
         // Draw position indicator (notch)
-        let notch_inner = radius - 12.0;
-        let notch_outer = radius - 4.0;
+        let notch_inner = radius - 12.0 * scale;
+        let notch_outer = radius - 4.0 * scale;
         let notch_start = Pos2::new(
             center.x + notch_inner * angle.cos(),
             center.y + notch_inner * angle.sin(),
@@ -314,18 +320,18 @@ pub fn knob(ui: &mut Ui, value: &mut f32, config: &KnobConfig) -> Response {
         );
         painter.line_segment(
             [notch_start, notch_end],
-            Stroke::new(2.5, theme::text::PRIMARY),
+            Stroke::new(2.5 * scale, theme::text::PRIMARY),
         );
 
         // Draw center dot
-        painter.circle_filled(center, 3.0, theme::text::SECONDARY);
+        painter.circle_filled(center, 3.0 * scale, theme::text::SECONDARY);
 
         // Draw outer ring border
         painter.circle_stroke(
             center,
             radius,
             Stroke::new(
-                1.0,
+                1.0 * scale,
                 if response.has_focus() || response.dragged() {
                     theme::accent::PRIMARY
                 } else {
@@ -335,26 +341,26 @@ pub fn knob(ui: &mut Ui, value: &mut f32, config: &KnobConfig) -> Response {
         );
 
         // Draw value text
-        let mut text_y = knob_rect.bottom() + 2.0;
+        let mut text_y = knob_rect.bottom() + 2.0 * scale;
         if config.show_value {
             let value_text = config.format.format(*value);
             painter.text(
-                Pos2::new(center.x, text_y + 6.0),
+                Pos2::new(center.x, text_y + 6.0 * scale),
                 egui::Align2::CENTER_CENTER,
                 value_text,
-                egui::FontId::proportional(11.0),
+                egui::FontId::proportional(11.0 * scale),
                 theme::text::PRIMARY,
             );
-            text_y += 14.0;
+            text_y += 14.0 * scale;
         }
 
         // Draw label
         if let Some(label) = &config.label {
             painter.text(
-                Pos2::new(center.x, text_y + 6.0),
+                Pos2::new(center.x, text_y + 6.0 * scale),
                 egui::Align2::CENTER_CENTER,
                 label,
-                egui::FontId::proportional(10.0),
+                egui::FontId::proportional(10.0 * scale),
                 theme::text::SECONDARY,
             );
         }
@@ -371,6 +377,7 @@ fn draw_value_arc(
     start_angle: f32,
     end_angle: f32,
     color: Color32,
+    scale: f32,
 ) {
     let segments = 32;
     let arc_span = end_angle - start_angle;
@@ -388,7 +395,7 @@ fn draw_value_arc(
         }
 
         for i in 0..points.len().saturating_sub(1) {
-            painter.line_segment([points[i], points[i + 1]], Stroke::new(3.0, color));
+            painter.line_segment([points[i], points[i + 1]], Stroke::new(3.0 * scale, color));
         }
     }
 }

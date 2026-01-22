@@ -116,32 +116,35 @@ pub fn oscilloscope_display(
 ) -> Response {
     let (rect, response) = ui.allocate_exact_size(config.size, Sense::hover());
 
+    // Calculate zoom scale factor based on height (default 120.0)
+    let zoom_scale = config.size.y / 120.0;
+
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
 
         // Draw background and grid
-        draw_oscilloscope_background(painter, rect, config);
+        draw_oscilloscope_background(painter, rect, config, zoom_scale);
 
         // Draw trigger level indicator
         if config.show_trigger {
-            draw_trigger_indicator(painter, rect, config);
+            draw_trigger_indicator(painter, rect, config, zoom_scale);
         }
 
         // Draw channel 2 first (so channel 1 draws on top)
         if !channel2.is_empty() {
-            draw_trace(painter, rect, channel2, config.channel2_color, config);
+            draw_trace(painter, rect, channel2, config.channel2_color, config, zoom_scale);
         }
 
         // Draw channel 1
         if !channel1.is_empty() {
-            draw_trace(painter, rect, channel1, config.channel1_color, config);
+            draw_trace(painter, rect, channel1, config.channel1_color, config, zoom_scale);
         }
 
         // Draw border
         painter.rect_stroke(
             rect,
-            4.0,
-            Stroke::new(1.0, Color32::from_rgb(60, 65, 80)),
+            4.0 * zoom_scale,
+            Stroke::new(1.0 * zoom_scale, Color32::from_rgb(60, 65, 80)),
         );
     }
 
@@ -149,11 +152,11 @@ pub fn oscilloscope_display(
 }
 
 /// Draw the oscilloscope background with grid.
-fn draw_oscilloscope_background(painter: &egui::Painter, rect: Rect, config: &OscilloscopeConfig) {
+fn draw_oscilloscope_background(painter: &egui::Painter, rect: Rect, config: &OscilloscopeConfig, zoom_scale: f32) {
     // Dark background with slight green tint (classic CRT look)
     painter.rect_filled(
         rect,
-        4.0,
+        4.0 * zoom_scale,
         Color32::from_rgb(10, 15, 12),
     );
 
@@ -170,14 +173,14 @@ fn draw_oscilloscope_background(painter: &egui::Painter, rect: Rect, config: &Os
         let x = rect.left() + rect.width() * t;
         painter.line_segment(
             [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-            Stroke::new(0.5, color),
+            Stroke::new(0.5 * zoom_scale, color),
         );
 
         // Horizontal lines
         let y = rect.top() + rect.height() * t;
         painter.line_segment(
             [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
-            Stroke::new(0.5, color),
+            Stroke::new(0.5 * zoom_scale, color),
         );
     }
 
@@ -188,15 +191,15 @@ fn draw_oscilloscope_background(painter: &egui::Painter, rect: Rect, config: &Os
 
     painter.line_segment(
         [Pos2::new(center_x, rect.top()), Pos2::new(center_x, rect.bottom())],
-        Stroke::new(1.0, crosshair_color),
+        Stroke::new(1.0 * zoom_scale, crosshair_color),
     );
     painter.line_segment(
         [Pos2::new(rect.left(), center_y), Pos2::new(rect.right(), center_y)],
-        Stroke::new(1.0, crosshair_color),
+        Stroke::new(1.0 * zoom_scale, crosshair_color),
     );
 
     // Draw small tick marks on center axes
-    let tick_length = 3.0;
+    let tick_length = 3.0 * zoom_scale;
     let tick_color = Color32::from_rgba_unmultiplied(100, 140, 100, 100);
     let num_ticks = 10;
 
@@ -207,25 +210,25 @@ fn draw_oscilloscope_background(painter: &egui::Painter, rect: Rect, config: &Os
         let x = rect.left() + rect.width() * t;
         painter.line_segment(
             [Pos2::new(x, center_y - tick_length), Pos2::new(x, center_y + tick_length)],
-            Stroke::new(0.5, tick_color),
+            Stroke::new(0.5 * zoom_scale, tick_color),
         );
 
         // Ticks on vertical center line
         let y = rect.top() + rect.height() * t;
         painter.line_segment(
             [Pos2::new(center_x - tick_length, y), Pos2::new(center_x + tick_length, y)],
-            Stroke::new(0.5, tick_color),
+            Stroke::new(0.5 * zoom_scale, tick_color),
         );
     }
 }
 
 /// Draw the trigger level indicator on the left edge.
-fn draw_trigger_indicator(painter: &egui::Painter, rect: Rect, config: &OscilloscopeConfig) {
+fn draw_trigger_indicator(painter: &egui::Painter, rect: Rect, config: &OscilloscopeConfig, zoom_scale: f32) {
     let trigger_y = rect.center().y - config.trigger_level * rect.height() * 0.5 * config.amplitude_scale;
     let trigger_y = trigger_y.clamp(rect.top(), rect.bottom());
 
     // Draw small arrow indicator on left edge
-    let arrow_size = 6.0;
+    let arrow_size = 6.0 * zoom_scale;
     let arrow_points = vec![
         Pos2::new(rect.left(), trigger_y),
         Pos2::new(rect.left() + arrow_size, trigger_y - arrow_size * 0.5),
@@ -240,16 +243,16 @@ fn draw_trigger_indicator(painter: &egui::Painter, rect: Rect, config: &Oscillos
     ));
 
     // Draw dashed trigger level line
-    let dash_length = 4.0;
-    let gap_length = 4.0;
-    let mut x = rect.left() + arrow_size + 2.0;
+    let dash_length = 4.0 * zoom_scale;
+    let gap_length = 4.0 * zoom_scale;
+    let mut x = rect.left() + arrow_size + 2.0 * zoom_scale;
     let dash_color = Color32::from_rgba_unmultiplied(255, 200, 100, 60);
 
     while x < rect.right() {
         let end_x = (x + dash_length).min(rect.right());
         painter.line_segment(
             [Pos2::new(x, trigger_y), Pos2::new(end_x, trigger_y)],
-            Stroke::new(0.5, dash_color),
+            Stroke::new(0.5 * zoom_scale, dash_color),
         );
         x += dash_length + gap_length;
     }
@@ -262,6 +265,7 @@ fn draw_trace(
     samples: &[f32],
     color: Color32,
     config: &OscilloscopeConfig,
+    zoom_scale: f32,
 ) {
     if samples.is_empty() {
         return;
@@ -278,11 +282,11 @@ fn draw_trace(
     // Draw glow effect (wider, semi-transparent line)
     if config.glow {
         let glow_color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 40);
-        draw_polyline(painter, &points, glow_color, config.line_thickness * 3.0);
+        draw_polyline(painter, &points, glow_color, config.line_thickness * 3.0 * zoom_scale);
     }
 
     // Draw main trace
-    draw_polyline(painter, &points, color, config.line_thickness);
+    draw_polyline(painter, &points, color, config.line_thickness * zoom_scale);
 }
 
 /// Calculate display points by resampling the input buffer.

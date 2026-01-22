@@ -280,9 +280,11 @@ impl WidgetValueTrait for SynthValueType {
             }
             Self::Select { value, options, label } => {
                 // Select gets an inline ComboBox - discrete choices need dropdown
+                let zoom = _user_state.zoom;
                 ui.horizontal(|ui: &mut egui::Ui| {
                     ui.label(if label.is_empty() { param_name } else { label });
                     egui::ComboBox::from_id_salt(param_name)
+                        .width(60.0 * zoom)
                         .selected_text(options.get(*value).map(|s| s.as_str()).unwrap_or(""))
                         .show_ui(ui, |ui: &mut egui::Ui| {
                             for (i, option) in options.iter().enumerate() {

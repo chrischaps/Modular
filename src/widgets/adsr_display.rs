@@ -218,12 +218,15 @@ pub fn get_adsr_segment_boundaries(params: &AdsrParams) -> (f32, f32, f32) {
 pub fn adsr_display(ui: &mut Ui, params: &AdsrParams, config: &AdsrConfig) -> Response {
     let (rect, response) = ui.allocate_exact_size(config.size, Sense::hover());
 
+    // Calculate zoom scale factor based on height (default 50.0)
+    let zoom_scale = config.size.y / 50.0;
+
     if ui.is_rect_visible(rect) {
         // Use clipped painter to prevent glow effects from extending outside bounds
         let painter = ui.painter_at(rect);
 
         // Draw background
-        painter.rect_filled(rect, 2.0, Color32::from_rgb(20, 22, 30));
+        painter.rect_filled(rect, 2.0 * zoom_scale, Color32::from_rgb(20, 22, 30));
 
         // Draw subtle grid
         if config.show_grid {
@@ -234,7 +237,7 @@ pub fn adsr_display(ui: &mut Ui, params: &AdsrParams, config: &AdsrConfig) -> Re
                 let x = rect.left() + rect.width() * (i as f32 / 4.0);
                 painter.line_segment(
                     [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-                    Stroke::new(0.5, grid_color),
+                    Stroke::new(0.5 * zoom_scale, grid_color),
                 );
             }
 
@@ -243,7 +246,7 @@ pub fn adsr_display(ui: &mut Ui, params: &AdsrParams, config: &AdsrConfig) -> Re
                 let y = rect.top() + rect.height() * (i as f32 / 4.0);
                 painter.line_segment(
                     [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
-                    Stroke::new(0.5, grid_color),
+                    Stroke::new(0.5 * zoom_scale, grid_color),
                 );
             }
         }
@@ -254,8 +257,8 @@ pub fn adsr_display(ui: &mut Ui, params: &AdsrParams, config: &AdsrConfig) -> Re
 
         // Convert to screen coordinates
         // Y is inverted (0 at bottom, 1 at top)
-        let padding_top = 4.0;
-        let padding_bottom = if config.show_labels { 14.0 } else { 4.0 };
+        let padding_top = 4.0 * zoom_scale;
+        let padding_bottom = if config.show_labels { 14.0 * zoom_scale } else { 4.0 * zoom_scale };
         let draw_height = rect.height() - padding_top - padding_bottom;
 
         let points: Vec<Pos2> = curve
@@ -282,7 +285,7 @@ pub fn adsr_display(ui: &mut Ui, params: &AdsrParams, config: &AdsrConfig) -> Re
                     Pos2::new(rect.left(), sustain_y),
                     Pos2::new(rect.right(), sustain_y),
                 ],
-                Stroke::new(1.0, sustain_color),
+                Stroke::new(1.0 * zoom_scale, sustain_color),
             );
         }
 
@@ -333,9 +336,9 @@ pub fn adsr_display(ui: &mut Ui, params: &AdsrParams, config: &AdsrConfig) -> Re
 
         // Draw segment labels
         if config.show_labels {
-            let label_y = rect.bottom() - 2.0;
+            let label_y = rect.bottom() - 2.0 * zoom_scale;
             let label_color = Color32::from_rgba_unmultiplied(255, 255, 255, 120);
-            let font = egui::FontId::proportional(9.0);
+            let font = egui::FontId::proportional(9.0 * zoom_scale);
 
             // Get segment boundaries using the same logarithmic scaling as the curve
             let (attack_end, decay_end, sustain_end) = get_adsr_segment_boundaries(params);
@@ -378,7 +381,7 @@ pub fn adsr_display(ui: &mut Ui, params: &AdsrParams, config: &AdsrConfig) -> Re
         }
 
         // Draw border
-        painter.rect_stroke(rect, 2.0, Stroke::new(1.0, Color32::from_rgb(50, 55, 70)));
+        painter.rect_stroke(rect, 2.0 * zoom_scale, Stroke::new(1.0 * zoom_scale, Color32::from_rgb(50, 55, 70)));
     }
 
     response

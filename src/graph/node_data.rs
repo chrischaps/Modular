@@ -575,6 +575,7 @@ impl NodeDataTrait for SynthNodeData {
         _node_id: egui_node_graph2::NodeId,
         _graph: &egui_node_graph2::Graph<Self, Self::DataType, Self::ValueType>,
         _user_state: &mut Self::UserState,
+        zoom: f32,
     ) -> Vec<NodeResponse<Self::Response, Self>>
     where
         Self::Response: UserResponseTrait,
@@ -587,12 +588,12 @@ impl NodeDataTrait for SynthNodeData {
         let icon_color = Color32::WHITE;
 
         // Left icon (category icon) - vector drawn for cross-platform reliability
-        let icon_size = 14.0;
+        let icon_size = 14.0 * zoom;
         let left_center = egui::pos2(rect.left() + icon_size * 0.6, rect.center().y);
         self.draw_category_icon(painter, left_center, icon_size, icon_color);
 
         // Right icon (secondary icon) - smaller
-        let secondary_size = 12.0;
+        let secondary_size = 12.0 * zoom;
         let right_center = egui::pos2(rect.right() - secondary_size * 0.6, rect.center().y);
         self.draw_secondary_icon(painter, right_center, secondary_size, icon_color);
 
@@ -608,6 +609,7 @@ impl NodeDataTrait for SynthNodeData {
         node_id: egui_node_graph2::NodeId,
         graph: &egui_node_graph2::Graph<Self, Self::DataType, Self::ValueType>,
         user_state: &mut Self::UserState,
+        zoom: f32,
     ) -> Vec<NodeResponse<Self::Response, Self>>
     where
         Self::Response: UserResponseTrait,
@@ -657,8 +659,8 @@ impl NodeDataTrait for SynthNodeData {
                 (0, true, true, true)
             };
 
-            // Add separator
-            ui.add_space(4.0);
+            // Add separator with zoom-scaled margins
+            ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
             let separator_color = Color32::from_rgba_unmultiplied(
                 category_color.r(),
@@ -666,12 +668,14 @@ impl NodeDataTrait for SynthNodeData {
                 category_color.b(),
                 64,
             );
+            let margin = 4.0 * zoom;
+            let rect = ui.available_rect_before_wrap();
             ui.painter().hline(
-                ui.available_rect_before_wrap().x_range(),
+                (rect.left() + margin)..=(rect.right() - margin),
                 ui.cursor().top(),
-                egui::Stroke::new(1.0, separator_color),
+                egui::Stroke::new(1.0 * zoom, separator_color),
             );
-            ui.add_space(4.0);
+            ui.add_space(4.0 * zoom);
 
             // Render MIDI event log
             let midi_events = user_state.midi_events();
@@ -681,8 +685,8 @@ impl NodeDataTrait for SynthNodeData {
             } else {
                 // Display events (most recent first for better visibility)
                 ui.vertical(|ui| {
-                    ui.set_min_width(180.0);
-                    ui.set_max_height(120.0);
+                    ui.set_min_width(180.0 * zoom);
+                    ui.set_max_height(120.0 * zoom);
 
                     for event in midi_events.iter().rev().take(8) {
                         // Apply channel filter (0 = all, 1-16 = specific channel)
@@ -720,8 +724,8 @@ impl NodeDataTrait for SynthNodeData {
 
         // Special rendering for Oscilloscope module
         if self.module_id == "util.oscilloscope" {
-            // Add separator
-            ui.add_space(4.0);
+            // Add separator with zoom-scaled margins
+            ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
             let separator_color = Color32::from_rgba_unmultiplied(
                 category_color.r(),
@@ -729,12 +733,14 @@ impl NodeDataTrait for SynthNodeData {
                 category_color.b(),
                 64,
             );
+            let margin = 4.0 * zoom;
+            let rect = ui.available_rect_before_wrap();
             ui.painter().hline(
-                ui.available_rect_before_wrap().x_range(),
+                (rect.left() + margin)..=(rect.right() - margin),
                 ui.cursor().top(),
-                egui::Stroke::new(1.0, separator_color),
+                egui::Stroke::new(1.0 * zoom, separator_color),
             );
-            ui.add_space(4.0);
+            ui.add_space(4.0 * zoom);
 
             // Get scope data from user state
             let scope_data = engine_node_id
@@ -763,7 +769,7 @@ impl NodeDataTrait for SynthNodeData {
                 (&[] as &[f32], &[] as &[f32])
             };
 
-            let config = crate::widgets::OscilloscopeConfig::new(200.0, 120.0)
+            let config = crate::widgets::OscilloscopeConfig::new(200.0 * zoom, 120.0 * zoom)
                 .with_trigger_level(trigger_level)
                 .with_trigger_indicator(true);
 
@@ -772,8 +778,8 @@ impl NodeDataTrait for SynthNodeData {
 
         // Special rendering for Step Sequencer module
         if self.module_id == "seq.step" {
-            // Add separator
-            ui.add_space(4.0);
+            // Add separator with zoom-scaled margins
+            ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
             let separator_color = Color32::from_rgba_unmultiplied(
                 category_color.r(),
@@ -781,12 +787,14 @@ impl NodeDataTrait for SynthNodeData {
                 category_color.b(),
                 64,
             );
+            let margin = 4.0 * zoom;
+            let rect = ui.available_rect_before_wrap();
             ui.painter().hline(
-                ui.available_rect_before_wrap().x_range(),
+                (rect.left() + margin)..=(rect.right() - margin),
                 ui.cursor().top(),
-                egui::Stroke::new(1.0, separator_color),
+                egui::Stroke::new(1.0 * zoom, separator_color),
             );
-            ui.add_space(4.0);
+            ui.add_space(4.0 * zoom);
 
             // Get step data from the node's input parameters
             let (num_steps, current_step_output, step_data) = if let Some(node) = graph.nodes.get(node_id) {
@@ -833,11 +841,11 @@ impl NodeDataTrait for SynthNodeData {
 
             // Render step grid (two rows of 8)
             ui.vertical(|ui| {
-                ui.set_min_width(220.0);
+                ui.set_min_width(220.0 * zoom);
 
                 // Step size
-                let step_size = 24.0;
-                let step_spacing = 3.0;
+                let step_size = 24.0 * zoom;
+                let step_spacing = 3.0 * zoom;
 
                 // Row 1: Steps 1-8
                 ui.horizontal(|ui| {
@@ -891,13 +899,13 @@ impl NodeDataTrait for SynthNodeData {
                         let note_name = crate::modules::sequencer::note_to_name(pitch);
                         let text_pos = egui::pos2(
                             rect.center().x,
-                            step_rect.bottom() + 2.0,
+                            step_rect.bottom() + 2.0 * zoom,
                         );
                         ui.painter().text(
                             text_pos,
                             egui::Align2::CENTER_TOP,
                             &note_name,
-                            egui::FontId::proportional(8.0),
+                            egui::FontId::proportional(8.0 * zoom),
                             Color32::from_gray(180),
                         );
 
@@ -963,7 +971,7 @@ impl NodeDataTrait for SynthNodeData {
 
                 // Row 2: Steps 9-16 (if num_steps > 8)
                 if num_steps > 8 {
-                    ui.add_space(2.0);
+                    ui.add_space(2.0 * zoom);
                     ui.horizontal(|ui| {
                         for step in 8..16.min(num_steps) {
                             let is_current = step == current_step_output;
@@ -1009,13 +1017,13 @@ impl NodeDataTrait for SynthNodeData {
                             let note_name = crate::modules::sequencer::note_to_name(pitch);
                             let text_pos = egui::pos2(
                                 rect.center().x,
-                                step_rect.bottom() + 2.0,
+                                step_rect.bottom() + 2.0 * zoom,
                             );
                             ui.painter().text(
                                 text_pos,
                                 egui::Align2::CENTER_TOP,
                                 &note_name,
-                                egui::FontId::proportional(8.0),
+                                egui::FontId::proportional(8.0 * zoom),
                                 Color32::from_gray(180),
                             );
 
@@ -1081,8 +1089,8 @@ impl NodeDataTrait for SynthNodeData {
 
         // Special rendering for Oscillator module - waveform preview
         if self.module_id == "osc.sine" {
-            // Add separator
-            ui.add_space(4.0);
+            // Add separator with zoom-scaled margins
+            ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
             let separator_color = Color32::from_rgba_unmultiplied(
                 category_color.r(),
@@ -1090,12 +1098,14 @@ impl NodeDataTrait for SynthNodeData {
                 category_color.b(),
                 64,
             );
+            let margin = 4.0 * zoom;
+            let rect = ui.available_rect_before_wrap();
             ui.painter().hline(
-                ui.available_rect_before_wrap().x_range(),
+                (rect.left() + margin)..=(rect.right() - margin),
                 ui.cursor().top(),
-                egui::Stroke::new(1.0, separator_color),
+                egui::Stroke::new(1.0 * zoom, separator_color),
             );
-            ui.add_space(4.0);
+            ui.add_space(4.0 * zoom);
 
             // Get waveform type and pulse width from node parameters
             let (waveform_idx, pulse_width) = if let Some(node) = graph.nodes.get(node_id) {
@@ -1138,18 +1148,18 @@ impl NodeDataTrait for SynthNodeData {
 
             // Display waveform with oscillator preset config
             let config = WaveformConfig::oscillator()
-                .with_size(140.0, 50.0);
+                .with_size(140.0 * zoom, 50.0 * zoom);
 
             ui.horizontal(|ui| {
-                ui.add_space((ui.available_width() - 140.0) / 2.0); // Center the display
+                ui.add_space((ui.available_width() - 140.0 * zoom) / 2.0); // Center the display
                 waveform_display(ui, &samples, &config);
             });
         }
 
         // Special rendering for ADSR Envelope module - envelope shape display
         if self.module_id == "mod.adsr" {
-            // Add separator
-            ui.add_space(4.0);
+            // Add separator with zoom-scaled margins
+            ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
             let separator_color = Color32::from_rgba_unmultiplied(
                 category_color.r(),
@@ -1157,12 +1167,14 @@ impl NodeDataTrait for SynthNodeData {
                 category_color.b(),
                 64,
             );
+            let margin = 4.0 * zoom;
+            let rect = ui.available_rect_before_wrap();
             ui.painter().hline(
-                ui.available_rect_before_wrap().x_range(),
+                (rect.left() + margin)..=(rect.right() - margin),
                 ui.cursor().top(),
-                egui::Stroke::new(1.0, separator_color),
+                egui::Stroke::new(1.0 * zoom, separator_color),
             );
-            ui.add_space(4.0);
+            ui.add_space(4.0 * zoom);
 
             // Get ADSR parameters from node inputs
             let adsr_params = if let Some(node) = graph.nodes.get(node_id) {
@@ -1204,18 +1216,18 @@ impl NodeDataTrait for SynthNodeData {
 
             // Display ADSR envelope visualization
             let config = AdsrConfig::default()
-                .with_size(140.0, 50.0);
+                .with_size(140.0 * zoom, 50.0 * zoom);
 
             ui.horizontal(|ui| {
-                ui.add_space((ui.available_width() - 140.0) / 2.0); // Center the display
+                ui.add_space((ui.available_width() - 140.0 * zoom) / 2.0); // Center the display
                 adsr_display(ui, &adsr_params, &config);
             });
         }
 
         // Special rendering for SVF Filter module - frequency response display
         if self.module_id == "filter.svf" {
-            // Add separator
-            ui.add_space(4.0);
+            // Add separator with zoom-scaled margins
+            ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
             let separator_color = Color32::from_rgba_unmultiplied(
                 category_color.r(),
@@ -1223,12 +1235,14 @@ impl NodeDataTrait for SynthNodeData {
                 category_color.b(),
                 64,
             );
+            let margin = 4.0 * zoom;
+            let rect = ui.available_rect_before_wrap();
             ui.painter().hline(
-                ui.available_rect_before_wrap().x_range(),
+                (rect.left() + margin)..=(rect.right() - margin),
                 ui.cursor().top(),
-                egui::Stroke::new(1.0, separator_color),
+                egui::Stroke::new(1.0 * zoom, separator_color),
             );
-            ui.add_space(4.0);
+            ui.add_space(4.0 * zoom);
 
             // Get cutoff and resonance parameters from node inputs
             let (cutoff_hz, resonance) = if let Some(node) = graph.nodes.get(node_id) {
@@ -1267,21 +1281,21 @@ impl NodeDataTrait for SynthNodeData {
             // Display filter response with custom config optimized for seeing resonance
             // Range: -24dB to +12dB shows both rolloff and resonance peak clearly
             let config = SpectrumConfig::default()
-                .with_size(140.0, 50.0)
+                .with_size(140.0 * zoom, 50.0 * zoom)
                 .with_db_range(-24.0, 12.0)
                 .with_style(SpectrumStyle::Line)
                 .with_glow(true);
 
             ui.horizontal(|ui| {
-                ui.add_space((ui.available_width() - 140.0) / 2.0); // Center the display
+                ui.add_space((ui.available_width() - 140.0 * zoom) / 2.0); // Center the display
                 spectrum_display(ui, &response_points, &config);
             });
         }
 
         // Special rendering for LFO module - waveform preview with phase marker
         if self.module_id == "mod.lfo" {
-            // Add separator
-            ui.add_space(4.0);
+            // Add separator with zoom-scaled margins
+            ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
             let separator_color = Color32::from_rgba_unmultiplied(
                 category_color.r(),
@@ -1289,12 +1303,14 @@ impl NodeDataTrait for SynthNodeData {
                 category_color.b(),
                 64,
             );
+            let margin = 4.0 * zoom;
+            let rect = ui.available_rect_before_wrap();
             ui.painter().hline(
-                ui.available_rect_before_wrap().x_range(),
+                (rect.left() + margin)..=(rect.right() - margin),
                 ui.cursor().top(),
-                egui::Stroke::new(1.0, separator_color),
+                egui::Stroke::new(1.0 * zoom, separator_color),
             );
-            ui.add_space(4.0);
+            ui.add_space(4.0 * zoom);
 
             // Get waveform type and parameters from node inputs
             let (waveform_idx, is_bipolar, rate_hz) = if let Some(node) = graph.nodes.get(node_id) {
@@ -1351,7 +1367,7 @@ impl NodeDataTrait for SynthNodeData {
 
             // Display waveform with LFO preset config (orange for control signals)
             let config = WaveformConfig::lfo()
-                .with_size(140.0, 50.0);
+                .with_size(140.0 * zoom, 50.0 * zoom);
 
             // Get real phase from audio engine feedback (output port 1)
             // Falls back to UI-time estimation if not yet available
@@ -1364,7 +1380,7 @@ impl NodeDataTrait for SynthNodeData {
                 });
 
             ui.horizontal(|ui| {
-                ui.add_space((ui.available_width() - 140.0) / 2.0); // Center the display
+                ui.add_space((ui.available_width() - 140.0 * zoom) / 2.0); // Center the display
 
                 // Draw the waveform first
                 let response = waveform_display(ui, &samples, &config);
@@ -1396,7 +1412,7 @@ impl NodeDataTrait for SynthNodeData {
                     let glow_color = Color32::from_rgba_unmultiplied(255, 200, 100, 80);
                     painter.circle_filled(
                         egui::Pos2::new(marker_x, marker_y),
-                        8.0,
+                        8.0 * zoom,
                         glow_color,
                     );
 
@@ -1404,7 +1420,7 @@ impl NodeDataTrait for SynthNodeData {
                     let dot_color = Color32::from_rgb(255, 220, 180);
                     painter.circle_filled(
                         egui::Pos2::new(marker_x, marker_y),
-                        4.0,
+                        4.0 * zoom,
                         dot_color,
                     );
 
@@ -1412,7 +1428,7 @@ impl NodeDataTrait for SynthNodeData {
                     let center_color = Color32::WHITE;
                     painter.circle_filled(
                         egui::Pos2::new(marker_x, marker_y),
-                        2.0,
+                        2.0 * zoom,
                         center_color,
                     );
                 }
@@ -1425,9 +1441,9 @@ impl NodeDataTrait for SynthNodeData {
         // Render horizontal row of knobs if this node has knob parameters
         if !self.knob_params.is_empty() {
             // Add some spacing before the knob row
-            ui.add_space(4.0);
+            ui.add_space(4.0 * zoom);
 
-            // Draw separator line
+            // Draw separator line with zoom-scaled margins
             let category_color = self.category.color();
             let separator_color = Color32::from_rgba_unmultiplied(
                 category_color.r(),
@@ -1435,16 +1451,18 @@ impl NodeDataTrait for SynthNodeData {
                 category_color.b(),
                 64,
             );
+            let margin = 4.0 * zoom;
+            let rect = ui.available_rect_before_wrap();
             ui.painter().hline(
-                ui.available_rect_before_wrap().x_range(),
+                (rect.left() + margin)..=(rect.right() - margin),
                 ui.cursor().top(),
-                egui::Stroke::new(1.0, separator_color),
+                egui::Stroke::new(1.0 * zoom, separator_color),
             );
-            ui.add_space(4.0);
+            ui.add_space(4.0 * zoom);
 
             // Render knobs in a horizontal layout
             ui.horizontal(|ui| {
-                const KNOB_SIZE: f32 = 36.0;
+                let knob_size = 36.0 * zoom;
 
                 for knob_param in &self.knob_params {
                     // Find the corresponding input parameter by name
@@ -1522,7 +1540,7 @@ impl NodeDataTrait for SynthNodeData {
                             // Render the knob based on value type
                             let knob_response = ui.scope(|ui| {
                                 ui.vertical(|ui| {
-                                    ui.set_min_width(KNOB_SIZE + 8.0);
+                                    ui.set_min_width(knob_size + 8.0 * zoom);
 
                                     // Visual indicator for MIDI mapping or learn mode
                                     let show_midi_indicator = midi_config.has_midi_mapping || midi_config.is_learn_target;
@@ -1539,7 +1557,7 @@ impl NodeDataTrait for SynthNodeData {
                                             Color32::from_rgb(180, 100, 200) // Purple for MIDI
                                         };
 
-                                        let dot_size = 8.0;
+                                        let dot_size = 8.0 * zoom;
                                         let available_width = ui.available_width();
                                         let badge_center = egui::pos2(
                                             ui.cursor().left() + available_width / 2.0,
@@ -1547,19 +1565,19 @@ impl NodeDataTrait for SynthNodeData {
                                         );
 
                                         // Draw badge background
-                                        ui.painter().circle_filled(badge_center, dot_size / 2.0 + 1.0, badge_color);
+                                        ui.painter().circle_filled(badge_center, dot_size / 2.0 + 1.0 * zoom, badge_color);
 
                                         // Draw "M" letter on badge
-                                        let text_pos = badge_center - egui::vec2(3.0, 4.0);
+                                        let text_pos = badge_center - egui::vec2(3.0 * zoom, 4.0 * zoom);
                                         ui.painter().text(
                                             text_pos,
                                             egui::Align2::LEFT_TOP,
                                             "M",
-                                            egui::FontId::proportional(8.0),
+                                            egui::FontId::proportional(8.0 * zoom),
                                             Color32::WHITE,
                                         );
 
-                                        ui.add_space(dot_size + 2.0);
+                                        ui.add_space(dot_size + 2.0 * zoom);
 
                                         // Request repaint for blinking effect
                                         if midi_config.is_learn_target {
@@ -1573,7 +1591,7 @@ impl NodeDataTrait for SynthNodeData {
                                             Color32::from_rgb(100, 200, 100) // Green for connected but no signal yet
                                         };
                                         // Draw a small colored dot centered above the knob
-                                        let dot_size = 6.0;
+                                        let dot_size = 6.0 * zoom;
                                         let available_width = ui.available_width();
                                         let dot_rect = egui::Rect::from_center_size(
                                             egui::pos2(
@@ -1583,7 +1601,7 @@ impl NodeDataTrait for SynthNodeData {
                                             egui::vec2(dot_size, dot_size),
                                         );
                                         ui.painter().circle_filled(dot_rect.center(), dot_size / 2.0, indicator_color);
-                                        ui.add_space(dot_size + 2.0);
+                                        ui.add_space(dot_size + 2.0 * zoom);
                                     }
 
                                     // Render knob based on the value type
@@ -1593,7 +1611,7 @@ impl NodeDataTrait for SynthNodeData {
                                         ui,
                                         &input.value,
                                         &knob_param.label,
-                                        KNOB_SIZE,
+                                        knob_size,
                                         is_connected,
                                         node_id,
                                         &knob_param.param_name,
@@ -1666,7 +1684,7 @@ impl NodeDataTrait for SynthNodeData {
         // Render LED indicators if this node has any
         if !self.led_indicators.is_empty() {
             // Add spacing before LEDs
-            ui.add_space(4.0);
+            ui.add_space(4.0 * zoom);
 
             // Render LEDs in a horizontal layout
             ui.horizontal(|ui| {
@@ -1678,8 +1696,10 @@ impl NodeDataTrait for SynthNodeData {
 
                     // Render the LED with label
                     ui.vertical(|ui| {
-                        ui.set_min_width(20.0);
-                        let config = led_indicator.config.clone().with_label(&led_indicator.label);
+                        ui.set_min_width(20.0 * zoom);
+                        let config = led_indicator.config.clone()
+                            .with_label(&led_indicator.label)
+                            .with_size(led_indicator.config.size * zoom);
                         led(ui, brightness, &config);
                     });
                 }

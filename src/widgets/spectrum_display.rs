@@ -190,11 +190,14 @@ pub fn spectrum_display(
 ) -> Response {
     let (rect, response) = ui.allocate_exact_size(config.size, Sense::hover());
 
+    // Calculate zoom scale factor based on height (default 60.0)
+    let zoom_scale = config.size.y / 60.0;
+
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
 
         // Draw background
-        draw_spectrum_background(painter, rect, config);
+        draw_spectrum_background(painter, rect, config, zoom_scale);
 
         // Skip if no points
         if response_curve.is_empty() {
@@ -241,11 +244,11 @@ pub fn spectrum_display(
 }
 
 /// Draw the background grid for the spectrum display.
-fn draw_spectrum_background(painter: &egui::Painter, rect: Rect, config: &SpectrumConfig) {
+fn draw_spectrum_background(painter: &egui::Painter, rect: Rect, config: &SpectrumConfig, zoom_scale: f32) {
     // Dark background
     painter.rect_filled(
         rect,
-        2.0,
+        2.0 * zoom_scale,
         Color32::from_rgb(20, 22, 30),
     );
 
@@ -268,7 +271,7 @@ fn draw_spectrum_background(painter: &egui::Painter, rect: Rect, config: &Spectr
                 let x = freq_to_x(*freq, rect, config);
                 painter.line_segment(
                     [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
-                    Stroke::new(0.5, grid_color),
+                    Stroke::new(0.5 * zoom_scale, grid_color),
                 );
             }
         }
@@ -280,17 +283,17 @@ fn draw_spectrum_background(painter: &egui::Painter, rect: Rect, config: &Spectr
             let y = db_to_y(db, rect, config);
             painter.line_segment(
                 [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
-                Stroke::new(0.5, grid_color),
+                Stroke::new(0.5 * zoom_scale, grid_color),
             );
 
             // dB labels (small, on left edge)
             if i > 0 && i < config.grid_divisions {
                 let label = format!("{:.0}", db);
                 painter.text(
-                    Pos2::new(rect.left() + 2.0, y - 6.0),
+                    Pos2::new(rect.left() + 2.0 * zoom_scale, y - 6.0 * zoom_scale),
                     egui::Align2::LEFT_CENTER,
                     label,
-                    egui::FontId::proportional(8.0),
+                    egui::FontId::proportional(8.0 * zoom_scale),
                     label_color,
                 );
             }
@@ -300,8 +303,8 @@ fn draw_spectrum_background(painter: &egui::Painter, rect: Rect, config: &Spectr
     // Border
     painter.rect_stroke(
         rect,
-        2.0,
-        Stroke::new(1.0, Color32::from_rgb(50, 55, 70)),
+        2.0 * zoom_scale,
+        Stroke::new(1.0 * zoom_scale, Color32::from_rgb(50, 55, 70)),
     );
 }
 

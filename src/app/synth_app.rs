@@ -877,6 +877,9 @@ impl SynthApp {
                 // Reset widget context menu flag before drawing
                 self.user_state.widget_context_menu_open = false;
 
+                // Update zoom for widget scaling
+                self.user_state.zoom = self.graph_state.pan_zoom.zoom;
+
                 // Draw the node graph editor
                 let graph_response = self.graph_state.draw_graph_editor(
                     ui,
@@ -1579,6 +1582,12 @@ impl SynthApp {
 
         // Clear the current graph
         self.clear_graph();
+
+        // Reset pan/zoom to default (zoom=1.0, pan=0) before loading positions.
+        // This is critical because the library's update_node_positions_after_zoom
+        // mutates node_positions based on the current zoom level. Loading positions
+        // at a different zoom than they were saved at would cause layout drift.
+        self.graph_state.pan_zoom = egui_node_graph2::PanZoom::default();
 
         // Map from patch node IDs to graph node IDs
         let mut id_map: HashMap<u64, egui_node_graph2::NodeId> = HashMap::new();

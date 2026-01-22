@@ -114,6 +114,10 @@ pub struct SynthGraphState {
     /// Oscilloscope waveform data received from the audio engine.
     /// Key: engine_node_id, Value: scope waveform data.
     pub scope_data: HashMap<EngineNodeId, ScopeData>,
+
+    /// Current zoom level for scaling UI elements.
+    /// Set by the graph editor before rendering.
+    pub zoom: f32,
 }
 
 impl Default for SynthGraphState {
@@ -136,6 +140,7 @@ impl Default for SynthGraphState {
             midi_learn_target: None,
             widget_context_menu_open: false,
             scope_data: HashMap::new(),
+            zoom: 1.0,
         }
     }
 }

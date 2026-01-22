@@ -111,12 +111,15 @@ impl LedConfig {
 pub fn led(ui: &mut Ui, brightness: f32, config: &LedConfig) -> Response {
     let brightness = brightness.clamp(0.0, 1.0);
 
-    // Calculate total widget size including label
-    let label_height = if config.label.is_some() { 14.0 } else { 0.0 };
+    // Scale factor relative to default size (12.0) for proportional scaling
+    let scale = config.size / 12.0;
+
+    // Calculate total widget size including label (all sizes scale proportionally)
+    let label_height = if config.label.is_some() { 14.0 * scale } else { 0.0 };
     let total_height = config.size + label_height;
 
     let (rect, response) = ui.allocate_exact_size(
-        Vec2::new(config.size + 8.0, total_height),
+        Vec2::new(config.size + 8.0 * scale, total_height),
         Sense::hover(),
     );
 
@@ -128,7 +131,7 @@ pub fn led(ui: &mut Ui, brightness: f32, config: &LedConfig) -> Response {
             rect.center().x,
             rect.min.y + config.size / 2.0,
         );
-        let radius = config.size / 2.0 - 1.0;
+        let radius = config.size / 2.0 - 1.0 * scale;
 
         // Interpolate color based on brightness
         let current_color = interpolate_color(config.off_color, config.on_color, brightness);
@@ -154,7 +157,7 @@ pub fn led(ui: &mut Ui, brightness: f32, config: &LedConfig) -> Response {
 
         // Draw LED body (outer ring for 3D effect)
         let ring_color = Color32::from_rgba_unmultiplied(0, 0, 0, 60);
-        painter.circle_filled(center, radius + 1.0, ring_color);
+        painter.circle_filled(center, radius + 1.0 * scale, ring_color);
 
         // Main LED body
         painter.circle_filled(center, radius, current_color);
@@ -179,12 +182,12 @@ pub fn led(ui: &mut Ui, brightness: f32, config: &LedConfig) -> Response {
 
         // Draw label if present
         if let Some(label) = &config.label {
-            let label_pos = Pos2::new(center.x, rect.min.y + config.size + 8.0);
+            let label_pos = Pos2::new(center.x, rect.min.y + config.size + 8.0 * scale);
             painter.text(
                 label_pos,
                 egui::Align2::CENTER_CENTER,
                 label,
-                egui::FontId::proportional(10.0),
+                egui::FontId::proportional(10.0 * scale),
                 Color32::from_gray(180),
             );
         }
