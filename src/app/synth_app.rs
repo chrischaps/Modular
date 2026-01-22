@@ -1110,6 +1110,7 @@ impl SynthApp {
                 });
 
             // Show submenu for open category
+            let mut submenu_rect: Option<egui::Rect> = None;
             if let Some(open_cat_index) = self.user_state.context_menu_open_category {
                 if let Some((_category, templates)) = categories.get(open_cat_index) {
                     // Position submenu to the right of the main menu
@@ -1133,6 +1134,8 @@ impl SynthApp {
                             });
                         });
 
+                    submenu_rect = Some(submenu_response.response.rect);
+
                     // Keep submenu open if mouse is inside it
                     if submenu_response.response.rect.contains(ctx.input(|i| i.pointer.hover_pos().unwrap_or_default())) {
                         // Reset hover intent when mouse is in submenu
@@ -1145,9 +1148,10 @@ impl SynthApp {
             let menu_rect = menu_response.response.rect;
             if ctx.input(|i| i.pointer.any_click()) {
                 if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
-                    // Check if click was outside menu (with some margin for submenus)
-                    let expanded_rect = menu_rect.expand(200.0); // Allow for submenu width
-                    if !expanded_rect.contains(pos) && template_to_create.is_none() {
+                    // Check if click was outside both main menu and submenu
+                    let in_main_menu = menu_rect.contains(pos);
+                    let in_submenu = submenu_rect.map_or(false, |r| r.contains(pos));
+                    if !in_main_menu && !in_submenu && template_to_create.is_none() {
                         close_menu = true;
                     }
                 }
