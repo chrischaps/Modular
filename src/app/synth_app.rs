@@ -938,6 +938,14 @@ impl SynthApp {
                                 // Show error message
                                 self.user_state.set_validation_error(error_msg);
                             } else {
+                                // Always send a disconnect command first to clear any existing connection
+                                // The graph library auto-disconnects old connections visually when a new
+                                // connection is made to an input, but doesn't emit a DisconnectEvent.
+                                // The engine's disconnect gracefully handles the case where nothing is connected.
+                                if let Some(disconnect_cmd) = self.build_disconnect_command(input) {
+                                    commands_to_send.push(disconnect_cmd);
+                                }
+
                                 // Connection is valid - send to engine
                                 if let Some(cmd) = self.build_connect_command(output, input) {
                                     commands_to_send.push(cmd);
