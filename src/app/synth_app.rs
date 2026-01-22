@@ -1017,6 +1017,11 @@ impl SynthApp {
             let mut close_menu = false;
             let mut template_to_create: Option<SynthNodeTemplate> = None;
 
+            // Hover delay before switching submenus (in seconds)
+            const SUBMENU_HOVER_DELAY: f32 = 0.15;
+
+            let categories = AllNodeTemplates::by_category();
+
             let menu_id = egui::Id::new("add_node_context_menu");
             let menu_response = egui::Area::new(menu_id)
                 .fixed_pos(menu_pos)
@@ -1025,25 +1030,83 @@ impl SynthApp {
                     egui::Frame::menu(ui.style()).show(ui, |ui| {
                         ui.set_min_width(120.0);
 
-                        for (category, templates) in AllNodeTemplates::by_category() {
-                            // Show category as a submenu button
-                            ui.menu_button(
-                                egui::RichText::new(format!("{} ", category.name()))
-                                    .color(category.color()),
-                                |ui| {
-                                    for template in templates {
-                                        let label = template.node_finder_label(&mut self.user_state);
-                                        if ui.button(label.as_ref()).clicked() {
-                                            template_to_create = Some(template);
-                                            close_menu = true;
-                                            ui.close_menu();
-                                        }
-                                    }
-                                },
+                        for (cat_index, (category, _templates)) in categories.iter().enumerate() {
+                            // Create category button with arrow indicator
+                            let button_text = egui::RichText::new(format!("{}  \u{25B6}", category.name()))
+                                .color(category.color());
+
+                            let response = ui.add(
+                                egui::Button::new(button_text)
+                                    .min_size(egui::vec2(110.0, 0.0))
+                                    .frame(false)
                             );
+
+                            // Handle hover intent with delay
+                            if response.hovered() {
+                                let now = std::time::Instant::now();
+
+                                // Check if we're already tracking this category
+                                if let Some((tracked_cat, hover_start)) = self.user_state.context_menu_hover_intent {
+                                    if tracked_cat == cat_index {
+                                        // Same category - check if delay has passed
+                                        if hover_start.elapsed().as_secs_f32() >= SUBMENU_HOVER_DELAY {
+                                            self.user_state.context_menu_open_category = Some(cat_index);
+                                        }
+                                    } else {
+                                        // Different category - start new tracking
+                                        self.user_state.context_menu_hover_intent = Some((cat_index, now));
+                                    }
+                                } else {
+                                    // No tracking yet - start tracking
+                                    self.user_state.context_menu_hover_intent = Some((cat_index, now));
+
+                                    // If no submenu is open, open immediately
+                                    if self.user_state.context_menu_open_category.is_none() {
+                                        self.user_state.context_menu_open_category = Some(cat_index);
+                                    }
+                                }
+                            }
+
+                            // Handle click to immediately open/toggle
+                            if response.clicked() {
+                                self.user_state.context_menu_open_category = Some(cat_index);
+                                self.user_state.context_menu_hover_intent = None;
+                            }
                         }
                     });
                 });
+
+            // Show submenu for open category
+            if let Some(open_cat_index) = self.user_state.context_menu_open_category {
+                if let Some((_category, templates)) = categories.get(open_cat_index) {
+                    // Position submenu to the right of the main menu
+                    let submenu_pos = menu_response.response.rect.right_top() + egui::vec2(4.0, open_cat_index as f32 * 22.0);
+
+                    let submenu_id = egui::Id::new("add_node_submenu");
+                    let submenu_response = egui::Area::new(submenu_id)
+                        .fixed_pos(submenu_pos)
+                        .order(egui::Order::Foreground)
+                        .show(ctx, |ui| {
+                            egui::Frame::menu(ui.style()).show(ui, |ui| {
+                                ui.set_min_width(100.0);
+
+                                for template in templates {
+                                    let label = template.node_finder_label(&mut self.user_state);
+                                    if ui.button(label.as_ref()).clicked() {
+                                        template_to_create = Some(*template);
+                                        close_menu = true;
+                                    }
+                                }
+                            });
+                        });
+
+                    // Keep submenu open if mouse is inside it
+                    if submenu_response.response.rect.contains(ctx.input(|i| i.pointer.hover_pos().unwrap_or_default())) {
+                        // Reset hover intent when mouse is in submenu
+                        self.user_state.context_menu_hover_intent = None;
+                    }
+                }
+            }
 
             // Close menu on click outside
             let menu_rect = menu_response.response.rect;
@@ -1102,6 +1165,8 @@ impl SynthApp {
 
             if close_menu {
                 self.user_state.context_menu_pos = None;
+                self.user_state.context_menu_open_category = None;
+                self.user_state.context_menu_hover_intent = None;
             }
         }
 

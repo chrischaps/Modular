@@ -72,6 +72,14 @@ pub struct SynthGraphState {
     /// None when menu is closed.
     pub context_menu_pos: Option<Pos2>,
 
+    /// Currently open submenu category index in the context menu.
+    /// Used for hover-delay submenu behavior.
+    pub context_menu_open_category: Option<usize>,
+
+    /// Category being hovered and when hover started.
+    /// Used to implement hover delay before opening a new submenu.
+    pub context_menu_hover_intent: Option<(usize, Instant)>,
+
     /// Current input values received from the audio engine for signal feedback.
     /// Key: (engine_node_id, input_port_index), Value: sampled signal value.
     /// These values animate the knobs when their inputs are connected.
@@ -117,6 +125,8 @@ impl Default for SynthGraphState {
             validation_message: None,
             validation_message_time: None,
             context_menu_pos: None,
+            context_menu_open_category: None,
+            context_menu_hover_intent: None,
             input_values: HashMap::new(),
             output_values: HashMap::new(),
             midi_events: VecDeque::new(),
@@ -161,6 +171,8 @@ impl SynthGraphState {
         self.validation_message = None;
         self.validation_message_time = None;
         self.context_menu_pos = None;
+        self.context_menu_open_category = None;
+        self.context_menu_hover_intent = None;
         self.input_values.clear();
         self.output_values.clear();
         self.midi_events.clear();
