@@ -957,15 +957,28 @@ impl SynthApp {
                                     if let Some(monitor_cmd) = self.build_monitor_input_command(input) {
                                         commands_to_send.push(monitor_cmd);
                                     }
+                                    // Monitor the output for cable animation signal feedback
+                                    if let Some(monitor_cmd) = self.build_monitor_output_command(output) {
+                                        commands_to_send.push(monitor_cmd);
+                                    }
                                 }
                             }
                         }
-                        NodeResponse::DisconnectEvent { output: _, input } => {
+                        NodeResponse::DisconnectEvent { output, input } => {
                             // Send disconnect command to engine
                             if let Some(cmd) = self.build_disconnect_command(input) {
                                 commands_to_send.push(cmd);
                                 // Stop monitoring this input
                                 if let Some(unmonitor_cmd) = self.build_unmonitor_input_command(input) {
+                                    commands_to_send.push(unmonitor_cmd);
+                                }
+                            }
+                            // Check if output has any remaining connections
+                            // If not, stop monitoring it for cable animation
+                            let has_other_connections = self.graph_state.graph.iter_connections()
+                                .any(|(_, o)| o == output);
+                            if !has_other_connections {
+                                if let Some(unmonitor_cmd) = self.build_unmonitor_output_command(output) {
                                     commands_to_send.push(unmonitor_cmd);
                                 }
                             }
@@ -1316,6 +1329,51 @@ impl SynthApp {
         })
     }
 
+    /// Build a MonitorOutput command for cable animation.
+    /// This enables signal-level feedback for the cable connecting from this output.
+    fn build_monitor_output_command(
+        &self,
+        output: egui_node_graph2::OutputId,
+    ) -> Option<EngineCommand> {
+        let output_data = self.graph_state.graph.outputs.get(output)?;
+        let node = self.graph_state.graph.nodes.get(output_data.node)?;
+
+        // Get engine node ID
+        let engine_node_id = self.user_state.get_engine_node_id(output_data.node)?;
+
+        // Find the output index (position in node.outputs)
+        let output_index = node.outputs
+            .iter()
+            .position(|(_, id)| *id == output)?;
+
+        Some(EngineCommand::MonitorOutput {
+            node_id: engine_node_id,
+            output_index,
+        })
+    }
+
+    /// Build an UnmonitorOutput command for a given output.
+    fn build_unmonitor_output_command(
+        &self,
+        output: egui_node_graph2::OutputId,
+    ) -> Option<EngineCommand> {
+        let output_data = self.graph_state.graph.outputs.get(output)?;
+        let node = self.graph_state.graph.nodes.get(output_data.node)?;
+
+        // Get engine node ID
+        let engine_node_id = self.user_state.get_engine_node_id(output_data.node)?;
+
+        // Find the output index (position in node.outputs)
+        let output_index = node.outputs
+            .iter()
+            .position(|(_, id)| *id == output)?;
+
+        Some(EngineCommand::UnmonitorOutput {
+            node_id: engine_node_id,
+            output_index,
+        })
+    }
+
     /// Get the DspModule port index for a given egui output ID.
     ///
     /// In egui_node_graph2, outputs are numbered separately from inputs.
@@ -1578,6 +1636,7 @@ impl SynthApp {
         let was_playing = self.is_playing;
         if was_playing {
             self.is_playing = false;
+            self.user_state.is_playing = false;
             self.send_command(EngineCommand::SetPlaying(false));
         }
 
@@ -1705,6 +1764,11 @@ impl SynthApp {
                     if let Some(monitor_cmd) = self.build_monitor_input_command(input_id) {
                         self.send_command(monitor_cmd);
                     }
+
+                    // Set up output monitoring for cable animation
+                    if let Some(monitor_cmd) = self.build_monitor_output_command(output_id) {
+                        self.send_command(monitor_cmd);
+                    }
                 }
             }
         }
@@ -1724,6 +1788,7 @@ impl SynthApp {
         // Restore playback state
         if was_playing {
             self.is_playing = true;
+            self.user_state.is_playing = true;
             self.send_command(EngineCommand::SetPlaying(true));
         }
 
@@ -2191,6 +2256,7 @@ impl eframe::App for SynthApp {
         // Handle deferred actions (to avoid borrow checker issues)
         if toolbar_actions.toggle_playing {
             self.is_playing = !self.is_playing;
+            self.user_state.is_playing = self.is_playing;
             self.send_command(EngineCommand::SetPlaying(self.is_playing));
         }
         if toolbar_actions.refresh_devices {

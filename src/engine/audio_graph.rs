@@ -619,7 +619,7 @@ impl AudioGraph {
         }
     }
 
-    /// Samples the values of monitored outputs for UI feedback (LED indicators).
+    /// Samples the values of monitored outputs for UI feedback (LED indicators, cable animation).
     fn sample_monitored_outputs(&mut self) {
         // Collect monitored outputs that we need to sample
         let monitored: Vec<(NodeId, PortIndex)> = self.monitored_outputs.iter().copied().collect();
@@ -627,9 +627,13 @@ impl AudioGraph {
         for (node_id, output_index) in monitored {
             // Get the output buffer for this port
             if let Some(buf) = self.buffers.get(node_id, output_index) {
-                // For gate signals, use max value in buffer (to catch brief pulses)
-                // For other signals, use first sample
-                let value = buf.samples.iter().copied().fold(0.0_f32, f32::max);
+                // Find the sample with the largest absolute value, preserving sign.
+                // This captures the "peak" of both positive and negative signals,
+                // which is important for bipolar signals like LFOs where we want
+                // negative values to animate cables in reverse.
+                let value = buf.samples.iter().copied().fold(0.0_f32, |acc, sample| {
+                    if sample.abs() > acc.abs() { sample } else { acc }
+                });
                 self.sampled_output_values.push((node_id, output_index, value));
             }
         }

@@ -3,7 +3,7 @@
 //! Contains the user state passed to egui_node_graph2 callbacks.
 
 use egui::Pos2;
-use egui_node_graph2::{GraphEditorState, NodeId};
+use egui_node_graph2::{ConnectionSignalTrait, GraphEditorState, NodeId};
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
@@ -118,6 +118,10 @@ pub struct SynthGraphState {
     /// Current zoom level for scaling UI elements.
     /// Set by the graph editor before rendering.
     pub zoom: f32,
+
+    /// Whether the transport is playing.
+    /// When false, cable animations are stopped.
+    pub is_playing: bool,
 }
 
 impl Default for SynthGraphState {
@@ -141,6 +145,7 @@ impl Default for SynthGraphState {
             widget_context_menu_open: false,
             scope_data: HashMap::new(),
             zoom: 1.0,
+            is_playing: false,
         }
     }
 }
@@ -325,6 +330,26 @@ impl SynthGraphState {
     /// Clear scope data for a specific node (e.g., when node is deleted).
     pub fn clear_scope_data_for_node(&mut self, engine_node_id: EngineNodeId) {
         self.scope_data.remove(&engine_node_id);
+    }
+}
+
+/// Implementation of ConnectionSignalTrait for signal-driven cable animations.
+///
+/// This enables cables to animate based on actual signal flow through the connection,
+/// rather than continuously. For example:
+/// - Gate signals only animate when the gate is high
+/// - Audio/CV signals animate with intensity proportional to signal level
+/// - All animations stop when transport is stopped
+impl ConnectionSignalTrait for SynthGraphState {
+    fn get_output_signal_level(&self, graph_node_id: NodeId, output_index: usize) -> Option<f32> {
+        // When transport is stopped, return 0.0 to stop all animations
+        if !self.is_playing {
+            return Some(0.0);
+        }
+        // Map graph NodeId to engine NodeId
+        let engine_node_id = self.get_engine_node_id(graph_node_id)?;
+        // Get the output signal value from the audio engine feedback
+        self.get_output_value(engine_node_id, output_index)
     }
 }
 
