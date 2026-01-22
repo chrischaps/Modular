@@ -1555,10 +1555,31 @@ impl SynthApp {
                 continue;
             };
 
-            // Get node position
+            // Get node position, normalized to zoom=1.0 coordinates for persistence.
+            // The library's update_node_positions_after_zoom modifies positions when zooming,
+            // so we need to reverse that transformation to get zoom-independent positions.
+            // On load, we reset to zoom=1.0 and pan=0, so positions saved this way will match.
             let position = self.graph_state.node_positions
                 .get(node_id)
-                .map(|pos| (pos.x, pos.y))
+                .map(|pos| {
+                    let zoom = self.graph_state.pan_zoom.zoom;
+                    let pan = self.graph_state.pan_zoom.pan;
+                    let clip_rect = self.graph_state.pan_zoom.clip_rect;
+
+                    // If zoom is ~1.0 or clip_rect is invalid, use position as-is
+                    if (zoom - 1.0).abs() < 0.001 || clip_rect.is_negative() {
+                        (pos.x, pos.y)
+                    } else {
+                        // Reverse the zoom transformation to get canonical position
+                        // This inverts what update_node_positions_after_zoom does
+                        let half_size = clip_rect.size() / 2.0;
+                        let local_pos = pos.to_vec2() - half_size + pan;
+                        let unscaled = local_pos / zoom;
+                        // For loading with pan=0, canonical position is:
+                        let canonical = (unscaled + half_size).to_pos2();
+                        (canonical.x, canonical.y)
+                    }
+                })
                 .unwrap_or((0.0, 0.0));
 
             let mut node_data = NodeData::new(
