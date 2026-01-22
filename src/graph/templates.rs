@@ -271,7 +271,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 KnobParam::exposed("Rate", "Rate"),
                 // Phase: knob-only parameter
                 KnobParam::knob_only("Phase", "Phase"),
-            ]),
+            ]).with_monitored_outputs(vec![1]), // Monitor Phase output (index 1) for waveform display
             SynthNodeTemplate::SvfFilter => SynthNodeData::new(
                 "filter.svf",
                 "SVF Filter",
@@ -684,10 +684,15 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     true, // Shown inline as checkbox
                 );
 
-                // Single output port
+                // Output ports
                 graph.add_output_param(
                     node_id,
                     "Out".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                );
+                graph.add_output_param(
+                    node_id,
+                    "Phase".to_string(),
                     SynthDataType::new(SignalType::Control),
                 );
             }

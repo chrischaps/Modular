@@ -85,8 +85,9 @@ impl Lfo {
                 // Input ports
                 PortDefinition::input_with_default("rate_cv", "Rate", SignalType::Control, 0.0),
                 PortDefinition::input_with_default("sync", "Sync", SignalType::Gate, 0.0),
-                // Single output port
+                // Output ports
                 PortDefinition::output("out", "Out", SignalType::Control),
+                PortDefinition::output("phase", "Phase", SignalType::Control),
             ],
             parameters: vec![
                 // Rate parameter (logarithmic for musical response)
@@ -127,6 +128,7 @@ impl Lfo {
     const PORT_RATE_CV: usize = 0;
     const PORT_SYNC: usize = 1;
     const PORT_OUT: usize = 0;
+    const PORT_PHASE: usize = 1;
 
     /// Parameter index constants.
     const PARAM_RATE: usize = 0;
@@ -220,9 +222,6 @@ impl DspModule for Lfo {
         let rate_cv = inputs.get(Self::PORT_RATE_CV);
         let sync_in = inputs.get(Self::PORT_SYNC);
 
-        // Get output buffer
-        let output = &mut outputs[Self::PORT_OUT];
-
         // Process each sample
         for i in 0..context.block_size {
             // Get smoothed parameter values (per-sample for click-free changes)
@@ -248,12 +247,15 @@ impl DspModule for Lfo {
             // Generate the waveform sample
             let sample = Self::generate_sample(effective_phase, waveform);
 
-            // Apply bipolar/unipolar scaling
-            output.samples[i] = if is_bipolar {
+            // Apply bipolar/unipolar scaling and write to main output
+            outputs[Self::PORT_OUT].samples[i] = if is_bipolar {
                 sample
             } else {
                 Self::to_unipolar(sample)
             };
+
+            // Write current phase to phase output (0-1 range)
+            outputs[Self::PORT_PHASE].samples[i] = effective_phase;
 
             // Get rate CV modulation
             let rate_cv_value = rate_cv
@@ -303,8 +305,8 @@ mod tests {
         let lfo = Lfo::new();
         let ports = lfo.ports();
 
-        // 2 inputs + 1 output = 3 ports
-        assert_eq!(ports.len(), 3);
+        // 2 inputs + 2 outputs = 4 ports
+        assert_eq!(ports.len(), 4);
 
         // Input ports
         assert!(ports[0].is_input());
@@ -315,10 +317,14 @@ mod tests {
         assert_eq!(ports[1].id, "sync");
         assert_eq!(ports[1].signal_type, SignalType::Gate);
 
-        // Output port
+        // Output ports
         assert!(ports[2].is_output());
         assert_eq!(ports[2].id, "out");
         assert_eq!(ports[2].signal_type, SignalType::Control);
+
+        assert!(ports[3].is_output());
+        assert_eq!(ports[3].id, "phase");
+        assert_eq!(ports[3].signal_type, SignalType::Control);
     }
 
     #[test]
@@ -363,7 +369,7 @@ mod tests {
         let mut lfo = Lfo::new();
         lfo.prepare(44100.0, 256);
 
-        let mut outputs = vec![SignalBuffer::control(256)];
+        let mut outputs = vec![SignalBuffer::control(256), SignalBuffer::control(256)];
         let ctx = ProcessContext::new(44100.0, 256);
 
         // 1 Hz, Sine, 0° phase, bipolar
@@ -379,7 +385,7 @@ mod tests {
         let mut lfo = Lfo::new();
         lfo.prepare(44100.0, 44100);
 
-        let mut outputs = vec![SignalBuffer::control(44100)];
+        let mut outputs = vec![SignalBuffer::control(44100), SignalBuffer::control(44100)];
         let ctx = ProcessContext::new(44100.0, 44100);
 
         // 1 Hz, Sine, 0° phase, bipolar
@@ -400,7 +406,7 @@ mod tests {
         let mut lfo = Lfo::new();
         lfo.prepare(44100.0, 44100);
 
-        let mut outputs = vec![SignalBuffer::control(44100)];
+        let mut outputs = vec![SignalBuffer::control(44100), SignalBuffer::control(44100)];
         let ctx = ProcessContext::new(44100.0, 44100);
 
         // 1 Hz, Sine, 0° phase, unipolar (bipolar = 0)
@@ -422,7 +428,7 @@ mod tests {
         lfo.prepare(44100.0, 1000);
 
         // Run LFO to advance phase
-        let mut outputs = vec![SignalBuffer::control(1000)];
+        let mut outputs = vec![SignalBuffer::control(1000), SignalBuffer::control(1000)];
         let ctx = ProcessContext::new(44100.0, 1000);
         lfo.process(&[], &mut outputs, &[1.0, 0.0, 0.0, 1.0], &ctx);
 
@@ -431,7 +437,7 @@ mod tests {
         sync.samples[50] = 1.0; // Rising edge at sample 50
 
         let rate_cv = SignalBuffer::control(100);
-        let mut outputs2 = vec![SignalBuffer::control(100)];
+        let mut outputs2 = vec![SignalBuffer::control(100), SignalBuffer::control(100)];
         let ctx2 = ProcessContext::new(44100.0, 100);
         lfo.process(&[&rate_cv, &sync], &mut outputs2, &[1.0, 0.0, 0.0, 1.0], &ctx2);
 
@@ -450,8 +456,8 @@ mod tests {
         lfo1.prepare(44100.0, 256);
         lfo2.prepare(44100.0, 256);
 
-        let mut outputs1 = vec![SignalBuffer::control(256)];
-        let mut outputs2 = vec![SignalBuffer::control(256)];
+        let mut outputs1 = vec![SignalBuffer::control(256), SignalBuffer::control(256)];
+        let mut outputs2 = vec![SignalBuffer::control(256), SignalBuffer::control(256)];
         let ctx = ProcessContext::new(44100.0, 256);
 
         // Process multiple times to let parameter smoothing settle
@@ -492,7 +498,7 @@ mod tests {
         rate_cv.fill(1.0);
 
         let sync = SignalBuffer::control(44100);
-        let mut outputs = vec![SignalBuffer::control(44100)];
+        let mut outputs = vec![SignalBuffer::control(44100), SignalBuffer::control(44100)];
         let ctx = ProcessContext::new(44100.0, 44100);
 
         // Base rate 1 Hz with +1 CV = 2 Hz
@@ -549,10 +555,10 @@ mod tests {
         lfo.prepare(44100.0, 44100);
 
         // Test each waveform produces different output
-        let mut sine_out = vec![SignalBuffer::control(44100)];
-        let mut tri_out = vec![SignalBuffer::control(44100)];
-        let mut sq_out = vec![SignalBuffer::control(44100)];
-        let mut saw_out = vec![SignalBuffer::control(44100)];
+        let mut sine_out = vec![SignalBuffer::control(44100), SignalBuffer::control(44100)];
+        let mut tri_out = vec![SignalBuffer::control(44100), SignalBuffer::control(44100)];
+        let mut sq_out = vec![SignalBuffer::control(44100), SignalBuffer::control(44100)];
+        let mut saw_out = vec![SignalBuffer::control(44100), SignalBuffer::control(44100)];
         let ctx = ProcessContext::new(44100.0, 44100);
 
         lfo.reset();
@@ -580,7 +586,7 @@ mod tests {
         lfo.prepare(44100.0, 256);
 
         // Generate some samples
-        let mut outputs = vec![SignalBuffer::control(256)];
+        let mut outputs = vec![SignalBuffer::control(256), SignalBuffer::control(256)];
         let ctx = ProcessContext::new(44100.0, 256);
         lfo.process(&[], &mut outputs, &[1.0, 0.0, 0.0, 1.0], &ctx);
 
@@ -588,7 +594,7 @@ mod tests {
         lfo.reset();
 
         // Generate first sample after reset - sine should be near 0
-        let mut outputs2 = vec![SignalBuffer::control(1)];
+        let mut outputs2 = vec![SignalBuffer::control(1), SignalBuffer::control(1)];
         let ctx2 = ProcessContext::new(44100.0, 1);
         lfo.process(&[], &mut outputs2, &[1.0, 0.0, 0.0, 1.0], &ctx2);
 
@@ -604,7 +610,7 @@ mod tests {
         let mut lfo = Lfo::new();
         lfo.prepare(44100.0, 44100);
 
-        let mut outputs = vec![SignalBuffer::control(44100)];
+        let mut outputs = vec![SignalBuffer::control(44100), SignalBuffer::control(44100)];
         let ctx = ProcessContext::new(44100.0, 44100);
 
         // 100 Hz rate
@@ -653,7 +659,7 @@ mod tests {
         let module = module.unwrap();
         assert_eq!(module.info().id, "mod.lfo");
         assert_eq!(module.info().name, "LFO");
-        assert_eq!(module.ports().len(), 3); // 2 inputs + 1 output
+        assert_eq!(module.ports().len(), 4); // 2 inputs + 2 outputs
         assert_eq!(module.parameters().len(), 4); // Rate, Waveform, Phase, Bipolar
     }
 }

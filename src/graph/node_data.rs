@@ -161,6 +161,9 @@ pub struct SynthNodeData {
     pub knob_params: Vec<KnobParam>,
     /// LED indicators to display in the bottom section of the node.
     pub led_indicators: Vec<LedIndicator>,
+    /// Output ports to monitor for feedback without LED indicators.
+    /// Used for waveform displays, phase indicators, etc.
+    pub monitored_outputs: Vec<usize>,
 }
 
 /// Configuration for MIDI mapping display on a knob.
@@ -189,6 +192,7 @@ impl SynthNodeData {
             category,
             knob_params: Vec::new(),
             led_indicators: Vec::new(),
+            monitored_outputs: Vec::new(),
         }
     }
 
@@ -201,6 +205,12 @@ impl SynthNodeData {
     /// Builder method to add LED indicators.
     pub fn with_led_indicators(mut self, led_indicators: Vec<LedIndicator>) -> Self {
         self.led_indicators = led_indicators;
+        self
+    }
+
+    /// Builder method to add outputs that should be monitored for UI feedback.
+    pub fn with_monitored_outputs(mut self, outputs: Vec<usize>) -> Self {
+        self.monitored_outputs = outputs;
         self
     }
 
@@ -1343,9 +1353,15 @@ impl NodeDataTrait for SynthNodeData {
             let config = WaveformConfig::lfo()
                 .with_size(140.0, 50.0);
 
-            // Calculate animated phase position based on time and rate
-            let time = ui.ctx().input(|i| i.time);
-            let phase = ((time * rate_hz as f64) % 1.0) as f32;
+            // Get real phase from audio engine feedback (output port 1)
+            // Falls back to UI-time estimation if not yet available
+            let phase = engine_node_id
+                .and_then(|eid| user_state.get_output_value(eid, 1)) // Phase is output index 1
+                .unwrap_or_else(|| {
+                    // Fallback: estimate phase from UI time when engine feedback not available
+                    let time = ui.ctx().input(|i| i.time);
+                    ((time * rate_hz as f64) % 1.0) as f32
+                });
 
             ui.horizontal(|ui| {
                 ui.add_space((ui.available_width() - 140.0) / 2.0); // Center the display

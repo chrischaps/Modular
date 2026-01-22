@@ -912,6 +912,14 @@ impl SynthApp {
                                         output_index: led_indicator.output_index,
                                     });
                                 }
+
+                                // Set up output monitoring for additional monitored outputs (e.g., phase)
+                                for &output_index in &node.user_data.monitored_outputs {
+                                    commands_to_send.push(EngineCommand::MonitorOutput {
+                                        node_id: engine_node_id,
+                                        output_index,
+                                    });
+                                }
                             }
                         }
                         NodeResponse::DeleteNodeFull { node_id, .. } => {
@@ -1150,12 +1158,18 @@ impl SynthApp {
                     module_id: template.module_id(),
                 });
 
-                // Set up output monitoring for any LED indicators
+                // Set up output monitoring for any LED indicators and monitored outputs
                 if let Some(node) = self.graph_state.graph.nodes.get(node_id) {
                     for led_indicator in &node.user_data.led_indicators {
                         commands_to_send.push(EngineCommand::MonitorOutput {
                             node_id: engine_node_id,
                             output_index: led_indicator.output_index,
+                        });
+                    }
+                    for &output_index in &node.user_data.monitored_outputs {
+                        commands_to_send.push(EngineCommand::MonitorOutput {
+                            node_id: engine_node_id,
+                            output_index,
                         });
                     }
                 }
@@ -1589,14 +1603,24 @@ impl SynthApp {
                 module_id: template.module_id(),
             });
 
-            // Set up output monitoring for LED indicators
+            // Set up output monitoring for LED indicators and monitored outputs
             // Collect indices first to avoid borrow issues
-            let led_output_indices: Vec<usize> = self.graph_state.graph.nodes
+            let (led_output_indices, monitored_output_indices): (Vec<usize>, Vec<usize>) = self.graph_state.graph.nodes
                 .get(graph_node_id)
-                .map(|node| node.user_data.led_indicators.iter().map(|led| led.output_index).collect())
+                .map(|node| (
+                    node.user_data.led_indicators.iter().map(|led| led.output_index).collect(),
+                    node.user_data.monitored_outputs.clone(),
+                ))
                 .unwrap_or_default();
 
             for output_index in led_output_indices {
+                self.send_command(EngineCommand::MonitorOutput {
+                    node_id: engine_node_id,
+                    output_index,
+                });
+            }
+
+            for output_index in monitored_output_indices {
                 self.send_command(EngineCommand::MonitorOutput {
                     node_id: engine_node_id,
                     output_index,
