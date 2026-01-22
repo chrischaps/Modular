@@ -286,8 +286,9 @@ pub fn adsr_display(ui: &mut Ui, params: &AdsrParams, config: &AdsrConfig) -> Re
             );
         }
 
-        // Draw filled area if enabled
-        if config.filled && !points.is_empty() {
+        // Draw filled area if enabled using vertical quad strips
+        // (convex_polygon doesn't work because ADSR shape is concave)
+        if config.filled && points.len() >= 2 {
             let fill_color = config.fill_color.unwrap_or_else(|| {
                 let c = config.color;
                 Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 30)
@@ -295,21 +296,22 @@ pub fn adsr_display(ui: &mut Ui, params: &AdsrParams, config: &AdsrConfig) -> Re
 
             let baseline_y = rect.top() + padding_top + draw_height;
 
-            // Create filled polygon
-            let mut mesh_points = points.clone();
-            mesh_points.push(Pos2::new(rect.right(), baseline_y));
-            mesh_points.push(Pos2::new(rect.left(), baseline_y));
-
-            // Draw as triangle fan from center
-            if mesh_points.len() >= 3 {
-                let center = Pos2::new(rect.center().x, baseline_y);
-                for i in 0..mesh_points.len() - 1 {
-                    painter.add(egui::Shape::convex_polygon(
-                        vec![center, mesh_points[i], mesh_points[i + 1]],
-                        fill_color,
-                        Stroke::NONE,
-                    ));
-                }
+            // Draw vertical quad strips between adjacent curve points
+            for i in 0..points.len() - 1 {
+                let p1 = points[i];
+                let p2 = points[i + 1];
+                // Create a quad from curve point to baseline
+                let quad = vec![
+                    p1,                                    // top-left
+                    p2,                                    // top-right
+                    Pos2::new(p2.x, baseline_y),          // bottom-right
+                    Pos2::new(p1.x, baseline_y),          // bottom-left
+                ];
+                painter.add(egui::Shape::convex_polygon(
+                    quad,
+                    fill_color,
+                    Stroke::NONE,
+                ));
             }
         }
 
