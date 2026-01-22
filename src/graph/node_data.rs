@@ -74,6 +74,22 @@ fn format_midi_event(event: &MidiEvent) -> (String, Color32) {
     }
 }
 
+/// Describes how a knob parameter interacts with its CV input port.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub enum KnobInputMode {
+    /// Knob only - no corresponding input port.
+    #[default]
+    KnobOnly,
+    /// CV replaces knob value when connected. Knob becomes read-only and
+    /// displays the incoming signal value.
+    Exposed,
+    /// CV modulates the knob's base value when connected. Knob remains
+    /// interactive for setting the base/center value. Good for parameters
+    /// like filter cutoff or oscillator frequency where you want CV to
+    /// modulate around a user-set center point.
+    Modulatable,
+}
+
 /// Describes a knob parameter that appears in the bottom section of a node.
 ///
 /// Knob parameters provide manual control over module values. They can optionally
@@ -85,29 +101,59 @@ pub struct KnobParam {
     pub param_name: String,
     /// Short label displayed below the knob (e.g., "Freq", "FM Dpth").
     pub label: String,
-    /// Whether this parameter is also exposed as an input port.
-    /// When connected, the input value replaces/modulates the knob value.
-    pub exposed_as_input: bool,
+    /// How this knob interacts with its CV input port.
+    pub input_mode: KnobInputMode,
 }
 
 impl KnobParam {
-    /// Create a new knob parameter.
-    pub fn new(param_name: impl Into<String>, label: impl Into<String>, exposed_as_input: bool) -> Self {
+    /// Whether this parameter has a corresponding input port.
+    pub fn has_input_port(&self) -> bool {
+        !matches!(self.input_mode, KnobInputMode::KnobOnly)
+    }
+
+    /// Whether the knob should be disabled when connected.
+    pub fn disable_when_connected(&self) -> bool {
+        matches!(self.input_mode, KnobInputMode::Exposed)
+    }
+}
+
+impl KnobParam {
+    /// Create a new knob parameter with a specific input mode.
+    pub fn with_mode(param_name: impl Into<String>, label: impl Into<String>, input_mode: KnobInputMode) -> Self {
         Self {
             param_name: param_name.into(),
             label: label.into(),
-            exposed_as_input,
+            input_mode,
         }
+    }
+
+    /// Create a new knob parameter (legacy compatibility).
+    /// If `exposed_as_input` is true, creates an Exposed mode parameter.
+    pub fn new(param_name: impl Into<String>, label: impl Into<String>, exposed_as_input: bool) -> Self {
+        let mode = if exposed_as_input {
+            KnobInputMode::Exposed
+        } else {
+            KnobInputMode::KnobOnly
+        };
+        Self::with_mode(param_name, label, mode)
     }
 
     /// Create a knob-only parameter (no corresponding input port).
     pub fn knob_only(param_name: impl Into<String>, label: impl Into<String>) -> Self {
-        Self::new(param_name, label, false)
+        Self::with_mode(param_name, label, KnobInputMode::KnobOnly)
     }
 
     /// Create an exposed parameter (has both knob and input port).
+    /// When connected, the knob becomes read-only and displays the incoming signal.
     pub fn exposed(param_name: impl Into<String>, label: impl Into<String>) -> Self {
-        Self::new(param_name, label, true)
+        Self::with_mode(param_name, label, KnobInputMode::Exposed)
+    }
+
+    /// Create a modulatable parameter (has both knob and input port).
+    /// When connected, the knob remains interactive for setting the base value,
+    /// while CV modulates around that base. Ideal for filter cutoff, pitch, etc.
+    pub fn modulatable(param_name: impl Into<String>, label: impl Into<String>) -> Self {
+        Self::with_mode(param_name, label, KnobInputMode::Modulatable)
     }
 }
 
@@ -1481,13 +1527,16 @@ impl NodeDataTrait for SynthNodeData {
                                 })
                                 .count();
 
-                            // Check if this exposed param has a connection
+                            // Check if this param has an input port and if it's connected
                             // iter_connections returns (InputId, OutputId) - input port and the output it's connected to
-                            let is_connected = knob_param.exposed_as_input &&
+                            let is_connected = knob_param.has_input_port() &&
                                 graph.iter_connections().any(|(input, _output)| input == *input_id);
 
+                            // Should the knob be disabled? Only for Exposed mode, not for Modulatable
+                            let should_disable = is_connected && knob_param.disable_when_connected();
+
                             // Get input port index for this parameter (for looking up signal value)
-                            let input_port_index = if knob_param.exposed_as_input {
+                            let input_port_index = if knob_param.has_input_port() {
                                 // Count ConnectionOrConstant and ConnectionOnly inputs before this one
                                 node.inputs.iter()
                                     .take_while(|(name, _)| *name != knob_param.param_name)
@@ -1607,16 +1656,22 @@ impl NodeDataTrait for SynthNodeData {
                                     // Render knob based on the value type
                                     // Note: We need to clone to render since we can't mutate through the graph reference
                                     // The actual parameter change will be handled through the normal widget flow
+                                    // For modulatable params, pass None for signal_value so knob shows base value
+                                    let display_signal = if knob_param.disable_when_connected() {
+                                        signal_value
+                                    } else {
+                                        None // Modulatable: show base knob value, not CV signal
+                                    };
                                     Self::render_knob_for_value(
                                         ui,
                                         &input.value,
                                         &knob_param.label,
                                         knob_size,
-                                        is_connected,
+                                        should_disable,
                                         node_id,
                                         &knob_param.param_name,
                                         &mut responses,
-                                        signal_value,
+                                        display_signal,
                                         &midi_config,
                                     );
                                 });

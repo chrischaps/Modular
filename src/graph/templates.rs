@@ -277,10 +277,10 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 "SVF Filter",
                 ModuleCategory::Filter,
             ).with_knob_params(vec![
-                // Cutoff: exposed param (input port + knob)
-                KnobParam::exposed("Cutoff", "Cutoff"),
-                // Resonance: exposed param (input port + knob)
-                KnobParam::exposed("Resonance", "Res"),
+                // Cutoff: modulatable param - CV modulates around knob's base frequency
+                KnobParam::modulatable("Cutoff", "Cutoff"),
+                // Resonance: modulatable param - CV adds to knob's base resonance
+                KnobParam::modulatable("Resonance", "Res"),
                 // Drive: knob-only
                 KnobParam::knob_only("Drive", "Drive"),
             ]),

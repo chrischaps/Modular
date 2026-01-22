@@ -493,12 +493,13 @@ impl SynthApp {
         let gate_value = if should_gate_on {
             // Note is pressed - gate should be on
             if !self.midi_gate_held_high {
-                // New note trigger
+                // New note trigger (gate was off)
                 self.midi_last_gate_on = Some(Instant::now());
                 self.midi_gate_held_high = true;
-                self.midi_last_triggered_note = active_note;
-                self.midi_last_velocity = active_velocity;
             }
+            // Always update to the most recent note ("Last" priority)
+            self.midi_last_triggered_note = active_note;
+            self.midi_last_velocity = active_velocity;
             1.0
         } else if self.midi_gate_held_high {
             // Note released but check minimum duration
@@ -1267,7 +1268,7 @@ impl SynthApp {
 
         // Check if this input name corresponds to an exposed knob parameter
         let is_exposed_param = node.user_data.knob_params.iter()
-            .any(|kp| kp.param_name == *input_name && kp.exposed_as_input);
+            .any(|kp| kp.param_name == *input_name && kp.has_input_port());
 
         if !is_exposed_param {
             return None;
@@ -1299,7 +1300,7 @@ impl SynthApp {
 
         // Check if this input name corresponds to an exposed knob parameter
         let is_exposed_param = node.user_data.knob_params.iter()
-            .any(|kp| kp.param_name == *input_name && kp.exposed_as_input);
+            .any(|kp| kp.param_name == *input_name && kp.has_input_port());
 
         if !is_exposed_param {
             return None;
