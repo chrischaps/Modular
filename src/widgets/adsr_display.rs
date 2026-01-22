@@ -219,7 +219,8 @@ pub fn adsr_display(ui: &mut Ui, params: &AdsrParams, config: &AdsrConfig) -> Re
     let (rect, response) = ui.allocate_exact_size(config.size, Sense::hover());
 
     if ui.is_rect_visible(rect) {
-        let painter = ui.painter();
+        // Use clipped painter to prevent glow effects from extending outside bounds
+        let painter = ui.painter_at(rect);
 
         // Draw background
         painter.rect_filled(rect, 2.0, Color32::from_rgb(20, 22, 30));
@@ -320,12 +321,12 @@ pub fn adsr_display(ui: &mut Ui, params: &AdsrParams, config: &AdsrConfig) -> Re
                 config.color.b(),
                 50,
             );
-            draw_polyline(painter, &points, glow_color, config.line_thickness * 3.0);
+            draw_polyline(&painter, &points, glow_color, config.line_thickness * 3.0);
         }
 
         // Draw main envelope line
         if points.len() >= 2 {
-            draw_polyline(painter, &points, config.color, config.line_thickness);
+            draw_polyline(&painter, &points, config.color, config.line_thickness);
         }
 
         // Draw segment labels
