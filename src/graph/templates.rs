@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use egui_node_graph2::{Graph, InputParamKind, NodeTemplateIter, NodeTemplateTrait};
 
 use crate::dsp::{ModuleCategory, SignalType};
-use super::{SynthDataType, SynthGraphState, SynthNodeData, SynthValueType, KnobParam, LedIndicator};
+use super::{SynthDataType, SynthGraphState, SynthNodeData, SynthValueType, KnobParam};
 
 /// Templates for all available synth modules.
 ///
@@ -310,10 +310,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 // Tempo and Gate Length as knobs
                 KnobParam::knob_only("Tempo", "BPM"),
                 KnobParam::knob_only("Gate Length", "Gate"),
-            ]).with_led_indicators(vec![
-                // Gate output LED indicator
-                LedIndicator::gate(0, "Gate"),
-            ]),
+            ]).with_monitored_outputs(vec![0]), // Monitor Gate output for lit port
             SynthNodeTemplate::Vca => SynthNodeData::new(
                 "util.vca",
                 "VCA",
@@ -350,10 +347,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 KnobParam::knob_only("Octave", "Oct"),
                 // Velocity: 0-1
                 KnobParam::knob_only("Velocity", "Vel"),
-            ]).with_led_indicators(vec![
-                // Gate output LED indicator
-                LedIndicator::gate(0, "Gate"),
-            ]),
+            ]).with_monitored_outputs(vec![0]), // Monitor Gate output for lit port
             SynthNodeTemplate::MidiMonitor => SynthNodeData::new(
                 "util.midi_monitor",
                 "MIDI Monitor",
@@ -367,10 +361,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             ).with_knob_params(vec![
                 // Octave shift: -4 to +4
                 KnobParam::knob_only("Octave", "Oct"),
-            ]).with_led_indicators(vec![
-                // Gate output LED indicator (output index 1 = Gate port)
-                LedIndicator::gate(1, "Gate"),
-            ]),
+            ]).with_monitored_outputs(vec![1]), // Monitor Gate output for lit port
             SynthNodeTemplate::SampleHold => SynthNodeData::new(
                 "util.sample_hold",
                 "Sample & Hold",
@@ -396,12 +387,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                 KnobParam::knob_only("Steps", "Steps"),
                 // Gate Length: percentage of step duration
                 KnobParam::knob_only("Gate Length", "Gate"),
-            ]).with_led_indicators(vec![
-                // Gate output LED
-                LedIndicator::gate(1, "Gate"),
-                // EOC output LED
-                LedIndicator::activity(4, "EOC"),
-            ]),
+            ]).with_monitored_outputs(vec![1, 4]), // Monitor Gate and EOC outputs for lit ports
             SynthNodeTemplate::StereoDelay => SynthNodeData::new(
                 "fx.delay",
                 "Stereo Delay",

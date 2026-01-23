@@ -1848,19 +1848,6 @@ impl NodeDataTrait for SynthNodeData {
             });
         }
 
-        // Show the module category as a small label with subtle styling
-        ui.horizontal(|ui| {
-            let category_color = self.category.color();
-            // Use a dimmed version of the category color for the label
-            let label_color = Color32::from_rgba_unmultiplied(
-                category_color.r(),
-                category_color.g(),
-                category_color.b(),
-                128, // 50% opacity
-            );
-            ui.label(RichText::new(self.category.name()).small().color(label_color));
-        });
-
         responses
     }
 
