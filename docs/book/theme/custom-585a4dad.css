@@ -1,0 +1,175 @@
+/* Modular Synth Documentation - Custom Theme */
+
+/* Signal type colors (matching the application) */
+:root {
+    --signal-audio: #4a90d9;      /* Blue */
+    --signal-control: #d98b4a;    /* Orange */
+    --signal-gate: #4ad97a;       /* Green */
+    --signal-midi: #9b4ad9;       /* Purple */
+
+    --category-sources: #4a90d9;   /* Blue */
+    --category-filters: #4ad97a;   /* Green */
+    --category-modulation: #d98b4a; /* Orange */
+    --category-utilities: #d9d94a; /* Yellow */
+    --category-effects: #9b4ad9;   /* Purple */
+    --category-midi: #d94a9b;      /* Magenta */
+    --category-output: #d94a4a;    /* Red */
+}
+
+/* Module documentation styling */
+.module-header {
+    border-radius: 4px;
+    padding: 8px 12px;
+    margin-bottom: 16px;
+}
+
+/* Tables - better styling */
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+}
+
+th, td {
+    border: 1px solid var(--table-border-color);
+    padding: 8px 12px;
+    text-align: left;
+}
+
+th {
+    background-color: var(--table-header-bg);
+    font-weight: 600;
+}
+
+tr:nth-child(even) {
+    background-color: var(--table-alternate-bg);
+}
+
+/* Code blocks in tables */
+td code {
+    background-color: var(--inline-code-color);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+/* Patch diagrams (ASCII art) */
+pre code {
+    font-size: 0.85em;
+    line-height: 1.4;
+}
+
+/* Blockquotes for tips */
+blockquote {
+    border-left: 4px solid var(--quote-border);
+    padding-left: 16px;
+    margin-left: 0;
+    color: var(--quote-color);
+}
+
+/* Image placeholders */
+img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin: 16px 0;
+}
+
+img + em {
+    display: block;
+    text-align: center;
+    color: var(--fg);
+    opacity: 0.7;
+    font-size: 0.9em;
+    margin-top: -8px;
+    margin-bottom: 16px;
+}
+
+/* Parameter tables */
+table th:first-child {
+    width: 20%;
+}
+
+/* Signal type indicators in text */
+.signal-audio { color: var(--signal-audio); font-weight: 500; }
+.signal-control { color: var(--signal-control); font-weight: 500; }
+.signal-gate { color: var(--signal-gate); font-weight: 500; }
+.signal-midi { color: var(--signal-midi); font-weight: 500; }
+
+/* Category headers */
+h2 code {
+    font-size: 0.85em;
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+/* Better heading spacing */
+h1 {
+    margin-top: 0;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--theme-popup-border);
+}
+
+h2 {
+    margin-top: 2em;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--theme-popup-border);
+}
+
+h3 {
+    margin-top: 1.5em;
+}
+
+/* Summary/SUMMARY styling */
+.chapter li.chapter-item {
+    margin-top: 4px;
+}
+
+/* Keyboard shortcuts table */
+table code {
+    white-space: nowrap;
+}
+
+/* Connection examples - make them stand out */
+h3 + pre {
+    background-color: var(--code-bg);
+    border-left: 3px solid var(--links);
+}
+
+/* Patch diagram styling */
+.patch-diagram {
+    font-family: monospace;
+    background-color: var(--code-bg);
+    padding: 16px;
+    border-radius: 8px;
+    overflow-x: auto;
+}
+
+/* Waveform representation in text */
+.waveform {
+    font-family: monospace;
+    letter-spacing: -1px;
+}
+
+/* Tips sections */
+h2:contains("Tips") + ul,
+h3:contains("Tips") + ul {
+    background-color: var(--quote-bg);
+    padding: 12px 12px 12px 32px;
+    border-radius: 8px;
+}
+
+/* Print styles */
+@media print {
+    .sidebar {
+        display: none;
+    }
+
+    .content {
+        max-width: 100%;
+    }
+
+    pre {
+        white-space: pre-wrap;
+    }
+}

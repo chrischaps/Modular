@@ -1,0 +1,491 @@
+<!DOCTYPE HTML>
+<html lang="en" class="coal sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Interface Overview - Modular Synth Documentation</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="A node-based modular audio synthesizer in Rust">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+        <link rel="stylesheet" href="../theme/custom-585a4dad.css">
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "coal";
+            const default_dark_theme = "coal";
+            window.path_to_searchindex_js = "../searchindex-10fdbf88.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc-6d120e77.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('coal')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Modular Synth Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/your-repo/modular" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/your-repo/modular/edit/master/docs/src/getting-started/interface-overview.md" title="Suggest an edit" aria-label="Suggest an edit" rel="edit">
+                            <span class=fa-svg id="git-edit-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M421.7 220.3l-11.3 11.3-22.6 22.6-205 205c-6.6 6.6-14.8 11.5-23.8 14.1L30.8 511c-8.4 2.5-17.5 .2-23.7-6.1S-1.5 489.7 1 481.2L38.7 353.1c2.6-9 7.5-17.2 14.1-23.8l205-205 22.6-22.6 11.3-11.3 33.9 33.9 62.1 62.1 33.9 33.9zM96 353.9l-9.3 9.3c-.9 .9-1.6 2.1-2 3.4l-25.3 86 86-25.3c1.3-.4 2.5-1.1 3.4-2l9.3-9.3H112c-8.8 0-16-7.2-16-16V353.9zM453.3 19.3l39.4 39.4c25 25 25 65.5 0 90.5l-14.5 14.5-22.6 22.6-11.3 11.3-33.9-33.9-62.1-62.1L314.3 67.7l11.3-11.3 22.6-22.6 14.5-14.5c25-25 65.5-25 90.5 0z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="interface-overview"><a class="header" href="#interface-overview">Interface Overview</a></h1>
+<p>Modular Synth uses a node-graph interface where modules are represented as nodes that can be connected together to create synthesizer patches.</p>
+<p><img src="../images/interface-overview.png" alt="Interface Overview">
+<em>The main Modular Synth interface</em></p>
+<h2 id="the-canvas"><a class="header" href="#the-canvas">The Canvas</a></h2>
+<p>The main area of the interface is the <strong>node graph canvas</strong>. This is where you create and connect modules.</p>
+<h3 id="navigation"><a class="header" href="#navigation">Navigation</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Action</th><th>Mouse</th><th>Keyboard</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Pan</strong></td><td>Middle-click drag</td><td>Arrow keys</td></tr>
+<tr><td><strong>Zoom</strong></td><td>Scroll wheel</td><td><code>+</code> / <code>-</code></td></tr>
+<tr><td><strong>Fit to view</strong></td><td>-</td><td><code>Home</code></td></tr>
+<tr><td><strong>Select module</strong></td><td>Left-click</td><td>-</td></tr>
+<tr><td><strong>Multi-select</strong></td><td>Shift + left-click</td><td>-</td></tr>
+<tr><td><strong>Box select</strong></td><td>Left-click drag on empty space</td><td>-</td></tr>
+<tr><td><strong>Delete</strong></td><td>-</td><td><code>Delete</code> or <code>Backspace</code></td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="canvas-tips"><a class="header" href="#canvas-tips">Canvas Tips</a></h3>
+<ul>
+<li>Double-click empty space to quickly add a module</li>
+<li>Use the scroll wheel to zoom in for detailed work or out for an overview</li>
+<li>Modules can be freely positioned anywhere on the canvas</li>
+</ul>
+<h2 id="adding-modules"><a class="header" href="#adding-modules">Adding Modules</a></h2>
+<h3 id="context-menu"><a class="header" href="#context-menu">Context Menu</a></h3>
+<p><strong>Right-click</strong> on empty canvas space to open the module browser:</p>
+<p><img src="../images/interface-context-menu.png" alt="Context Menu">
+<em>The module browser context menu</em></p>
+<p>Modules are organized by category:</p>
+<ul>
+<li><strong>Sources</strong> - Oscillators and sound generators</li>
+<li><strong>Filters</strong> - Frequency shaping</li>
+<li><strong>Modulation</strong> - Envelopes, LFOs, clocks</li>
+<li><strong>Utilities</strong> - VCAs, mixers, signal processing</li>
+<li><strong>Effects</strong> - Delays, reverbs, distortion</li>
+<li><strong>MIDI</strong> - MIDI input and processing</li>
+<li><strong>Visualization</strong> - Scopes and meters</li>
+<li><strong>Output</strong> - Audio output</li>
+</ul>
+<p>Click a module name to add it at the cursor position.</p>
+<h3 id="quick-add"><a class="header" href="#quick-add">Quick Add</a></h3>
+<p><strong>Double-click</strong> on empty canvas space to open a quick search box where you can type to filter modules by name.</p>
+<h2 id="module-anatomy"><a class="header" href="#module-anatomy">Module Anatomy</a></h2>
+<p>Each module has a consistent structure:</p>
+<p><img src="../images/interface-module-anatomy.png" alt="Module Anatomy">
+<em>Parts of a module</em></p>
+<h3 id="header-bar"><a class="header" href="#header-bar">Header Bar</a></h3>
+<p>The colored bar at the top shows:</p>
+<ul>
+<li><strong>Module name</strong> - The type of module</li>
+<li><strong>Category color</strong> - Indicates the module’s function category</li>
+</ul>
+<h3 id="input-ports-left-side"><a class="header" href="#input-ports-left-side">Input Ports (Left Side)</a></h3>
+<p>Circular connectors on the left side receive signals from other modules:</p>
+<ul>
+<li><strong>Port color</strong> indicates the expected signal type</li>
+<li><strong>Port label</strong> describes what the input controls</li>
+<li>Hover over a port to see a tooltip with details</li>
+</ul>
+<h3 id="output-ports-right-side"><a class="header" href="#output-ports-right-side">Output Ports (Right Side)</a></h3>
+<p>Circular connectors on the right side send signals to other modules:</p>
+<ul>
+<li><strong>Port color</strong> indicates the signal type produced</li>
+<li>Multiple modules can connect to the same output</li>
+</ul>
+<h3 id="parameter-knobs-bottom"><a class="header" href="#parameter-knobs-bottom">Parameter Knobs (Bottom)</a></h3>
+<p>Rotary knobs for adjusting module parameters:</p>
+<ul>
+<li><strong>Drag vertically</strong> to adjust the value</li>
+<li><strong>Double-click</strong> to reset to default</li>
+<li><strong>Ctrl + click</strong> for fine adjustment</li>
+<li>Value readout shows the current setting</li>
+</ul>
+<h3 id="exposed-parameters"><a class="header" href="#exposed-parameters">Exposed Parameters</a></h3>
+<p>Some parameters can be controlled both manually and via external signals. When an external signal is connected:</p>
+<ul>
+<li>The knob becomes <strong>read-only</strong> (dimmed appearance)</li>
+<li>The knob <strong>animates</strong> to show the incoming signal value</li>
+<li>An <strong>orange indicator</strong> shows external control is active</li>
+</ul>
+<p>When disconnected, the knob returns to manual control.</p>
+<h2 id="making-connections"><a class="header" href="#making-connections">Making Connections</a></h2>
+<h3 id="creating-a-connection"><a class="header" href="#creating-a-connection">Creating a Connection</a></h3>
+<ol>
+<li>Click and hold on an <strong>output port</strong> (right side of a module)</li>
+<li>Drag to an <strong>input port</strong> (left side of another module)</li>
+<li>Release to complete the connection</li>
+</ol>
+<p><img src="../images/interface-connection.png" alt="Making a Connection">
+<em>Dragging a connection from output to input</em></p>
+<h3 id="connection-rules"><a class="header" href="#connection-rules">Connection Rules</a></h3>
+<ul>
+<li>Outputs connect to inputs (never output-to-output or input-to-input)</li>
+<li>Signal types should match (Audio to Audio, Control to Control, etc.)</li>
+<li>Some inputs accept multiple signal types (automatic conversion)</li>
+<li>Multiple cables can connect to the same output</li>
+<li>Only one cable can connect to each input</li>
+</ul>
+<h3 id="connection-colors"><a class="header" href="#connection-colors">Connection Colors</a></h3>
+<p>Cables are colored by signal type:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Color</th><th>Signal Type</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Blue</strong></td><td>Audio</td></tr>
+<tr><td><strong>Orange</strong></td><td>Control/CV</td></tr>
+<tr><td><strong>Green</strong></td><td>Gate/Trigger</td></tr>
+<tr><td><strong>Purple</strong></td><td>MIDI</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="removing-connections"><a class="header" href="#removing-connections">Removing Connections</a></h3>
+<ul>
+<li><strong>Right-click</strong> on a connection to delete it</li>
+<li><strong>Click</strong> on an input port with an existing connection, then press <code>Escape</code> to disconnect</li>
+<li><strong>Delete a module</strong> to remove all its connections</li>
+</ul>
+<h2 id="adjusting-parameters"><a class="header" href="#adjusting-parameters">Adjusting Parameters</a></h2>
+<h3 id="knob-interaction"><a class="header" href="#knob-interaction">Knob Interaction</a></h3>
+<p><img src="../images/interface-knob.png" alt="Knob Interaction">
+<em>Adjusting a parameter knob</em></p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Action</th><th>Result</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Drag up/down</strong></td><td>Adjust value</td></tr>
+<tr><td><strong>Ctrl + drag</strong></td><td>Fine adjustment</td></tr>
+<tr><td><strong>Double-click</strong></td><td>Reset to default</td></tr>
+<tr><td><strong>Right-click</strong></td><td>Open value entry / MIDI learn</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="value-display"><a class="header" href="#value-display">Value Display</a></h3>
+<p>Below each knob is a value readout showing:</p>
+<ul>
+<li>The current numeric value</li>
+<li>The unit (Hz, ms, dB, etc.) where applicable</li>
+</ul>
+<h2 id="patch-management"><a class="header" href="#patch-management">Patch Management</a></h2>
+<h3 id="saving-patches"><a class="header" href="#saving-patches">Saving Patches</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Action</th><th>Shortcut</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Save</strong></td><td><code>Ctrl + S</code></td></tr>
+<tr><td><strong>Save As</strong></td><td><code>Ctrl + Shift + S</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>Patches are saved as <code>.json</code> files containing all module settings and connections.</p>
+<h3 id="loading-patches"><a class="header" href="#loading-patches">Loading Patches</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Action</th><th>Shortcut</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Open</strong></td><td><code>Ctrl + O</code></td></tr>
+<tr><td><strong>New</strong></td><td><code>Ctrl + N</code></td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="recent-patches"><a class="header" href="#recent-patches">Recent Patches</a></h3>
+<p>Access recently opened patches from the <strong>File</strong> menu.</p>
+<h2 id="midi-setup"><a class="header" href="#midi-setup">MIDI Setup</a></h2>
+<h3 id="enabling-midi-input"><a class="header" href="#enabling-midi-input">Enabling MIDI Input</a></h3>
+<ol>
+<li>Add a <strong>MIDI Note</strong> or <strong>Keyboard</strong> module to your patch</li>
+<li>The module will automatically receive input from connected MIDI devices</li>
+</ol>
+<h3 id="midi-learn"><a class="header" href="#midi-learn">MIDI Learn</a></h3>
+<p>To assign a MIDI controller to a knob:</p>
+<ol>
+<li><strong>Right-click</strong> the knob</li>
+<li>Select <strong>MIDI Learn</strong></li>
+<li>Move the desired MIDI controller</li>
+<li>The knob is now mapped to that controller</li>
+</ol>
+<h3 id="computer-keyboard"><a class="header" href="#computer-keyboard">Computer Keyboard</a></h3>
+<p>The <strong>Keyboard</strong> module allows playing notes using your computer keyboard:</p>
+<ul>
+<li><strong>Z-M</strong> row: Lower octave (C3-B3)</li>
+<li><strong>Q-P</strong> row: Upper octave (C4-B4)</li>
+<li><strong>Number keys</strong>: Octave selection</li>
+</ul>
+<h2 id="keyboard-shortcuts"><a class="header" href="#keyboard-shortcuts">Keyboard Shortcuts</a></h2>
+<h3 id="general"><a class="header" href="#general">General</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Shortcut</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Ctrl + N</code></td><td>New patch</td></tr>
+<tr><td><code>Ctrl + O</code></td><td>Open patch</td></tr>
+<tr><td><code>Ctrl + S</code></td><td>Save patch</td></tr>
+<tr><td><code>Ctrl + Shift + S</code></td><td>Save patch as</td></tr>
+<tr><td><code>Ctrl + Z</code></td><td>Undo</td></tr>
+<tr><td><code>Ctrl + Y</code></td><td>Redo</td></tr>
+<tr><td><code>Delete</code></td><td>Delete selected</td></tr>
+<tr><td><code>Ctrl + A</code></td><td>Select all</td></tr>
+<tr><td><code>Escape</code></td><td>Deselect / Cancel</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="navigation-1"><a class="header" href="#navigation-1">Navigation</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Shortcut</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Home</code></td><td>Fit all to view</td></tr>
+<tr><td><code>+</code> / <code>-</code></td><td>Zoom in / out</td></tr>
+<tr><td>Arrow keys</td><td>Pan canvas</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="modules"><a class="header" href="#modules">Modules</a></h3>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Shortcut</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Ctrl + D</code></td><td>Duplicate selected</td></tr>
+<tr><td><code>Ctrl + C</code></td><td>Copy selected</td></tr>
+<tr><td><code>Ctrl + V</code></td><td>Paste</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="next-steps"><a class="header" href="#next-steps">Next Steps</a></h2>
+<p>Now that you understand the interface:</p>
+<ul>
+<li><strong><a href="./your-first-patch.html">Your First Patch</a></strong> - Build a simple synthesizer step by step</li>
+<li><strong><a href="../concepts/signal-types.html">Signal Types</a></strong> - Understand the different signal types</li>
+<li><strong><a href="../modules/README.html">Module Reference</a></strong> - Explore all available modules</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../getting-started/installation.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="../getting-started/your-first-patch.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../getting-started/installation.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="../getting-started/your-first-patch.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
+
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>

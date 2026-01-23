@@ -1,0 +1,31 @@
+[book]
+authors = ["Chris"]
+language = "en"
+src = "src"
+title = "Modular Synth Documentation"
+description = "A node-based modular audio synthesizer in Rust"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+default-theme = "coal"
+preferred-dark-theme = "coal"
+git-repository-url = "https://github.com/your-repo/modular"
+edit-url-template = "https://github.com/your-repo/modular/edit/master/docs/{path}"
+no-section-label = false
+additional-css = ["theme/custom.css"]
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.playground]
+editable = false
+copyable = true
+
+[output.html.search]
+enable = true
+limit-results = 30
+teaser-word-count = 30
