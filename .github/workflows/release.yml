@@ -42,7 +42,6 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # Linux needs some system deps for egui/winit
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -52,27 +51,11 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Package (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          mkdir staging
-          copy target\${{ matrix.target }}\release\${{ matrix.artifact_name }} staging\
-          cd staging
-          7z a -tzip ..\${{ matrix.asset_name }}.zip *
-
-      - name: Package (Unix)
-        if: matrix.os != 'windows-latest'
-        run: |
-          mkdir staging
-          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} staging/
-          cd staging
-          zip ../${{ matrix.asset_name }}.zip *
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}.zip
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
 
   release:
     needs: build
@@ -86,10 +69,19 @@ jobs:
         with:
           path: artifacts
 
+      - name: Package artifacts
+        run: |
+          cd artifacts
+          for dir in */; do
+            name="${dir%/}"
+            (cd "$dir" && zip "../${name}.zip" *)
+            rm -rf "$dir"
+          done
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/**/*.zip
+          files: artifacts/*.zip
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
