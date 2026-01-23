@@ -9,7 +9,7 @@ license = "MIT"
 [dependencies]
 eframe = "0.30"
 egui = "0.30"
-egui_node_graph2 = { path = "../egui_node_graph2/egui_node_graph2" }
+egui_node_graph2 = { git = "https://github.com/chrischaps/egui_node_graph2" }
 cpal = "0.15"
 midir = "0.10"
 rtrb = "0.3"
