@@ -626,17 +626,20 @@ impl NodeDataTrait for SynthNodeData {
     where
         Self::Response: UserResponseTrait,
     {
-        // Draw the left category icon directly with painter
-        // Note: We only draw the LEFT icon (category) since it's positioned relative to
-        // the left edge which is stable. The right icon would be positioned based on
-        // MAX_NODE_SIZE which causes it to appear outside narrow nodes.
-        let rect = ui.available_rect_before_wrap();
-        let painter = ui.painter();
-        let icon_color = Color32::WHITE;
-
+        // Allocate space for the category icon (drawn before the title)
         let icon_size = 14.0 * zoom;
-        let left_center = egui::pos2(rect.left() + icon_size * 0.6, rect.center().y);
-        self.draw_category_icon(painter, left_center, icon_size, icon_color);
+        let icon_padding = 4.0 * zoom;
+        let (icon_rect, _response) = ui.allocate_exact_size(
+            egui::vec2(icon_size + icon_padding, icon_size),
+            egui::Sense::hover(),
+        );
+
+        // Draw the category icon centered in the allocated space
+        let icon_center = egui::pos2(
+            icon_rect.left() + icon_size * 0.5,
+            icon_rect.center().y,
+        );
+        self.draw_category_icon(ui.painter(), icon_center, icon_size, Color32::WHITE);
 
         Vec::new()
     }
