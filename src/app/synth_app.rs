@@ -980,12 +980,23 @@ impl SynthApp {
                                 }
                             }
                             // Check if output has any remaining connections
-                            // If not, stop monitoring it for cable animation
+                            // If not, stop monitoring it for cable animation (unless it's always monitored)
                             let has_other_connections = self.graph_state.graph.iter_connections()
                                 .any(|(_, o)| o == output);
                             if !has_other_connections {
-                                if let Some(unmonitor_cmd) = self.build_unmonitor_output_command(output) {
-                                    commands_to_send.push(unmonitor_cmd);
+                                // Check if this output should stay monitored (e.g., for lit port visualization)
+                                let should_stay_monitored = self.graph_state.graph.try_get_output(output)
+                                    .and_then(|out_param| {
+                                        let node = self.graph_state.graph.nodes.get(out_param.node)?;
+                                        let output_index = self.graph_state.graph.get_output_index(output)?;
+                                        Some(node.user_data.monitored_outputs.contains(&output_index))
+                                    })
+                                    .unwrap_or(false);
+
+                                if !should_stay_monitored {
+                                    if let Some(unmonitor_cmd) = self.build_unmonitor_output_command(output) {
+                                        commands_to_send.push(unmonitor_cmd);
+                                    }
                                 }
                             }
                         }
