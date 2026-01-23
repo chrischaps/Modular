@@ -568,6 +568,12 @@ impl SynthApp {
             self.cached_params.insert((engine_node_id, MidiNote::PARAM_VELOCITY), velocity_to_send as f32);
             self.cached_params.insert((engine_node_id, MidiNote::PARAM_AFTERTOUCH), self.midi_aftertouch as f32);
         }
+
+        // Update active notes for piano display
+        let active_notes: Vec<u8> = self.midi_held_notes.iter()
+            .map(|(note, _, _)| *note)
+            .collect();
+        self.user_state.set_midi_active_notes(active_notes);
     }
 
     /// Check if MIDI gate needs to be released after minimum duration.
@@ -2178,6 +2184,12 @@ impl SynthApp {
             self.cached_params.insert((engine_node_id, note_param_idx), note_to_send);
             self.cached_params.insert((engine_node_id, gate_param_idx), gate_value);
         }
+
+        // Update active notes for piano display (convert relative notes to MIDI notes)
+        let active_notes: Vec<u8> = self.pressed_keys.iter()
+            .map(|(rel, _)| relative_to_midi(*rel, 0) as u8)
+            .collect();
+        self.user_state.set_keyboard_active_notes(active_notes);
     }
 
     /// Check if gate needs to be released after minimum duration.

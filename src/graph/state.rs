@@ -122,6 +122,14 @@ pub struct SynthGraphState {
     /// Whether the transport is playing.
     /// When false, cable animations are stopped.
     pub is_playing: bool,
+
+    /// Active notes for Keyboard module display (MIDI note numbers).
+    /// Updated by the keyboard input handler.
+    pub keyboard_active_notes: Vec<u8>,
+
+    /// Active notes for MIDI Note module display (MIDI note numbers).
+    /// Updated by the MIDI event handler.
+    pub midi_active_notes: Vec<u8>,
 }
 
 impl Default for SynthGraphState {
@@ -146,6 +154,8 @@ impl Default for SynthGraphState {
             scope_data: HashMap::new(),
             zoom: 1.0,
             is_playing: false,
+            keyboard_active_notes: Vec::new(),
+            midi_active_notes: Vec::new(),
         }
     }
 }
@@ -192,6 +202,8 @@ impl SynthGraphState {
         self.midi_learn_target = None;
         self.widget_context_menu_open = false;
         self.scope_data.clear();
+        self.keyboard_active_notes.clear();
+        self.midi_active_notes.clear();
     }
 
     /// Get the MIDI mapping info for a parameter, if any.
@@ -330,6 +342,26 @@ impl SynthGraphState {
     /// Clear scope data for a specific node (e.g., when node is deleted).
     pub fn clear_scope_data_for_node(&mut self, engine_node_id: EngineNodeId) {
         self.scope_data.remove(&engine_node_id);
+    }
+
+    /// Set the active notes for the Keyboard module display.
+    pub fn set_keyboard_active_notes(&mut self, notes: Vec<u8>) {
+        self.keyboard_active_notes = notes;
+    }
+
+    /// Get the active notes for the Keyboard module display.
+    pub fn keyboard_active_notes(&self) -> &[u8] {
+        &self.keyboard_active_notes
+    }
+
+    /// Set the active notes for the MIDI Note module display.
+    pub fn set_midi_active_notes(&mut self, notes: Vec<u8>) {
+        self.midi_active_notes = notes;
+    }
+
+    /// Get the active notes for the MIDI Note module display.
+    pub fn midi_active_notes(&self) -> &[u8] {
+        &self.midi_active_notes
     }
 }
 

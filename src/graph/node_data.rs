@@ -15,7 +15,7 @@ use egui_node_graph2::{NodeDataTrait, NodeResponse, UserResponseTrait};
 
 use crate::dsp::ModuleCategory;
 use crate::engine::midi_engine::MidiEvent;
-use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, ParamFormat, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, SpectrumConfig, SpectrumStyle, generate_filter_response, FilterResponseType};
+use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, ParamFormat, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, SpectrumConfig, SpectrumStyle, generate_filter_response, FilterResponseType, piano, PianoConfig, PianoData};
 use super::{SynthResponse, SynthValueType};
 
 /// MIDI event colors for the MIDI Monitor display.
@@ -1476,6 +1476,114 @@ impl NodeDataTrait for SynthNodeData {
 
                 // Request continuous repaint for animation
                 ui.ctx().request_repaint();
+            });
+        }
+
+        // Special rendering for Keyboard module - piano keyboard display
+        if self.module_id == "input.keyboard" {
+            // Add separator with zoom-scaled margins
+            ui.add_space(4.0 * zoom);
+            let category_color = self.category.color();
+            let separator_color = Color32::from_rgba_unmultiplied(
+                category_color.r(),
+                category_color.g(),
+                category_color.b(),
+                64,
+            );
+            let margin = 4.0 * zoom;
+            let rect = ui.available_rect_before_wrap();
+            ui.painter().hline(
+                (rect.left() + margin)..=(rect.right() - margin),
+                ui.cursor().top(),
+                egui::Stroke::new(1.0 * zoom, separator_color),
+            );
+            ui.add_space(4.0 * zoom);
+
+            // Get octave parameter from node
+            let octave_shift = if let Some(node) = graph.nodes.get(node_id) {
+                let mut octave = 0i32;
+                for (name, input_id) in &node.inputs {
+                    if name == "Octave" {
+                        let input = graph.get_input(*input_id);
+                        if let SynthValueType::LinearRange { value, .. } = &input.value {
+                            octave = *value as i32;
+                        }
+                    }
+                }
+                octave
+            } else {
+                0
+            };
+
+            // Base note is C4 (60) plus octave shift
+            let base_note = (60 + octave_shift * 12).max(0).min(127) as u8;
+
+            let data = PianoData {
+                active_notes: user_state.keyboard_active_notes().to_vec(),
+                base_note,
+                octave_shift,
+            };
+
+            let config = PianoConfig::keyboard()
+                .with_size(140.0 * zoom, 45.0 * zoom);
+
+            ui.horizontal(|ui| {
+                ui.add_space((ui.available_width() - 140.0 * zoom) / 2.0); // Center the display
+                piano(ui, &data, &config);
+            });
+        }
+
+        // Special rendering for MIDI Note module - piano keyboard display
+        if self.module_id == "input.midi_note" {
+            // Add separator with zoom-scaled margins
+            ui.add_space(4.0 * zoom);
+            let category_color = self.category.color();
+            let separator_color = Color32::from_rgba_unmultiplied(
+                category_color.r(),
+                category_color.g(),
+                category_color.b(),
+                64,
+            );
+            let margin = 4.0 * zoom;
+            let rect = ui.available_rect_before_wrap();
+            ui.painter().hline(
+                (rect.left() + margin)..=(rect.right() - margin),
+                ui.cursor().top(),
+                egui::Stroke::new(1.0 * zoom, separator_color),
+            );
+            ui.add_space(4.0 * zoom);
+
+            // Get octave parameter from node
+            let octave_shift = if let Some(node) = graph.nodes.get(node_id) {
+                let mut octave = 0i32;
+                for (name, input_id) in &node.inputs {
+                    if name == "Octave" {
+                        let input = graph.get_input(*input_id);
+                        if let SynthValueType::LinearRange { value, .. } = &input.value {
+                            octave = *value as i32;
+                        }
+                    }
+                }
+                octave
+            } else {
+                0
+            };
+
+            // Base note is C4 (60) plus octave shift
+            let base_note = (60 + octave_shift * 12).max(0).min(127) as u8;
+
+            let data = PianoData {
+                active_notes: user_state.midi_active_notes().to_vec(),
+                base_note,
+                octave_shift,
+            };
+
+            let config = PianoConfig::midi()
+                .with_size(140.0 * zoom, 45.0 * zoom);
+
+            ui.horizontal(|ui| {
+                ui.add_space((ui.available_width() - 140.0 * zoom) / 2.0); // Center the display
+                piano(ui, &data, &config);
             });
         }
 
