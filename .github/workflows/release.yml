@@ -1,0 +1,95 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARY_NAME: modular_synth
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: modular_synth.exe
+            asset_name: modular_synth-windows
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: modular_synth
+            asset_name: modular_synth-macos-intel
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: modular_synth
+            asset_name: modular_synth-macos-apple-silicon
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: modular_synth
+            asset_name: modular_synth-linux
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # Linux needs some system deps for egui/winit
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          mkdir staging
+          copy target\${{ matrix.target }}\release\${{ matrix.artifact_name }} staging\
+          cd staging
+          7z a -tzip ..\${{ matrix.asset_name }}.zip *
+
+      - name: Package (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir staging
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} staging/
+          cd staging
+          zip ../${{ matrix.asset_name }}.zip *
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
