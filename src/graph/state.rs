@@ -2,7 +2,7 @@
 //!
 //! Contains the user state passed to egui_node_graph2 callbacks.
 
-use egui::Pos2;
+use egui::{Color32, Pos2};
 use egui_node_graph2::{ConnectionSignalTrait, GraphEditorState, NodeId};
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
@@ -382,6 +382,26 @@ impl ConnectionSignalTrait for SynthGraphState {
         let engine_node_id = self.get_engine_node_id(graph_node_id)?;
         // Get the output signal value from the audio engine feedback
         self.get_output_value(engine_node_id, output_index)
+    }
+
+    fn output_port_color(
+        &self,
+        graph_node_id: NodeId,
+        output_index: usize,
+        base_color: Color32,
+    ) -> Color32 {
+        // Get signal level and brighten the port color accordingly
+        if let Some(signal_level) = self.get_output_signal_level(graph_node_id, output_index) {
+            let brightness = signal_level.abs().clamp(0.0, 1.0);
+            // Lerp from base color towards white based on signal level
+            Color32::from_rgb(
+                (base_color.r() as f32 + (255.0 - base_color.r() as f32) * brightness) as u8,
+                (base_color.g() as f32 + (255.0 - base_color.g() as f32) * brightness) as u8,
+                (base_color.b() as f32 + (255.0 - base_color.b() as f32) * brightness) as u8,
+            )
+        } else {
+            base_color
+        }
     }
 }
 
