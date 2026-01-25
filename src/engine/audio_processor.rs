@@ -301,7 +301,7 @@ mod tests {
         assert!(registry.contains("fx.chorus"));
         assert!(registry.contains("fx.compressor"));
         assert!(registry.contains("util.mixer"));
-        assert_eq!(registry.len(), 21);
+        assert_eq!(registry.len(), 22);
     }
 
     #[test]
