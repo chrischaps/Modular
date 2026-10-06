@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use crate::dsp::denormal::DenormalGuard;
 use crate::dsp::{ModuleRegistry, ProcessContext};
-use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Chorus, Clock, Compressor, Distortion, KeyboardInput, Lfo, MidiMonitor, MidiNote, Mixer, Oscilloscope, ParametricEq, Reverb, SampleHold, SineOscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
+use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Chorus, Clock, Compressor, Distortion, KeyboardInput, LadderFilter, Lfo, MidiMonitor, MidiNote, Mixer, Oscilloscope, ParametricEq, Reverb, SampleHold, SineOscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
 
 use super::channels::EngineHandle;
 use super::commands::{AudioMessage, EngineEvent, ScopeFrame};
@@ -24,6 +24,7 @@ pub fn create_module_registry() -> ModuleRegistry {
     registry.register::<KeyboardInput>();
     registry.register::<MidiNote>();
     registry.register::<SvfFilter>();
+    registry.register::<LadderFilter>();
     registry.register::<AdsrEnvelope>();
     registry.register::<Lfo>();
     registry.register::<Clock>();
@@ -288,6 +289,7 @@ mod tests {
         let registry = create_module_registry();
         assert!(registry.contains("osc.sine"));
         assert!(registry.contains("filter.svf"));
+        assert!(registry.contains("filter.ladder"));
         assert!(registry.contains("mod.adsr"));
         assert!(registry.contains("util.clock"));
         assert!(registry.contains("util.vca"));
@@ -307,7 +309,7 @@ mod tests {
         assert!(registry.contains("fx.chorus"));
         assert!(registry.contains("fx.compressor"));
         assert!(registry.contains("util.mixer"));
-        assert_eq!(registry.len(), 21);
+        assert_eq!(registry.len(), 22);
     }
 
     #[test]

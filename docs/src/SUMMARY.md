@@ -18,6 +18,7 @@
 - [Module Overview](./modules/README.md)
   - [Oscillator](./modules/sources/oscillator.md)
   - [SVF Filter](./modules/filters/svf-filter.md)
+  - [Ladder Filter](./modules/filters/ladder-filter.md)
   - [ADSR Envelope](./modules/modulation/adsr.md)
   - [LFO](./modules/modulation/lfo.md)
   - [Clock](./modules/modulation/clock.md)

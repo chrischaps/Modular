@@ -8,7 +8,7 @@ use crate::dsp::{
     context::ProcessContext,
     parameter::ParameterDefinition,
     port::PortDefinition,
-    primitives::{fast_tanh, prewarp, SoftSaturator, TptIntegrator},
+    primitives::{fast_tanh, prewarp, NoiseFloor, SoftSaturator, TptIntegrator},
     signal::SignalBuffer,
     smoothed_value::SmoothedValue,
     SignalType,
@@ -61,8 +61,8 @@ pub struct SvfFilter {
     last_band: f32,
     /// Saturator in the resonance feedback path.
     resonance_sat: SoftSaturator,
-    /// State of the noise generator that seeds self-oscillation.
-    noise_seed: u32,
+    /// Circuit noise that seeds self-oscillation.
+    noise: NoiseFloor,
     /// Port definitions.
     ports: Vec<PortDefinition>,
     /// Parameter definitions.
@@ -85,7 +85,7 @@ impl SvfFilter {
             low_int: TptIntegrator::new(),
             last_band: 0.0,
             resonance_sat: SoftSaturator::new(Self::RESONANCE_SAT_LEVEL),
-            noise_seed: 0x2545_f491,
+            noise: NoiseFloor::default(),
             ports: vec![
                 // Input ports
                 PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0),
@@ -144,10 +144,6 @@ impl SvfFilter {
     const MAX_FEEDBACK: f32 = 2.06;
     /// Level the resonance saturator limits the bandpass feedback to.
     const RESONANCE_SAT_LEVEL: f32 = 1.0;
-    /// Input noise floor (-120 dBFS), standing in for circuit noise. It gives
-    /// a self-oscillating filter something to grow from when nothing is
-    /// patched in, and is far below anything audible.
-    const NOISE_FLOOR: f32 = 1e-6;
 
     /// Small-signal damping (1/Q) for a resonance setting: what the filter's
     /// response looks like before the saturator starts to act. It falls from
@@ -165,17 +161,6 @@ impl SvfFilter {
         let k = Self::small_signal_damping(resonance);
         let denom = (1.0 - w * w).powi(2) + (k * w).powi(2);
         -10.0 * denom.max(1e-12).log10()
-    }
-
-    /// Next sample of the noise floor (xorshift32, white, ±`NOISE_FLOOR`).
-    #[inline]
-    fn noise(&mut self) -> f32 {
-        let mut x = self.noise_seed;
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        self.noise_seed = x;
-        (x as i32 as f32) * (Self::NOISE_FLOOR / 2_147_483_648.0)
     }
 
     /// The cutoff the filter is currently running at, in Hz, before CV.
@@ -254,7 +239,7 @@ impl DspModule for SvfFilter {
             let input = audio_in
                 .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
                 .unwrap_or(0.0);
-            let input = fast_tanh(input * drive) + self.noise();
+            let input = fast_tanh(input * drive) + self.noise.sample();
 
             // Cutoff CV adds octaves in the log domain
             let cutoff_mod = cutoff_cv

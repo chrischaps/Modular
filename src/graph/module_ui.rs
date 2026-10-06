@@ -118,6 +118,12 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "filter.ladder",
+        knobs: &[modulatable("Cutoff", "Cutoff"), modulatable("Resonance", "Res"), knob("Drive")],
+        display: NodeDisplay::LadderResponse,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "mod.adsr",
         knobs: &[knob_as("Attack", "Atk"), knob_as("Decay", "Dec"), knob_as("Sustain", "Sus"), knob_as("Release", "Rel")],
         display: NodeDisplay::Envelope,

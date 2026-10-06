@@ -18,7 +18,8 @@ Frequency-shaping modules that remove or emphasize parts of the spectrum.
 
 | Module | ID | Description |
 |--------|-----|-------------|
-| [SVF Filter](./filters/svf-filter.md) | `filter.svf` | State Variable Filter with LP/HP/BP outputs |
+| [SVF Filter](./filters/svf-filter.md) | `filter.svf` | State Variable Filter with LP/HP/BP/Notch outputs |
+| [Ladder Filter](./filters/ladder-filter.md) | `filter.ladder` | Moog-style 4-pole lowpass, saturating and oversampled |
 
 ### Modulation (Orange Header)
 

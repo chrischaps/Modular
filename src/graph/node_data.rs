@@ -15,7 +15,7 @@ use egui_node_graph2::{NodeDataTrait, NodeResponse, UserResponseTrait};
 
 use crate::dsp::ModuleCategory;
 use crate::engine::midi_engine::MidiEvent;
-use crate::modules::SvfFilter;
+use crate::modules::{LadderFilter, SvfFilter};
 use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, FrequencyPoint, SpectrumConfig, SpectrumStyle, piano, PianoConfig, PianoData};
 use super::{SynthResponse, SynthValueType};
 
@@ -204,8 +204,10 @@ pub enum NodeDisplay {
     LfoWave,
     /// ADSR: envelope shape.
     Envelope,
-    /// Filter: frequency response curve.
+    /// SVF Filter: frequency response curve.
     FilterResponse,
+    /// Ladder Filter: frequency response curve.
+    LadderResponse,
     /// Keyboard: piano showing held keys.
     KeyboardPiano,
     /// MIDI Note: piano showing incoming notes.
@@ -1247,8 +1249,14 @@ impl NodeDataTrait for SynthNodeData {
             });
         }
 
-        // Special rendering for SVF Filter module - frequency response display
-        if self.display == NodeDisplay::FilterResponse {
+        // Filter modules - frequency response display, computed from each
+        // filter's own transfer function so the curve matches the sound
+        let response_db: Option<fn(f32, f32, f32) -> f32> = match self.display {
+            NodeDisplay::FilterResponse => Some(SvfFilter::lowpass_response_db),
+            NodeDisplay::LadderResponse => Some(LadderFilter::lowpass_response_db),
+            _ => None,
+        };
+        if let Some(response_db) = response_db {
             // Add separator with zoom-scaled margins
             ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
@@ -1293,13 +1301,12 @@ impl NodeDataTrait for SynthNodeData {
                 (1000.0, 0.5)
             };
 
-            // Lowpass response (the primary output), computed from the
-            // filter's own transfer function so the curve matches the sound
+            // Lowpass response (the primary output)
             let (log_min, log_max) = (20.0f32.ln(), 20000.0f32.ln());
             let response_points: Vec<FrequencyPoint> = (0..128)
                 .map(|i| {
                     let freq = (log_min + (log_max - log_min) * i as f32 / 127.0).exp();
-                    let db = SvfFilter::lowpass_response_db(cutoff_hz, resonance, freq);
+                    let db = response_db(cutoff_hz, resonance, freq);
                     FrequencyPoint::new(freq, db.clamp(-60.0, 24.0))
                 })
                 .collect();
