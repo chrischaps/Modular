@@ -32,6 +32,59 @@ pub fn windowed_rms(samples: &[f32], window: usize) -> Vec<f32> {
     samples.chunks_exact(window.max(1)).map(rms).collect()
 }
 
+/// Reverberation time (RT60) of an impulse response, in seconds.
+///
+/// Uses Schroeder's backward-integrated energy decay curve and the T30
+/// method: a straight line is fitted to the curve between -5 and -35 dB and
+/// extended to -60 dB. The response should run until it has fallen well past
+/// -35 dB. Returns `None` if it never falls that far.
+pub fn rt60(impulse_response: &[f32], sample_rate: f32) -> Option<f32> {
+    let mut edc = vec![0.0f64; impulse_response.len()];
+    let mut energy = 0.0;
+    for (i, &s) in impulse_response.iter().enumerate().rev() {
+        energy += (s as f64) * (s as f64);
+        edc[i] = energy;
+    }
+    let total = *edc.first()?;
+    if total <= 0.0 {
+        return None;
+    }
+
+    // Least-squares line through (time, dB) over the -5..-35 dB span
+    let (mut n, mut sx, mut sy, mut sxx, mut sxy) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    for (i, &e) in edc.iter().enumerate() {
+        let db = 10.0 * (e / total).max(1e-30).log10();
+        if (-35.0..=-5.0).contains(&db) {
+            let t = i as f64 / sample_rate as f64;
+            n += 1.0;
+            sx += t;
+            sy += db;
+            sxx += t * t;
+            sxy += t * db;
+        }
+    }
+    let reached_35 = edc.iter().any(|&e| e / total < 10f64.powf(-3.5));
+    if n < 2.0 || !reached_35 {
+        return None;
+    }
+    let slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+    (slope < 0.0).then(|| (-60.0 / slope) as f32)
+}
+
+/// Normalized echo density (Abel & Huang) of a stretch of reverb.
+///
+/// The fraction of samples lying more than one standard deviation from zero,
+/// divided by the fraction expected for Gaussian noise (0.3173). Sparse,
+/// distinct echoes read well below 1; a fully diffuse tail reads about 1.
+pub fn echo_density(samples: &[f32]) -> f32 {
+    let sd = rms(samples);
+    if sd == 0.0 {
+        return 0.0;
+    }
+    let outside = samples.iter().filter(|s| s.abs() > sd).count();
+    outside as f32 / samples.len() as f32 / 0.317_310_5
+}
+
 /// A one-sided magnitude spectrum.
 pub struct Spectrum {
     /// Magnitude of each bin from DC to Nyquist. A full-scale sine at a bin
@@ -227,6 +280,39 @@ mod tests {
     #[test]
     fn test_windowed_rms_drops_partial_window() {
         assert_eq!(windowed_rms(&[1.0; 10], 4), vec![1.0, 1.0]);
+    }
+
+    #[test]
+    fn test_rt60_of_exponential_noise() {
+        // Noise under an envelope falling 60 dB in 1.5 s
+        let sr = 48000.0;
+        let mut seed = 1u32;
+        let ir: Vec<f32> = (0..(3.0 * sr) as usize)
+            .map(|i| {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                let noise = seed as i32 as f32 / i32::MAX as f32;
+                noise * 10f32.powf(-3.0 * i as f32 / sr / 1.5)
+            })
+            .collect();
+        let t = rt60(&ir, sr).unwrap();
+        assert!((t - 1.5).abs() < 0.03, "rt60 {}", t);
+        assert_eq!(rt60(&[0.0; 100], sr), None);
+    }
+
+    #[test]
+    fn test_echo_density_tells_clicks_from_noise() {
+        let mut clicks = vec![0.0f32; 4800];
+        for i in (0..4800).step_by(480) {
+            clicks[i] = 1.0;
+        }
+        assert!(echo_density(&clicks) < 0.1);
+        let noise: Vec<f32> = (0..4800u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 8) as f32 / 8_388_608.0 - 1.0)
+            .collect();
+        // Uniform noise has fewer outliers than Gaussian: 0.42 / 0.3173
+        assert!((echo_density(&noise) - 1.33).abs() < 0.1);
     }
 
     #[test]

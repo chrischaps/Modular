@@ -217,13 +217,16 @@ static MODULE_UI: &[ModuleUi] = &[
     ModuleUi {
         module_id: "fx.reverb",
         knobs: &[
+            // The room and its tail on top, placement in the mix below
             knob("Size"),
             knob("Decay"),
             knob_as("Damping", "Damp"),
+            knob("Mod"),
             knob_as("Pre-Delay", "PreD"),
-            knob("Mix"),
             knob("Width"),
+            knob("Mix"),
         ],
+        knobs_per_row: 4,
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
