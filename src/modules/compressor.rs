@@ -305,6 +305,12 @@ impl DspModule for Compressor {
         let out = &mut out_slice[Self::PORT_OUT];
         let gr_out = &mut gr_slice[0];
 
+        // Use the sidechain only when it carries signal this block; otherwise
+        // the detector follows the input (interim until the engine reports
+        // real connection state). Deciding per block, not per sample, keeps
+        // the detector from jumping to the dry signal at zero crossings.
+        let sidechain = sidechain.filter(|buf| buf.samples.iter().any(|&s| s != 0.0));
+
         // Process each sample
         for i in 0..context.block_size {
             // Get smoothed values
@@ -323,11 +329,7 @@ impl DspModule for Compressor {
 
             // Get sidechain sample (normalled from input if not connected)
             let sidechain_sample = sidechain
-                .and_then(|buf| {
-                    let s = buf.samples.get(i).copied().unwrap_or(0.0);
-                    // Check if sidechain is actually providing signal
-                    if s.abs() > 0.00001 { Some(s) } else { None }
-                })
+                .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
                 .unwrap_or(dry);
 
             // Envelope follow the sidechain signal

@@ -79,6 +79,9 @@ pub struct AudioEngine {
     config: StreamConfig,
     stream: Option<Stream>,
     state: Arc<AudioState>,
+    /// The graph processor driven by the stream, kept here so it survives a
+    /// device change (the stream, and its callback's handle, are rebuilt).
+    processor: Option<Arc<Mutex<AudioProcessor>>>,
 }
 
 impl AudioEngine {
@@ -109,6 +112,7 @@ impl AudioEngine {
             config,
             stream: None,
             state,
+            processor: None,
         })
     }
 
@@ -143,8 +147,9 @@ impl AudioEngine {
 
     /// Select a different output device by index.
     ///
-    /// This will stop the current stream if running. Call `start()` to begin
-    /// playback on the new device.
+    /// If a stream was running it is rebuilt on the new device. When the
+    /// engine is driving an `AudioProcessor`, the same processor (and so the
+    /// whole patch) moves to the new device, re-prepared at its sample rate.
     pub fn select_device(&mut self, index: usize) -> Result<(), AudioError> {
         // Stop current stream if running
         let was_running = self.is_running();
@@ -177,7 +182,16 @@ impl AudioEngine {
 
         // Restart if it was running before
         if was_running {
-            self.start()?;
+            match self.processor.clone() {
+                Some(processor) => {
+                    // The old stream is gone, so this lock is uncontended
+                    if let Ok(mut proc) = processor.lock() {
+                        proc.set_sample_rate(sample_rate as f32);
+                    }
+                    self.build_processor_stream(processor)?;
+                }
+                None => self.start()?,
+            }
         }
 
         Ok(())
@@ -311,14 +325,21 @@ impl AudioEngine {
             return Ok(());
         }
 
-        let channels = self.config.channels as usize;
-        let sample_rate = self.config.sample_rate.0 as f32;
-
         // Wrap processor in Mutex for the callback
         // Note: In practice, the Mutex is uncontested since only the audio
         // callback accesses it, so there's no actual blocking.
         let processor = Arc::new(Mutex::new(processor));
-        let processor_clone = Arc::clone(&processor);
+        self.processor = Some(Arc::clone(&processor));
+        self.build_processor_stream(processor)
+    }
+
+    /// Builds and starts a stream on the current device that runs `processor`.
+    fn build_processor_stream(
+        &mut self,
+        processor: Arc<Mutex<AudioProcessor>>,
+    ) -> Result<(), AudioError> {
+        let channels = self.config.channels as usize;
+        let processor_clone = processor;
 
         // DEBUG: Count callback invocations and lock failures
         use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};

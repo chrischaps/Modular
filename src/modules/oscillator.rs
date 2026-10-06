@@ -102,7 +102,8 @@ impl SineOscillator {
                 PortDefinition::output("out", "Out", SignalType::Audio),
             ],
             parameters: vec![
-                ParameterDefinition::frequency("frequency", "Frequency", 20.0, 20000.0, 440.0),
+                // Default C4 so V/Oct 0.0 (C4 from MIDI/Keyboard) plays in tune
+                ParameterDefinition::frequency("frequency", "Frequency", 20.0, 20000.0, Self::C4_HZ),
                 ParameterDefinition::new(
                     "fm_depth",
                     "FM Depth",
@@ -129,11 +130,14 @@ impl SineOscillator {
                 ),
             ],
             // Initialize smoothed parameters with defaults
-            freq_smooth: SmoothedValue::with_default_smoothing(440.0, sample_rate),
+            freq_smooth: SmoothedValue::with_default_smoothing(Self::C4_HZ, sample_rate),
             fm_depth_smooth: SmoothedValue::with_default_smoothing(0.0, sample_rate),
             pulse_width_smooth: SmoothedValue::with_default_smoothing(0.5, sample_rate),
         }
     }
+
+    /// Frequency of C4 (MIDI note 60), the pitch at V/Oct 0.0.
+    pub const C4_HZ: f32 = 261.625_58;
 
     /// Port index constants for clarity.
     const PORT_V_OCT: usize = 0;
@@ -437,7 +441,7 @@ mod tests {
         assert_eq!(params[0].id, "frequency");
         assert_eq!(params[0].min, 20.0);
         assert_eq!(params[0].max, 20000.0);
-        assert_eq!(params[0].default, 440.0);
+        assert_eq!(params[0].default, SineOscillator::C4_HZ);
 
         // FM Depth parameter
         assert_eq!(params[1].id, "fm_depth");

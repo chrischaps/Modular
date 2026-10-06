@@ -21,15 +21,24 @@ const ALLPASS_TUNINGS: [usize; 4] = [556, 441, 341, 225];
 /// Stereo spread offset (samples) - slight detuning between L/R channels.
 const STEREO_SPREAD: usize = 23;
 
-/// Maximum room size multiplier.
+/// Room size multiplier range applied to the Freeverb tunings (Size 0..1).
+const MIN_ROOM_SIZE: f32 = 0.5;
 const MAX_ROOM_SIZE: f32 = 2.0;
+
+/// How often (in samples) the size-dependent comb lengths and feedback
+/// gains are recomputed while Size/Decay are smoothing.
+const COEFF_UPDATE_INTERVAL: usize = 32;
 
 /// Maximum pre-delay in seconds.
 const MAX_PREDELAY_SECONDS: f32 = 0.1;
 
 /// A simple comb filter with lowpass damping in the feedback path.
+///
+/// The buffer is allocated at the largest room size; `len` selects how much
+/// of it is active, which is how the Size parameter changes the delay time.
 struct CombFilter {
     buffer: Vec<f32>,
+    len: usize,
     write_pos: usize,
     filter_state: f32,
 }
@@ -38,6 +47,7 @@ impl CombFilter {
     fn new(size: usize) -> Self {
         Self {
             buffer: vec![0.0; size],
+            len: size,
             write_pos: 0,
             filter_state: 0.0,
         }
@@ -45,7 +55,13 @@ impl CombFilter {
 
     fn resize(&mut self, size: usize) {
         self.buffer.resize(size, 0.0);
-        if self.write_pos >= size {
+        self.set_len(self.len);
+    }
+
+    /// Sets the active delay length (clamped to the allocated buffer).
+    fn set_len(&mut self, len: usize) {
+        self.len = len.clamp(1, self.buffer.len());
+        if self.write_pos >= self.len {
             self.write_pos = 0;
         }
     }
@@ -61,8 +77,11 @@ impl CombFilter {
         // Write input + filtered feedback to buffer
         self.buffer[self.write_pos] = input + self.filter_state * feedback;
 
-        // Advance write position
-        self.write_pos = (self.write_pos + 1) % self.buffer.len();
+        // Advance write position within the active length
+        self.write_pos += 1;
+        if self.write_pos >= self.len {
+            self.write_pos = 0;
+        }
 
         output
     }
@@ -208,6 +227,8 @@ pub struct Reverb {
     mix_smooth: SmoothedValue,
     /// Smoothed stereo width.
     width_smooth: SmoothedValue,
+    /// Per-comb feedback gains for the current size/decay (left, right).
+    comb_feedback: [[f32; 8]; 2],
     /// Port definitions.
     ports: Vec<PortDefinition>,
     /// Parameter definitions.
@@ -261,6 +282,7 @@ impl Reverb {
             predelay_smooth: SmoothedValue::with_default_smoothing(0.0, sample_rate),
             mix_smooth: SmoothedValue::with_default_smoothing(0.3, sample_rate),
             width_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
+            comb_feedback: [[0.0; 8]; 2],
             ports: vec![
                 // Input ports
                 PortDefinition::input_with_default("in_l", "In L", SignalType::Audio, 0.0),
@@ -308,17 +330,40 @@ impl Reverb {
     const PARAM_MIX: usize = 4;
     const PARAM_WIDTH: usize = 5;
 
-    /// Convert decay time to feedback coefficient.
-    /// Uses the formula: feedback = e^(-3 * delay_time / decay_time)
-    /// This gives -60dB after decay_time seconds.
-    fn decay_to_feedback(decay_seconds: f32, avg_delay_samples: f32, sample_rate: f32) -> f32 {
-        let avg_delay_seconds = avg_delay_samples / sample_rate;
-        if decay_seconds <= 0.0 || avg_delay_seconds <= 0.0 {
+    /// Convert decay time to a comb feedback coefficient.
+    ///
+    /// A signal circulating in a comb of delay `d` loses `g` per trip, so after
+    /// `T` seconds it has made `T/d` trips: g^(T/d) = 10^(-60/20) for RT60.
+    /// Solving gives g = 10^(-3 * d / T).
+    fn decay_to_feedback(decay_seconds: f32, delay_samples: f32, sample_rate: f32) -> f32 {
+        let delay_seconds = delay_samples / sample_rate;
+        if decay_seconds <= 0.0 || delay_seconds <= 0.0 {
             return 0.0;
         }
-        // Calculate feedback for RT60 (time to decay by 60dB)
-        let feedback = (-3.0 * avg_delay_seconds / decay_seconds).exp();
-        feedback.clamp(0.0, 0.98) // Limit feedback to prevent runaway
+        let feedback = 10.0_f32.powf(-3.0 * delay_seconds / decay_seconds);
+        feedback.clamp(0.0, 0.998) // Strictly below 1 so the loop always decays
+    }
+
+    /// Maps the Size parameter (0..1) to a multiplier on the Freeverb tunings.
+    #[inline]
+    fn room_scale(size: f32) -> f32 {
+        MIN_ROOM_SIZE + size.clamp(0.0, 1.0) * (MAX_ROOM_SIZE - MIN_ROOM_SIZE)
+    }
+
+    /// Applies Size to every comb's active length and recomputes the per-comb
+    /// feedback so the tail reaches -60 dB after `decay` seconds.
+    fn update_combs(&mut self, size: f32, decay: f32) {
+        let scale = self.sample_rate / 44100.0 * Self::room_scale(size);
+        for idx in 0..COMB_TUNINGS.len() {
+            let len_l = (COMB_TUNINGS[idx] as f32 * scale) as usize;
+            let len_r = ((COMB_TUNINGS[idx] + STEREO_SPREAD) as f32 * scale) as usize;
+            self.combs_l[idx].set_len(len_l);
+            self.combs_r[idx].set_len(len_r);
+            self.comb_feedback[0][idx] =
+                Self::decay_to_feedback(decay, self.combs_l[idx].len as f32, self.sample_rate);
+            self.comb_feedback[1][idx] =
+                Self::decay_to_feedback(decay, self.combs_r[idx].len as f32, self.sample_rate);
+        }
     }
 
     /// Resize all filters for a new sample rate.
@@ -421,8 +466,11 @@ impl DspModule for Reverb {
         let out_left = &mut out_left_slice[Self::PORT_OUT_L];
         let out_right = &mut out_right_slice[0];
 
-        // Calculate scale factor for sample rate
-        let scale = self.sample_rate / 44100.0;
+        // Normal the right input from the left when it carries no signal this
+        // block (interim until the engine reports real connection state).
+        let right_is_silent = in_right
+            .map(|buf| buf.samples.iter().all(|&s| s == 0.0))
+            .unwrap_or(true);
 
         // Process each sample
         for i in 0..context.block_size {
@@ -439,15 +487,10 @@ impl DspModule for Reverb {
             self.predelay_l.set_delay(predelay_samples);
             self.predelay_r.set_delay(predelay_samples);
 
-            // Calculate room size factor (affects comb filter lengths)
-            // Size 0.5 = normal, 0 = small, 1 = large
-            let room_size = 0.5 + size_smoothed * 0.5; // 0.5 to 1.0
-
-            // Calculate average delay time for feedback calculation
-            let avg_delay_samples = COMB_TUNINGS.iter().sum::<usize>() as f32 / 8.0 * scale * room_size;
-
-            // Convert decay time to feedback coefficient
-            let feedback = Self::decay_to_feedback(decay_smoothed, avg_delay_samples, self.sample_rate);
+            // Size sets the comb lengths; Decay sets per-comb feedback for RT60
+            if i % COEFF_UPDATE_INTERVAL == 0 {
+                self.update_combs(size_smoothed, decay_smoothed);
+            }
 
             // Get dry input samples
             let dry_left = in_left
@@ -455,10 +498,13 @@ impl DspModule for Reverb {
                 .unwrap_or(0.0);
 
             // Right channel normalled from left
-            let dry_right = in_right
-                .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
-                .filter(|&s| s.abs() > 0.0001)
-                .unwrap_or(dry_left);
+            let dry_right = if right_is_silent {
+                dry_left
+            } else {
+                in_right
+                    .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
+                    .unwrap_or(0.0)
+            };
 
             // Apply pre-delay
             let predelayed_l = self.predelay_l.process(dry_left);
@@ -472,22 +518,8 @@ impl DspModule for Reverb {
             let mut sum_r = 0.0;
 
             for (idx, (comb_l, comb_r)) in self.combs_l.iter_mut().zip(self.combs_r.iter_mut()).enumerate() {
-                // Calculate effective delay for this comb based on room size
-                let base_delay_l = (COMB_TUNINGS[idx] as f32 * scale * room_size) as usize;
-                let base_delay_r = ((COMB_TUNINGS[idx] + STEREO_SPREAD) as f32 * scale * room_size) as usize;
-
-                // Ensure we don't exceed buffer size
-                let delay_l = base_delay_l.min(comb_l.buffer.len() - 1).max(1);
-                let delay_r = base_delay_r.min(comb_r.buffer.len() - 1).max(1);
-
-                // Temporarily adjust buffer size effect by setting write position
-                // This is a simplified approach - full implementation would interpolate
-                sum_l += comb_l.process(input, feedback, damping_smoothed);
-                sum_r += comb_r.process(input, feedback, damping_smoothed);
-
-                // Suppress unused variable warnings
-                let _ = delay_l;
-                let _ = delay_r;
+                sum_l += comb_l.process(input, self.comb_feedback[0][idx], damping_smoothed);
+                sum_r += comb_r.process(input, self.comb_feedback[1][idx], damping_smoothed);
             }
 
             // Scale down comb output
@@ -736,8 +768,76 @@ mod tests {
         let long_feedback = Reverb::decay_to_feedback(10.0, 1000.0, 44100.0);
 
         assert!(short_feedback < long_feedback, "Longer decay should give higher feedback");
-        assert!(long_feedback <= 0.98, "Feedback should be clamped");
+        assert!(long_feedback < 1.0, "Feedback should stay below unity");
         assert!(short_feedback >= 0.0, "Feedback should be non-negative");
+
+        // RT60 identity: g^(T/d) must equal -60 dB
+        let (decay, delay, sr) = (2.0, 1400.0, 44100.0);
+        let g = Reverb::decay_to_feedback(decay, delay, sr);
+        let trips = decay / (delay / sr);
+        let level_db = 20.0 * g.powf(trips).log10();
+        assert!((level_db + 60.0).abs() < 0.5, "Expected -60 dB after decay, got {}", level_db);
+    }
+
+    /// Renders the wet impulse response (damping 0, mix 100%, no pre-delay).
+    fn impulse_response(size: f32, decay: f32, seconds: f32) -> Vec<f32> {
+        let sample_rate = 44100.0;
+        let block = 512;
+        let mut reverb = Reverb::new();
+        reverb.prepare(sample_rate, block);
+        let params = [size, decay, 0.0, 0.0, 1.0, 1.0];
+        reverb.size_smooth.reset(size);
+        reverb.decay_smooth.reset(decay);
+        reverb.damping_smooth.reset(0.0);
+        reverb.mix_smooth.reset(1.0);
+
+        let total = (seconds * sample_rate) as usize;
+        let ctx = ProcessContext::new(sample_rate, block);
+        let mut response = Vec::with_capacity(total);
+        let mut first = true;
+        while response.len() < total {
+            let mut input = SignalBuffer::audio(block);
+            if first {
+                input.samples[0] = 1.0;
+                first = false;
+            }
+            let mut outputs = vec![SignalBuffer::audio(block), SignalBuffer::audio(block)];
+            reverb.process(&[&input], &mut outputs, &params, &ctx);
+            response.extend_from_slice(&outputs[0].samples);
+        }
+        response
+    }
+
+    #[test]
+    fn test_reverb_size_changes_echo_time() {
+        let first_echo = |size: f32| {
+            impulse_response(size, 2.0, 0.2)
+                .iter()
+                .position(|s| s.abs() > 1e-6)
+                .expect("reverb should produce an echo")
+        };
+        let small = first_echo(0.0);
+        let large = first_echo(1.0);
+        // Shortest comb is 1116 samples at 1x; Size spans 0.5x..2x.
+        assert_eq!(small, 558, "Size 0 first echo");
+        assert_eq!(large, 2232, "Size 1 first echo");
+    }
+
+    #[test]
+    fn test_reverb_decay_matches_rt60() {
+        // With Decay = 1 s the tail should fall ~30 dB between 0.2 s and 0.7 s.
+        let ir = impulse_response(0.5, 1.0, 0.8);
+        let rms_at = |t: f32| {
+            let start = (t * 44100.0) as usize;
+            let w = &ir[start..start + 2205];
+            (w.iter().map(|x| x * x).sum::<f32>() / w.len() as f32).sqrt()
+        };
+        let drop_db = 20.0 * (rms_at(0.2) / rms_at(0.7)).log10();
+        assert!(
+            (drop_db - 30.0).abs() < 6.0,
+            "Expected ~30 dB decay over 0.5 s at RT60 = 1 s, got {:.1} dB",
+            drop_db
+        );
     }
 
     #[test]

@@ -166,6 +166,28 @@ impl AudioGraph {
         }
     }
 
+    /// Updates the sample rate and re-prepares every module (e.g. after the
+    /// output device changes). Not real-time safe: call with the stream stopped.
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        if sample_rate == self.sample_rate {
+            return;
+        }
+
+        self.sample_rate = sample_rate;
+        for data in self.modules.values_mut() {
+            data.module.prepare(sample_rate, self.block_size);
+            data.module.reset();
+        }
+    }
+
+    /// Resets the internal state of every module (oscillator phases, filter
+    /// memory, delay and reverb tails) so playback restarts from silence.
+    pub fn reset_modules(&mut self) {
+        for data in self.modules.values_mut() {
+            data.module.reset();
+        }
+    }
+
     /// Returns a reference to the processing order.
     pub fn processing_order(&self) -> &[NodeId] {
         &self.processing_order

@@ -526,7 +526,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     node_id,
                     "Frequency".to_string(),
                     SynthDataType::new(SignalType::Control),
-                    SynthValueType::frequency(440.0, 20.0, 20000.0, ""),
+                    SynthValueType::frequency(crate::modules::SineOscillator::C4_HZ, 20.0, 20000.0, ""),
                     InputParamKind::ConnectionOrConstant,
                     true, // Port shown inline, widget skipped via knob_params check
                 );

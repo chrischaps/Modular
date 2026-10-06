@@ -316,6 +316,12 @@ impl DspModule for Chorus {
         let out_left = &mut out_left_slice[Self::PORT_OUT_L];
         let out_right = &mut out_right_slice[0];
 
+        // Normal the right input from the left when it carries no signal this
+        // block (interim until the engine reports real connection state).
+        let right_is_silent = in_right
+            .map(|buf| buf.samples.iter().all(|&s| s == 0.0))
+            .unwrap_or(true);
+
         let max_delay_samples = (MAX_DELAY_SECONDS * self.sample_rate) as f32;
 
         // Process each sample
@@ -349,10 +355,13 @@ impl DspModule for Chorus {
                 .unwrap_or(0.0);
 
             // Right channel normalled from left if not connected/silent
-            let dry_right = in_right
-                .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
-                .filter(|&s| s.abs() > 0.0001 || in_right.map(|b| !b.samples.is_empty()).unwrap_or(false))
-                .unwrap_or(dry_left);
+            let dry_right = if right_is_silent {
+                dry_left
+            } else {
+                in_right
+                    .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
+                    .unwrap_or(0.0)
+            };
 
             // Process through active voices and accumulate wet signal
             let mut wet_left = 0.0;

@@ -19,7 +19,9 @@ use crate::dsp::{
 ///
 /// The SVF is a classic filter topology that provides lowpass, highpass,
 /// and bandpass outputs simultaneously. This implementation uses the
-/// Chamberlin algorithm with improvements for stability at high resonance.
+/// topology-preserving transform (TPT / zero-delay feedback) form described
+/// by Zavalishin and Simper: it is stable at every cutoff up to Nyquist and
+/// tracks the analog response closely, unlike the Chamberlin form.
 ///
 /// # Ports
 ///
@@ -38,10 +40,10 @@ use crate::dsp::{
 pub struct SvfFilter {
     /// Sample rate from last prepare() call.
     sample_rate: f32,
-    /// Filter state: lowpass output.
-    low: f32,
-    /// Filter state: bandpass output.
-    band: f32,
+    /// First integrator state (trapezoidal "ic1eq").
+    ic1: f32,
+    /// Second integrator state (trapezoidal "ic2eq").
+    ic2: f32,
     /// Port definitions.
     ports: Vec<PortDefinition>,
     /// Parameter definitions.
@@ -60,8 +62,8 @@ impl SvfFilter {
         let sample_rate = 44100.0;
         Self {
             sample_rate,
-            low: 0.0,
-            band: 0.0,
+            ic1: 0.0,
+            ic2: 0.0,
             ports: vec![
                 // Input ports
                 PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0),
@@ -111,22 +113,19 @@ impl SvfFilter {
     const PARAM_RESONANCE: usize = 1;
     const PARAM_DRIVE: usize = 2;
 
-    /// Soft clip function using tanh for smooth saturation.
-    /// This helps stabilize the filter at high resonance.
+    /// Soft clip function using tanh for smooth saturation of the input drive.
     #[inline]
     fn soft_clip(x: f32) -> f32 {
         x.tanh()
     }
 
-    /// Calculate the filter coefficient 'f' from cutoff frequency.
-    /// Uses the formula: f = 2 * sin(pi * cutoff / sample_rate)
-    /// Clamped to prevent instability at high frequencies.
+    /// Calculate the prewarped integrator gain 'g' from cutoff frequency.
+    /// g = tan(pi * cutoff / sample_rate). The TPT structure is stable for any
+    /// finite g, so the only clamp keeps tan() away from its pole at Nyquist.
     #[inline]
-    fn calc_f(&self, cutoff: f32) -> f32 {
-        let cutoff_clamped = cutoff.clamp(20.0, self.sample_rate * 0.45);
-        let f = 2.0 * (PI * cutoff_clamped / self.sample_rate).sin();
-        // Clamp f to prevent instability (max ~0.9 for stable operation)
-        f.clamp(0.0, 0.9)
+    fn calc_g(&self, cutoff: f32) -> f32 {
+        let cutoff_clamped = cutoff.clamp(20.0, self.sample_rate * 0.49);
+        (PI * cutoff_clamped / self.sample_rate).tan()
     }
 
     /// Calculate the damping coefficient 'q' from resonance.
@@ -227,33 +226,31 @@ impl DspModule for SvfFilter {
                 .unwrap_or(0.0);
             let resonance = (base_resonance + res_mod * 0.5).clamp(0.0, 1.0);
 
-            // Calculate filter coefficients
-            let f = self.calc_f(cutoff);
-            let q = Self::calc_q(resonance);
+            // Calculate filter coefficients (k = damping = 1/Q)
+            let g = self.calc_g(cutoff);
+            let k = Self::calc_q(resonance);
+            let a1 = 1.0 / (1.0 + g * (g + k));
+            let a2 = g * a1;
+            let a3 = g * a2;
 
-            // Chamberlin SVF algorithm (two integrator topology)
-            // low = low + f * band
-            // high = input - low - q * band
-            // band = f * high + band
-
-            self.low = self.low + f * self.band;
-            let high = input - self.low - q * self.band;
-            self.band = f * high + self.band;
-
-            // Apply soft clipping to internal states to prevent runaway at high resonance
-            self.low = Self::soft_clip(self.low);
-            self.band = Self::soft_clip(self.band);
+            // TPT SVF tick (Simper, "Linear Trapezoidal Integrated SVF")
+            let v3 = input - self.ic2;
+            let band = a1 * self.ic1 + a2 * v3;
+            let low = self.ic2 + a2 * self.ic1 + a3 * v3;
+            self.ic1 = 2.0 * band - self.ic1;
+            self.ic2 = 2.0 * low - self.ic2;
+            let high = input - k * band - low;
 
             // Write outputs
-            lp_out.samples[i] = self.low;
+            lp_out.samples[i] = low;
             hp_out.samples[i] = high;
-            bp_out.samples[i] = self.band;
+            bp_out.samples[i] = band;
         }
     }
 
     fn reset(&mut self) {
-        self.low = 0.0;
-        self.band = 0.0;
+        self.ic1 = 0.0;
+        self.ic2 = 0.0;
         // Reset smoothed parameters to their current targets
         self.cutoff_smooth.reset(self.cutoff_smooth.target());
         self.resonance_smooth.reset(self.resonance_smooth.target());
@@ -559,17 +556,62 @@ mod tests {
     }
 
     #[test]
-    fn test_calc_f_coefficient() {
+    fn test_calc_g_coefficient() {
         let filter = SvfFilter::new();
 
-        // At low frequencies, f should be small
-        let f_low = filter.calc_f(100.0);
-        assert!(f_low > 0.0 && f_low < 0.1, "f at 100Hz should be small: {}", f_low);
+        // At low frequencies, g should be small
+        let g_low = filter.calc_g(100.0);
+        assert!(g_low > 0.0 && g_low < 0.1, "g at 100Hz should be small: {}", g_low);
 
-        // At high frequencies, f should be larger but clamped
-        let f_high = filter.calc_f(10000.0);
-        assert!(f_high > f_low, "f should increase with frequency");
-        assert!(f_high <= 0.9, "f should be clamped for stability: {}", f_high);
+        // g increases with frequency and stays finite right up to Nyquist
+        let g_high = filter.calc_g(10000.0);
+        assert!(g_high > g_low, "g should increase with frequency");
+        assert!(filter.calc_g(30000.0).is_finite(), "g must stay finite above Nyquist");
+    }
+
+    /// Measures steady-state RMS gain of the lowpass output for a sine at `freq`.
+    fn lowpass_gain(cutoff: f32, freq: f32) -> f32 {
+        let sample_rate = 44100.0;
+        let n = 8820;
+        let mut filter = SvfFilter::new();
+        filter.prepare(sample_rate, n);
+        let mut input = SignalBuffer::audio(n);
+        for i in 0..n {
+            input.samples[i] = 0.1 * (2.0 * PI * freq * i as f32 / sample_rate).sin();
+        }
+        let mut outputs = vec![
+            SignalBuffer::audio(n),
+            SignalBuffer::audio(n),
+            SignalBuffer::audio(n),
+        ];
+        let ctx = ProcessContext::new(sample_rate, n);
+        // Resonance 0 => k = 2 (Butterworth-like -6 dB at cutoff); drive 0 => unity
+        filter.reset();
+        filter.cutoff_smooth.reset(cutoff);
+        filter.process(&[&input], &mut outputs, &[cutoff, 0.0, 0.0], &ctx);
+        let skip = n / 2;
+        let rms = |s: &[f32]| (s.iter().map(|x| x * x).sum::<f32>() / s.len() as f32).sqrt();
+        rms(&outputs[0].samples[skip..]) / rms(&input.samples[skip..])
+    }
+
+    #[test]
+    fn test_svf_cutoff_reaches_high_frequencies() {
+        // The old Chamberlin implementation topped out near 6.5 kHz. A 12 kHz
+        // cutoff must now pass an 8 kHz tone almost untouched...
+        let pass = lowpass_gain(12000.0, 8000.0);
+        assert!(pass > 0.7, "8 kHz should pass a 12 kHz lowpass, gain={}", pass);
+        // ...while a 2 kHz cutoff attenuates it strongly (12 dB/oct, 2 octaves).
+        let stop = lowpass_gain(2000.0, 8000.0);
+        assert!(stop < 0.1, "8 kHz should be cut by a 2 kHz lowpass, gain={}", stop);
+    }
+
+    #[test]
+    fn test_svf_gain_at_cutoff() {
+        // With k = 2 the 2-pole response is -6 dB (0.5) at the cutoff frequency.
+        for &fc in &[100.0, 1000.0, 10000.0] {
+            let g = lowpass_gain(fc, fc);
+            assert!((g - 0.5).abs() < 0.05, "gain at cutoff {} Hz = {}", fc, g);
+        }
     }
 
     #[test]

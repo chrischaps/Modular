@@ -85,14 +85,23 @@ impl AudioOutput {
     const PARAM_VOLUME: usize = 0;
     const PARAM_LIMITER: usize = 1;
 
-    /// Applies a soft clipper using tanh for gentle limiting.
+    /// Level (about -3 dBFS) below which the soft clipper is perfectly transparent.
+    const CLIP_KNEE: f32 = 0.7;
+
+    /// Applies a soft clipper that only acts on peaks.
     ///
-    /// This provides a smooth saturation curve that prevents harsh
-    /// digital clipping while maintaining signal character.
+    /// Below `CLIP_KNEE` the signal passes untouched, so normal-level mixes are
+    /// not coloured. Above it, a tanh segment (matched in level and slope at the
+    /// knee) rounds peaks off smoothly and never exceeds ±1.
     #[inline]
     fn soft_clip(sample: f32) -> f32 {
-        // tanh provides a smooth S-curve that saturates at ±1
-        sample.tanh()
+        let magnitude = sample.abs();
+        if magnitude <= Self::CLIP_KNEE {
+            return sample;
+        }
+        let headroom = 1.0 - Self::CLIP_KNEE;
+        let shaped = Self::CLIP_KNEE + headroom * ((magnitude - Self::CLIP_KNEE) / headroom).tanh();
+        shaped.copysign(sample)
     }
 
     /// Returns the final stereo output buffer.
@@ -519,14 +528,25 @@ mod tests {
 
     #[test]
     fn test_soft_clip_function() {
-        // tanh provides smooth saturation
-        assert!((AudioOutput::soft_clip(0.0) - 0.0).abs() < 0.001);
-        assert!((AudioOutput::soft_clip(0.5) - 0.5_f32.tanh()).abs() < 0.001);
-        assert!((AudioOutput::soft_clip(1.0) - 1.0_f32.tanh()).abs() < 0.001);
-        assert!((AudioOutput::soft_clip(5.0) - 5.0_f32.tanh()).abs() < 0.001);
+        // Transparent below the knee: no colouration of normal-level signals
+        for &x in &[0.0, 0.25, 0.5, AudioOutput::CLIP_KNEE] {
+            assert_eq!(AudioOutput::soft_clip(x), x);
+            assert_eq!(AudioOutput::soft_clip(-x), -x);
+        }
 
-        // Negative values
-        assert!((AudioOutput::soft_clip(-0.5) - (-0.5_f32).tanh()).abs() < 0.001);
+        // Above the knee: compressed, monotonic, never exceeding full scale
+        let a = AudioOutput::soft_clip(0.9);
+        let b = AudioOutput::soft_clip(1.5);
+        let c = AudioOutput::soft_clip(5.0);
+        assert!(a > AudioOutput::CLIP_KNEE && a < 0.9);
+        assert!(b > a && c > b && c <= 1.0);
+        assert_eq!(AudioOutput::soft_clip(-1.5), -b);
+
+        // Continuous at the knee (no step in level or slope)
+        let eps = 1e-3;
+        let k = AudioOutput::CLIP_KNEE;
+        let slope = (AudioOutput::soft_clip(k + eps) - AudioOutput::soft_clip(k)) / eps;
+        assert!((slope - 1.0).abs() < 0.01, "slope at knee = {}", slope);
     }
 
     #[test]

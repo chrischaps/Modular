@@ -207,6 +207,10 @@ impl AudioProcessor {
         for cmd in commands {
             match cmd {
                 EngineCommand::SetPlaying(playing) => {
+                    if self.is_playing && !playing {
+                        // Clear tails so pressing Play again starts from silence
+                        self.graph.reset_modules();
+                    }
                     self.is_playing = playing;
                     let event = if playing {
                         EngineEvent::Started
@@ -268,6 +272,13 @@ impl AudioProcessor {
     /// Returns whether audio processing is currently active.
     pub fn is_playing(&self) -> bool {
         self.is_playing
+    }
+
+    /// Changes the sample rate, re-preparing every module. Only call this
+    /// while no audio stream is running the processor.
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.context = ProcessContext::new(sample_rate, self.context.block_size);
+        self.graph.set_sample_rate(sample_rate);
     }
 }
 
