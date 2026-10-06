@@ -198,3 +198,116 @@ fn audio_callback_never_allocates() {
     assert!(output.iter().all(|s| s.is_finite()));
     assert_eq!(allocations, 0, "audio callback allocated {allocations} times over {blocks} callbacks");
 }
+
+/// Index of the port called `name` on a registered module.
+fn port(module_id: &str, name: &str) -> usize {
+    let module = create_module_registry().create(module_id).unwrap();
+    module.ports().iter().position(|p| p.name == name).unwrap_or_else(|| panic!("{module_id} has no {name}"))
+}
+
+#[test]
+fn poly_patch_never_allocates_with_eight_voices() {
+    let (mut ui, engine) = EngineChannels::with_defaults().split();
+    let mut processor = AudioProcessor::new(48000.0, 256, engine);
+    let (mut midi, midi_input) = rtrb::RingBuffer::new(512);
+    processor.set_midi_input(midi_input);
+
+    // Poly MIDI -> osc -> SVF -> ladder -> VCA (opened by an envelope) ->
+    // mixer -> delay -> output. Everything up to the VCA runs 8 voices; the
+    // mixer and delay hear them summed
+    let chain: [(NodeId, &'static str); 9] = [
+        (1, "input.poly_midi"),
+        (2, "osc.sine"),
+        (3, "filter.svf"),
+        (4, "filter.ladder"),
+        (5, "mod.adsr"),
+        (6, "util.vca"),
+        (7, "util.mixer"),
+        (8, "fx.delay"),
+        (9, "output.audio"),
+    ];
+    for (node_id, module_id) in chain {
+        ui.send_command(EngineCommand::AddModule { node_id, module_id });
+    }
+    fn connect(ui: &mut UiHandle, from: (NodeId, &str, &str), to: (NodeId, &str, &str)) {
+        ui.send_command(EngineCommand::Connect {
+            from_node: from.0,
+            from_port: port(from.1, from.2),
+            to_node: to.0,
+            to_port: port(to.1, to.2),
+        });
+    }
+    connect(&mut ui, (1, "input.poly_midi", "Pitch"), (2, "osc.sine", "V/Oct"));
+    connect(&mut ui, (1, "input.poly_midi", "Gate"), (5, "mod.adsr", "Gate"));
+    connect(&mut ui, (1, "input.poly_midi", "Velocity"), (5, "mod.adsr", "Velocity"));
+    connect(&mut ui, (2, "osc.sine", "Out"), (3, "filter.svf", "In"));
+    connect(&mut ui, (5, "mod.adsr", "Out"), (3, "filter.svf", "Cutoff"));
+    connect(&mut ui, (3, "filter.svf", "LowPass"), (4, "filter.ladder", "In"));
+    connect(&mut ui, (4, "filter.ladder", "LP24"), (6, "util.vca", "In"));
+    connect(&mut ui, (5, "mod.adsr", "Out"), (6, "util.vca", "CV"));
+    connect(&mut ui, (6, "util.vca", "Out"), (7, "util.mixer", "Ch 1"));
+    connect(&mut ui, (7, "util.mixer", "Out"), (8, "fx.delay", "In L"));
+    connect(&mut ui, (8, "fx.delay", "Out L"), (9, "output.audio", "Left"));
+    connect(&mut ui, (8, "fx.delay", "Out R"), (9, "output.audio", "Right"));
+    for node_id in 1..=9 {
+        for index in 0..4 {
+            ui.send_command(EngineCommand::MonitorInput { node_id, input_index: index });
+            ui.send_command(EngineCommand::MonitorOutput { node_id, output_index: index });
+        }
+    }
+    ui.send_command(EngineCommand::SetPlaying(true));
+    assert!(ui.flush());
+
+    let device_buffers = [256, 441, 480, 128, 1024, 64];
+    let mut output = vec![0.0_f32; 1024 * 2];
+    let mut allocations = 0;
+
+    for round in 0..1000 {
+        let frames = device_buffers[round % device_buffers.len()];
+
+        // Ten-note clusters on 8 voices: every round steals. The pedal comes
+        // and goes, and the voice count drops and comes back
+        let root = 36 + (round % 48) as u8;
+        for k in 0..10 {
+            let event = MidiEvent::NoteOn { channel: 0, note: root + k * 2, velocity: 60 + k * 6 };
+            midi.push(TimestampedMidiEvent::now(event)).unwrap();
+        }
+        let pedal = if round % 20 < 10 { 127 } else { 0 };
+        midi.push(TimestampedMidiEvent::now(MidiEvent::ControlChange { channel: 0, controller: 64, value: pedal }))
+            .unwrap();
+        for k in 0..10 {
+            let event = MidiEvent::NoteOff { channel: 0, note: root.wrapping_sub(2) + k * 2, velocity: 0 };
+            midi.push(TimestampedMidiEvent::now(event)).unwrap();
+        }
+        if round % 100 == 50 {
+            ui.send_command(EngineCommand::SetParameter { node_id: 1, param_index: 1, value: 3.0 });
+        }
+        if round % 100 == 70 {
+            ui.send_command(EngineCommand::SetParameter { node_id: 1, param_index: 1, value: 8.0 });
+        }
+        if round % 8 == 3 {
+            ui.send_command(EngineCommand::SetBypass { node_id: 3, bypassed: round % 16 == 3 });
+        }
+        if round % 250 == 125 {
+            // Rebuild the filter mid-chord: a fresh 8-voice module joins
+            ui.send_command(EngineCommand::RemoveModule { node_id: 4 });
+            ui.send_command(EngineCommand::AddModule { node_id: 4, module_id: "filter.ladder" });
+            connect(&mut ui, (3, "filter.svf", "LowPass"), (4, "filter.ladder", "In"));
+            connect(&mut ui, (4, "filter.ladder", "LP24"), (6, "util.vca", "In"));
+        }
+        ui.flush();
+        ui.drain_events().for_each(drop);
+
+        allocations += count_allocations(|| processor.process(&mut output[..frames * 2], 2));
+    }
+
+    assert!(processor.is_playing());
+    assert_eq!(processor.plan().len(), chain.len());
+    assert!(output.iter().all(|s| s.is_finite()));
+    assert!(output.iter().any(|&s| s != 0.0), "the chords are heard");
+    let plan = processor.plan();
+    assert_eq!(plan.output_channels(2, 0), Some(8), "the oscillator runs 8 voices");
+    assert_eq!(plan.output_channels(6, 0), Some(8), "so does the VCA");
+    assert_eq!(plan.output_channels(7, 0), Some(1), "the mixer sums them");
+    assert_eq!(allocations, 0, "audio callback allocated {allocations} times playing 8 voices");
+}

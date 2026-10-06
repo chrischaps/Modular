@@ -8,8 +8,8 @@ use std::time::Instant;
 use rtrb::Consumer;
 
 use crate::dsp::denormal::DenormalGuard;
-use crate::dsp::{ModuleRegistry, ProcessContext};
-use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Chorus, Clock, Compressor, Distortion, KeyboardInput, LadderFilter, Lfo, MidiMonitor, MidiNote, Mixer, Oscilloscope, ParametricEq, Reverb, SampleHold, Oscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
+use crate::dsp::{ModuleRegistry, Poly, ProcessContext};
+use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Chorus, Clock, Compressor, Distortion, KeyboardInput, LadderFilter, Lfo, MidiMonitor, MidiNote, Mixer, Oscilloscope, PolyMidi, ParametricEq, Reverb, SampleHold, Oscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
 
 use super::channels::EngineHandle;
 use super::commands::{AudioMessage, EngineEvent, ScopeFrame};
@@ -22,20 +22,24 @@ use super::midi_scheduler::{take_chunk, MidiScheduler};
 /// Registering a module here is all it takes to make it available in the
 /// editor: node templates are generated from the registry. Registration
 /// order is the order modules appear in the add-node menu.
+///
+/// Modules wrapped in [`Poly`] are polyphonic: they run one voice per
+/// channel of a polyphonic cable.
 pub fn create_module_registry() -> ModuleRegistry {
     let mut registry = ModuleRegistry::new();
-    registry.register::<Oscillator>();
+    registry.register::<Poly<Oscillator>>();
     registry.register::<KeyboardInput>();
     registry.register::<MidiNote>();
-    registry.register::<SvfFilter>();
-    registry.register::<LadderFilter>();
-    registry.register::<AdsrEnvelope>();
+    registry.register::<PolyMidi>();
+    registry.register::<Poly<SvfFilter>>();
+    registry.register::<Poly<LadderFilter>>();
+    registry.register::<Poly<AdsrEnvelope>>();
     registry.register::<Lfo>();
     registry.register::<Clock>();
-    registry.register::<Vca>();
-    registry.register::<Attenuverter>();
+    registry.register::<Poly<Vca>>();
+    registry.register::<Poly<Attenuverter>>();
     registry.register::<Mixer>();
-    registry.register::<SampleHold>();
+    registry.register::<Poly<SampleHold>>();
     registry.register::<Oscilloscope>();
     registry.register::<StepSequencer>();
     registry.register::<StereoDelay>();
@@ -324,6 +328,7 @@ mod tests {
         assert!(registry.contains("input.keyboard"));
         assert!(registry.contains("util.midi_monitor"));
         assert!(registry.contains("input.midi_note"));
+        assert!(registry.contains("input.poly_midi"));
         assert!(registry.contains("util.sample_hold"));
         assert!(registry.contains("util.oscilloscope"));
         assert!(registry.contains("seq.step"));
@@ -334,7 +339,7 @@ mod tests {
         assert!(registry.contains("fx.chorus"));
         assert!(registry.contains("fx.compressor"));
         assert!(registry.contains("util.mixer"));
-        assert_eq!(registry.len(), 22);
+        assert_eq!(registry.len(), 23);
     }
 
     #[test]

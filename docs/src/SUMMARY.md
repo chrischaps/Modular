@@ -12,6 +12,7 @@
 
 - [Signal Types](./concepts/signal-types.md)
 - [Connections](./concepts/connections.md)
+- [Polyphony](./concepts/polyphony.md)
 
 # Modules
 
@@ -35,6 +36,7 @@
   - [Compressor](./modules/effects/compressor.md)
   - [Keyboard Input](./modules/midi/keyboard.md)
   - [MIDI Note](./modules/midi/midi-note.md)
+  - [Poly MIDI](./modules/midi/poly-midi.md)
   - [MIDI Monitor](./modules/midi/midi-monitor.md)
   - [Oscilloscope](./modules/visualization/oscilloscope.md)
   - [Audio Output](./modules/output/audio-output.md)

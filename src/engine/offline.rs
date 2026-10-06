@@ -412,6 +412,68 @@ mod tests {
         }
     }
 
+    /// Poly MIDI playing a polyphonic voice: sine oscillator through a VCA
+    /// opened by an envelope, one of each per note, summed at the output.
+    fn poly_voice_patch() -> Patch {
+        let mut patch = osc_patch(0);
+        patch.connections.clear();
+        patch.nodes.push(NodeData::new(3, "input.poly_midi", (-200.0, 0.0)));
+        let mut env = NodeData::new(4, "mod.adsr", (0.0, 200.0));
+        env.parameters = vec![
+            NamedParameter::new("Attack", ParameterValue::Number(0.002)),
+            NamedParameter::new("Sustain", ParameterValue::Number(1.0)),
+            NamedParameter::new("Release", ParameterValue::Number(0.01)),
+        ];
+        patch.nodes.push(env);
+        // Quiet enough that four voices stay clear of the output limiter
+        let mut vca = NodeData::new(5, "util.vca", (100.0, 0.0));
+        vca.parameters = vec![NamedParameter::new("Level", ParameterValue::Number(0.2))];
+        patch.nodes.push(vca);
+        patch.connections.push(ConnectionData::new(3, "Pitch", 1, "V/Oct"));
+        patch.connections.push(ConnectionData::new(3, "Gate", 4, "Gate"));
+        patch.connections.push(ConnectionData::new(4, "Out", 5, "CV"));
+        patch.connections.push(ConnectionData::new(1, "Out", 5, "In"));
+        patch.connections.push(ConnectionData::new(5, "Out", 2, "Mono"));
+        patch
+    }
+
+    #[test]
+    fn test_poly_chord_plays_independent_voices() {
+        let sr = 48000.0;
+        let (mut r, compiled) = OfflineRenderer::from_patch(&poly_voice_patch(), sr, 256).unwrap();
+        assert!(compiled.warnings.is_empty(), "{:?}", compiled.warnings);
+
+        // A C major chord, its notes let go one at a time
+        let chord = [60_u8, 64, 67, 72];
+        let quarter = (sr / 4.0) as u64;
+        for (n, &note) in chord.iter().enumerate() {
+            r.queue_midi(0, 0, MidiMessage::NoteOn { note, velocity: 100 });
+            if n < 3 {
+                r.queue_midi((n as u64 + 1) * quarter, 0, MidiMessage::NoteOff { note, velocity: 0 });
+            }
+        }
+        let out = r.render_seconds(1.0);
+
+        // Each quarter second, the notes still held ring and the rest are gone
+        let hz = |note: u8| 440.0 * 2f64.powf((note as f64 - 69.0) / 12.0);
+        for quarter_index in 0..4 {
+            let start = quarter_index * quarter as usize + 2400;
+            let spectrum = Spectrum::of(&out.left[start..start + 8192], sr);
+            let level = |f: f64| {
+                let bin = (f / spectrum.bin_hz).round() as usize;
+                spectrum.magnitudes[bin - 2..=bin + 2].iter().copied().fold(0.0, f64::max)
+            };
+            for (n, &note) in chord.iter().enumerate() {
+                let magnitude = level(hz(note));
+                if n >= quarter_index {
+                    assert!(magnitude > 0.05, "quarter {quarter_index}: note {note} should ring, {magnitude:.4}");
+                } else {
+                    assert!(magnitude < 0.002, "quarter {quarter_index}: note {note} should be released, {magnitude:.4}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_midi_pitch_bend_bends_the_oscillator() {
         let sr = 48000.0;

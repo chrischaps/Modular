@@ -168,7 +168,7 @@ impl MidiNote {
     }
 
     /// Whether the Channel parameter lets `event` through.
-    fn listens_to(channel_param: f32, event: &MidiEvent) -> bool {
+    pub(crate) fn listens_to(channel_param: f32, event: &MidiEvent) -> bool {
         let channel = channel_param.round() as i32;
         channel == 0 || channel - 1 == event.channel as i32
     }

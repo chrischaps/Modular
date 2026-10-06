@@ -85,13 +85,30 @@ pub fn connected_input<'a>(inputs: &[&'a SignalBuffer], port: usize) -> Option<&
     inputs.get(port).copied().filter(|buf| buf.is_connected())
 }
 
+/// The most channels one cable carries. A polyphonic cable carries one
+/// channel per voice.
+pub const MAX_CHANNELS: usize = 8;
+
 /// A buffer containing signal samples.
 ///
 /// Used to pass data between modules in the audio graph.
 /// The buffer is pre-allocated to avoid allocations in the audio thread.
+///
+/// # Channels
+///
+/// A buffer carries 1 to [`MAX_CHANNELS`] channels, like a polyphonic cable
+/// in VCV Rack. `samples` is always channel 1, so modules that only know
+/// about one channel keep working unchanged. The rest live in their own
+/// buffers, allocated up front by [`polyphonic`](Self::polyphonic) and
+/// reached with [`voice`](Self::voice) and [`channel_mut`](Self::channel_mut).
+///
+/// Channels beyond [`channels`](Self::channels) always hold silence, so a
+/// module running more voices than an input carries reads zeros from it,
+/// except from a one-channel input, which every voice shares.
 #[derive(Clone, Debug)]
 pub struct SignalBuffer {
-    /// The sample data. Length matches the audio engine's buffer size.
+    /// The sample data of channel 1. Length matches the audio engine's
+    /// buffer size.
     pub samples: Vec<f32>,
     /// The type of signal stored in this buffer.
     pub signal_type: SignalType,
@@ -100,6 +117,11 @@ pub struct SignalBuffer {
     /// this set to `false`. Use [`connected_input`] rather than reading it
     /// directly.
     connected: bool,
+    /// How many channels are in use, from 1 to `1 + poly.len()`.
+    channels: usize,
+    /// Channels 2 and up, each a one-channel buffer of the same length.
+    /// Empty for a buffer that only ever carries one channel.
+    poly: Vec<SignalBuffer>,
 }
 
 impl SignalBuffer {
@@ -108,6 +130,8 @@ impl SignalBuffer {
         samples: Vec::new(),
         signal_type: SignalType::Audio,
         connected: false,
+        channels: 1,
+        poly: Vec::new(),
     };
 
     /// Creates a new signal buffer with the specified size and type.
@@ -118,6 +142,85 @@ impl SignalBuffer {
             samples: vec![0.0; size],
             signal_type,
             connected: true,
+            channels: 1,
+            poly: Vec::new(),
+        }
+    }
+
+    /// Creates a buffer with room for [`MAX_CHANNELS`] channels, starting
+    /// with one in use.
+    pub fn polyphonic(size: usize, signal_type: SignalType) -> Self {
+        Self {
+            poly: (1..MAX_CHANNELS).map(|_| Self::new(size, signal_type)).collect(),
+            ..Self::new(size, signal_type)
+        }
+    }
+
+    /// The number of channels in use.
+    #[inline]
+    pub fn channels(&self) -> usize {
+        self.channels
+    }
+
+    /// The most channels this buffer has room for.
+    #[inline]
+    pub fn max_channels(&self) -> usize {
+        1 + self.poly.len()
+    }
+
+    /// Sets how many channels are in use, within `1..=max_channels()`, and
+    /// returns the count set. Channels dropped are silenced; channels added
+    /// start silent.
+    ///
+    /// REAL-TIME SAFE.
+    pub fn set_channels(&mut self, channels: usize) -> usize {
+        let channels = channels.clamp(1, self.max_channels());
+        if channels < self.channels {
+            for voice in &mut self.poly[channels - 1..self.channels - 1] {
+                voice.samples.fill(0.0);
+            }
+        }
+        self.channels = channels;
+        channels
+    }
+
+    /// Channel `channel` (counting from 0) as a module running several voices
+    /// should read it: a one-channel buffer gives every voice its one
+    /// channel, and channels past [`channels`](Self::channels) are silent.
+    #[inline]
+    pub fn voice(&self, channel: usize) -> &SignalBuffer {
+        if channel == 0 || self.channels == 1 {
+            self
+        } else {
+            self.poly.get(channel - 1).unwrap_or(self)
+        }
+    }
+
+    /// The samples of channel `channel` (counting from 0), for writing.
+    ///
+    /// # Panics
+    ///
+    /// If `channel` is not below [`max_channels`](Self::max_channels).
+    #[inline]
+    pub fn channel_mut(&mut self, channel: usize) -> &mut [f32] {
+        match channel {
+            0 => &mut self.samples,
+            _ => &mut self.poly[channel - 1].samples,
+        }
+    }
+
+    /// The one-channel buffer holding channel `channel` (from 1), so a
+    /// voice of a polyphonic module can be handed it as its own output.
+    pub(crate) fn poly_buffer_mut(&mut self, channel: usize) -> &mut SignalBuffer {
+        &mut self.poly[channel - 1]
+    }
+
+    /// Sets every channel's length to `len`, padding with zeros. Within the
+    /// capacity the buffer was created with, this never allocates.
+    pub fn set_len(&mut self, len: usize) {
+        self.samples.resize(len, 0.0);
+        for voice in &mut self.poly {
+            voice.samples.resize(len, 0.0);
         }
     }
 
@@ -149,9 +252,23 @@ impl SignalBuffer {
         Self::new(size, SignalType::Gate)
     }
 
-    /// Clears the buffer, setting all samples to zero.
+    /// Clears the buffer to one silent channel.
     pub fn clear(&mut self) {
         self.samples.fill(0.0);
+        self.set_channels(1);
+    }
+
+    /// Writes the sum of `source`'s channels into this buffer's first
+    /// channel, as a mono module hears a polyphonic cable.
+    ///
+    /// REAL-TIME SAFE.
+    pub fn mix_down(&mut self, source: &SignalBuffer) {
+        self.samples.copy_from_slice(&source.samples);
+        for voice in &source.poly[..source.channels - 1] {
+            for (out, &sample) in self.samples.iter_mut().zip(&voice.samples) {
+                *out += sample;
+            }
+        }
     }
 
     /// Fills the buffer with a constant value.

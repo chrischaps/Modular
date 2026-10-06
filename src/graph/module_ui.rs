@@ -126,6 +126,14 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "input.poly_midi",
+        knobs: &[knob("Voices"), knob_as("Octave", "Oct"), knob_as("Bend Range", "Bend")],
+        labels: &[("Channel", "Ch"), ("Allocation", "Mode")],
+        monitor: &["Gate"],
+        display: NodeDisplay::MidiPiano,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "filter.svf",
         knobs: &[modulatable("Cutoff", "Cutoff"), modulatable("Resonance", "Res"), knob("Drive")],
         display: NodeDisplay::FilterResponse,

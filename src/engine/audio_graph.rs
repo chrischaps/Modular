@@ -14,7 +14,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::dsp::bypass::{bypass_routes, can_bypass};
-use crate::dsp::{DspModule, ModuleRegistry, PortDefinition, SignalBuffer};
+use crate::dsp::{DspModule, ModuleRegistry, PortDefinition, SignalBuffer, SignalType};
 use crate::engine::commands::{EngineCommand, NodeId, PortIndex};
 use crate::engine::graph_plan::{
     GraphPlan, InputSource, InputTap, MonitorSource, OutputTap, PlanNode, MAX_INPUTS,
@@ -57,6 +57,8 @@ struct NodeSpec {
     bypass_routes: Vec<Option<usize>>,
     /// Whether the module is bypassed.
     bypassed: bool,
+    /// Whether the module works per channel of a polyphonic cable.
+    polyphonic: bool,
     /// A module created and prepared here but not yet handed to a plan.
     /// Once compiled into a plan it lives on the audio thread, and later
     /// plans take it over from their predecessor.
@@ -77,6 +79,7 @@ impl NodeSpec {
             parameters: module.parameters().iter().map(|p| p.default).collect(),
             bypass_routes,
             bypassed: false,
+            polyphonic: module.polyphonic(),
             fresh: Some(module),
         }
     }
@@ -616,9 +619,19 @@ impl AudioGraph {
                 // output buffers are already laid out
                 let source = feeds
                     .get(&(node_id, port_index))
-                    .and_then(|conn| source_buffer(conn, &output_base));
+                    .and_then(|conn| Some((conn, source_buffer(conn, &output_base)?)));
                 inputs.push(match source {
-                    Some(buffer) => InputSource::Output(buffer),
+                    // A mono module hears a polyphonic cable into an audio
+                    // input as the sum of its voices
+                    Some((conn, buffer))
+                        if !spec.polyphonic
+                            && port.signal_type == SignalType::Audio
+                            && self.nodes.get(&conn.from_node).is_some_and(|source| source.polyphonic) =>
+                    {
+                        plan.mixdowns.push(SignalBuffer::new(block_size, port.signal_type));
+                        InputSource::Mixdown { source: buffer, mix: plan.mixdowns.len() - 1 }
+                    }
+                    Some((_, buffer)) => InputSource::Output(buffer),
                     None => {
                         let mut buffer = SignalBuffer::unconnected(block_size, port.signal_type);
                         buffer.fill(port.default_value);
@@ -633,16 +646,19 @@ impl AudioGraph {
 
             let start = plan.outputs.len();
             output_base.insert(node_id, start);
-            plan.outputs.extend(
-                spec.ports
-                    .iter()
-                    .filter(|p| p.is_output())
-                    .map(|p| SignalBuffer::new(block_size, p.signal_type)),
-            );
+            plan.outputs.extend(spec.ports.iter().filter(|p| p.is_output()).map(|p| {
+                if spec.polyphonic {
+                    SignalBuffer::polyphonic(block_size, p.signal_type)
+                } else {
+                    SignalBuffer::new(block_size, p.signal_type)
+                }
+            }));
 
             // A stereo effect fed only on its left input normals the left
             // across, so bypassing it passes the left to both sides as well
-            let patched = |input: usize| matches!(inputs.get(input), Some(InputSource::Output(_)));
+            let patched = |input: usize| {
+                matches!(inputs.get(input), Some(InputSource::Output(_) | InputSource::Mixdown { .. }))
+            };
             let first_route = spec.bypass_routes.iter().flatten().next().copied();
             let dry = spec
                 .bypass_routes
@@ -715,7 +731,7 @@ impl Default for AudioGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsp::{ModuleCategory, ModuleInfo, ParameterDefinition, ProcessContext, SignalType};
+    use crate::dsp::{ModuleCategory, ModuleInfo, ParameterDefinition, Poly, ProcessContext};
 
     // ========================================================================
     // Test Module Implementations
@@ -1660,6 +1676,149 @@ mod tests {
 
         assert_eq!(conn1, conn2);
         assert_ne!(conn1, conn3);
+    }
+
+    /// Outputs three channels, channel `c` holding `c + 1`, on an audio and
+    /// a control output.
+    struct TestPolySource;
+
+    impl DspModule for TestPolySource {
+        fn info(&self) -> &ModuleInfo {
+            static INFO: ModuleInfo = ModuleInfo {
+                id: "test.poly_source",
+                name: "Test Poly Source",
+                category: ModuleCategory::Source,
+                description: "Three channels",
+            };
+            &INFO
+        }
+
+        fn ports(&self) -> &[PortDefinition] {
+            static PORTS: &[PortDefinition] = &[
+                PortDefinition {
+                    id: "audio",
+                    name: "Audio",
+                    signal_type: SignalType::Audio,
+                    direction: crate::dsp::PortDirection::Output,
+                    default_value: 0.0,
+                },
+                PortDefinition {
+                    id: "cv",
+                    name: "CV",
+                    signal_type: SignalType::Control,
+                    direction: crate::dsp::PortDirection::Output,
+                    default_value: 0.0,
+                },
+            ];
+            PORTS
+        }
+
+        fn parameters(&self) -> &[ParameterDefinition] {
+            &[]
+        }
+
+        fn prepare(&mut self, _: f32, _: usize) {}
+
+        fn process(&mut self, _: &[&SignalBuffer], outputs: &mut [SignalBuffer], _: &[f32], _: &ProcessContext) {
+            for output in outputs.iter_mut() {
+                let channels = output.set_channels(3);
+                for channel in 0..channels {
+                    output.channel_mut(channel).fill(channel as f32 + 1.0);
+                }
+            }
+        }
+
+        fn reset(&mut self) {}
+
+        fn polyphonic(&self) -> bool {
+            true
+        }
+    }
+
+    /// The output buffer of a node's first output.
+    fn first_output(plan: &GraphPlan, node_id: NodeId) -> &SignalBuffer {
+        let node = plan.nodes.iter().find(|n| n.node_id == node_id).unwrap();
+        &plan.outputs[node.outputs.start]
+    }
+
+    #[test]
+    fn test_mono_audio_input_hears_poly_cable_summed() {
+        let mut graph = AudioGraph::new(44100.0, 4);
+        graph.add_module_instance(1, Box::new(TestPolySource));
+        graph.add_module_instance(2, Box::new(TestPassthrough)); // audio in
+        graph.add_module_instance(3, Box::new(TestPassthrough));
+        graph.connect(1, 0, 2, 0);
+        graph.connect(2, 1, 3, 0);
+
+        let plan = run_block(&mut graph, 4);
+        assert_eq!(first_output(&plan, 1).channels(), 3);
+        assert_eq!(first_output(&plan, 2).samples, [6.0; 4], "1 + 2 + 3");
+        assert_eq!(first_output(&plan, 2).channels(), 1);
+        assert_eq!(plan.mixdowns.len(), 1, "mono sources downstream need no mixdown");
+    }
+
+    #[test]
+    fn test_mono_control_input_hears_first_channel() {
+        let mut graph = AudioGraph::new(44100.0, 4);
+        graph.add_module_instance(1, Box::new(TestPolySource));
+        graph.add_module_instance(2, Box::new(Poly::new(|| TestPassthrough)));
+        // A control input on a mono module: summing CV would be wrong
+        struct ControlIn;
+        impl DspModule for ControlIn {
+            fn info(&self) -> &ModuleInfo {
+                static INFO: ModuleInfo = ModuleInfo {
+                    id: "test.control_in",
+                    name: "Control In",
+                    category: ModuleCategory::Utility,
+                    description: "Checks its control input",
+                };
+                &INFO
+            }
+            fn ports(&self) -> &[PortDefinition] {
+                static PORTS: &[PortDefinition] = &[PortDefinition {
+                    id: "cv",
+                    name: "CV",
+                    signal_type: SignalType::Control,
+                    direction: crate::dsp::PortDirection::Input,
+                    default_value: 0.0,
+                }];
+                PORTS
+            }
+            fn parameters(&self) -> &[ParameterDefinition] {
+                &[]
+            }
+            fn prepare(&mut self, _: f32, _: usize) {}
+            fn process(&mut self, inputs: &[&SignalBuffer], _: &mut [SignalBuffer], _: &[f32], _: &ProcessContext) {
+                assert_eq!(inputs[0].samples[0], 1.0, "channel 1, not the sum");
+            }
+            fn reset(&mut self) {}
+        }
+        graph.add_module_instance(3, Box::new(ControlIn));
+        graph.connect(1, 1, 3, 0);
+        // A polyphonic module takes every channel, unsummed
+        graph.connect(1, 0, 2, 0);
+
+        let plan = run_block(&mut graph, 4);
+        let poly = first_output(&plan, 2);
+        assert_eq!(poly.channels(), 3);
+        let firsts: Vec<f32> = (0..3).map(|c| poly.voice(c).samples[0]).collect();
+        assert_eq!(firsts, [1.0, 2.0, 3.0]);
+        assert!(plan.mixdowns.is_empty());
+    }
+
+    #[test]
+    fn test_bypassed_poly_module_passes_every_channel() {
+        let mut graph = AudioGraph::new(44100.0, 4);
+        graph.add_module_instance(1, Box::new(TestPolySource));
+        graph.add_module_instance(2, Box::new(Poly::<TestEffect>::default()));
+        graph.connect(1, 0, 2, 0);
+        assert!(graph.set_bypass(2, true));
+
+        let plan = run_block(&mut graph, 4);
+        let out = first_output(&plan, 2);
+        assert_eq!(out.channels(), 3);
+        let firsts: Vec<f32> = (0..3).map(|c| out.voice(c).samples[0]).collect();
+        assert_eq!(firsts, [1.0, 2.0, 3.0]);
     }
 
     #[test]

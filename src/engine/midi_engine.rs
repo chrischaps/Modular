@@ -525,6 +525,15 @@ impl MidiEngine {
         }
     }
 
+    /// Sends an event made here rather than by a device, such as a note
+    /// from the computer keyboard, as if it came in from MIDI. Lossy, like
+    /// device input.
+    pub fn send(&self, event: MidiEvent) {
+        if let Ok(mut senders) = self.senders.lock() {
+            senders.send(TimestampedMidiEvent::now(event));
+        }
+    }
+
     /// Check if currently connected to a device.
     pub fn is_connected(&self) -> bool {
         self.connection.is_some()

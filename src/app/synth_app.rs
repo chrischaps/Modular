@@ -465,10 +465,16 @@ impl SynthApp {
         self.status_message = Some("All MIDI mappings cleared".to_string());
     }
 
-    /// Check if there are any MIDI Note modules in the graph.
+    /// Check if there are any MIDI Note or Poly MIDI modules in the graph.
     fn has_midi_note_modules(&self) -> bool {
         self.graph_state.graph.nodes.iter()
-            .any(|(_, node)| node.user_data.module_id == "input.midi_note")
+            .any(|(_, node)| matches!(node.user_data.module_id, "input.midi_note" | "input.poly_midi"))
+    }
+
+    /// Check if there are any Poly MIDI modules in the graph.
+    fn has_poly_midi_modules(&self) -> bool {
+        self.graph_state.graph.nodes.iter()
+            .any(|(_, node)| node.user_data.module_id == "input.poly_midi")
     }
 
     /// Select an audio output device by index
@@ -1825,6 +1831,10 @@ impl SynthApp {
 
         // Process raw keyboard events - these haven't been consumed yet
         let mut keys_changed = false;
+        // With a Poly MIDI module to hear them, the keys also play as MIDI,
+        // so chords can be played without a MIDI keyboard
+        let play_midi = self.has_poly_midi_modules();
+        let mut midi_notes = Vec::new();
 
         ctx.input(|i| {
             // Check raw events for key presses/releases
@@ -1841,18 +1851,31 @@ impl SynthApp {
                             if !self.pressed_keys.iter().any(|(_, k)| k == key) {
                                 self.pressed_keys.push((relative_note, *key));
                                 keys_changed = true;
+                                midi_notes.push((relative_note, true));
                             }
                         } else {
                             // Remove key from list
                             if let Some(pos) = self.pressed_keys.iter().position(|(_, k)| k == key) {
                                 self.pressed_keys.remove(pos);
                                 keys_changed = true;
+                                midi_notes.push((relative_note, false));
                             }
                         }
                     }
                 }
             }
         });
+
+        if let (true, Some(engine)) = (play_midi, self.midi_engine.as_ref()) {
+            for (relative_note, pressed) in midi_notes {
+                let note = relative_to_midi(relative_note, 0);
+                engine.send(if pressed {
+                    MidiEvent::NoteOn { channel: 0, note, velocity: 100 }
+                } else {
+                    MidiEvent::NoteOff { channel: 0, note, velocity: 0 }
+                });
+            }
+        }
 
         // Update Keyboard modules if key state changed
         if keys_changed {

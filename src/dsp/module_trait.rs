@@ -305,7 +305,22 @@ pub trait DspModule: Send + 'static {
     fn tempo_bpm(&self, _params: &[f32]) -> Option<f32> {
         None
     }
+
+    /// Whether this module works per channel of a polyphonic cable. Its
+    /// outputs then get room for [`MAX_CHANNELS`](super::signal::MAX_CHANNELS)
+    /// channels, and its inputs receive every channel.
+    ///
+    /// A module that isn't polyphonic hears only the first channel of a
+    /// polyphonic cable, except on audio inputs, which hear all the channels
+    /// summed. The default is `false`.
+    fn polyphonic(&self) -> bool {
+        false
+    }
 }
+
+/// The most input ports a module may have. Inputs are passed to modules as a
+/// stack array of buffer references, so this bounds that array.
+pub const MAX_INPUTS: usize = 32;
 
 #[cfg(test)]
 mod tests {

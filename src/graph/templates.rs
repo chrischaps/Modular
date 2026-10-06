@@ -514,7 +514,7 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let ids: Vec<&str> = AllNodeTemplates.all_kinds().iter().map(|t| t.module_id()).collect();
-        assert_eq!(ids.len(), 22);
+        assert_eq!(ids.len(), 23);
         for id in ["osc.sine", "output.audio", "mod.lfo", "util.mixer", "filter.svf", "filter.ladder", "fx.compressor", "seq.step"] {
             assert!(ids.contains(&id), "{id}");
         }

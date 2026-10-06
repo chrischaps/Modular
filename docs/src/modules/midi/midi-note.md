@@ -11,7 +11,7 @@
 
 The MIDI Note module receives MIDI from the device chosen in the toolbar (a keyboard, a controller, a DAW or sequencer) and converts it to CV and gate signals. It's the bridge between the MIDI world and the modular CV/Gate paradigm.
 
-It is monophonic: when several keys are held, **Priority** decides which one sounds.
+It is monophonic: when several keys are held, **Priority** decides which one sounds. To play chords, use [Poly MIDI](./poly-midi.md).
 
 ## Outputs
 
@@ -167,6 +167,7 @@ Knobs on other modules can follow a MIDI CC (a mod wheel, a fader):
 
 ## Related Modules
 
+- [Poly MIDI](./poly-midi.md) - Polyphonic MIDI, for chords
 - [Keyboard Input](./keyboard.md) - Computer keyboard alternative
 - [MIDI Monitor](./midi-monitor.md) - Debug MIDI data
 - [Oscillator](../sources/oscillator.md) - V/Oct destination

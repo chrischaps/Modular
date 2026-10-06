@@ -17,15 +17,18 @@
 //! A bypassed filter or effect passes its audio input straight to its output.
 //! Switching crossfades over [`BYPASS_FADE_SECONDS`] so nothing clicks, and
 //! once fully bypassed the module isn't run at all.
+//!
+//! Buffers carry up to [`MAX_CHANNELS`](crate::dsp::MAX_CHANNELS) channels.
+//! Polyphonic modules set how many each block, and the count flows
+//! downstream with the signal. A module that isn't polyphonic hears a
+//! polyphonic cable on an audio input as all its channels summed.
 
 use std::ops::Range;
 
 use crate::dsp::{DspModule, OutputLevels, ProcessContext, SignalBuffer};
 use crate::engine::commands::{NodeId, PortIndex};
 
-/// The most input ports a module may have. Inputs are passed to modules as a
-/// stack array of buffer references, so this bounds that array.
-pub const MAX_INPUTS: usize = 32;
+pub use crate::dsp::module_trait::MAX_INPUTS;
 
 /// How long bypassing a module, or bringing it back, crossfades for.
 pub const BYPASS_FADE_SECONDS: f32 = 0.02;
@@ -40,6 +43,10 @@ pub(crate) enum InputSource {
     Output(usize),
     /// An unpatched input's stand-in buffer (index into `GraphPlan::defaults`).
     Default(usize),
+    /// A polyphonic upstream output (index into `GraphPlan::outputs`) heard
+    /// by a mono audio input as the sum of its channels, written into a
+    /// buffer of its own (index into `GraphPlan::mixdowns`).
+    Mixdown { source: usize, mix: usize },
 }
 
 /// What a monitored input reports.
@@ -97,6 +104,8 @@ pub struct GraphPlan {
     pub(crate) defaults: Vec<SignalBuffer>,
     /// The value each `defaults` buffer is filled with.
     pub(crate) default_values: Vec<f32>,
+    /// Sums of polyphonic cables, for mono audio inputs.
+    pub(crate) mixdowns: Vec<SignalBuffer>,
     pub(crate) input_taps: Vec<InputTap>,
     pub(crate) output_taps: Vec<OutputTap>,
     /// The number of samples every buffer currently holds.
@@ -113,6 +122,7 @@ impl GraphPlan {
             outputs: Vec::new(),
             defaults: Vec::new(),
             default_values: Vec::new(),
+            mixdowns: Vec::new(),
             input_taps: Vec::new(),
             output_taps: Vec::new(),
             block_len: max_block_size,
@@ -219,7 +229,7 @@ impl GraphPlan {
         let context = &context;
         let fade_step = 1.0 / (BYPASS_FADE_SECONDS * context.sample_rate).max(1.0);
 
-        let Self { nodes, outputs, defaults, .. } = self;
+        let Self { nodes, outputs, defaults, mixdowns, .. } = self;
         for node in nodes.iter_mut() {
             // Inputs come from earlier nodes, whose buffers all precede ours
             let (upstream, rest) = outputs.split_at_mut(node.outputs.start);
@@ -232,11 +242,24 @@ impl GraphPlan {
                 continue;
             };
 
+            for source in &node.inputs {
+                if let InputSource::Mixdown { source, mix } = *source {
+                    if upstream[source].channels() > 1 {
+                        mixdowns[mix].mix_down(&upstream[source]);
+                    }
+                }
+            }
+
             let mut inputs = [&EMPTY_BUFFER; MAX_INPUTS];
             for (slot, source) in inputs.iter_mut().zip(&node.inputs) {
                 *slot = match *source {
                     InputSource::Output(index) => &upstream[index],
                     InputSource::Default(index) => &defaults[index],
+                    // One channel needs no summing: read it where it is
+                    InputSource::Mixdown { source, .. } if upstream[source].channels() == 1 => {
+                        &upstream[source]
+                    }
+                    InputSource::Mixdown { mix, .. } => &mixdowns[mix],
                 };
             }
 
@@ -262,6 +285,14 @@ impl GraphPlan {
         }
     }
 
+    /// How many channels a node's output (counted among its outputs) carried
+    /// in the last block, or `None` if there is no such output.
+    pub fn output_channels(&self, node_id: NodeId, output_index: usize) -> Option<usize> {
+        let node = self.nodes.iter().find(|node| node.node_id == node_id)?;
+        let buffer = node.outputs.clone().nth(output_index)?;
+        Some(self.outputs[buffer].channels())
+    }
+
     /// Whether a node is bypassed, or `None` if it isn't in this plan.
     pub fn is_bypassed(&self, node_id: NodeId) -> Option<bool> {
         self.nodes.iter().find(|node| node.node_id == node_id).map(|node| node.bypassed)
@@ -282,8 +313,8 @@ impl GraphPlan {
         if len == self.block_len {
             return;
         }
-        for buffer in &mut self.outputs {
-            buffer.samples.resize(len, 0.0);
+        for buffer in self.outputs.iter_mut().chain(&mut self.mixdowns) {
+            buffer.set_len(len);
         }
         for (buffer, &value) in self.defaults.iter_mut().zip(&self.default_values) {
             buffer.samples.resize(len, value);
@@ -359,13 +390,17 @@ impl GraphPlan {
     }
 }
 
-/// Copies each bypassed output's input straight through. Outputs with
-/// nothing to pass stay silent.
+/// Copies each bypassed output's input straight through, every channel of
+/// it. Outputs with nothing to pass stay silent.
 fn pass_dry(outputs: &mut [SignalBuffer], dry: &[Option<usize>], inputs: &[&SignalBuffer]) {
     for (output, source) in outputs.iter_mut().zip(dry) {
         if let Some(input) = source.and_then(|index| inputs.get(index)) {
-            for (out, &sample) in output.samples.iter_mut().zip(&input.samples) {
-                *out = sample;
+            let channels = output.set_channels(input.channels());
+            for channel in 0..channels {
+                let input = &input.voice(channel).samples;
+                for (out, &sample) in output.channel_mut(channel).iter_mut().zip(input) {
+                    *out = sample;
+                }
             }
         }
     }
@@ -385,13 +420,19 @@ fn crossfade(
     let mut reached = from;
     for (output, source) in outputs.iter_mut().zip(dry) {
         let input = source.and_then(|index| inputs.get(index));
-        let mut wet = from;
-        for (i, sample) in output.samples.iter_mut().enumerate() {
-            wet = advance(wet);
-            let dry = input.and_then(|buffer| buffer.samples.get(i)).copied().unwrap_or(0.0);
-            *sample = dry + wet * (*sample - dry);
+        // As many channels as either side carries
+        let wanted = output.channels().max(input.map_or(1, |buffer| buffer.channels()));
+        let channels = output.set_channels(wanted);
+        for channel in 0..channels {
+            let input = input.map(|buffer| &buffer.voice(channel).samples);
+            let mut wet = from;
+            for (i, sample) in output.channel_mut(channel).iter_mut().enumerate() {
+                wet = advance(wet);
+                let dry = input.and_then(|samples| samples.get(i)).copied().unwrap_or(0.0);
+                *sample = dry + wet * (*sample - dry);
+            }
+            reached = wet;
         }
-        reached = wet;
     }
     reached
 }
