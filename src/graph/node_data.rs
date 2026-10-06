@@ -1213,38 +1213,41 @@ impl NodeDataTrait for SynthNodeData {
 
             // Get ADSR parameters from node inputs
             let adsr_params = if let Some(node) = graph.nodes.get(node_id) {
-                let mut attack = 0.01f32;
-                let mut decay = 0.1f32;
-                let mut sustain = 0.7f32;
-                let mut release = 0.3f32;
+                let defaults = AdsrParams::default();
+                let number = |name: &str, default: f32| {
+                    node.inputs
+                        .iter()
+                        .find(|(input_name, _)| input_name == name)
+                        .and_then(|(_, id)| match graph.get_input(*id).value {
+                            SynthValueType::Number { value, .. } => Some(value),
+                            _ => None,
+                        })
+                        .unwrap_or(default)
+                };
+                // The softest note only differs when velocity is patched in
+                let velocity_patched = node
+                    .inputs
+                    .iter()
+                    .find(|(name, _)| name == "Velocity")
+                    .is_some_and(|(_, id)| graph.iter_connections().any(|(input, _)| input == *id));
+                let softest_peak = if velocity_patched {
+                    1.0 - number("Velocity Amount", 0.0)
+                } else {
+                    1.0
+                };
 
-                for (name, input_id) in &node.inputs {
-                    let input = graph.get_input(*input_id);
-                    match name.as_str() {
-                        "Attack" => {
-                            if let SynthValueType::Number { value, .. } = &input.value {
-                                attack = *value;
-                            }
-                        }
-                        "Decay" => {
-                            if let SynthValueType::Number { value, .. } = &input.value {
-                                decay = *value;
-                            }
-                        }
-                        "Sustain" => {
-                            if let SynthValueType::Number { value, .. } = &input.value {
-                                sustain = *value;
-                            }
-                        }
-                        "Release" => {
-                            if let SynthValueType::Number { value, .. } = &input.value {
-                                release = *value;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                AdsrParams::new(attack, decay, sustain, release)
+                AdsrParams::new(
+                    number("Attack", defaults.attack),
+                    number("Decay", defaults.decay),
+                    number("Sustain", defaults.sustain),
+                    number("Release", defaults.release),
+                )
+                .with_curves(
+                    number("Attack Curve", defaults.attack_curve),
+                    number("Decay Curve", defaults.decay_curve),
+                    number("Release Curve", defaults.release_curve),
+                )
+                .with_softest_peak(softest_peak)
             } else {
                 AdsrParams::default()
             };

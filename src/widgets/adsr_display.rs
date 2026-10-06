@@ -1,12 +1,15 @@
 //! ADSR envelope visualization widget.
 //!
 //! Provides a visual display of ADSR envelope shape based on current parameter values.
-//! The display shows attack, decay, sustain, and release segments with the actual
-//! exponential curves matching the audio engine's envelope generator.
+//! The display shows attack, decay, sustain, and release segments drawn with
+//! the envelope generator's own stage curve ([`stage_shape`]), so each segment
+//! has exactly the shape the audio follows. Segment widths are log-scaled so a
+//! 5 ms attack stays visible next to a 5 s release.
 
 use eframe::egui::{self, Color32, Pos2, Response, Sense, Stroke, Ui, Vec2};
 
 use crate::app::theme;
+use crate::modules::envelope::{curve_steepness, stage_shape};
 
 /// Configuration for the ADSR display widget.
 #[derive(Clone)]
@@ -98,6 +101,15 @@ pub struct AdsrParams {
     pub sustain: f32,
     /// Release time in seconds (0.001 to 10.0).
     pub release: f32,
+    /// Attack curve (0 = straight, 1 = deep RC).
+    pub attack_curve: f32,
+    /// Decay curve (0 = straight, 1 = deep RC).
+    pub decay_curve: f32,
+    /// Release curve (0 = straight, 1 = deep RC).
+    pub release_curve: f32,
+    /// Peak at the softest velocity (1.0 when velocity isn't patched).
+    /// Below 1, a faint second envelope shows the softest note.
+    pub softest_peak: f32,
 }
 
 impl Default for AdsrParams {
@@ -107,8 +119,21 @@ impl Default for AdsrParams {
             decay: 0.1,
             sustain: 0.7,
             release: 0.3,
+            attack_curve: 0.2,
+            decay_curve: 0.5,
+            release_curve: 0.5,
+            softest_peak: 1.0,
         }
     }
+}
+
+/// An envelope segment, for [`AdsrParams::level_at`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdsrSegment {
+    Attack,
+    Decay,
+    Sustain,
+    Release,
 }
 
 impl AdsrParams {
@@ -119,6 +144,33 @@ impl AdsrParams {
             decay: decay.clamp(0.001, 10.0),
             sustain: sustain.clamp(0.0, 1.0),
             release: release.clamp(0.001, 10.0),
+            ..Default::default()
+        }
+    }
+
+    /// Sets the stage curves (0 = straight, 1 = deep RC).
+    pub fn with_curves(mut self, attack: f32, decay: f32, release: f32) -> Self {
+        self.attack_curve = attack.clamp(0.0, 1.0);
+        self.decay_curve = decay.clamp(0.0, 1.0);
+        self.release_curve = release.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Sets the peak of the softest note (1 - velocity amount).
+    pub fn with_softest_peak(mut self, peak: f32) -> Self {
+        self.softest_peak = peak.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Envelope level at normalized time `u` (0-1) through a segment, for a
+    /// note at full velocity. This is the curve the envelope module renders.
+    pub fn level_at(&self, segment: AdsrSegment, u: f32) -> f32 {
+        let shape = |curve: f32| stage_shape(curve_steepness(curve), u as f64) as f32;
+        match segment {
+            AdsrSegment::Attack => shape(self.attack_curve),
+            AdsrSegment::Decay => 1.0 - (1.0 - self.sustain) * shape(self.decay_curve),
+            AdsrSegment::Sustain => self.sustain,
+            AdsrSegment::Release => self.sustain * (1.0 - shape(self.release_curve)),
         }
     }
 }
@@ -129,70 +181,43 @@ impl AdsrParams {
 /// - x is in range [0, 1] representing time
 /// - y is in range [0, 1] representing amplitude
 ///
-/// The curve uses exponential shapes matching the actual audio engine implementation.
-/// Time segments are scaled to ensure visual clarity - each segment gets a minimum
+/// Each segment is drawn with [`AdsrParams::level_at`], the curve the envelope
+/// module renders. Time segments are scaled to ensure visual clarity - each segment gets a minimum
 /// visual width so the envelope shape is always readable.
 pub fn generate_adsr_curve(params: &AdsrParams, num_points: usize) -> Vec<(f32, f32)> {
-    let mut points = Vec::with_capacity(num_points);
+    let (attack_end, decay_end, sustain_end) = get_adsr_segment_boundaries(params);
 
-    // Use logarithmic scaling for times to better visualize short vs long segments
-    // This prevents very short attack/decay from being invisible
-    let attack_log = (1.0 + params.attack).ln();
-    let decay_log = (1.0 + params.decay).ln();
-    let sustain_log = (1.0 + 0.15_f32).ln(); // Fixed visual sustain hold
-    let release_log = (1.0 + params.release).ln();
-    let total_log = attack_log + decay_log + sustain_log + release_log;
-
-    // Calculate segment boundaries with logarithmic scaling
-    let attack_end = attack_log / total_log;
-    let decay_end = (attack_log + decay_log) / total_log;
-    let sustain_end = (attack_log + decay_log + sustain_log) / total_log;
-
-    for i in 0..num_points {
-        let x = i as f32 / (num_points - 1) as f32;
-        let y;
-
-        if x <= attack_end {
-            // Attack phase: exponential rise from 0 to 1
-            let t = if attack_end > 0.0 {
-                x / attack_end
-            } else {
-                1.0
-            };
-            // Exponential curve that reaches ~99.3% at t=1
-            y = 1.0 - (-5.0 * t).exp();
-        } else if x <= decay_end {
-            // Decay phase: exponential fall from 1 to sustain
-            let t = if (decay_end - attack_end) > 0.0 {
-                (x - attack_end) / (decay_end - attack_end)
-            } else {
-                1.0
-            };
-            // Exponential decay from 1 to sustain level
-            let decay_amount = 1.0 - params.sustain;
-            y = params.sustain + decay_amount * (-5.0 * t).exp();
-        } else if x <= sustain_end {
-            // Sustain phase: hold at sustain level
-            y = params.sustain;
+    // Where x falls in [start, end], as 0-1
+    let through = |x: f32, start: f32, end: f32| {
+        if end > start {
+            (x - start) / (end - start)
         } else {
-            // Release phase: exponential fall from sustain to 0
-            let t = if (1.0 - sustain_end) > 0.0 {
-                (x - sustain_end) / (1.0 - sustain_end)
-            } else {
-                1.0
-            };
-            // Exponential decay from sustain to 0
-            y = params.sustain * (-5.0 * t).exp();
+            1.0
         }
+    };
 
-        points.push((x, y.clamp(0.0, 1.0)));
-    }
-
-    points
+    (0..num_points)
+        .map(|i| {
+            let x = i as f32 / (num_points - 1) as f32;
+            let y = if x <= attack_end {
+                params.level_at(AdsrSegment::Attack, through(x, 0.0, attack_end))
+            } else if x <= decay_end {
+                params.level_at(AdsrSegment::Decay, through(x, attack_end, decay_end))
+            } else if x <= sustain_end {
+                params.level_at(AdsrSegment::Sustain, 0.0)
+            } else {
+                params.level_at(AdsrSegment::Release, through(x, sustain_end, 1.0))
+            };
+            (x, y.clamp(0.0, 1.0))
+        })
+        .collect()
 }
 
-/// Get the segment boundaries for label positioning.
+/// Get the segment boundaries for drawing and label positioning.
 /// Returns (attack_end, decay_end, sustain_end) as normalized x positions.
+///
+/// Widths grow with ln(1 + seconds), so short stages stay readable; the
+/// sustain gets a fixed width since it lasts as long as the gate.
 pub fn get_adsr_segment_boundaries(params: &AdsrParams) -> (f32, f32, f32) {
     let attack_log = (1.0 + params.attack).ln();
     let decay_log = (1.0 + params.decay).ln();
@@ -261,15 +286,13 @@ pub fn adsr_display(ui: &mut Ui, params: &AdsrParams, config: &AdsrConfig) -> Re
         let padding_bottom = if config.show_labels { 14.0 * zoom_scale } else { 4.0 * zoom_scale };
         let draw_height = rect.height() - padding_top - padding_bottom;
 
-        let points: Vec<Pos2> = curve
-            .iter()
-            .map(|(x, y)| {
-                Pos2::new(
-                    rect.left() + x * rect.width(),
-                    rect.top() + padding_top + (1.0 - y) * draw_height,
-                )
-            })
-            .collect();
+        let to_screen = |(x, y): &(f32, f32), scale: f32| {
+            Pos2::new(
+                rect.left() + x * rect.width(),
+                rect.top() + padding_top + (1.0 - y * scale) * draw_height,
+            )
+        };
+        let points: Vec<Pos2> = curve.iter().map(|p| to_screen(p, 1.0)).collect();
 
         // Draw sustain level line
         if config.show_sustain_line && params.sustain > 0.01 {
@@ -327,6 +350,19 @@ pub fn adsr_display(ui: &mut Ui, params: &AdsrParams, config: &AdsrConfig) -> Re
                 50,
             );
             draw_polyline(&painter, &points, glow_color, config.line_thickness * 3.0);
+        }
+
+        // The softest note: the same shape at its lower peak, faint and
+        // without glow, so the span between the two lines is the dynamics
+        if params.softest_peak < 0.999 && curve.len() >= 2 {
+            let ghost: Vec<Pos2> = curve.iter().map(|p| to_screen(p, params.softest_peak)).collect();
+            let ghost_color = Color32::from_rgba_unmultiplied(
+                config.color.r(),
+                config.color.g(),
+                config.color.b(),
+                90,
+            );
+            draw_polyline(&painter, &ghost, ghost_color, config.line_thickness * 0.75);
         }
 
         // Draw main envelope line
@@ -531,6 +567,50 @@ mod tests {
             for y in sustain_points {
                 assert!(y < 0.1, "Zero sustain should produce near-zero values");
             }
+        }
+    }
+
+    #[test]
+    fn test_display_matches_rendered_envelope() {
+        use crate::dsp::{DspModule, ProcessContext, SignalBuffer};
+        use crate::modules::AdsrEnvelope;
+
+        // Render a note through the real module, then check every segment
+        // of the display against it at the same point in each stage
+        let sr = 48000.0;
+        for (curves, sustain) in [((0.2, 0.5, 0.5), 0.7), ((0.0, 1.0, 0.3), 0.25), ((0.9, 0.1, 0.0), 0.5)] {
+            let (a, d, r) = (0.04, 0.07, 0.11);
+            let params = AdsrParams::new(a, d, sustain, r).with_curves(curves.0, curves.1, curves.2);
+
+            let samples = |secs: f32| (secs * sr) as usize;
+            let hold = samples(a + d + 0.05);
+            let total = hold + samples(r) + 10;
+            let mut env = AdsrEnvelope::new();
+            env.prepare(sr, total);
+            let mut gate = SignalBuffer::control(total);
+            gate.samples[..hold].fill(1.0);
+            let mut out = vec![SignalBuffer::control(total)];
+            let module_params = [a, d, sustain, r, curves.0, curves.1, curves.2, 0.5];
+            env.process(&[&gate], &mut out, &module_params, &ProcessContext::new(sr, total));
+            let out = &out[0].samples;
+
+            let decay_start = out.iter().position(|&s| s >= 1.0).unwrap();
+            for step in 0..=20 {
+                let u = step as f32 / 20.0;
+                let at = |start: usize, secs: f32| out[start + (u * secs * sr).round() as usize];
+                for (segment, rendered) in [
+                    (AdsrSegment::Attack, at(0, a)),
+                    (AdsrSegment::Decay, at(decay_start, d)),
+                    (AdsrSegment::Release, at(hold, r)),
+                ] {
+                    let drawn = params.level_at(segment, u);
+                    assert!(
+                        (drawn - rendered).abs() < 2e-3,
+                        "{segment:?} at {u} with curves {curves:?}: drawn {drawn}, rendered {rendered}"
+                    );
+                }
+            }
+            assert!((out[hold - 1] - params.level_at(AdsrSegment::Sustain, 0.0)).abs() < 1e-4);
         }
     }
 

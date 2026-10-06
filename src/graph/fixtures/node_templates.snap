@@ -89,15 +89,24 @@ display LadderResponse
 == mod.adsr "ADSR Envelope" finder="ADSR Envelope" Modulation
 in   Gate               Gate     ConnectionOnly       inline=true  port
 in   Retrig             Gate     ConnectionOnly       inline=true  port
+in   Velocity           Control  ConnectionOnly       inline=true  port
 in   Attack             Control  ConstantOnly         inline=false num 0.01 [0.001..10] s log
 in   Decay              Control  ConstantOnly         inline=false num 0.1 [0.001..10] s log
 in   Sustain            Control  ConstantOnly         inline=false num 0.7 [0..1]
 in   Release            Control  ConstantOnly         inline=false num 0.3 [0.001..10] s log
+in   Attack Curve       Control  ConstantOnly         inline=false num 0.2 [0..1] %
+in   Decay Curve        Control  ConstantOnly         inline=false num 0.5 [0..1] %
+in   Release Curve      Control  ConstantOnly         inline=false num 0.5 [0..1] %
+in   Velocity Amount    Control  ConstantOnly         inline=false num 0.5 [0..1] %
 out  Out                Control
 knob Attack             "Atk" KnobOnly
 knob Decay              "Dec" KnobOnly
 knob Sustain            "Sus" KnobOnly
 knob Release            "Rel" KnobOnly
+knob Attack Curve       "A Crv" KnobOnly
+knob Decay Curve        "D Crv" KnobOnly
+knob Velocity Amount    "Vel" KnobOnly
+knob Release Curve      "R Crv" KnobOnly
 display Envelope
 
 == mod.lfo "LFO" finder="LFO" Modulation

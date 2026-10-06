@@ -141,8 +141,20 @@ static MODULE_UI: &[ModuleUi] = &[
     },
     ModuleUi {
         module_id: "mod.adsr",
-        knobs: &[knob_as("Attack", "Atk"), knob_as("Decay", "Dec"), knob_as("Sustain", "Sus"), knob_as("Release", "Rel")],
+        // Two rows: times and level, then each stage's curve under its time
+        // (velocity sits under sustain, both being about level)
+        knobs: &[
+            knob_as("Attack", "Atk"),
+            knob_as("Decay", "Dec"),
+            knob_as("Sustain", "Sus"),
+            knob_as("Release", "Rel"),
+            knob_as("Attack Curve", "A Crv"),
+            knob_as("Decay Curve", "D Crv"),
+            knob_as("Velocity Amount", "Vel"),
+            knob_as("Release Curve", "R Crv"),
+        ],
         display: NodeDisplay::Envelope,
+        knobs_per_row: 4,
         ..ModuleUi::DEFAULT
     },
     ModuleUi {

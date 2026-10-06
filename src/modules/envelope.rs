@@ -2,8 +2,16 @@
 //!
 //! Generates an Attack-Decay-Sustain-Release envelope in response to gate signals.
 //! Fundamental for shaping sound amplitude and filter cutoff over time.
+//!
+//! Every stage takes exactly the time on its knob. A stage is a one-pole
+//! (RC) curve aimed past its target, so it arrives on time instead of creeping
+//! up on it forever. How far past is the stage's Curve: aimed far past, the
+//! visible stretch is nearly a straight line; aimed just past, it is a deep
+//! analog curve. [`stage_shape`] is that curve in closed form, and the ADSR
+//! display draws with it, so the picture is the sound.
 
 use crate::dsp::{
+    connected_input,
     context::ProcessContext,
     module_trait::{DspModule, ModuleCategory, ModuleInfo},
     parameter::ParameterDefinition,
@@ -12,14 +20,38 @@ use crate::dsp::{
     ParameterDisplay, SignalType,
 };
 
+/// Steepness at Curve = 100%. The stage aims 1/(e^10 − 1) ≈ 0.005% of its
+/// span past its target: a deep curve that is still on time.
+const MAX_STEEPNESS: f64 = 10.0;
+
+/// Steepness for a Curve knob position (0.0–1.0).
+///
+/// 0 is a straight line, 1 a deep RC curve. Never quite 0, so the
+/// aim-past-the-target arithmetic stays finite.
+#[inline]
+pub fn curve_steepness(curve: f32) -> f64 {
+    (curve.clamp(0.0, 1.0) as f64 * MAX_STEEPNESS).max(1e-3)
+}
+
+/// How far a stage has gone from its start level to its target, at
+/// normalized time `u` (0 at the start of the stage, 1 when it lands).
+///
+/// Fast start, slow finish, and exactly 1 at `u = 1`. Higher `steepness`
+/// is more curved; near 0 it is a straight line.
+#[inline]
+pub fn stage_shape(steepness: f64, u: f64) -> f64 {
+    let u = u.clamp(0.0, 1.0);
+    (-steepness * u).exp_m1() / (-steepness).exp_m1()
+}
+
 /// Envelope stages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EnvelopeStage {
     /// Envelope is idle (output = 0).
     Idle,
-    /// Attack phase: rising from 0 to 1.
+    /// Attack phase: rising from the current level to the peak.
     Attack,
-    /// Decay phase: falling from 1 to sustain level.
+    /// Decay phase: falling from the peak to the sustain level.
     Decay,
     /// Sustain phase: holding at sustain level while gate is high.
     Sustain,
@@ -27,31 +59,65 @@ pub enum EnvelopeStage {
     Release,
 }
 
+/// Per-sample recursion for one stage: progress `x` (0 → 1) steps toward
+/// `aim` (past 1) by `x = aim + (x - aim) * coeff`, reaching 1 after exactly
+/// the stage time. This traces [`stage_shape`] one sample at a time.
+#[derive(Clone, Copy, Debug)]
+struct StageRate {
+    coeff: f64,
+    aim: f64,
+}
+
+impl StageRate {
+    fn new(time_seconds: f32, curve: f32, sample_rate: f32) -> Self {
+        let steepness = curve_steepness(curve);
+        let samples = (time_seconds as f64 * sample_rate as f64).max(1.0);
+        Self {
+            coeff: (-steepness / samples).exp(),
+            // 1 + 1/(e^k − 1): from here, the curve crosses 1 at u = 1
+            aim: 1.0 + 1.0 / steepness.exp_m1(),
+        }
+    }
+}
+
 /// ADSR Envelope generator.
 ///
 /// Generates a control signal that follows the classic ADSR envelope shape:
-/// - **Attack**: Time to rise from 0 to 1
-/// - **Decay**: Time to fall from 1 to sustain level
-/// - **Sustain**: Level to hold while gate is high
-/// - **Release**: Time to fall from current level to 0 after gate goes low
+/// - **Attack**: Time to rise from the current level to the peak
+/// - **Decay**: Time to fall from the peak to the sustain level
+/// - **Sustain**: Level to hold while gate is high, as a fraction of the peak
+/// - **Release**: Time to fall from the current level to 0 after gate goes low
 ///
 /// # Ports
 ///
 /// - **Gate** (Gate, Input): Triggers the envelope (high = note on, low = note off).
 /// - **Retrigger** (Gate, Input): Restarts attack from current level when high.
+/// - **Velocity** (Control, Input): Scales the peak, read at each note on.
 /// - **Out** (Control, Output): The envelope output (0.0 to 1.0).
 ///
 /// # Parameters
 ///
-/// - **Attack** (0.001-10.0s): Attack time, logarithmic scaling.
-/// - **Decay** (0.001-10.0s): Decay time, logarithmic scaling.
-/// - **Sustain** (0.0-1.0): Sustain level, linear scaling.
-/// - **Release** (0.001-10.0s): Release time, logarithmic scaling.
+/// - **Attack**, **Decay**, **Release** (0.001-10.0s): Stage times, logarithmic scaling.
+/// - **Sustain** (0.0-1.0): Sustain level, linear scaling. Glides rather than steps.
+/// - **Attack/Decay/Release Curve** (0-100%): Straight line to deep RC curve.
+/// - **Velocity Amount** (0-100%): How much velocity scales the peak.
 pub struct AdsrEnvelope {
     /// Current envelope stage.
     stage: EnvelopeStage,
     /// Current envelope level (0.0 to 1.0).
-    level: f32,
+    level: f64,
+    /// Level the current stage started from.
+    stage_start: f64,
+    /// Progress through the current stage (0 at its start, 1 when it lands).
+    progress: f64,
+    /// Peak level for this note, set from velocity at note on.
+    peak: f64,
+    /// Sustain parameter after smoothing, so knob moves glide.
+    sustain: f64,
+    /// Whether `sustain` has caught a parameter value yet.
+    sustain_primed: bool,
+    /// One-pole coefficient for sustain smoothing.
+    sustain_coeff: f64,
     /// Previous gate state (for edge detection).
     prev_gate: bool,
     /// Previous retrigger state (for edge detection).
@@ -67,9 +133,15 @@ pub struct AdsrEnvelope {
 impl AdsrEnvelope {
     /// Creates a new ADSR envelope.
     pub fn new() -> Self {
-        Self {
+        let mut env = Self {
             stage: EnvelopeStage::Idle,
             level: 0.0,
+            stage_start: 0.0,
+            progress: 0.0,
+            peak: 1.0,
+            sustain: 0.0,
+            sustain_primed: false,
+            sustain_coeff: 0.0,
             prev_gate: false,
             prev_retrigger: false,
             sample_rate: 44100.0,
@@ -77,9 +149,12 @@ impl AdsrEnvelope {
                 // Input ports
                 PortDefinition::input_with_default("gate", "Gate", SignalType::Gate, 0.0),
                 PortDefinition::input_with_default("retrigger", "Retrig", SignalType::Gate, 0.0),
+                PortDefinition::input_with_default("velocity", "Velocity", SignalType::Control, 1.0),
                 // Output port
                 PortDefinition::output("out", "Out", SignalType::Control),
             ],
+            // New parameters go at the end: v1/v2 patches name their
+            // positional values against this list.
             parameters: vec![
                 // Attack time (1ms to 10s, logarithmic)
                 ParameterDefinition::new(
@@ -117,13 +192,51 @@ impl AdsrEnvelope {
                     0.3, // 300ms default
                     ParameterDisplay::logarithmic("s"),
                 ),
+                // Attack curve: nearly straight by default, so attacks are punchy
+                ParameterDefinition::new(
+                    "attack_curve",
+                    "Attack Curve",
+                    0.0,
+                    1.0,
+                    0.2,
+                    ParameterDisplay::linear("%"),
+                ),
+                // Decay and release curves: analog RC by default
+                ParameterDefinition::new(
+                    "decay_curve",
+                    "Decay Curve",
+                    0.0,
+                    1.0,
+                    0.5,
+                    ParameterDisplay::linear("%"),
+                ),
+                ParameterDefinition::new(
+                    "release_curve",
+                    "Release Curve",
+                    0.0,
+                    1.0,
+                    0.5,
+                    ParameterDisplay::linear("%"),
+                ),
+                // How much the Velocity input scales the peak
+                ParameterDefinition::new(
+                    "velocity_amount",
+                    "Velocity Amount",
+                    0.0,
+                    1.0,
+                    0.5,
+                    ParameterDisplay::linear("%"),
+                ),
             ],
-        }
+        };
+        env.prepare(44100.0, 0);
+        env
     }
 
     /// Port index constants.
     const PORT_GATE: usize = 0;
     const PORT_RETRIGGER: usize = 1;
+    const PORT_VELOCITY: usize = 2;
     const PORT_OUT: usize = 0;
 
     /// Parameter index constants.
@@ -131,33 +244,49 @@ impl AdsrEnvelope {
     const PARAM_DECAY: usize = 1;
     const PARAM_SUSTAIN: usize = 2;
     const PARAM_RELEASE: usize = 3;
+    const PARAM_ATTACK_CURVE: usize = 4;
+    const PARAM_DECAY_CURVE: usize = 5;
+    const PARAM_RELEASE_CURVE: usize = 6;
+    const PARAM_VELOCITY_AMOUNT: usize = 7;
 
     /// Gate threshold for detecting high/low states.
     const GATE_THRESHOLD: f32 = 0.5;
 
-    /// Calculate the exponential coefficient for a given time.
-    ///
-    /// This creates an RC-style exponential curve that reaches ~99.3%
-    /// of the target value in the specified time.
-    ///
-    /// For attack (rising): level = 1.0 - (1.0 - level) * coeff
-    /// For decay/release (falling): level = level * coeff
-    #[inline]
-    fn calc_coeff(&self, time_seconds: f32) -> f32 {
-        if time_seconds <= 0.0 {
-            return 0.0;
-        }
-        // Time constant for ~99.3% completion in the given time
-        // exp(-5/time) gives us approximately the right decay rate
-        let samples = time_seconds * self.sample_rate;
-        if samples <= 1.0 {
-            return 0.0;
-        }
-        (-5.0_f32 / samples).exp()
+    /// Time constant for sustain knob moves.
+    const SUSTAIN_SMOOTHING_SECONDS: f32 = 0.005;
+
+    /// Begins a stage from the current level.
+    fn enter(&mut self, stage: EnvelopeStage) {
+        self.stage = stage;
+        self.stage_start = self.level;
+        self.progress = 0.0;
     }
 
-    /// Threshold for considering the envelope "close enough" to target.
-    const LEVEL_THRESHOLD: f32 = 0.0001;
+    /// Note on: sets the peak from velocity and starts the attack from
+    /// wherever the envelope is now.
+    fn trigger(&mut self, velocity: Option<f32>, velocity_amount: f32) {
+        self.peak = match velocity {
+            Some(v) => {
+                let amount = velocity_amount.clamp(0.0, 1.0) as f64;
+                1.0 - amount + amount * v.clamp(0.0, 1.0) as f64
+            }
+            None => 1.0,
+        };
+        self.enter(EnvelopeStage::Attack);
+    }
+
+    /// Advances the current stage's progress one sample. Returns true
+    /// when the stage lands on its target.
+    #[inline]
+    fn advance(&mut self, rate: StageRate) -> bool {
+        self.progress = rate.aim + (self.progress - rate.aim) * rate.coeff;
+        if self.progress >= 1.0 {
+            self.progress = 1.0;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl Default for AdsrEnvelope {
@@ -172,7 +301,7 @@ impl DspModule for AdsrEnvelope {
             id: "mod.adsr",
             name: "ADSR Envelope",
             category: ModuleCategory::Modulation,
-            description: "Attack-Decay-Sustain-Release envelope generator",
+            description: "Attack-Decay-Sustain-Release envelope with exact stage times, curve shaping and velocity",
         };
         &INFO
     }
@@ -187,6 +316,8 @@ impl DspModule for AdsrEnvelope {
 
     fn prepare(&mut self, sample_rate: f32, _max_block_size: usize) {
         self.sample_rate = sample_rate;
+        self.sustain_coeff =
+            (-1.0 / (Self::SUSTAIN_SMOOTHING_SECONDS as f64 * sample_rate as f64)).exp();
     }
 
     fn process(
@@ -196,135 +327,111 @@ impl DspModule for AdsrEnvelope {
         params: &[f32],
         context: &ProcessContext,
     ) {
-        let attack_time = params[Self::PARAM_ATTACK];
-        let decay_time = params[Self::PARAM_DECAY];
-        let sustain_level = params[Self::PARAM_SUSTAIN].clamp(0.0, 1.0);
-        let release_time = params[Self::PARAM_RELEASE];
+        let sustain_param = params[Self::PARAM_SUSTAIN].clamp(0.0, 1.0) as f64;
+        let velocity_amount = params[Self::PARAM_VELOCITY_AMOUNT];
+
+        // Rates are worked out per block, so turning a knob mid-stage
+        // reshapes the rest of the stage rather than waiting for the next note
+        let attack = StageRate::new(params[Self::PARAM_ATTACK], params[Self::PARAM_ATTACK_CURVE], self.sample_rate);
+        let decay = StageRate::new(params[Self::PARAM_DECAY], params[Self::PARAM_DECAY_CURVE], self.sample_rate);
+        let release = StageRate::new(params[Self::PARAM_RELEASE], params[Self::PARAM_RELEASE_CURVE], self.sample_rate);
+
+        if !self.sustain_primed {
+            self.sustain = sustain_param;
+            self.sustain_primed = true;
+        }
 
         // Get input buffers
         let gate_in = inputs.get(Self::PORT_GATE);
         let retrigger_in = inputs.get(Self::PORT_RETRIGGER);
+        let velocity_in = connected_input(inputs, Self::PORT_VELOCITY);
 
         // Get output buffer
         let output = &mut outputs[Self::PORT_OUT];
 
-        // Pre-calculate coefficients
-        let attack_coeff = self.calc_coeff(attack_time);
-        let decay_coeff = self.calc_coeff(decay_time);
-        let release_coeff = self.calc_coeff(release_time);
-
-        // Process each sample
         for i in 0..context.block_size {
-            // Get gate state
-            let gate_value = gate_in
-                .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
-                .unwrap_or(0.0);
-            let gate_high = gate_value > Self::GATE_THRESHOLD;
+            let gate_high = gate_in
+                .and_then(|buf| buf.samples.get(i))
+                .is_some_and(|&v| v > Self::GATE_THRESHOLD);
+            let retrigger_high = retrigger_in
+                .and_then(|buf| buf.samples.get(i))
+                .is_some_and(|&v| v > Self::GATE_THRESHOLD);
+            let velocity = velocity_in.and_then(|buf| buf.samples.get(i).copied());
 
-            // Get retrigger state
-            let retrigger_value = retrigger_in
-                .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
-                .unwrap_or(0.0);
-            let retrigger_high = retrigger_value > Self::GATE_THRESHOLD;
-
-            // Detect gate rising edge (note on)
             let gate_rising = gate_high && !self.prev_gate;
-
-            // Detect retrigger rising edge
             let retrigger_rising = retrigger_high && !self.prev_retrigger;
+            self.prev_gate = gate_high;
+            self.prev_retrigger = retrigger_high;
 
-            // State machine transitions
+            // Stage changes from the gates
             match self.stage {
-                EnvelopeStage::Idle => {
-                    if gate_rising {
-                        self.stage = EnvelopeStage::Attack;
+                EnvelopeStage::Idle | EnvelopeStage::Release => {
+                    if gate_rising || (retrigger_rising && gate_high) {
+                        self.trigger(velocity, velocity_amount);
                     }
                 }
                 EnvelopeStage::Attack => {
                     if !gate_high {
-                        // Gate went low during attack
-                        self.stage = EnvelopeStage::Release;
+                        self.enter(EnvelopeStage::Release);
+                    }
+                    // A retrigger mid-attack changes nothing: already rising
+                }
+                EnvelopeStage::Decay | EnvelopeStage::Sustain => {
+                    if !gate_high {
+                        self.enter(EnvelopeStage::Release);
                     } else if retrigger_rising {
-                        // Retrigger: restart attack from current level
-                        // (already in attack, just continue)
-                    } else {
-                        // Exponential rise toward 1.0
-                        self.level = 1.0 - (1.0 - self.level) * attack_coeff;
+                        self.trigger(velocity, velocity_amount);
+                    }
+                }
+            }
 
-                        // Transition to decay when we reach the top
-                        if self.level >= 1.0 - Self::LEVEL_THRESHOLD {
-                            self.level = 1.0;
-                            self.stage = EnvelopeStage::Decay;
-                        }
+            // Sustain glides toward its knob
+            self.sustain = sustain_param + (self.sustain - sustain_param) * self.sustain_coeff;
+            let sustain_level = self.sustain * self.peak;
+
+            // Output, then move one sample on: a stage that starts at the
+            // gate edge lands exactly its time later
+            output.samples[i] = self.level as f32;
+
+            match self.stage {
+                EnvelopeStage::Idle => {}
+                EnvelopeStage::Attack => {
+                    let landed = self.advance(attack);
+                    self.level = self.stage_start + (self.peak - self.stage_start) * self.progress;
+                    if landed {
+                        self.enter(EnvelopeStage::Decay);
                     }
                 }
                 EnvelopeStage::Decay => {
-                    if !gate_high {
-                        // Gate went low during decay
-                        self.stage = EnvelopeStage::Release;
-                    } else if retrigger_rising {
-                        // Retrigger: restart attack from current level
-                        self.stage = EnvelopeStage::Attack;
-                    } else {
-                        // Exponential fall toward sustain level
-                        self.level = sustain_level + (self.level - sustain_level) * decay_coeff;
-
-                        // Transition to sustain when we reach the sustain level
-                        if (self.level - sustain_level).abs() < Self::LEVEL_THRESHOLD {
-                            self.level = sustain_level;
-                            self.stage = EnvelopeStage::Sustain;
-                        }
+                    // Aimed at the smoothed sustain, so a knob move mid-decay bends the curve
+                    let landed = self.advance(decay);
+                    self.level = self.stage_start + (sustain_level - self.stage_start) * self.progress;
+                    if landed {
+                        self.enter(EnvelopeStage::Sustain);
                     }
                 }
                 EnvelopeStage::Sustain => {
-                    if !gate_high {
-                        // Gate went low
-                        self.stage = EnvelopeStage::Release;
-                    } else if retrigger_rising {
-                        // Retrigger: restart attack from sustain level
-                        self.stage = EnvelopeStage::Attack;
-                    } else {
-                        // Hold at sustain level
-                        self.level = sustain_level;
-                    }
+                    self.level = sustain_level;
                 }
                 EnvelopeStage::Release => {
-                    if gate_rising {
-                        // New note on during release
-                        self.stage = EnvelopeStage::Attack;
-                    } else if retrigger_rising && gate_high {
-                        // Retrigger while gate is still high
-                        self.stage = EnvelopeStage::Attack;
-                    } else {
-                        // Exponential fall toward 0
-                        self.level *= release_coeff;
-
-                        // Transition to idle when we reach zero
-                        if self.level < Self::LEVEL_THRESHOLD {
-                            self.level = 0.0;
-                            self.stage = EnvelopeStage::Idle;
-                        }
+                    let landed = self.advance(release);
+                    self.level = self.stage_start * (1.0 - self.progress);
+                    if landed {
+                        self.level = 0.0;
+                        self.stage = EnvelopeStage::Idle;
                     }
                 }
             }
-
-            // Handle gate rising edge transitioning from Idle
-            if gate_rising && self.stage == EnvelopeStage::Idle {
-                self.stage = EnvelopeStage::Attack;
-            }
-
-            // Update previous states for edge detection
-            self.prev_gate = gate_high;
-            self.prev_retrigger = retrigger_high;
-
-            // Write output
-            output.samples[i] = self.level;
         }
     }
 
     fn reset(&mut self) {
         self.stage = EnvelopeStage::Idle;
         self.level = 0.0;
+        self.stage_start = 0.0;
+        self.progress = 0.0;
+        self.peak = 1.0;
+        self.sustain_primed = false;
         self.prev_gate = false;
         self.prev_retrigger = false;
     }
@@ -333,6 +440,44 @@ impl DspModule for AdsrEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const SR: f32 = 48000.0;
+
+    /// Full parameter list with the given A/D/S/R and default curves and velocity amount.
+    fn params(attack: f32, decay: f32, sustain: f32, release: f32) -> [f32; 8] {
+        [attack, decay, sustain, release, 0.2, 0.5, 0.5, 0.5]
+    }
+
+    /// Runs the envelope over a gate that is high for `gate_samples` of `total` samples.
+    fn render(params: &[f32], gate_samples: usize, total: usize) -> Vec<f32> {
+        let mut env = AdsrEnvelope::new();
+        env.prepare(SR, total);
+        let mut gate = SignalBuffer::control(total);
+        gate.samples[..gate_samples].fill(1.0);
+        let mut outputs = vec![SignalBuffer::control(total)];
+        env.process(&[&gate], &mut outputs, params, &ProcessContext::new(SR, total));
+        outputs.remove(0).samples
+    }
+
+    /// First index at or after `from` where the output reaches `level`
+    /// (from below when rising, from above when falling).
+    fn first_reaching(out: &[f32], from: usize, level: f32, rising: bool) -> usize {
+        out[from..]
+            .iter()
+            .position(|&s| if rising { s >= level } else { s <= level })
+            .map(|i| i + from)
+            .expect("level never reached")
+    }
+
+    fn assert_within_5_percent(measured_samples: usize, knob_seconds: f32, what: &str) {
+        let measured = measured_samples as f32 / SR;
+        let error = (measured - knob_seconds).abs() / knob_seconds;
+        assert!(
+            error <= 0.05,
+            "{what}: knob {knob_seconds}s, measured {measured}s ({:.1}% off)",
+            error * 100.0
+        );
+    }
 
     #[test]
     fn test_adsr_info() {
@@ -347,7 +492,7 @@ mod tests {
         let env = AdsrEnvelope::new();
         let ports = env.ports();
 
-        assert_eq!(ports.len(), 3);
+        assert_eq!(ports.len(), 4);
 
         // Gate input
         assert!(ports[0].is_input());
@@ -359,10 +504,15 @@ mod tests {
         assert_eq!(ports[1].id, "retrigger");
         assert_eq!(ports[1].signal_type, SignalType::Gate);
 
-        // Output
-        assert!(ports[2].is_output());
-        assert_eq!(ports[2].id, "out");
+        // Velocity input
+        assert!(ports[2].is_input());
+        assert_eq!(ports[2].id, "velocity");
         assert_eq!(ports[2].signal_type, SignalType::Control);
+
+        // Output
+        assert!(ports[3].is_output());
+        assert_eq!(ports[3].id, "out");
+        assert_eq!(ports[3].signal_type, SignalType::Control);
     }
 
     #[test]
@@ -370,30 +520,20 @@ mod tests {
         let env = AdsrEnvelope::new();
         let params = env.parameters();
 
-        assert_eq!(params.len(), 4);
+        // The first four keep their positions for v1/v2 patches
+        let ids: Vec<_> = params.iter().map(|p| p.id).collect();
+        assert_eq!(
+            ids,
+            ["attack", "decay", "sustain", "release", "attack_curve", "decay_curve", "release_curve", "velocity_amount"]
+        );
 
-        // Attack
-        assert_eq!(params[0].id, "attack");
         assert_eq!(params[0].min, 0.001);
         assert_eq!(params[0].max, 10.0);
         assert!((params[0].default - 0.01).abs() < f32::EPSILON);
-
-        // Decay
-        assert_eq!(params[1].id, "decay");
-        assert_eq!(params[1].min, 0.001);
-        assert_eq!(params[1].max, 10.0);
         assert!((params[1].default - 0.1).abs() < f32::EPSILON);
-
-        // Sustain
-        assert_eq!(params[2].id, "sustain");
         assert_eq!(params[2].min, 0.0);
         assert_eq!(params[2].max, 1.0);
         assert!((params[2].default - 0.7).abs() < f32::EPSILON);
-
-        // Release
-        assert_eq!(params[3].id, "release");
-        assert_eq!(params[3].min, 0.001);
-        assert_eq!(params[3].max, 10.0);
         assert!((params[3].default - 0.3).abs() < f32::EPSILON);
     }
 
@@ -406,175 +546,204 @@ mod tests {
         let mut outputs = vec![SignalBuffer::control(256)];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        env.process(&[], &mut outputs, &[0.01, 0.1, 0.7, 0.3], &ctx);
+        env.process(&[], &mut outputs, &params(0.01, 0.1, 0.7, 0.3), &ctx);
 
         // Output should be all zeros
         assert!(outputs[0].samples.iter().all(|&s| s == 0.0));
     }
 
     #[test]
+    fn test_stage_shape_ends() {
+        for k in [1e-3, 0.5, 2.0, 5.0, 10.0] {
+            assert!(stage_shape(k, 0.0).abs() < 1e-12);
+            assert!((stage_shape(k, 1.0) - 1.0).abs() < 1e-12);
+        }
+        // Near zero steepness is a straight line
+        assert!((stage_shape(curve_steepness(0.0), 0.25) - 0.25).abs() < 1e-3);
+        // Steeper is further along early
+        assert!(stage_shape(5.0, 0.2) > stage_shape(2.0, 0.2));
+    }
+
+    #[test]
+    fn test_stage_times_match_knobs() {
+        // Attack, decay and release land within 5% of their knobs, at
+        // short, middling and long settings and every curve
+        for &time in &[0.005, 0.1, 1.0] {
+            for &curve in &[0.0, 0.2, 0.5, 1.0] {
+                let p = [time, time, 0.5, time, curve, curve, curve, 0.5];
+                let hold = ((time * 2.5) * SR) as usize;
+                let total = hold + ((time * 1.5) * SR) as usize;
+                let out = render(&p, hold, total);
+
+                let peak = first_reaching(&out, 0, 1.0, true);
+                assert_within_5_percent(peak, time, &format!("attack (curve {curve})"));
+
+                let sustained = first_reaching(&out, peak, 0.5, false);
+                assert_within_5_percent(sustained - peak, time, &format!("decay (curve {curve})"));
+
+                let silent = first_reaching(&out, hold, 0.0, false);
+                assert_within_5_percent(silent - hold, time, &format!("release (curve {curve})"));
+            }
+        }
+    }
+
+    #[test]
+    fn test_curve_follows_stage_shape() {
+        // The rendered envelope is stage_shape, sample for sample
+        let (a, d, s, r) = (0.05, 0.08, 0.4, 0.12);
+        let p = [a, d, s, r, 0.3, 0.6, 0.8, 0.5];
+        let hold = ((a + d + 0.05) * SR) as usize;
+        let out = render(&p, hold, hold + (r * SR) as usize + 100);
+
+        let curve = |c: f32, u: f64| stage_shape(curve_steepness(c), u);
+        let decay_start = first_reaching(&out, 0, 1.0, true);
+        for step in 1..10 {
+            let u = step as f64 / 10.0;
+            let at = |start: usize, secs: f32| out[start + (u * (secs * SR) as f64).round() as usize] as f64;
+
+            let attack = curve(0.3, u);
+            let decay = 1.0 - (1.0 - s as f64) * curve(0.6, u);
+            let release = s as f64 * (1.0 - curve(0.8, u));
+
+            assert!((at(0, a) - attack).abs() < 1e-3, "attack at {u}: {} vs {attack}", at(0, a));
+            assert!((at(decay_start, d) - decay).abs() < 1e-3, "decay at {u}");
+            assert!((at(hold, r) - release).abs() < 1e-3, "release at {u}");
+        }
+    }
+
+    #[test]
+    fn test_attack_is_punchy_by_default() {
+        // Halfway through the attack is about 70% up, like an RC aimed at
+        // 1.2, not the 92% the old RC aimed at 1.0 gave
+        let out = render(&params(0.1, 1.0, 0.7, 0.3), 48000, 48000);
+        let halfway = out[(0.05 * SR) as usize];
+        assert!(halfway > 0.6 && halfway < 0.8, "halfway level {halfway}");
+    }
+
+    #[test]
     fn test_adsr_attack_phase() {
-        let mut env = AdsrEnvelope::new();
-        let sample_rate = 44100.0;
-        env.prepare(sample_rate, 4410);
-
-        // Create a gate signal that's high
-        let mut gate = SignalBuffer::control(4410);
-        gate.fill(1.0);
-
-        let mut outputs = vec![SignalBuffer::control(4410)];
-        let ctx = ProcessContext::new(sample_rate, 4410);
-
-        // Short attack (10ms), longer decay
-        env.process(&[&gate], &mut outputs, &[0.01, 1.0, 0.7, 0.3], &ctx);
-
-        // First sample should be small (just started attack)
-        assert!(outputs[0].samples[0] < 0.5, "Initial attack should be low");
-
-        // After ~10ms (441 samples), should be close to 1.0
-        assert!(
-            outputs[0].samples[441] > 0.9,
-            "Should reach near-peak after attack time"
-        );
-
-        // Should eventually reach 1.0 then decay to sustain
-        let max_level = outputs[0].samples.iter().cloned().fold(0.0f32, f32::max);
-        assert!(
-            max_level > 0.99,
-            "Should reach peak during attack, got {}",
-            max_level
-        );
+        let out = render(&params(0.01, 1.0, 0.7, 0.3), 4800, 4800);
+        assert!(out[0] < 0.01, "Envelope starts at zero on the gate edge");
+        assert!(out[480] > 0.99, "Reaches the peak after the attack time");
+        assert!(out.iter().all(|&s| s <= 1.0));
     }
 
     #[test]
     fn test_adsr_sustain_hold() {
-        let mut env = AdsrEnvelope::new();
-        let sample_rate = 44100.0;
-        env.prepare(sample_rate, 44100);
-
-        // Gate high for 1 second
-        let mut gate = SignalBuffer::control(44100);
-        gate.fill(1.0);
-
-        let mut outputs = vec![SignalBuffer::control(44100)];
-        let ctx = ProcessContext::new(sample_rate, 44100);
-
-        // Very fast attack/decay so we reach sustain quickly
-        env.process(&[&gate], &mut outputs, &[0.001, 0.001, 0.5, 0.3], &ctx);
-
-        // After attack and decay, should be at sustain level (0.5)
-        // Check last portion of the buffer
-        let end_samples = &outputs[0].samples[40000..];
-        for &sample in end_samples {
-            assert!(
-                (sample - 0.5).abs() < 0.01,
-                "Should hold at sustain level, got {}",
-                sample
-            );
+        let out = render(&params(0.001, 0.001, 0.5, 0.3), 48000, 48000);
+        for &sample in &out[40000..] {
+            assert!((sample - 0.5).abs() < 1e-4, "Should hold at sustain level, got {}", sample);
         }
+    }
+
+    #[test]
+    fn test_sustain_changes_glide() {
+        let mut env = AdsrEnvelope::new();
+        env.prepare(SR, 4800);
+        let mut gate = SignalBuffer::control(4800);
+        gate.fill(1.0);
+        let ctx = ProcessContext::new(SR, 4800);
+        let mut outputs = vec![SignalBuffer::control(4800)];
+        env.process(&[&gate], &mut outputs, &params(0.001, 0.001, 0.8, 0.3), &ctx);
+        assert!((outputs[0].samples[4799] - 0.8).abs() < 1e-4);
+
+        // Drop the sustain knob: no step, but there within ~30 ms
+        env.process(&[&gate], &mut outputs, &params(0.001, 0.001, 0.2, 0.3), &ctx);
+        let out = &outputs[0].samples;
+        let biggest_step = out.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
+        assert!(biggest_step < 0.01, "sustain stepped by {biggest_step}");
+        assert!((out[1440] - 0.2).abs() < 0.01, "sustain should settle, got {}", out[1440]);
+    }
+
+    #[test]
+    fn test_velocity_scales_peak() {
+        let total = 9600;
+        let run = |velocity: f32, amount: f32, connected: bool| {
+            let mut env = AdsrEnvelope::new();
+            env.prepare(SR, total);
+            let mut gate = SignalBuffer::control(total);
+            gate.fill(1.0);
+            let mut vel = if connected {
+                SignalBuffer::control(total)
+            } else {
+                SignalBuffer::unconnected(total, SignalType::Control)
+            };
+            vel.fill(velocity);
+            let mut outputs = vec![SignalBuffer::control(total)];
+            let p = [0.01, 0.01, 0.5, 0.3, 0.2, 0.5, 0.5, amount];
+            env.process(&[&gate, &SignalBuffer::control(total), &vel], &mut outputs, &p, &ProcessContext::new(SR, total));
+            let out = outputs.remove(0).samples;
+            (out.iter().cloned().fold(0.0, f32::max), out[total - 1])
+        };
+
+        // Full amount: peak is the velocity, sustain is a fraction of the peak
+        let (peak, sustain) = run(0.4, 1.0, true);
+        assert!((peak - 0.4).abs() < 1e-4, "peak {peak}");
+        assert!((sustain - 0.2).abs() < 1e-3, "sustain {sustain}");
+
+        // Half amount: halfway between full and the velocity
+        let (peak, _) = run(0.4, 0.5, true);
+        assert!((peak - 0.7).abs() < 1e-4, "peak {peak}");
+
+        // Nothing plugged in: full peak whatever the amount
+        let (peak, _) = run(0.0, 1.0, false);
+        assert!((peak - 1.0).abs() < 1e-4, "peak {peak}");
     }
 
     #[test]
     fn test_adsr_release_phase() {
         let mut env = AdsrEnvelope::new();
-        let sample_rate = 44100.0;
+        env.prepare(SR, 4800);
+        let ctx = ProcessContext::new(SR, 4800);
+        let p = params(0.001, 0.001, 0.7, 0.05);
 
-        // First, trigger the envelope to build up some level
-        env.prepare(sample_rate, 4410);
-
-        let mut gate_on = SignalBuffer::control(4410);
+        let mut gate_on = SignalBuffer::control(4800);
         gate_on.fill(1.0);
+        let mut outputs = vec![SignalBuffer::control(4800)];
+        env.process(&[&gate_on], &mut outputs, &p, &ctx);
 
-        let mut outputs = vec![SignalBuffer::control(4410)];
-        let ctx = ProcessContext::new(sample_rate, 4410);
+        let gate_off = SignalBuffer::control(4800);
+        env.process(&[&gate_off], &mut outputs, &p, &ctx);
+        let out = &outputs[0].samples;
 
-        // Fast attack/decay to reach sustain
-        env.process(&[&gate_on], &mut outputs, &[0.001, 0.001, 0.7, 0.1], &ctx);
-
-        // Now release (gate low)
-        let gate_off = SignalBuffer::control(4410);
-        let mut outputs2 = vec![SignalBuffer::control(4410)];
-
-        env.process(&[&gate_off], &mut outputs2, &[0.001, 0.001, 0.7, 0.1], &ctx);
-
-        // First sample should be near sustain level
-        assert!(
-            outputs2[0].samples[0] > 0.5,
-            "Release should start from sustain level"
-        );
-
-        // Should decay toward zero
-        assert!(
-            outputs2[0].samples[4409] < outputs2[0].samples[0],
-            "Release should decrease the level"
-        );
+        assert!((out[0] - 0.7).abs() < 1e-3, "Release starts from sustain level");
+        assert!(out[1200] < out[600] && out[600] < out[0], "Release falls");
+        assert!(out[2400] < 1e-3, "Release lands on zero at its time");
+        assert_eq!(out[2402], 0.0);
+        assert_eq!(env.stage, EnvelopeStage::Idle);
     }
 
     #[test]
     fn test_adsr_gate_off_during_attack() {
-        let mut env = AdsrEnvelope::new();
-        let sample_rate = 44100.0;
-        env.prepare(sample_rate, 4410);
+        let out = render(&params(0.5, 0.1, 0.7, 0.05), 1000, 4800);
 
-        // Gate that goes low partway through attack
-        let mut gate = SignalBuffer::control(4410);
-        for i in 0..1000 {
-            gate.samples[i] = 1.0;
-        }
-        // Rest is 0.0 (low)
-
-        let mut outputs = vec![SignalBuffer::control(4410)];
-        let ctx = ProcessContext::new(sample_rate, 4410);
-
-        // Long attack so we're definitely still in attack when gate goes low
-        env.process(&[&gate], &mut outputs, &[0.5, 0.1, 0.7, 0.1], &ctx);
-
-        // After gate goes low, level should start decreasing (release)
-        let level_at_gate_off = outputs[0].samples[1000];
-        let level_later = outputs[0].samples[4000];
-        assert!(
-            level_later < level_at_gate_off,
-            "Level should decrease after gate off"
-        );
+        // Released partway up, it falls from there to zero in the release time
+        let level_at_gate_off = out[1000];
+        assert!(level_at_gate_off > 0.0 && level_at_gate_off < 0.5);
+        assert!(out[1001] < level_at_gate_off);
+        assert!(out[1000 + 2400] < 1e-3);
+        assert_eq!(out[1000 + 2402], 0.0);
     }
 
     #[test]
     fn test_adsr_retrigger() {
         let mut env = AdsrEnvelope::new();
-        let sample_rate = 44100.0;
-        env.prepare(sample_rate, 8820);
+        env.prepare(SR, 9600);
 
-        // Gate stays high
-        let mut gate = SignalBuffer::control(8820);
+        let mut gate = SignalBuffer::control(9600);
         gate.fill(1.0);
+        let mut retrigger = SignalBuffer::control(9600);
+        retrigger.samples[4800..4810].fill(1.0);
 
-        // Retrigger pulse at halfway point
-        let mut retrigger = SignalBuffer::control(8820);
-        for i in 4400..4410 {
-            retrigger.samples[i] = 1.0;
-        }
+        let mut outputs = vec![SignalBuffer::control(9600)];
+        let ctx = ProcessContext::new(SR, 9600);
+        env.process(&[&gate, &retrigger], &mut outputs, &params(0.01, 0.05, 0.5, 0.3), &ctx);
 
-        let mut outputs = vec![SignalBuffer::control(8820)];
-        let ctx = ProcessContext::new(sample_rate, 8820);
-
-        // Moderate attack/decay so we reach sustain before retrigger
-        env.process(
-            &[&gate, &retrigger],
-            &mut outputs,
-            &[0.01, 0.05, 0.5, 0.3],
-            &ctx,
-        );
-
-        // Before retrigger, should be at or near sustain
-        let level_before = outputs[0].samples[4300];
-
-        // After retrigger, should rise toward 1.0 again
-        // Check a bit after the retrigger point
-        let level_after = outputs[0].samples[4600];
-        assert!(
-            level_after > level_before,
-            "Retrigger should cause level to rise from sustain"
-        );
+        let out = &outputs[0].samples;
+        assert!((out[4799] - 0.5).abs() < 1e-3, "At sustain before the retrigger");
+        // Back up to the peak one attack time later, smoothly
+        assert!((out[4800 + 480] - 1.0).abs() < 1e-3, "got {}", out[4800 + 480]);
+        assert!((out[4801] - out[4800]).abs() < 0.05);
     }
 
     #[test]
@@ -587,7 +756,7 @@ mod tests {
         gate.fill(1.0);
         let mut outputs = vec![SignalBuffer::control(256)];
         let ctx = ProcessContext::new(44100.0, 256);
-        env.process(&[&gate], &mut outputs, &[0.001, 0.1, 0.7, 0.3], &ctx);
+        env.process(&[&gate], &mut outputs, &params(0.001, 0.1, 0.7, 0.3), &ctx);
 
         // Reset
         env.reset();
@@ -598,64 +767,19 @@ mod tests {
 
         // Process without gate - should output zeros
         let mut outputs2 = vec![SignalBuffer::control(256)];
-        env.process(&[], &mut outputs2, &[0.01, 0.1, 0.7, 0.3], &ctx);
+        env.process(&[], &mut outputs2, &params(0.01, 0.1, 0.7, 0.3), &ctx);
         assert!(outputs2[0].samples.iter().all(|&s| s == 0.0));
     }
 
     #[test]
     fn test_adsr_output_range() {
-        let mut env = AdsrEnvelope::new();
-        let sample_rate = 44100.0;
-        env.prepare(sample_rate, 44100);
-
-        // Gate on then off
-        let mut gate = SignalBuffer::control(44100);
-        for i in 0..22050 {
-            gate.samples[i] = 1.0;
+        for curve in [0.0, 0.5, 1.0] {
+            let p = [0.01, 0.1, 0.7, 0.3, curve, curve, curve, 0.5];
+            let out = render(&p, 22050, 44100);
+            for &sample in &out {
+                assert!((0.0..=1.0).contains(&sample), "Output {} out of range", sample);
+            }
         }
-
-        let mut outputs = vec![SignalBuffer::control(44100)];
-        let ctx = ProcessContext::new(sample_rate, 44100);
-
-        env.process(&[&gate], &mut outputs, &[0.01, 0.1, 0.7, 0.3], &ctx);
-
-        // All output values should be in valid range [0, 1]
-        for &sample in &outputs[0].samples {
-            assert!(
-                sample >= 0.0 && sample <= 1.0,
-                "Output {} out of range",
-                sample
-            );
-        }
-    }
-
-    #[test]
-    fn test_adsr_exponential_curves() {
-        let mut env = AdsrEnvelope::new();
-        let sample_rate = 44100.0;
-        env.prepare(sample_rate, 4410);
-
-        let mut gate = SignalBuffer::control(4410);
-        gate.fill(1.0);
-
-        let mut outputs = vec![SignalBuffer::control(4410)];
-        let ctx = ProcessContext::new(sample_rate, 4410);
-
-        // Moderate attack time
-        env.process(&[&gate], &mut outputs, &[0.05, 0.5, 0.5, 0.3], &ctx);
-
-        // Check that attack curve is concave (exponential rise)
-        // The rate of increase should slow down as we approach 1.0
-        let early_increase = outputs[0].samples[100] - outputs[0].samples[0];
-        let later_increase = outputs[0].samples[1000] - outputs[0].samples[900];
-
-        // Early increase should be larger (faster initial rise)
-        assert!(
-            early_increase > later_increase,
-            "Attack should have exponential curve (early: {}, later: {})",
-            early_increase,
-            later_increase
-        );
     }
 
     #[test]
@@ -685,59 +809,19 @@ mod tests {
         let module = module.unwrap();
         assert_eq!(module.info().id, "mod.adsr");
         assert_eq!(module.info().name, "ADSR Envelope");
-        assert_eq!(module.ports().len(), 3);
-        assert_eq!(module.parameters().len(), 4);
+        assert_eq!(module.ports().len(), 4);
+        assert_eq!(module.parameters().len(), 8);
     }
 
     #[test]
     fn test_adsr_zero_sustain() {
-        let mut env = AdsrEnvelope::new();
-        let sample_rate = 44100.0;
-        env.prepare(sample_rate, 44100);
-
-        let mut gate = SignalBuffer::control(44100);
-        gate.fill(1.0);
-
-        let mut outputs = vec![SignalBuffer::control(44100)];
-        let ctx = ProcessContext::new(sample_rate, 44100);
-
-        // Zero sustain level
-        env.process(&[&gate], &mut outputs, &[0.01, 0.01, 0.0, 0.3], &ctx);
-
-        // After attack and decay, should be at zero
-        let end_samples = &outputs[0].samples[40000..];
-        for &sample in end_samples {
-            assert!(
-                sample < 0.01,
-                "Should hold at zero sustain, got {}",
-                sample
-            );
-        }
+        let out = render(&params(0.01, 0.01, 0.0, 0.3), 48000, 48000);
+        assert!(out[40000..].iter().all(|&s| s == 0.0));
     }
 
     #[test]
     fn test_adsr_full_sustain() {
-        let mut env = AdsrEnvelope::new();
-        let sample_rate = 44100.0;
-        env.prepare(sample_rate, 44100);
-
-        let mut gate = SignalBuffer::control(44100);
-        gate.fill(1.0);
-
-        let mut outputs = vec![SignalBuffer::control(44100)];
-        let ctx = ProcessContext::new(sample_rate, 44100);
-
-        // Full sustain level (1.0)
-        env.process(&[&gate], &mut outputs, &[0.01, 0.01, 1.0, 0.3], &ctx);
-
-        // After attack, should stay at 1.0 (no decay needed)
-        let end_samples = &outputs[0].samples[40000..];
-        for &sample in end_samples {
-            assert!(
-                sample > 0.99,
-                "Should hold at full sustain, got {}",
-                sample
-            );
-        }
+        let out = render(&params(0.01, 0.01, 1.0, 0.3), 48000, 48000);
+        assert!(out[1000..].iter().all(|&s| (s - 1.0).abs() < 1e-6));
     }
 }

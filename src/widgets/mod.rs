@@ -29,6 +29,6 @@ pub use spectrum_display::{
 pub use led::{led, LedConfig};
 pub use cpu_meter::{cpu_meter, CpuMeterConfig, cpu_load_color};
 pub use oscilloscope_display::{oscilloscope_display, OscilloscopeConfig, TriggerMode};
-pub use adsr_display::{adsr_display, AdsrConfig, AdsrParams, generate_adsr_curve, get_adsr_segment_boundaries};
+pub use adsr_display::{adsr_display, AdsrConfig, AdsrParams, AdsrSegment, generate_adsr_curve, get_adsr_segment_boundaries};
 pub use piano::{piano, PianoConfig, PianoData};
 pub use level_meter::{level_meter, LevelMeter, LevelMeterConfig};
