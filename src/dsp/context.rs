@@ -2,6 +2,8 @@
 //!
 //! Provides runtime information that modules need during audio processing.
 
+use super::signal::MidiEvent;
+
 /// Transport state information for synchronization.
 ///
 /// Provides tempo and playback state for modules that need to sync
@@ -70,24 +72,29 @@ impl TransportState {
 /// Context provided to modules during audio processing.
 ///
 /// Contains all the runtime information a module needs to process audio,
-/// including sample rate, buffer size, and transport state.
+/// including sample rate, buffer size, transport state, and the MIDI that
+/// arrived for this block.
 #[derive(Clone, Copy, Debug)]
-pub struct ProcessContext {
+pub struct ProcessContext<'a> {
     /// The audio sample rate in Hz (e.g., 44100, 48000).
     pub sample_rate: f32,
     /// The number of samples in the current processing block.
     pub block_size: usize,
     /// Current transport/timeline state.
     pub transport: TransportState,
+    /// Incoming MIDI for this block, in time order. Each event's
+    /// `sample_offset` is the sample within the block it lands on.
+    pub midi: &'a [MidiEvent],
 }
 
-impl ProcessContext {
+impl<'a> ProcessContext<'a> {
     /// Creates a new process context.
     pub fn new(sample_rate: f32, block_size: usize) -> Self {
         Self {
             sample_rate,
             block_size,
             transport: TransportState::new(),
+            midi: &[],
         }
     }
 
@@ -97,6 +104,17 @@ impl ProcessContext {
             sample_rate,
             block_size,
             transport,
+            midi: &[],
+        }
+    }
+
+    /// The same context, carrying `midi` as this block's MIDI input.
+    pub fn with_midi<'b>(self, midi: &'b [MidiEvent]) -> ProcessContext<'b> {
+        ProcessContext {
+            sample_rate: self.sample_rate,
+            block_size: self.block_size,
+            transport: self.transport,
+            midi,
         }
     }
 
@@ -128,7 +146,7 @@ impl ProcessContext {
     }
 }
 
-impl Default for ProcessContext {
+impl Default for ProcessContext<'_> {
     fn default() -> Self {
         Self::new(44100.0, 256)
     }

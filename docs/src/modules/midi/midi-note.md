@@ -1,51 +1,50 @@
 # MIDI Note
 
-**Module ID**: `midi.note`
-**Category**: MIDI
-**Header Color**: Magenta
+**Module ID**: `input.midi_note`
+**Category**: Source
+**Header Color**: Blue
 
 ![MIDI Note Module](../../images/module-midi-note.png)
 *The MIDI Note module*
 
 ## Description
 
-The MIDI Note module receives MIDI input from external devices (keyboards, controllers, DAWs) and converts it to CV and Gate signals. It's the bridge between the MIDI world and the modular CV/Gate paradigm.
+The MIDI Note module receives MIDI from the device chosen in the toolbar (a keyboard, a controller, a DAW or sequencer) and converts it to CV and gate signals. It's the bridge between the MIDI world and the modular CV/Gate paradigm.
 
-## Inputs
-
-| Port | Signal Type | Description |
-|------|-------------|-------------|
-| **MIDI In** | MIDI (Purple) | MIDI data from external source (auto-connected) |
+It is monophonic: when several keys are held, **Priority** decides which one sounds.
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **V/Oct** | Control (Orange) | Pitch as 1V/octave CV |
-| **Gate** | Gate (Green) | High during Note On, low on Note Off |
-| **Velocity** | Control (Orange) | Note velocity (0.0 - 1.0) |
-| **Aftertouch** | Control (Orange) | Channel aftertouch pressure |
-| **Mod Wheel** | Control (Orange) | MIDI CC1 (Mod Wheel) |
-| **Pitch Bend** | Control (Orange) | Pitch bend wheel (-1.0 to +1.0) |
+| **Pitch** | Control (Orange) | V/Oct pitch, including pitch bend |
+| **Gate** | Gate (Green) | High while any key is held |
+| **Velocity** | Control (Orange) | The sounding note's velocity (0.0 - 1.0) |
+| **Aftertouch** | Control (Orange) | Channel pressure (0.0 - 1.0) |
 
 ## Parameters
 
-| Knob | Range | Default | Description |
-|------|-------|---------|-------------|
-| **MIDI Channel** | 1-16 / Omni | Omni | Which MIDI channel to respond to |
-| **Voice Mode** | Last/Low/High | Last | Note priority for monophonic mode |
-| **Bend Range** | 0-24 semitones | 2 | Pitch bend range in semitones |
-| **Velocity Curve** | Linear/Soft/Hard | Linear | Velocity response curve |
+| Control | Range | Default | Description |
+|---------|-------|---------|-------------|
+| **Ch** | Omni / 1-16 | Omni | Which MIDI channel to respond to |
+| **Priority** | Last / Low / High | Last | Which held key sounds |
+| **Retrig** | Off / On | Off | Restart the gate when moving between held keys |
+| **Oct** | -4 to +4 | 0 | Octave shift |
+| **Bend** | 0-12 semitones | 2 | How far the pitch bend wheel bends |
 
 ## How It Works
 
-When MIDI data arrives:
+1. **Note On**: Gate goes high and Pitch moves to the note, on the exact sample the note arrived
+2. **Note Off**: Gate goes low once every key is released. Pitch stays on the last note, so the release tail stays in tune
+3. **Pitch Bend**: Bends the Pitch output by up to ±Bend semitones, gliding over a few milliseconds so it never zippers
+4. **Aftertouch**: Channel pressure appears on the Aftertouch output
+5. **All Notes Off** (CC 123) and **All Sound Off** (CC 120) release every held key
 
-1. **Note On**: Gate goes high, V/Oct updates to pitch, Velocity captures velocity
-2. **Note Off**: Gate goes low (or when all keys released)
-3. **Aftertouch**: Continuous pressure data
-4. **Mod Wheel (CC1)**: Updates Mod Wheel output
-5. **Pitch Bend**: Updates Pitch Bend output
+Switching or disconnecting the MIDI device releases any notes still held, so nothing sticks.
+
+### Timing
+
+MIDI is handled on the audio thread. Each message is stamped the moment it arrives and placed at the matching sample of the next audio buffer. Every note is delayed by the same amount (one audio buffer, a few milliseconds), so a steady sequence from a DAW or sequencer plays back steady, with no jitter. Even the shortest note produces a gate.
 
 ### V/Oct Conversion
 
@@ -59,12 +58,12 @@ MIDI notes convert to V/Oct standard:
 
 ### Basic MIDI Connection
 
-Connect to any MIDI device:
+Choose your device from the MIDI menu in the toolbar, then patch:
 
 ```
-[MIDI Note V/Oct] ──> [Oscillator V/Oct]
+[MIDI Note Pitch] ──> [Oscillator V/Oct]
 [MIDI Note Gate] ──> [ADSR Gate]
-[MIDI Note Velocity] ──> [VCA CV] (optional)
+[MIDI Note Velocity] ──> [ADSR Velocity] (optional)
 ```
 
 ### Velocity-Sensitive Patch
@@ -73,49 +72,36 @@ Use velocity for expression:
 
 ```
 [MIDI Note Velocity] ──> [Attenuverter] ──> [Filter Cutoff CV]
-                     ──> [VCA CV]
+                     ──> [ADSR Velocity]
 ```
 
 Harder playing = louder and brighter.
 
-### Pitch Bend
-
-Add pitch bend to oscillator:
-
-```
-[MIDI Note V/Oct] ──────────────────────> [Oscillator V/Oct]
-[MIDI Note Pitch Bend] ──> [Attenuverter] ──> [Oscillator FM]
-```
-
-Scale the pitch bend amount with the attenuverter.
-
-### Mod Wheel Modulation
-
-Use mod wheel for real-time control:
-
-```
-[MIDI Note Mod Wheel] ──> [LFO Depth] (vibrato amount)
-                      ──> [Filter Cutoff CV]
-                      ──> [Effect Parameter]
-```
-
 ### Channel Selection
 
-**Omni Mode**: Responds to all MIDI channels (default)
+**Omni**: Responds to all MIDI channels (default)
 **Specific Channel (1-16)**: Only responds to that channel
 
 Use specific channels when:
-- Multiple MIDI devices are connected
 - Splitting keyboard zones
 - Receiving from a DAW with multiple tracks
+- Running two MIDI Note modules as two separate voices
 
-### Voice Modes
+### Priority
 
-When multiple keys are pressed (monophonic mode):
+When more than one key is held:
 
-**Last**: Most recently pressed note takes priority
-**Low**: Lowest note takes priority
-**High**: Highest note takes priority
+**Last**: Most recently pressed key sounds
+**Low**: Lowest key sounds (classic for basslines)
+**High**: Highest key sounds (classic for leads)
+
+Releasing the sounding key falls back to another held key, so you can trill against a held note.
+
+### Retrigger
+
+With **Retrig** off, playing legato (pressing a new key before releasing the old one) changes the pitch but keeps the gate high, so the envelope carries on: smooth, connected lines.
+
+With **Retrig** on, each legato note drops the gate for one sample, so envelopes start again on every note.
 
 ### Aftertouch Expression
 
@@ -129,19 +115,9 @@ If your MIDI controller supports aftertouch:
 
 Pressing harder after the initial attack adds modulation.
 
-### Velocity Curves
-
-| Curve | Response |
-|-------|----------|
-| **Linear** | 1:1 mapping, raw MIDI velocity |
-| **Soft** | Easier to reach high velocities |
-| **Hard** | Requires stronger playing for high velocities |
-
-Choose based on your playing style and controller.
-
 ## MIDI Learn
 
-For parameters that support MIDI Learn:
+Knobs on other modules can follow a MIDI CC (a mod wheel, a fader):
 
 1. Right-click the parameter knob
 2. Select "MIDI Learn"
@@ -152,18 +128,16 @@ For parameters that support MIDI Learn:
 
 ### Complete Velocity-Sensitive Synth
 ```
-[MIDI Note V/Oct] ──> [Oscillator V/Oct]
+[MIDI Note Pitch] ──> [Oscillator V/Oct]
 [MIDI Note Gate] ──> [ADSR] ──> [VCA CV]
 [MIDI Note Velocity] ──> [Filter Cutoff CV]
-                     ──> [ADSR Velocity Scale]
+                     ──> [ADSR Velocity]
 ```
 
-### With Pitch Bend and Mod Wheel
+### Two Oscillators, One Keyboard
 ```
-[MIDI Note V/Oct] ──> [Oscillator 1 V/Oct]
+[MIDI Note Pitch] ──> [Oscillator 1 V/Oct]
                   ──> [Oscillator 2 V/Oct]
-[MIDI Note Pitch Bend] ──> [Mixer] ──> [Oscillator FM]
-[MIDI Note Mod Wheel] ──> [LFO] ──> [Mixer]
 ```
 
 ### Multi-Timbral Setup
@@ -172,33 +146,24 @@ For parameters that support MIDI Learn:
 [MIDI Note (Ch 2)] ──> [Synth Voice 2]
 ```
 
-### Performance Controller
-```
-[MIDI Note Mod Wheel] ──> [Filter Cutoff CV]
-[MIDI Note Aftertouch] ──> [Vibrato Amount]
-[MIDI Note Pitch Bend] ──> [Pitch CV Offset]
-```
-
 ## Troubleshooting
 
 ### No MIDI Input
 
 1. Check MIDI device is connected and powered
-2. Verify MIDI channel settings match
-3. Check that the device is selected in system MIDI settings
-4. Try "Omni" channel mode
+2. Check the device is selected in the toolbar's MIDI menu. On Windows, a device another app has open (a DAW, a browser) can't be opened here too
+3. Verify the Ch setting matches what your device sends, or try Omni
+4. Press Play: MIDI only sounds while the patch is playing
 
 ### Wrong Pitch
 
-1. Verify oscillator is calibrated to V/Oct
-2. Check for octave offset settings
-3. Ensure no unintended pitch modulation
+1. Check Oct, and that the pitch bend wheel is centred
+2. Ensure no unintended pitch modulation
 
 ### Stuck Notes
 
-1. Check Gate connections
-2. Send All Notes Off from your controller
-3. Reload the patch
+1. Send All Notes Off from your controller
+2. Select the MIDI device again, which releases every held note
 
 ## Related Modules
 

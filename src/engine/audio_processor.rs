@@ -5,6 +5,8 @@
 
 use std::time::Instant;
 
+use rtrb::Consumer;
+
 use crate::dsp::denormal::DenormalGuard;
 use crate::dsp::{ModuleRegistry, ProcessContext};
 use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Chorus, Clock, Compressor, Distortion, KeyboardInput, LadderFilter, Lfo, MidiMonitor, MidiNote, Mixer, Oscilloscope, ParametricEq, Reverb, SampleHold, Oscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
@@ -12,6 +14,8 @@ use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Chorus, Clock, Com
 use super::channels::EngineHandle;
 use super::commands::{AudioMessage, EngineEvent, ScopeFrame};
 use super::graph_plan::GraphPlan;
+use super::midi_engine::TimestampedMidiEvent;
+use super::midi_scheduler::{take_chunk, MidiScheduler};
 
 /// Creates a module registry with all built-in modules.
 ///
@@ -60,6 +64,8 @@ pub struct AudioProcessor {
     plan: Box<GraphPlan>,
     /// Handle for receiving messages from the UI thread.
     engine_handle: EngineHandle,
+    /// Live MIDI input, placed at sample offsets for each callback.
+    midi: MidiScheduler,
     /// Current sample rate.
     sample_rate: f32,
     /// Whether audio processing is active.
@@ -85,11 +91,18 @@ impl AudioProcessor {
         Self {
             plan: Box::new(GraphPlan::empty(block_size)),
             engine_handle,
+            midi: MidiScheduler::new(),
             sample_rate,
             is_playing: false,
             frame_counter: 0,
             cpu_load_avg: 0.0,
         }
+    }
+
+    /// Feeds live MIDI from the MIDI engine to the graph. Events are placed
+    /// at the sample matching when they arrived, one callback later.
+    pub fn set_midi_input(&mut self, input: Consumer<TimestampedMidiEvent>) {
+        self.midi.set_input(input);
     }
 
     /// How often to send CPU load events (in audio callbacks).
@@ -104,8 +117,9 @@ impl AudioProcessor {
     ///
     /// This is called from the cpal audio callback. It:
     /// 1. Applies pending messages from the UI (new plans, parameters, play/stop)
-    /// 2. If playing, runs the graph, in chunks of at most the plan's block size
-    /// 3. Writes the output module's audio to the output buffer
+    /// 2. Places the MIDI that arrived since the last callback in this buffer
+    /// 3. If playing, runs the graph, in chunks of at most the plan's block size
+    /// 4. Writes the output module's audio to the output buffer
     ///
     /// REAL-TIME SAFE: no allocation, locking or blocking.
     ///
@@ -117,6 +131,9 @@ impl AudioProcessor {
         // arithmetic; restored when the callback returns
         let _denormals = DenormalGuard::new();
 
+        // Start timing for CPU measurement; also the moment MIDI is placed against
+        let start_time = Instant::now();
+
         // Process pending messages from UI
         self.process_messages();
 
@@ -124,21 +141,26 @@ impl AudioProcessor {
         output.fill(0.0);
 
         if !self.is_playing || channels == 0 {
+            // Notes played while stopped shouldn't all sound at once on Play
+            self.midi.skip(start_time);
             // Reset CPU load when not playing
             self.cpu_load_avg = 0.0;
             return;
         }
 
-        // Start timing for CPU measurement
-        let start_time = Instant::now();
         let num_frames = output.len() / channels;
+        let mut midi = self.midi.collect(start_time, num_frames);
 
-        // Run the graph over the device buffer in plan-sized blocks
-        let chunk_len = self.plan.max_block_size().max(1) * channels;
-        for chunk in output.chunks_mut(chunk_len) {
+        // Run the graph over the device buffer in plan-sized blocks, each
+        // with the MIDI that falls inside it
+        let block = self.plan.max_block_size().max(1);
+        for (index, chunk) in output.chunks_mut(block * channels).enumerate() {
             let frames = chunk.len() / channels;
-            self.plan.process(&ProcessContext::new(self.sample_rate, frames));
-            self.write_output(chunk, channels, frames);
+            let start = index * block;
+            let chunk_midi = take_chunk(&mut midi, start, start + frames);
+            let context = ProcessContext::new(self.sample_rate, frames).with_midi(chunk_midi);
+            self.plan.process(&context);
+            Self::write_output(&self.plan, chunk, channels, frames);
         }
 
         self.send_monitor_values();
@@ -225,8 +247,8 @@ impl AudioProcessor {
 
     /// Writes the output module's audio for one block into `output`
     /// (interleaved), duplicating to any channels beyond stereo.
-    fn write_output(&self, output: &mut [f32], channels: usize, frames: usize) {
-        let Some((left, right)) = self.plan.audio_output() else {
+    fn write_output(plan: &GraphPlan, output: &mut [f32], channels: usize, frames: usize) {
+        let Some((left, right)) = plan.audio_output() else {
             return;
         };
 

@@ -44,19 +44,17 @@ monitor [0]
 display KeyboardPiano
 
 == input.midi_note "MIDI Note" finder="MIDI Note" Source
-in   Note               Control  ConstantOnly         inline=false num 60 [0..127]
-in   Gate               Control  ConstantOnly         inline=false toggle false ""
-in   Velocity           Control  ConstantOnly         inline=false num 100 [0..127]
-in   Aftertouch         Control  ConstantOnly         inline=false num 0 [0..127]
 in   Channel            Control  ConstantOnly         inline=true  select 0 ["Omni", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"] "Ch"
-in   Octave             Control  ConstantOnly         inline=false num 0 [-4..4]
+in   Octave             Control  ConstantOnly         inline=false num 0 [-4..4] oct stepped
 in   Priority           Control  ConstantOnly         inline=true  select 0 ["Last", "Low", "High"] "Priority"
 in   Retrigger          Control  ConstantOnly         inline=true  toggle false "Retrig"
+in   Bend Range         Control  ConstantOnly         inline=false num 2 [0..12] st stepped
 out  Pitch              Control
 out  Gate               Gate
 out  Velocity           Control
 out  Aftertouch         Control
 knob Octave             "Oct" KnobOnly
+knob Bend Range         "Bend" KnobOnly
 monitor [1]
 display MidiPiano
 

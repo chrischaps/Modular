@@ -6,7 +6,7 @@
 //! [`GraphPlan`] swapping as the live app.
 
 use crate::dsp::denormal::DenormalGuard;
-use crate::dsp::ProcessContext;
+use crate::dsp::{MidiEvent, MidiMessage, ProcessContext};
 use crate::persistence::{compile_patch, CompiledPatch, Patch, PatchError};
 
 use super::{create_module_registry, AudioGraph, EngineCommand, GraphPlan};
@@ -22,7 +22,13 @@ pub struct StereoBuffer {
 pub struct OfflineRenderer {
     graph: AudioGraph,
     plan: Box<GraphPlan>,
-    context: ProcessContext,
+    context: ProcessContext<'static>,
+    /// Frames processed so far: the renderer's sample clock.
+    position: u64,
+    /// Queued MIDI as (frame, event), in frame order.
+    midi: Vec<(u64, MidiEvent)>,
+    /// The current block's MIDI, re-based to the block start.
+    block_midi: Vec<MidiEvent>,
 }
 
 impl OfflineRenderer {
@@ -32,6 +38,9 @@ impl OfflineRenderer {
             graph: AudioGraph::with_registry(sample_rate, block_size, create_module_registry()),
             plan: Box::new(GraphPlan::empty(block_size)),
             context: ProcessContext::new(sample_rate, block_size),
+            position: 0,
+            midi: Vec::new(),
+            block_midi: Vec::new(),
         }
     }
 
@@ -80,6 +89,32 @@ impl OfflineRenderer {
         }
     }
 
+    /// Queues a MIDI message to arrive at `frame` on the renderer's sample
+    /// clock (see [`position`](Self::position)), as live MIDI would be
+    /// placed by the audio thread.
+    pub fn queue_midi(&mut self, frame: u64, channel: u8, message: MidiMessage) {
+        let at = self.midi.partition_point(|&(queued, _)| queued <= frame);
+        self.midi.insert(at, (frame, MidiEvent::new(0, channel, message)));
+    }
+
+    /// Frames processed so far. Renders run in whole blocks, so this can be
+    /// ahead of the frames returned when a render isn't a whole number of
+    /// blocks.
+    pub fn position(&self) -> u64 {
+        self.position
+    }
+
+    /// Moves the queued MIDI that falls in the next block into `block_midi`.
+    fn take_block_midi(&mut self) {
+        let end = self.position + self.context.block_size as u64;
+        let count = self.midi.partition_point(|&(frame, _)| frame < end);
+        self.block_midi.clear();
+        for (frame, mut event) in self.midi.drain(..count) {
+            event.sample_offset = frame.saturating_sub(self.position) as u32;
+            self.block_midi.push(event);
+        }
+    }
+
     /// The sample rate being rendered at.
     pub fn sample_rate(&self) -> f32 {
         self.context.sample_rate
@@ -98,7 +133,9 @@ impl OfflineRenderer {
 
         self.sync_plan();
         while out.left.len() < frames {
-            self.plan.process(&self.context);
+            self.take_block_midi();
+            self.plan.process(&self.context.with_midi(&self.block_midi));
+            self.position += self.context.block_size as u64;
 
             let wanted = (frames - out.left.len()).min(self.context.block_size);
             match self.plan.audio_output() {
@@ -328,5 +365,66 @@ mod tests {
         let mut r = OfflineRenderer::new(48000.0, 128);
         let out = r.render(300);
         assert!(out.left.iter().chain(&out.right).all(|&s| s == 0.0));
+    }
+
+    /// MIDI Note playing an oscillator (chosen waveform) through a VCA
+    /// opened by its gate.
+    fn midi_voice_patch(waveform: usize) -> Patch {
+        let mut patch = osc_patch(waveform);
+        patch.connections.clear();
+        patch.nodes.push(NodeData::new(3, "input.midi_note", (-200.0, 0.0)));
+        patch.nodes.push(NodeData::new(4, "util.vca", (100.0, 0.0)));
+        patch.connections.push(ConnectionData::new(3, "Pitch", 1, "V/Oct"));
+        patch.connections.push(ConnectionData::new(3, "Gate", 4, "CV"));
+        patch.connections.push(ConnectionData::new(1, "Out", 4, "In"));
+        patch.connections.push(ConnectionData::new(4, "Out", 2, "Mono"));
+        patch
+    }
+
+    #[test]
+    fn test_midi_sixteenths_land_on_their_samples() {
+        // 16th notes at 120 BPM (6000 samples apart), starting mid-block so
+        // every note falls inside a block rather than on its edge
+        let sr = 48000.0;
+        let (mut r, compiled) = OfflineRenderer::from_patch(&midi_voice_patch(2), sr, 256).unwrap();
+        assert!(compiled.warnings.is_empty(), "{:?}", compiled.warnings);
+        let first = 1037;
+        for n in 0..8 {
+            let on = first + n * 6000;
+            r.queue_midi(on, 0, MidiMessage::NoteOn { note: 60, velocity: 100 });
+            r.queue_midi(on + 3000, 0, MidiMessage::NoteOff { note: 60, velocity: 0 });
+        }
+        let out = r.render(first as usize + 8 * 6000);
+
+        // A note starts where the square wave appears after silence
+        let loud = |s: f32| s.abs() > 0.05;
+        let onsets: Vec<usize> = (32..out.left.len())
+            .filter(|&i| loud(out.left[i]) && out.left[i - 32..i].iter().all(|&s| !loud(s)))
+            .collect();
+        assert_eq!(onsets.len(), 8, "onsets at {onsets:?}");
+
+        // The output stage's lookahead delays every note equally
+        let latency = onsets[0] - first as usize;
+        assert!(latency <= 64, "latency {latency}");
+        for (n, &onset) in onsets.iter().enumerate() {
+            let expected = first as usize + n * 6000 + latency;
+            assert!(onset.abs_diff(expected) <= 1, "note {n} at {onset}, expected {expected}");
+        }
+    }
+
+    #[test]
+    fn test_midi_pitch_bend_bends_the_oscillator() {
+        let sr = 48000.0;
+        let (mut r, _) = OfflineRenderer::from_patch(&midi_voice_patch(0), sr, 256).unwrap();
+        // A4, bent fully up: two semitones (the default range) to B4
+        r.queue_midi(0, 0, MidiMessage::NoteOn { note: 69, velocity: 100 });
+        r.queue_midi(0, 0, MidiMessage::PitchBend { value: 8191 });
+        r.render_seconds(0.1);
+        let out = r.render(65536);
+
+        let f = Spectrum::of(&out.left, sr).dominant_frequency();
+        let b4 = 440.0 * 2f64.powf(2.0 / 12.0);
+        let cents = 1200.0 * (f / b4).log2();
+        assert!(cents.abs() < 1.0, "expected B4, measured {:.2} Hz ({:+.2} cents)", f, cents);
     }
 }

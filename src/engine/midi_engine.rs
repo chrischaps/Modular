@@ -3,11 +3,16 @@
 //! Handles MIDI input from hardware controllers and virtual MIDI ports.
 //! Uses midir for cross-platform MIDI access and rtrb for lock-free
 //! communication with the audio thread.
+//!
+//! Every incoming message is stamped with the moment it arrived and sent two
+//! ways: to the audio thread, which places it at the matching sample (see
+//! [`MidiScheduler`](super::MidiScheduler)), and to the UI, for display,
+//! MIDI Learn and CC mappings.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use midir::{MidiInput, MidiInputConnection, MidiInputPort};
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -195,6 +200,32 @@ impl MidiEvent {
         }
     }
 
+    /// The audio-thread form of this event, placed at `sample_offset`.
+    /// Returns `None` for messages no module uses (polyphonic aftertouch).
+    pub fn to_dsp(&self, sample_offset: u32) -> Option<crate::dsp::MidiEvent> {
+        use crate::dsp::MidiMessage;
+        let (channel, message) = match *self {
+            MidiEvent::NoteOn { channel, note, velocity } => {
+                (channel, MidiMessage::NoteOn { note, velocity })
+            }
+            MidiEvent::NoteOff { channel, note, velocity } => {
+                (channel, MidiMessage::NoteOff { note, velocity })
+            }
+            MidiEvent::ControlChange { channel, controller, value } => {
+                (channel, MidiMessage::ControlChange { controller, value })
+            }
+            MidiEvent::PitchBend { channel, value } => (channel, MidiMessage::PitchBend { value }),
+            MidiEvent::ChannelPressure { channel, pressure } => {
+                (channel, MidiMessage::Aftertouch { pressure })
+            }
+            MidiEvent::ProgramChange { channel, program } => {
+                (channel, MidiMessage::ProgramChange { program })
+            }
+            MidiEvent::PolyPressure { .. } => return None,
+        };
+        Some(crate::dsp::MidiEvent::new(sample_offset, channel, message))
+    }
+
     /// Get the MIDI channel for this event.
     pub fn channel(&self) -> u8 {
         match self {
@@ -214,9 +245,43 @@ impl MidiEvent {
 pub struct TimestampedMidiEvent {
     /// The MIDI event.
     pub event: MidiEvent,
-    /// Timestamp in microseconds since connection started.
-    pub timestamp_us: u64,
+    /// When the event arrived, on the same clock the audio callback reads.
+    pub received: Instant,
 }
+
+impl TimestampedMidiEvent {
+    /// Stamps `event` as arriving now.
+    pub fn now(event: MidiEvent) -> Self {
+        Self { event, received: Instant::now() }
+    }
+}
+
+/// The receiving ends of the MIDI event queues.
+pub struct MidiReceivers {
+    /// For the audio thread, to hand to the
+    /// [`AudioProcessor`](super::AudioProcessor).
+    pub audio: Consumer<TimestampedMidiEvent>,
+    /// For the UI: monitor display, piano, MIDI Learn and CC mappings.
+    pub ui: Consumer<TimestampedMidiEvent>,
+}
+
+/// The sending ends, shared with the midir callback.
+struct MidiSenders {
+    audio: Producer<TimestampedMidiEvent>,
+    ui: Producer<TimestampedMidiEvent>,
+}
+
+impl MidiSenders {
+    /// Sends an event both ways. Lossy: a full queue drops it rather than
+    /// hold up MIDI input.
+    fn send(&mut self, event: TimestampedMidiEvent) {
+        let _ = self.audio.push(event);
+        let _ = self.ui.push(event);
+    }
+}
+
+/// CC 123, All Notes Off.
+pub const ALL_NOTES_OFF: u8 = 123;
 
 /// Error type for MIDI operations.
 #[derive(Debug)]
@@ -260,10 +325,11 @@ pub struct MidiEngine {
     selected_device: Option<usize>,
     /// Active MIDI connection.
     connection: Option<MidiInputConnection<()>>,
-    /// Producer for sending events to consumers. Shared with the midir
-    /// callback; each connection clones the Arc, and closing the connection
-    /// drops that clone, so the producer outlives any one device.
-    event_producer: Arc<Mutex<Producer<TimestampedMidiEvent>>>,
+    /// Producers for sending events to the audio thread and the UI. Shared
+    /// with the midir callback; each connection clones the Arc, and closing
+    /// the connection drops that clone, so the producers outlive any one
+    /// device. Only MIDI input and UI threads lock this, never audio.
+    senders: Arc<Mutex<MidiSenders>>,
     /// Shared state for device enumeration.
     state: Arc<Mutex<MidiState>>,
     /// Flag to signal device scan thread to stop.
@@ -275,10 +341,11 @@ pub struct MidiEngine {
 impl MidiEngine {
     /// Create a new MIDI engine.
     ///
-    /// Returns the engine and a consumer for receiving MIDI events.
-    pub fn new() -> Result<(Self, Consumer<TimestampedMidiEvent>), MidiError> {
-        // Create the event ring buffer
-        let (producer, consumer) = RingBuffer::new(DEFAULT_MIDI_BUFFER_SIZE);
+    /// Returns the engine and the receiving ends of its event queues.
+    pub fn new() -> Result<(Self, MidiReceivers), MidiError> {
+        // One queue to the audio thread, one to the UI
+        let (audio_producer, audio_consumer) = RingBuffer::new(DEFAULT_MIDI_BUFFER_SIZE);
+        let (ui_producer, ui_consumer) = RingBuffer::new(DEFAULT_MIDI_BUFFER_SIZE);
 
         // Initialize MIDI input for port enumeration
         let midi_in = MidiInput::new("Modular Synth")
@@ -336,13 +403,13 @@ impl MidiEngine {
             devices,
             selected_device: None,
             connection: None,
-            event_producer: Arc::new(Mutex::new(producer)),
+            senders: Arc::new(Mutex::new(MidiSenders { audio: audio_producer, ui: ui_producer })),
             state,
             scan_running,
             scan_thread: Some(scan_thread),
         };
 
-        Ok((engine, consumer))
+        Ok((engine, MidiReceivers { audio: audio_consumer, ui: ui_consumer }))
     }
 
     /// Enumerate available MIDI input devices.
@@ -407,19 +474,16 @@ impl MidiEngine {
                 &port,
                 "Modular Synth Input",
                 {
-                    let producer = Arc::clone(&self.event_producer);
-                    move |timestamp_us, data, _| {
+                    let senders = Arc::clone(&self.senders);
+                    move |_timestamp_us, data, _| {
+                        // Stamped on arrival rather than with midir's timestamp,
+                        // whose clock starts at connection and differs per
+                        // platform; the audio callback reads this same clock
                         if let Some(event) = MidiEvent::from_bytes(data) {
-                            let timestamped = TimestampedMidiEvent {
-                                event,
-                                timestamp_us,
-                            };
-                            if let Ok(mut prod) = producer.lock() {
-                                // Use lossy push - drop events if buffer is full
-                                let _ = prod.push(timestamped);
+                            let stamped = TimestampedMidiEvent::now(event);
+                            if let Ok(mut senders) = senders.lock() {
+                                senders.send(stamped);
                             }
-                            // Log MIDI events to console for debugging
-                            eprintln!("MIDI: {:?}", event);
                         }
                     }
                 },
@@ -443,11 +507,20 @@ impl MidiEngine {
     }
 
     /// Disconnect from the current MIDI device.
+    ///
+    /// Notes still held on it will never get their Note Off, so the audio
+    /// thread is sent All Notes Off on every channel.
     pub fn disconnect(&mut self) {
         if let Some(connection) = self.connection.take() {
             // Close the connection - this drops it
             connection.close();
             self.selected_device = None;
+            if let Ok(mut senders) = self.senders.lock() {
+                for channel in 0..16 {
+                    let all_off = MidiEvent::ControlChange { channel, controller: ALL_NOTES_OFF, value: 0 };
+                    let _ = senders.audio.push(TimestampedMidiEvent::now(all_off));
+                }
+            }
             eprintln!("MIDI disconnected");
         }
     }
@@ -595,6 +668,30 @@ mod tests {
         } else {
             panic!("Expected ChannelPressure event");
         }
+    }
+
+    #[test]
+    fn test_to_dsp_keeps_channel_and_message() {
+        use crate::dsp::MidiMessage;
+        let bend = MidiEvent::PitchBend { channel: 3, value: -4096 };
+        let dsp = bend.to_dsp(17).unwrap();
+        assert_eq!(dsp.sample_offset, 17);
+        assert_eq!(dsp.channel, 3);
+        assert_eq!(dsp.message, MidiMessage::PitchBend { value: -4096 });
+
+        let pressure = MidiEvent::ChannelPressure { channel: 0, pressure: 90 };
+        assert_eq!(pressure.to_dsp(0).unwrap().message, MidiMessage::Aftertouch { pressure: 90 });
+
+        let poly = MidiEvent::PolyPressure { channel: 0, note: 60, pressure: 90 };
+        assert!(poly.to_dsp(0).is_none());
+    }
+
+    #[test]
+    fn test_pitch_bend_extremes() {
+        let down = MidiEvent::from_bytes(&[0xE0, 0x00, 0x00]).unwrap();
+        let up = MidiEvent::from_bytes(&[0xE0, 0x7F, 0x7F]).unwrap();
+        assert!(matches!(down, MidiEvent::PitchBend { value: -8192, .. }));
+        assert!(matches!(up, MidiEvent::PitchBend { value: 8191, .. }));
     }
 
     #[test]

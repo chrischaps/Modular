@@ -10,6 +10,7 @@ pub mod channels;
 pub mod commands;
 pub mod graph_plan;
 pub mod midi_engine;
+pub mod midi_scheduler;
 pub mod offline;
 
 pub use audio_engine::{AudioEngine, AudioError, DeviceInfo};
@@ -22,4 +23,7 @@ pub use channels::{
 pub use commands::{AudioMessage, EngineCommand, EngineEvent, NodeId, PortIndex, ScopeFrame};
 pub use graph_plan::GraphPlan;
 pub use offline::{OfflineRenderer, StereoBuffer};
-pub use midi_engine::{MidiDeviceInfo, MidiEngine, MidiError, MidiEvent, TimestampedMidiEvent};
+pub use midi_engine::{
+    MidiDeviceInfo, MidiEngine, MidiError, MidiEvent, MidiReceivers, TimestampedMidiEvent,
+};
+pub use midi_scheduler::{MidiScheduler, MAX_MIDI_EVENTS_PER_CALLBACK};

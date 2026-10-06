@@ -4,15 +4,17 @@
 //! plays a patch of more than 30 modules (every built-in module, some
 //! twice), through odd device buffer sizes, while the patch is edited and
 //! its Clock changes tempo under a tempo-synced Delay and its effects are
-//! bypassed and brought back. Edits are compiled on the "UI" side
-//! (outside the counted region); installing them happens inside it.
+//! bypassed and brought back, and live MIDI plays its MIDI Note modules.
+//! Edits are compiled on the "UI" side (outside the counted region);
+//! installing them happens inside it.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use modular_synth::engine::{
-    create_module_registry, AudioProcessor, EngineChannels, EngineCommand, NodeId, UiHandle,
+    create_module_registry, AudioProcessor, EngineChannels, EngineCommand, MidiEvent, NodeId,
+    TimestampedMidiEvent, UiHandle,
 };
 
 struct CountingAllocator;
@@ -123,6 +125,8 @@ fn harness_counts_allocations() {
 fn audio_callback_never_allocates() {
     let (mut ui, engine) = EngineChannels::with_defaults().split();
     let mut processor = AudioProcessor::new(48000.0, 256, engine);
+    let (mut midi, midi_input) = rtrb::RingBuffer::new(512);
+    processor.set_midi_input(midi_input);
 
     let nodes = build_big_patch(&mut ui, PATCH_SIZE);
     assert!(nodes.len() >= 30);
@@ -167,6 +171,18 @@ fn audio_callback_never_allocates() {
             let (node_id, module_id) = nodes[round / 50 % nodes.len()];
             ui.send_command(EngineCommand::RemoveModule { node_id });
             ui.send_command(EngineCommand::AddModule { node_id, module_id });
+        }
+        // Play: notes on and off every block, with bends and pressure. The
+        // queue would overflow (and the push panic) unless the callback drains it
+        let note = 48 + (round % 24) as u8;
+        let events = [
+            MidiEvent::NoteOn { channel: 0, note, velocity: 100 },
+            MidiEvent::PitchBend { channel: 0, value: (round as i16 % 64) * 128 - 4096 },
+            MidiEvent::ChannelPressure { channel: 0, pressure: (round % 128) as u8 },
+            MidiEvent::NoteOff { channel: 0, note: note.wrapping_sub(3), velocity: 0 },
+        ];
+        for event in events {
+            midi.push(TimestampedMidiEvent::now(event)).unwrap();
         }
         ui.flush();
         ui.drain_events().for_each(drop);

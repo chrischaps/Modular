@@ -46,7 +46,7 @@ pub struct ModuleUi {
     pub labels: &'static [(&'static str, &'static str)],
     /// Parameters with no control on the node. A trailing `*` matches a prefix.
     pub hidden: &'static [&'static str],
-    /// Leading parameters driven by live input (computer keyboard, MIDI)
+    /// Leading parameters driven by live input (the computer keyboard)
     /// rather than by the graph. Parameter sync leaves these alone.
     pub live_params: usize,
     /// Output ports the engine reports values for (lit gate ports, phase).
@@ -119,13 +119,11 @@ static MODULE_UI: &[ModuleUi] = &[
     },
     ModuleUi {
         module_id: "input.midi_note",
-        knobs: &[knob_as("Octave", "Oct")],
+        knobs: &[knob_as("Octave", "Oct"), knob_as("Bend Range", "Bend")],
         labels: &[("Channel", "Ch"), ("Retrigger", "Retrig")],
-        hidden: &["Note", "Gate", "Velocity", "Aftertouch"],
-        live_params: 4,
         monitor: &["Gate"],
         display: NodeDisplay::MidiPiano,
-        knobs_per_row: 0,
+        ..ModuleUi::DEFAULT
     },
     ModuleUi {
         module_id: "filter.svf",
