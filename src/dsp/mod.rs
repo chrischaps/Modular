@@ -3,6 +3,7 @@
 //! Core DSP traits and types.
 //! Defines the DspModule trait, ports, parameters, and signal types.
 
+pub mod analysis;
 pub mod context;
 pub mod module_trait;
 pub mod parameter;

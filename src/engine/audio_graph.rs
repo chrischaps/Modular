@@ -795,17 +795,10 @@ impl AudioGraph {
     ///
     /// Returns the stereo output buffer as (left, right) slices.
     pub fn get_output(&self) -> Option<(&[f32], &[f32])> {
-        // Find the audio output module
-        for (&node_id, data) in &self.modules {
-            if data.module.info().id == "output.audio" {
-                // The AudioOutput module has its own internal buffer
-                // We need to access it through a downcast
-                // For now, return None - this would need the module to expose its buffer
-                // through the trait or a specific accessor
-                let _ = node_id; // Suppress unused warning
-            }
-        }
-        None
+        // Like the live engine, use the first output module in processing order
+        self.processing_order
+            .iter()
+            .find_map(|id| self.modules.get(id)?.module.get_audio_output())
     }
 }
 

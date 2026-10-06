@@ -2,7 +2,10 @@
 //!
 //! Patch save/load functionality using serde and JSON.
 
+pub mod compile;
 pub mod patch;
+
+pub use compile::{compile_patch, CompiledPatch};
 
 pub use patch::{
     ConnectionData, MidiMapping, NodeData, ParameterValue, Patch, PatchError,

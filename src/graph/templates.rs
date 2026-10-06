@@ -59,6 +59,15 @@ pub enum SynthNodeTemplate {
 }
 
 impl SynthNodeTemplate {
+    /// Finds the template whose `module_id()` matches, e.g. for patch loading.
+    pub fn from_module_id(module_id: &str) -> Option<Self> {
+        use egui_node_graph2::NodeTemplateIter;
+        AllNodeTemplates
+            .all_kinds()
+            .into_iter()
+            .find(|t| t.module_id() == module_id)
+    }
+
     /// Get the module ID for this template.
     /// These IDs must match the `id` field in the corresponding DspModule::info().
     pub fn module_id(&self) -> &'static str {

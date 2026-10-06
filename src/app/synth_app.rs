@@ -16,7 +16,7 @@ use crate::engine::{
 };
 use rtrb::Consumer;
 use crate::graph::{
-    validate_connection, AllNodeTemplates, AnyParameterId, SynthDataType, SynthGraphState,
+    port_mapping, validate_connection, AllNodeTemplates, AnyParameterId, SynthDataType, SynthGraphState,
     SynthNodeData, SynthNodeTemplate, SynthValueType,
 };
 use crate::modules::keyboard::{key_to_note, relative_to_midi};
@@ -1399,35 +1399,12 @@ impl SynthApp {
     ///
     /// In egui_node_graph2, outputs are numbered separately from inputs.
     /// In DspModule, all ports are in a single array with inputs first.
-    /// So we need to offset the egui output index by the number of input ports.
     fn get_output_port_index(
         &self,
         node_id: egui_node_graph2::NodeId,
         output_id: egui_node_graph2::OutputId,
     ) -> Option<usize> {
-        let node = self.graph_state.graph.nodes.get(node_id)?;
-
-        // Count the number of connectable inputs (ConnectionOnly or ConnectionOrConstant)
-        // These map to DspModule input ports
-        let num_input_ports = node.inputs
-            .iter()
-            .filter(|(_, id)| {
-                let input = self.graph_state.graph.get_input(*id);
-                matches!(
-                    input.kind,
-                    egui_node_graph2::InputParamKind::ConnectionOnly
-                        | egui_node_graph2::InputParamKind::ConnectionOrConstant
-                )
-            })
-            .count();
-
-        // Find the egui output index
-        let egui_output_idx = node.outputs
-            .iter()
-            .position(|(_, id)| *id == output_id)?;
-
-        // DspModule port index = num_input_ports + egui_output_index
-        Some(num_input_ports + egui_output_idx)
+        port_mapping::output_port_index(&self.graph_state.graph, node_id, output_id)
     }
 
     /// Get the DspModule port index for a given egui input ID.
@@ -1439,37 +1416,7 @@ impl SynthApp {
         node_id: egui_node_graph2::NodeId,
         input_id: egui_node_graph2::InputId,
     ) -> Option<usize> {
-        let node = self.graph_state.graph.nodes.get(node_id)?;
-
-        // Count connectable inputs (ConnectionOnly or ConnectionOrConstant) up to target
-        let mut port_index = 0;
-        for (_, id) in &node.inputs {
-            let input = self.graph_state.graph.get_input(*id);
-
-            // Check if this input can accept connections
-            let is_connectable = matches!(
-                input.kind,
-                egui_node_graph2::InputParamKind::ConnectionOnly
-                    | egui_node_graph2::InputParamKind::ConnectionOrConstant
-            );
-
-            if *id == input_id {
-                // Return port index if this input can accept connections
-                if is_connectable {
-                    return Some(port_index);
-                } else {
-                    // ConstantOnly inputs don't map to DspModule ports
-                    return None;
-                }
-            }
-
-            // Count connectable inputs as ports
-            if is_connectable {
-                port_index += 1;
-            }
-        }
-
-        None
+        port_mapping::input_port_index(&self.graph_state.graph, node_id, input_id)
     }
 
     /// Sync parameter values from the graph UI to the audio engine.
@@ -1867,10 +1814,7 @@ impl SynthApp {
 
     /// Find the template for a given module ID.
     fn find_template_for_module(&self, module_id: &str) -> Option<SynthNodeTemplate> {
-        use egui_node_graph2::NodeTemplateIter;
-        AllNodeTemplates.all_kinds()
-            .into_iter()
-            .find(|t| t.module_id() == module_id)
+        SynthNodeTemplate::from_module_id(module_id)
     }
 
     /// Show a save file dialog and save the current patch.

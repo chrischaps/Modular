@@ -5,6 +5,7 @@
 
 mod data_types;
 mod node_data;
+pub mod port_mapping;
 mod responses;
 mod state;
 mod templates;
@@ -12,6 +13,7 @@ mod validation;
 mod value_types;
 
 pub use data_types::SynthDataType;
+pub use port_mapping::SynthGraph;
 pub use node_data::{KnobParam, LedIndicator, SynthNodeData};
 pub use responses::SynthResponse;
 pub use state::{create_editor_state, DisplayMidiEvent, MidiMappingInfo, SynthGraphEditorState, SynthGraphState};

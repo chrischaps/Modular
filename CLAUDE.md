@@ -167,6 +167,9 @@ cargo check
 # Run with release optimizations (for audio performance testing)
 cargo run --release
 
+# Render a patch to WAV offline (no audio device) and print peak/RMS levels
+cargo run --release --bin render -- patch.json out.wav --seconds 5
+
 # GitHub CLI
 gh issue list --state open
 gh issue view <number>
