@@ -6,6 +6,7 @@
 use crate::dsp::{
     module_trait::{DspModule, ModuleCategory, ModuleInfo},
     context::ProcessContext,
+    denormal::flush,
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
@@ -338,18 +339,18 @@ impl DspModule for StereoDelay {
             let hp_coeff = Self::highpass_coeff(low_cut_smoothed, self.sample_rate);
 
             // Apply lowpass to feedback (high cut)
-            self.high_cut_state_l += lp_coeff * (wet_left - self.high_cut_state_l);
-            self.high_cut_state_r += lp_coeff * (wet_right - self.high_cut_state_r);
+            self.high_cut_state_l = flush(self.high_cut_state_l + lp_coeff * (wet_left - self.high_cut_state_l));
+            self.high_cut_state_r = flush(self.high_cut_state_r + lp_coeff * (wet_right - self.high_cut_state_r));
 
             let filtered_left = self.high_cut_state_l;
             let filtered_right = self.high_cut_state_r;
 
             // Apply highpass to feedback (low cut)
             let hp_filtered_left = hp_coeff * (filtered_left - self.low_cut_state_l);
-            self.low_cut_state_l = filtered_left - hp_filtered_left;
+            self.low_cut_state_l = flush(filtered_left - hp_filtered_left);
 
             let hp_filtered_right = hp_coeff * (filtered_right - self.low_cut_state_r);
-            self.low_cut_state_r = filtered_right - hp_filtered_right;
+            self.low_cut_state_r = flush(filtered_right - hp_filtered_right);
 
             // Calculate feedback signals
             let (feedback_left, feedback_right) = if ping_pong {
@@ -367,8 +368,8 @@ impl DspModule for StereoDelay {
             };
 
             // Write to delay buffer (input + feedback)
-            self.buffer_left[self.write_pos] = dry_left + feedback_left;
-            self.buffer_right[self.write_pos] = dry_right + feedback_right;
+            self.buffer_left[self.write_pos] = flush(dry_left + feedback_left);
+            self.buffer_right[self.write_pos] = flush(dry_right + feedback_right);
 
             // Advance write position
             self.write_pos = (self.write_pos + 1) % buffer_size;

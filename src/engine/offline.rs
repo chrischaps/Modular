@@ -5,6 +5,7 @@
 //! `render` tool. Uses the same module registry, patch compilation and
 //! [`GraphPlan`] swapping as the live app.
 
+use crate::dsp::denormal::DenormalGuard;
 use crate::dsp::ProcessContext;
 use crate::persistence::{compile_patch, CompiledPatch, Patch, PatchError};
 
@@ -85,6 +86,9 @@ impl OfflineRenderer {
             left: Vec::with_capacity(frames),
             right: Vec::with_capacity(frames),
         };
+
+        // Same floating-point mode as the live audio callback
+        let _denormals = DenormalGuard::new();
 
         self.sync_plan();
         while out.left.len() < frames {

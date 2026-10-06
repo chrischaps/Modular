@@ -8,6 +8,7 @@ use std::f32::consts::PI;
 use crate::dsp::{
     module_trait::{DspModule, ModuleCategory, ModuleInfo},
     context::ProcessContext,
+    denormal::flush,
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
@@ -38,8 +39,11 @@ impl BiquadState {
     /// Process a single sample through the biquad filter.
     #[inline]
     fn process(&mut self, input: f32, coeffs: &BiquadCoeffs) -> f32 {
-        let output = coeffs.b0 * input + coeffs.b1 * self.x1 + coeffs.b2 * self.x2
-            - coeffs.a1 * self.y1 - coeffs.a2 * self.y2;
+        let output = flush(
+            coeffs.b0 * input + coeffs.b1 * self.x1 + coeffs.b2 * self.x2
+                - coeffs.a1 * self.y1
+                - coeffs.a2 * self.y2,
+        );
 
         // Update state
         self.x2 = self.x1;

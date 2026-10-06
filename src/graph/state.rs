@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use crate::engine::NodeId as EngineNodeId;
 use crate::engine::midi_engine::MidiEvent;
+use crate::widgets::LevelMeter;
 use super::{SynthDataType, SynthNodeData, SynthValueType};
 use super::templates::SynthNodeTemplate;
 
@@ -130,6 +131,9 @@ pub struct SynthGraphState {
     /// Active notes for MIDI Note module display (MIDI note numbers).
     /// Updated by the MIDI event handler.
     pub midi_active_notes: Vec<u8>,
+
+    /// Output stage meter, fed by OutputLevel events from the audio engine.
+    pub output_meter: LevelMeter,
 }
 
 impl Default for SynthGraphState {
@@ -156,6 +160,7 @@ impl Default for SynthGraphState {
             is_playing: false,
             keyboard_active_notes: Vec::new(),
             midi_active_notes: Vec::new(),
+            output_meter: LevelMeter::default(),
         }
     }
 }
@@ -204,6 +209,7 @@ impl SynthGraphState {
         self.scope_data.clear();
         self.keyboard_active_notes.clear();
         self.midi_active_notes.clear();
+        self.output_meter = LevelMeter::default();
     }
 
     /// Get the MIDI mapping info for a parameter, if any.

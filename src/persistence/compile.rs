@@ -173,6 +173,28 @@ mod tests {
     }
 
     #[test]
+    fn test_old_output_patches_load_with_character_off() {
+        // Patches saved before the Character toggle have two output
+        // parameters; Limiter keeps its meaning and Character falls back to off
+        let mut patch = osc_to_output();
+        patch.nodes[1].parameters = vec![ParameterValue::Scalar(0.5), ParameterValue::Toggle(false)];
+        let compiled = compile_patch(&patch).unwrap();
+
+        let out = compiled.node_ids[&20];
+        let params: Vec<(usize, f32)> = compiled
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                EngineCommand::SetParameter { node_id, param_index, value } if *node_id == out => {
+                    Some((*param_index, *value))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(params, vec![(0, 0.5), (1, 0.0), (2, 0.0)]);
+    }
+
+    #[test]
     fn test_unknown_module_is_an_error() {
         let mut patch = osc_to_output();
         patch.nodes.push(NodeData::new(30, "does.not.exist", (0.0, 0.0)));

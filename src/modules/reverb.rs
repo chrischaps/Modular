@@ -6,6 +6,7 @@
 use crate::dsp::{
     module_trait::{DspModule, ModuleCategory, ModuleInfo},
     context::ProcessContext,
+    denormal::flush,
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
@@ -72,10 +73,10 @@ impl CombFilter {
 
         // Lowpass filter in feedback path for damping
         // damping: 0 = no damping (bright), 1 = full damping (dark)
-        self.filter_state = output * (1.0 - damping) + self.filter_state * damping;
+        self.filter_state = flush(output * (1.0 - damping) + self.filter_state * damping);
 
         // Write input + filtered feedback to buffer
-        self.buffer[self.write_pos] = input + self.filter_state * feedback;
+        self.buffer[self.write_pos] = flush(input + self.filter_state * feedback);
 
         // Advance write position within the active length
         self.write_pos += 1;
@@ -120,7 +121,7 @@ impl AllpassFilter {
         let buffered = self.buffer[self.write_pos];
         let output = -input + buffered;
 
-        self.buffer[self.write_pos] = input + buffered * FEEDBACK;
+        self.buffer[self.write_pos] = flush(input + buffered * FEEDBACK);
         self.write_pos = (self.write_pos + 1) % self.buffer.len();
 
         output
@@ -830,6 +831,17 @@ mod tests {
             "Expected ~30 dB decay over 0.5 s at RT60 = 1 s, got {:.1} dB",
             drop_db
         );
+    }
+
+    #[test]
+    fn test_silent_tail_reaches_true_zero() {
+        // A decaying tail must land on exact silence instead of lingering in
+        // slow denormal arithmetic. Tests run without FTZ, so this exercises
+        // the per-loop flush on its own.
+        let ir = impulse_response(0.5, 0.5, 4.0);
+        assert!(ir.iter().all(|s| !s.is_subnormal()), "tail went denormal");
+        let tail = &ir[(3.5 * 44100.0) as usize..];
+        assert!(tail.iter().all(|&s| s == 0.0), "tail should be exactly silent by 3.5 s");
     }
 
     #[test]

@@ -3,6 +3,7 @@
 //! Defines the messages that flow between the UI thread and the audio engine thread.
 //! All types here must be Send + 'static for safe cross-thread communication.
 
+use crate::dsp::OutputLevels;
 use crate::modules::oscilloscope::SCOPE_BUFFER_SIZE;
 
 use super::graph_plan::GraphPlan;
@@ -166,13 +167,9 @@ impl ScopeFrame {
 /// These provide feedback for metering and status display.
 #[derive(Debug, Clone)]
 pub enum EngineEvent {
-    /// Current output levels for metering display.
-    OutputLevel {
-        /// Left channel peak level (0.0-1.0+).
-        left: f32,
-        /// Right channel peak level (0.0-1.0+).
-        right: f32,
-    },
+    /// Output stage meter readings (pre/post-limiter peaks and gain
+    /// reduction) for the most recent audio callback.
+    OutputLevel(OutputLevels),
 
     /// Current CPU load of the audio processing.
     CpuLoad(f32),
@@ -249,14 +246,11 @@ mod tests {
 
     #[test]
     fn test_event_clone() {
-        let event = EngineEvent::OutputLevel {
-            left: 0.5,
-            right: 0.7,
-        };
+        let levels = OutputLevels { pre: [0.9, 1.4], post: [0.5, 0.7], limiter_gain: 0.6 };
+        let event = EngineEvent::OutputLevel(levels);
         let cloned = event.clone();
-        if let EngineEvent::OutputLevel { left, right } = cloned {
-            assert!((left - 0.5).abs() < f32::EPSILON);
-            assert!((right - 0.7).abs() < f32::EPSILON);
+        if let EngineEvent::OutputLevel(cloned) = cloned {
+            assert_eq!(cloned, levels);
         } else {
             panic!("Clone failed");
         }

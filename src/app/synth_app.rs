@@ -856,8 +856,12 @@ impl SynthApp {
                         // Update CPU load for display
                         self.cpu_load = load;
                     }
+                    crate::engine::EngineEvent::OutputLevel(levels) => {
+                        // Feed the Audio Output node's meter
+                        self.user_state.output_meter.feed(levels);
+                    }
                     // Other events are not currently handled by the app
-                    // (OutputLevel, Started, Stopped, Error)
+                    // (Started, Stopped, Error)
                     _ => {}
                 }
             }
@@ -2187,6 +2191,13 @@ impl eframe::App for SynthApp {
 
         // Process events from the audio engine
         self.process_engine_events();
+
+        // Advance meter ballistics; keep repainting until it has settled
+        let dt = ctx.input(|i| i.stable_dt).min(0.1);
+        self.user_state.output_meter.tick(dt);
+        if !self.user_state.output_meter.is_idle() {
+            ctx.request_repaint();
+        }
 
         // Clear status message after it's been shown (user will see it on first frame)
         // We clear it on the next frame after it was set

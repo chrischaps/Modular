@@ -5,7 +5,8 @@
 
 use crate::dsp::{
     context::ProcessContext,
-    module_trait::{DspModule, ModuleCategory, ModuleInfo},
+    dynamics::{DcBlocker, PeakLimiter},
+    module_trait::{DspModule, ModuleCategory, ModuleInfo, OutputLevels},
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
@@ -16,8 +17,8 @@ use crate::dsp::{
 /// The audio output module that routes audio to the speakers.
 ///
 /// This is the final destination in an audio graph. It accepts stereo
-/// (Left/Right) or mono input and applies volume control and optional
-/// limiting before output.
+/// (Left/Right) or mono input and runs it through a mastering-style output
+/// stage before it reaches the speakers.
 ///
 /// # Ports
 ///
@@ -28,13 +29,23 @@ use crate::dsp::{
 /// # Parameters
 ///
 /// - **Volume** (0.0-1.0): Master volume control, default 0.8.
-/// - **Limiter** (Toggle): Soft limiter to prevent harsh clipping, default on.
+/// - **Limiter** (Toggle): Transparent lookahead peak limiter with a
+///   -0.3 dBFS ceiling, default on.
+/// - **Character** (Toggle): Soft-clip saturation before the limiter, for
+///   colour rather than protection, default off.
 ///
-/// # Signal Routing
+/// # Signal Path
 ///
-/// - If only Mono is connected, it routes to both Left and Right output.
-/// - If Left/Right are connected, Mono is added to both channels.
-/// - Output is scaled by Volume and optionally passed through a soft limiter.
+/// 1. Mix: Left/Right, with Mono added to both channels. Non-finite samples
+///    (NaN, infinity) are replaced with silence so they can't reach the DAC.
+/// 2. DC blocker (5 Hz highpass) removes any constant offset.
+/// 3. Volume.
+/// 4. Character soft clip (optional).
+/// 5. Peak limiter (optional; when off, the 1 ms lookahead delay remains so
+///    toggling it doesn't shift timing).
+///
+/// Peak levels are measured on both sides of the limiter so the UI can show
+/// how hard the patch drives the output and how much the limiter is doing.
 pub struct AudioOutput {
     /// Sample rate from last prepare() call.
     sample_rate: f32,
@@ -45,12 +56,16 @@ pub struct AudioOutput {
     /// Internal stereo output buffer for the audio engine to read from.
     /// Index 0 = Left, Index 1 = Right.
     output_buffer: [Vec<f32>; 2],
-    /// Peak level for left channel (for metering).
-    peak_left: f32,
-    /// Peak level for right channel (for metering).
-    peak_right: f32,
     /// Smoothed volume parameter.
     volume_smooth: SmoothedValue,
+    /// DC blockers, one per channel.
+    dc_blockers: [DcBlocker; 2],
+    /// Stereo-linked output limiter.
+    limiter: PeakLimiter,
+    /// Peaks going into the limiter since the levels were last taken.
+    pre_peaks: [f32; 2],
+    /// Peaks leaving the output stage since the levels were last taken.
+    post_peaks: [f32; 2],
 }
 
 impl AudioOutput {
@@ -65,14 +80,18 @@ impl AudioOutput {
                 PortDefinition::input_with_default("right", "Right", SignalType::Audio, 0.0),
                 PortDefinition::input_with_default("mono", "Mono", SignalType::Audio, 0.0),
             ],
+            // New parameters go at the end: patches restore them by position
             parameters: vec![
                 ParameterDefinition::normalized("volume", "Volume", 0.8),
                 ParameterDefinition::toggle("limiter", "Limiter", true),
+                ParameterDefinition::toggle("character", "Character", false),
             ],
             output_buffer: [Vec::new(), Vec::new()],
-            peak_left: 0.0,
-            peak_right: 0.0,
             volume_smooth: SmoothedValue::with_default_smoothing(0.8, sample_rate),
+            dc_blockers: [DcBlocker::new(sample_rate), DcBlocker::new(sample_rate)],
+            limiter: PeakLimiter::new(sample_rate),
+            pre_peaks: [0.0; 2],
+            post_peaks: [0.0; 2],
         }
     }
 
@@ -84,6 +103,7 @@ impl AudioOutput {
     /// Parameter index constants.
     const PARAM_VOLUME: usize = 0;
     const PARAM_LIMITER: usize = 1;
+    const PARAM_CHARACTER: usize = 2;
 
     /// Level (about -3 dBFS) below which the soft clipper is perfectly transparent.
     const CLIP_KNEE: f32 = 0.7;
@@ -104,6 +124,16 @@ impl AudioOutput {
         shaped.copysign(sample)
     }
 
+    /// Replaces NaN and infinity with silence.
+    #[inline]
+    fn sanitize(sample: f32) -> f32 {
+        if sample.is_finite() {
+            sample
+        } else {
+            0.0
+        }
+    }
+
     /// Returns the final stereo output buffer.
     ///
     /// This is how the audio engine can access the processed output.
@@ -112,18 +142,9 @@ impl AudioOutput {
         &self.output_buffer
     }
 
-    /// Returns the current peak levels for metering.
-    ///
-    /// Returns (left_peak, right_peak) in the range 0.0 to 1.0+
-    /// (can exceed 1.0 before limiting).
-    pub fn get_peak_levels(&self) -> (f32, f32) {
-        (self.peak_left, self.peak_right)
-    }
-
-    /// Resets the peak meters.
-    pub fn reset_peaks(&mut self) {
-        self.peak_left = 0.0;
-        self.peak_right = 0.0;
+    /// Delay the output stage adds, in samples (the limiter's lookahead).
+    pub fn latency(&self) -> usize {
+        self.limiter.latency()
     }
 }
 
@@ -139,7 +160,7 @@ impl DspModule for AudioOutput {
             id: "output.audio",
             name: "Audio Output",
             category: ModuleCategory::Output,
-            description: "Master stereo output with volume and limiting",
+            description: "Master stereo output with DC blocking and a peak limiter",
         };
         &INFO
     }
@@ -157,8 +178,12 @@ impl DspModule for AudioOutput {
         // Pre-allocate output buffers
         self.output_buffer[0].resize(max_block_size, 0.0);
         self.output_buffer[1].resize(max_block_size, 0.0);
-        // Update sample rate for smoothed parameters
+        // Update sample rate for smoothed parameters and the output stage
         self.volume_smooth.set_sample_rate(sample_rate);
+        for blocker in &mut self.dc_blockers {
+            blocker.set_sample_rate(sample_rate);
+        }
+        self.limiter.set_sample_rate(sample_rate);
     }
 
     fn process(
@@ -171,20 +196,17 @@ impl DspModule for AudioOutput {
         // Set smoothing target from parameter
         self.volume_smooth.set_target(params[Self::PARAM_VOLUME]);
 
-        // Limiter is a toggle, no smoothing needed
+        // Toggles, no smoothing needed
         let limiter_enabled = params[Self::PARAM_LIMITER] > 0.5;
+        let character_enabled = params[Self::PARAM_CHARACTER] > 0.5;
 
         // Get input buffers (may be empty if not connected)
         let left_input = inputs.get(Self::PORT_LEFT);
         let right_input = inputs.get(Self::PORT_RIGHT);
         let mono_input = inputs.get(Self::PORT_MONO);
 
-        // Reset peak meters for this block
-        let mut block_peak_left: f32 = 0.0;
-        let mut block_peak_right: f32 = 0.0;
-
-        // Process each sample
-        for i in 0..context.block_size {
+        let block_size = context.block_size.min(self.output_buffer[0].len());
+        for i in 0..block_size {
             // Get smoothed volume (per-sample for click-free changes)
             let volume = self.volume_smooth.next();
 
@@ -202,34 +224,29 @@ impl DspModule for AudioOutput {
                 .unwrap_or(0.0);
 
             // Mix: L/R inputs plus mono added to both channels
-            let mut out_left = left_sample + mono_sample;
-            let mut out_right = right_sample + mono_sample;
+            let mixed = [
+                Self::sanitize(left_sample + mono_sample),
+                Self::sanitize(right_sample + mono_sample),
+            ];
 
-            // Apply volume
-            out_left *= volume;
-            out_right *= volume;
-
-            // Track peak levels before limiting (for accurate metering)
-            block_peak_left = block_peak_left.max(out_left.abs());
-            block_peak_right = block_peak_right.max(out_right.abs());
-
-            // Apply soft limiter if enabled
-            if limiter_enabled {
-                out_left = Self::soft_clip(out_left);
-                out_right = Self::soft_clip(out_right);
+            // DC blocker, volume, then optional colour
+            let mut staged = [0.0; 2];
+            for ch in 0..2 {
+                let mut sample = self.dc_blockers[ch].process(mixed[ch]) * volume;
+                if character_enabled {
+                    sample = Self::soft_clip(sample);
+                }
+                self.pre_peaks[ch] = self.pre_peaks[ch].max(sample.abs());
+                staged[ch] = sample;
             }
 
-            // Store in output buffer (ensure we don't exceed capacity)
-            if i < self.output_buffer[0].len() {
-                self.output_buffer[0][i] = out_left;
-                self.output_buffer[1][i] = out_right;
-            }
+            let (out_left, out_right) = self.limiter.process(staged[0], staged[1], limiter_enabled);
+            self.post_peaks[0] = self.post_peaks[0].max(out_left.abs());
+            self.post_peaks[1] = self.post_peaks[1].max(out_right.abs());
+
+            self.output_buffer[0][i] = out_left;
+            self.output_buffer[1][i] = out_right;
         }
-
-        // Update peak meters (with slow decay for visual smoothness)
-        const DECAY_FACTOR: f32 = 0.95;
-        self.peak_left = self.peak_left.max(block_peak_left) * DECAY_FACTOR;
-        self.peak_right = self.peak_right.max(block_peak_right) * DECAY_FACTOR;
     }
 
     fn reset(&mut self) {
@@ -237,8 +254,12 @@ impl DspModule for AudioOutput {
         for buf in &mut self.output_buffer {
             buf.fill(0.0);
         }
-        self.peak_left = 0.0;
-        self.peak_right = 0.0;
+        for blocker in &mut self.dc_blockers {
+            blocker.reset();
+        }
+        self.limiter.reset();
+        self.pre_peaks = [0.0; 2];
+        self.post_peaks = [0.0; 2];
         // Reset smoothed parameters to their current targets
         self.volume_smooth.reset(self.volume_smooth.target());
     }
@@ -247,14 +268,76 @@ impl DspModule for AudioOutput {
         Some((&self.output_buffer[0], &self.output_buffer[1]))
     }
 
-    fn get_peak_levels(&self) -> Option<(f32, f32)> {
-        Some((self.peak_left, self.peak_right))
+    fn take_output_levels(&mut self) -> Option<OutputLevels> {
+        Some(OutputLevels {
+            pre: std::mem::take(&mut self.pre_peaks),
+            post: std::mem::take(&mut self.post_peaks),
+            limiter_gain: self.limiter.take_min_gain(),
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dsp::analysis::peak;
+    use crate::dsp::dynamics::db_to_gain;
+
+    const SR: f32 = 44100.0;
+    const BLOCK: usize = 256;
+
+    /// A sine with exactly 8 cycles per block, so repeating the same buffer
+    /// block after block is seamless.
+    fn looped_sine(amplitude: f32) -> SignalBuffer {
+        let mut buf = SignalBuffer::audio(BLOCK);
+        for (n, sample) in buf.samples.iter_mut().enumerate() {
+            *sample = amplitude * (std::f32::consts::TAU * 8.0 * n as f32 / BLOCK as f32).sin();
+        }
+        buf
+    }
+
+    fn prepared() -> AudioOutput {
+        let mut output = AudioOutput::new();
+        output.prepare(SR, BLOCK);
+        output
+    }
+
+    /// Feeds the same (left, right, mono) block `blocks` times.
+    fn run(
+        output: &mut AudioOutput,
+        left: &SignalBuffer,
+        right: &SignalBuffer,
+        mono: &SignalBuffer,
+        params: &[f32],
+        blocks: usize,
+    ) {
+        let ctx = ProcessContext::new(SR, BLOCK);
+        for _ in 0..blocks {
+            output.process(&[left, right, mono], &mut [], params, &ctx);
+        }
+    }
+
+    /// Asserts a channel of the last block is `expected`, delayed by the
+    /// output stage's latency (the input loops every block).
+    fn assert_delayed_copy(output: &AudioOutput, channel: usize, expected: &SignalBuffer) {
+        let latency = output.latency();
+        let out = &output.get_output_buffer()[channel];
+        for i in 0..BLOCK {
+            let want = expected.samples[(i + BLOCK - latency % BLOCK) % BLOCK];
+            assert!(
+                (out[i] - want).abs() < 0.01,
+                "channel {} sample {}: expected {}, got {}",
+                channel,
+                i,
+                want,
+                out[i]
+            );
+        }
+    }
+
+    fn silence() -> SignalBuffer {
+        SignalBuffer::audio(BLOCK)
+    }
 
     #[test]
     fn test_audio_output_info() {
@@ -290,7 +373,7 @@ mod tests {
         let output = AudioOutput::new();
         let params = output.parameters();
 
-        assert_eq!(params.len(), 2);
+        assert_eq!(params.len(), 3);
 
         // Volume parameter
         assert_eq!(params[0].id, "volume");
@@ -298,311 +381,179 @@ mod tests {
         assert_eq!(params[0].max, 1.0);
         assert_eq!(params[0].default, 0.8);
 
-        // Limiter parameter (toggle)
+        // Limiter keeps its id and position, so saved patches still load
         assert_eq!(params[1].id, "limiter");
         assert_eq!(params[1].min, 0.0);
         assert_eq!(params[1].max, 1.0);
         assert_eq!(params[1].default, 1.0); // true = 1.0
+
+        // Character is new, appended, and off by default
+        assert_eq!(params[2].id, "character");
+        assert_eq!(params[2].default, 0.0);
     }
 
     #[test]
     fn test_mono_routes_to_both_channels() {
-        let mut output = AudioOutput::new();
-        output.prepare(44100.0, 256);
+        let mut output = prepared();
+        let mono = looped_sine(0.5);
+        run(&mut output, &silence(), &silence(), &mono, &[1.0, 1.0, 0.0], 20);
 
-        // Create mono input signal
-        let mut mono_input = SignalBuffer::audio(256);
-        mono_input.fill(0.5);
-
-        // Empty left/right inputs
-        let left_input = SignalBuffer::audio(256);
-        let right_input = SignalBuffer::audio(256);
-
-        let ctx = ProcessContext::new(44100.0, 256);
-
-        // Process multiple times to let parameter smoothing settle
-        for _ in 0..20 {
-            output.process(
-                &[&left_input, &right_input, &mono_input],
-                &mut [],
-                &[1.0, 0.0],
-                &ctx,
-            );
-        }
-
-        let out_buf = output.get_output_buffer();
-
-        // Both channels should have the mono signal (check last samples after smoothing)
-        for i in 200..256 {
-            assert!(
-                (out_buf[0][i] - 0.5).abs() < 0.01,
-                "Left channel sample {} should be 0.5, got {}",
-                i,
-                out_buf[0][i]
-            );
-            assert!(
-                (out_buf[1][i] - 0.5).abs() < 0.01,
-                "Right channel sample {} should be 0.5, got {}",
-                i,
-                out_buf[1][i]
-            );
-        }
+        assert_delayed_copy(&output, 0, &mono);
+        assert_delayed_copy(&output, 1, &mono);
     }
 
     #[test]
     fn test_stereo_inputs() {
-        let mut output = AudioOutput::new();
-        output.prepare(44100.0, 256);
+        let mut output = prepared();
+        let left = looped_sine(0.3);
+        let right = looped_sine(0.7);
+        run(&mut output, &left, &right, &silence(), &[1.0, 1.0, 0.0], 20);
 
-        // Create stereo inputs
-        let mut left_input = SignalBuffer::audio(256);
-        let mut right_input = SignalBuffer::audio(256);
-        left_input.fill(0.3);
-        right_input.fill(0.7);
-
-        // No mono input
-        let mono_input = SignalBuffer::audio(256);
-
-        let ctx = ProcessContext::new(44100.0, 256);
-
-        // Process multiple times to let parameter smoothing settle
-        for _ in 0..20 {
-            output.process(
-                &[&left_input, &right_input, &mono_input],
-                &mut [],
-                &[1.0, 0.0],
-                &ctx,
-            );
-        }
-
-        let out_buf = output.get_output_buffer();
-
-        // Channels should have their respective inputs (check last samples after smoothing)
-        for i in 200..256 {
-            assert!(
-                (out_buf[0][i] - 0.3).abs() < 0.01,
-                "Left channel sample {} should be 0.3, got {}",
-                i,
-                out_buf[0][i]
-            );
-            assert!(
-                (out_buf[1][i] - 0.7).abs() < 0.01,
-                "Right channel sample {} should be 0.7, got {}",
-                i,
-                out_buf[1][i]
-            );
-        }
+        assert_delayed_copy(&output, 0, &left);
+        assert_delayed_copy(&output, 1, &right);
     }
 
     #[test]
     fn test_mono_added_to_stereo() {
-        let mut output = AudioOutput::new();
-        output.prepare(44100.0, 256);
+        let mut output = prepared();
+        run(
+            &mut output,
+            &looped_sine(0.2),
+            &looped_sine(0.3),
+            &looped_sine(0.1),
+            &[1.0, 1.0, 0.0],
+            20,
+        );
 
-        // Create all inputs
-        let mut left_input = SignalBuffer::audio(256);
-        let mut right_input = SignalBuffer::audio(256);
-        let mut mono_input = SignalBuffer::audio(256);
-        left_input.fill(0.2);
-        right_input.fill(0.3);
-        mono_input.fill(0.1);
-
-        let ctx = ProcessContext::new(44100.0, 256);
-
-        // Process multiple times to let parameter smoothing settle
-        for _ in 0..20 {
-            output.process(
-                &[&left_input, &right_input, &mono_input],
-                &mut [],
-                &[1.0, 0.0],
-                &ctx,
-            );
-        }
-
-        let out_buf = output.get_output_buffer();
-
-        // L = 0.2 + 0.1 = 0.3, R = 0.3 + 0.1 = 0.4 (check last samples after smoothing)
-        for i in 200..256 {
-            assert!(
-                (out_buf[0][i] - 0.3).abs() < 0.01,
-                "Left channel sample {} should be 0.3, got {}",
-                i,
-                out_buf[0][i]
-            );
-            assert!(
-                (out_buf[1][i] - 0.4).abs() < 0.01,
-                "Right channel sample {} should be 0.4, got {}",
-                i,
-                out_buf[1][i]
-            );
-        }
+        // L = 0.2 + 0.1, R = 0.3 + 0.1
+        assert_delayed_copy(&output, 0, &looped_sine(0.3));
+        assert_delayed_copy(&output, 1, &looped_sine(0.4));
     }
 
     #[test]
     fn test_volume_scales_output() {
-        let mut output = AudioOutput::new();
-        output.prepare(44100.0, 256);
+        let mut output = prepared();
+        run(&mut output, &silence(), &silence(), &looped_sine(1.0), &[0.5, 0.0, 0.0], 20);
 
-        let mut mono_input = SignalBuffer::audio(256);
-        mono_input.fill(1.0);
-
-        let ctx = ProcessContext::new(44100.0, 256);
-
-        // Process multiple times to let parameter smoothing settle
-        for _ in 0..20 {
-            output.process(&[&SignalBuffer::audio(256), &SignalBuffer::audio(256), &mono_input], &mut [], &[0.5, 0.0], &ctx);
-        }
-
-        let out_buf = output.get_output_buffer();
-
-        // Check last samples after smoothing settled
-        for i in 200..256 {
-            assert!(
-                (out_buf[0][i] - 0.5).abs() < 0.01,
-                "Left channel should be scaled to 0.5, got {}",
-                out_buf[0][i]
-            );
-        }
+        assert_delayed_copy(&output, 0, &looped_sine(0.5));
     }
 
     #[test]
-    fn test_limiter_prevents_clipping() {
-        let mut output = AudioOutput::new();
-        output.prepare(44100.0, 256);
+    fn test_limiter_holds_ceiling_on_plus_12_db_input() {
+        let mut output = prepared();
+        let ceiling = db_to_gain(PeakLimiter::DEFAULT_CEILING_DB);
+        let loud = looped_sine(db_to_gain(12.0));
+        let ctx = ProcessContext::new(SR, BLOCK);
 
-        // Create very loud input that would clip
-        let mut mono_input = SignalBuffer::audio(256);
-        mono_input.fill(5.0); // Way over 1.0
-
-        let ctx = ProcessContext::new(44100.0, 256);
-
-        // Process multiple times to let parameter smoothing settle
-        for _ in 0..20 {
-            output.process(&[&SignalBuffer::audio(256), &SignalBuffer::audio(256), &mono_input], &mut [], &[1.0, 1.0], &ctx);
+        // Every sample of every block, including the onset
+        for _ in 0..40 {
+            output.process(&[&silence(), &silence(), &loud], &mut [], &[1.0, 1.0, 0.0], &ctx);
+            for channel in output.get_output_buffer() {
+                for &sample in channel.iter() {
+                    assert!(sample.abs() <= ceiling, "{} exceeds ceiling {}", sample, ceiling);
+                }
+            }
         }
 
-        let out_buf = output.get_output_buffer();
-
-        // Output should be limited (tanh(5.0) ≈ 0.9999) - check last samples
-        for i in 200..256 {
-            assert!(
-                out_buf[0][i].abs() <= 1.0,
-                "Limiter should keep output within -1 to 1, got {}",
-                out_buf[0][i]
-            );
-            assert!(
-                out_buf[0][i] > 0.99,
-                "Limiter should be close to 1.0 for loud input, got {}",
-                out_buf[0][i]
-            );
-        }
+        // Limited, not silenced: peaks sit right at the ceiling
+        let last_peak = peak(&output.get_output_buffer()[0]);
+        assert!(last_peak > ceiling - 0.01, "peak {} should reach the ceiling", last_peak);
     }
 
     #[test]
     fn test_limiter_off_allows_clipping() {
-        let mut output = AudioOutput::new();
-        output.prepare(44100.0, 256);
+        let mut output = prepared();
+        let loud = looped_sine(2.0);
+        run(&mut output, &silence(), &silence(), &loud, &[1.0, 0.0, 0.0], 20);
 
-        // Create loud input
-        let mut mono_input = SignalBuffer::audio(256);
-        mono_input.fill(2.0);
+        // Output should NOT be limited
+        assert_delayed_copy(&output, 0, &loud);
+    }
 
-        let ctx = ProcessContext::new(44100.0, 256);
+    #[test]
+    fn test_character_soft_clips_before_limiter() {
+        // Character alone: rounded off at full scale
+        let mut output = prepared();
+        run(&mut output, &silence(), &silence(), &looped_sine(5.0), &[1.0, 0.0, 1.0], 20);
+        let clipped = peak(&output.get_output_buffer()[0]);
+        assert!(clipped <= 1.0 && clipped > 0.95, "soft clip peak {}", clipped);
 
-        // Process multiple times to let parameter smoothing settle
-        for _ in 0..20 {
-            output.process(&[&SignalBuffer::audio(256), &SignalBuffer::audio(256), &mono_input], &mut [], &[1.0, 0.0], &ctx);
-        }
+        // Character plus limiter: still held to the ceiling
+        let mut output = prepared();
+        run(&mut output, &silence(), &silence(), &looped_sine(5.0), &[1.0, 1.0, 1.0], 20);
+        let ceiling = db_to_gain(PeakLimiter::DEFAULT_CEILING_DB);
+        assert!(peak(&output.get_output_buffer()[0]) <= ceiling);
 
-        let out_buf = output.get_output_buffer();
+        // Quiet signals pass through Character untouched
+        let mut output = prepared();
+        let quiet = looped_sine(0.5);
+        run(&mut output, &silence(), &silence(), &quiet, &[1.0, 1.0, 1.0], 20);
+        assert_delayed_copy(&output, 0, &quiet);
+    }
 
-        // Output should NOT be limited - check last samples after smoothing
-        for i in 200..256 {
-            assert!(
-                (out_buf[0][i] - 2.0).abs() < 0.1,
-                "With limiter off, output should pass through as-is, got {}",
-                out_buf[0][i]
-            );
+    #[test]
+    fn test_dc_offset_decays_to_zero() {
+        let mut output = prepared();
+        let mut offset = silence();
+        offset.fill(0.5);
+
+        // One second of pure DC
+        let blocks = (SR as usize) / BLOCK;
+        run(&mut output, &offset, &offset, &silence(), &[1.0, 1.0, 0.0], blocks);
+
+        for channel in output.get_output_buffer() {
+            assert!(peak(channel) < 1e-3, "DC should be removed, peak {}", peak(channel));
         }
     }
 
     #[test]
-    fn test_soft_clip_function() {
-        // Transparent below the knee: no colouration of normal-level signals
-        for &x in &[0.0, 0.25, 0.5, AudioOutput::CLIP_KNEE] {
-            assert_eq!(AudioOutput::soft_clip(x), x);
-            assert_eq!(AudioOutput::soft_clip(-x), -x);
+    fn test_non_finite_input_is_silenced() {
+        let mut output = prepared();
+        let mut broken = looped_sine(0.5);
+        broken.samples[10] = f32::NAN;
+        broken.samples[20] = f32::INFINITY;
+        run(&mut output, &silence(), &silence(), &broken, &[1.0, 1.0, 0.0], 4);
+
+        for channel in output.get_output_buffer() {
+            assert!(channel.iter().all(|s| s.is_finite()));
         }
-
-        // Above the knee: compressed, monotonic, never exceeding full scale
-        let a = AudioOutput::soft_clip(0.9);
-        let b = AudioOutput::soft_clip(1.5);
-        let c = AudioOutput::soft_clip(5.0);
-        assert!(a > AudioOutput::CLIP_KNEE && a < 0.9);
-        assert!(b > a && c > b && c <= 1.0);
-        assert_eq!(AudioOutput::soft_clip(-1.5), -b);
-
-        // Continuous at the knee (no step in level or slope)
-        let eps = 1e-3;
-        let k = AudioOutput::CLIP_KNEE;
-        let slope = (AudioOutput::soft_clip(k + eps) - AudioOutput::soft_clip(k)) / eps;
-        assert!((slope - 1.0).abs() < 0.01, "slope at knee = {}", slope);
     }
 
     #[test]
-    fn test_peak_metering() {
-        let mut output = AudioOutput::new();
-        output.prepare(44100.0, 256);
+    fn test_metering_reports_pre_and_post_limiter_peaks() {
+        let mut output = prepared();
+        run(&mut output, &silence(), &silence(), &looped_sine(2.0), &[1.0, 1.0, 0.0], 20);
 
-        let mut mono_input = SignalBuffer::audio(256);
-        mono_input.fill(0.8);
-
-        let ctx = ProcessContext::new(44100.0, 256);
-
-        // Process multiple times to let parameter smoothing settle
-        for _ in 0..20 {
-            output.process(&[&SignalBuffer::audio(256), &SignalBuffer::audio(256), &mono_input], &mut [], &[1.0, 0.0], &ctx);
+        let levels = output.take_output_levels().unwrap();
+        let ceiling = db_to_gain(PeakLimiter::DEFAULT_CEILING_DB);
+        for ch in 0..2 {
+            assert!((levels.pre[ch] - 2.0).abs() < 0.05, "pre peak {}", levels.pre[ch]);
+            assert!(levels.post[ch] <= ceiling && levels.post[ch] > ceiling - 0.01);
         }
+        // About 6.3 dB of gain reduction
+        assert!((levels.limiter_gain - ceiling / 2.0).abs() < 0.02, "gain {}", levels.limiter_gain);
 
-        let (left_peak, right_peak) = output.get_peak_levels();
-
-        // Peak should be around 0.8 (with some decay applied due to smoothing and decay factor)
-        assert!(
-            left_peak > 0.5 && left_peak <= 0.85,
-            "Peak should be close to 0.8, got {}",
-            left_peak
-        );
-        assert!(
-            right_peak > 0.5 && right_peak <= 0.85,
-            "Peak should be close to 0.8, got {}",
-            right_peak
-        );
+        // Taking the levels starts a new measurement
+        let again = output.take_output_levels().unwrap();
+        assert_eq!(again, OutputLevels::default());
     }
 
     #[test]
     fn test_reset() {
-        let mut output = AudioOutput::new();
-        output.prepare(44100.0, 256);
+        let mut output = prepared();
+        run(&mut output, &silence(), &silence(), &looped_sine(0.8), &[1.0, 1.0, 0.0], 1);
 
-        // Process some audio to fill buffers and set peaks
-        let mut mono_input = SignalBuffer::audio(256);
-        mono_input.fill(0.8);
-        let ctx = ProcessContext::new(44100.0, 256);
-        output.process(&[&SignalBuffer::audio(256), &SignalBuffer::audio(256), &mono_input], &mut [], &[1.0, 0.0], &ctx);
-
-        // Reset
         output.reset();
 
         // Buffers should be cleared
-        let out_buf = output.get_output_buffer();
-        for sample in &out_buf[0] {
+        for sample in &output.get_output_buffer()[0] {
             assert_eq!(*sample, 0.0);
         }
+        assert_eq!(output.take_output_levels().unwrap(), OutputLevels::default());
 
-        // Peaks should be reset
-        let (left_peak, right_peak) = output.get_peak_levels();
-        assert_eq!(left_peak, 0.0);
-        assert_eq!(right_peak, 0.0);
+        // And the lookahead delay holds no stale audio
+        run(&mut output, &silence(), &silence(), &silence(), &[1.0, 1.0, 0.0], 1);
+        assert_eq!(peak(&output.get_output_buffer()[0]), 0.0);
     }
 
     #[test]
@@ -633,6 +584,6 @@ mod tests {
         assert_eq!(module.info().id, "output.audio");
         assert_eq!(module.info().name, "Audio Output");
         assert_eq!(module.ports().len(), 3);
-        assert_eq!(module.parameters().len(), 2);
+        assert_eq!(module.parameters().len(), 3);
     }
 }

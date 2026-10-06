@@ -8,6 +8,7 @@ use std::f32::consts::PI;
 use crate::dsp::{
     module_trait::{DspModule, ModuleCategory, ModuleInfo},
     context::ProcessContext,
+    denormal::flush,
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
@@ -237,8 +238,8 @@ impl DspModule for SvfFilter {
             let v3 = input - self.ic2;
             let band = a1 * self.ic1 + a2 * v3;
             let low = self.ic2 + a2 * self.ic1 + a3 * v3;
-            self.ic1 = 2.0 * band - self.ic1;
-            self.ic2 = 2.0 * low - self.ic2;
+            self.ic1 = flush(2.0 * band - self.ic1);
+            self.ic2 = flush(2.0 * low - self.ic2);
             let high = input - k * band - low;
 
             // Write outputs

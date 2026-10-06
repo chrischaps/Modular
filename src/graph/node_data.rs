@@ -763,6 +763,54 @@ impl NodeDataTrait for SynthNodeData {
             }
         }
 
+        // Special rendering for Audio Output module - output stage meter
+        if self.module_id == "output.audio" {
+            // Add separator with zoom-scaled margins
+            ui.add_space(4.0 * zoom);
+            let category_color = self.category.color();
+            let separator_color = Color32::from_rgba_unmultiplied(
+                category_color.r(),
+                category_color.g(),
+                category_color.b(),
+                64,
+            );
+            let margin = 4.0 * zoom;
+            let rect = ui.available_rect_before_wrap();
+            ui.painter().hline(
+                (rect.left() + margin)..=(rect.right() - margin),
+                ui.cursor().top(),
+                egui::Stroke::new(1.0 * zoom, separator_color),
+            );
+            ui.add_space(6.0 * zoom);
+
+            // The meter marks overs differently when the limiter is off
+            let limiter_enabled = graph
+                .nodes
+                .get(node_id)
+                .and_then(|node| {
+                    node.inputs.iter().find(|(name, _)| name == "Limiter").map(|(_, id)| *id)
+                })
+                .map(|input_id| match graph.get_input(input_id).value {
+                    SynthValueType::Toggle { value, .. } => value,
+                    _ => true,
+                })
+                .unwrap_or(true);
+
+            let config = crate::widgets::LevelMeterConfig {
+                limiter_enabled,
+                ceiling_db: crate::dsp::dynamics::PeakLimiter::DEFAULT_CEILING_DB,
+                ..Default::default()
+            }
+            .scaled(zoom);
+
+            ui.horizontal(|ui| {
+                let meter_width = config.width + config.bar_height * 9.0;
+                ui.add_space(((ui.available_width() - meter_width) / 2.0).max(0.0));
+                crate::widgets::level_meter(ui, &user_state.output_meter, &config);
+            });
+            ui.add_space(2.0 * zoom);
+        }
+
         // Special rendering for Oscilloscope module
         if self.module_id == "util.oscilloscope" {
             // Add separator with zoom-scaled margins

@@ -5,6 +5,8 @@
 
 pub mod analysis;
 pub mod context;
+pub mod denormal;
+pub mod dynamics;
 pub mod module_trait;
 pub mod parameter;
 pub mod port;
@@ -14,7 +16,7 @@ pub mod smoothed_value;
 
 // Re-export commonly used types
 pub use context::{ProcessContext, TransportState};
-pub use module_trait::{DspModule, ModuleCategory, ModuleError, ModuleInfo};
+pub use module_trait::{DspModule, ModuleCategory, ModuleError, ModuleInfo, OutputLevels};
 pub use parameter::{ParameterDefinition, ParameterDisplay};
 pub use port::{PortDefinition, PortDirection};
 pub use registry::{ModuleFactory, ModuleRegistry};

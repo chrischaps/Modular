@@ -325,6 +325,7 @@ impl EngineHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dsp::OutputLevels;
 
     fn add(node_id: u64, module_id: &'static str) -> EngineCommand {
         EngineCommand::AddModule { node_id, module_id }
@@ -469,18 +470,17 @@ mod tests {
         let (mut ui, mut engine) = EngineChannels::new(64, 64).split();
 
         // Send event from engine
-        let result = engine.send_event(EngineEvent::OutputLevel {
-            left: 0.5,
-            right: 0.6,
-        });
+        let result = engine.send_event(EngineEvent::OutputLevel(OutputLevels {
+            post: [0.5, 0.6],
+            ..Default::default()
+        }));
         assert!(result.is_ok());
 
         // Receive in UI
         let event = ui.recv_event();
         assert!(event.is_some());
-        if let EngineEvent::OutputLevel { left, right } = event.unwrap() {
-            assert!((left - 0.5).abs() < f32::EPSILON);
-            assert!((right - 0.6).abs() < f32::EPSILON);
+        if let EngineEvent::OutputLevel(levels) = event.unwrap() {
+            assert_eq!(levels.post, [0.5, 0.6]);
         } else {
             panic!("Wrong event type");
         }
@@ -528,10 +528,7 @@ mod tests {
         // Send multiple events
         engine.send_event_lossy(EngineEvent::Started);
         engine.send_event_lossy(EngineEvent::CpuLoad(0.3));
-        engine.send_event_lossy(EngineEvent::OutputLevel {
-            left: 0.1,
-            right: 0.2,
-        });
+        engine.send_event_lossy(EngineEvent::OutputLevel(OutputLevels::default()));
 
         // Drain all events
         let events: Vec<_> = ui.drain_events().collect();

@@ -16,7 +16,7 @@
 
 use std::ops::Range;
 
-use crate::dsp::{DspModule, ProcessContext, SignalBuffer};
+use crate::dsp::{DspModule, OutputLevels, ProcessContext, SignalBuffer};
 use crate::engine::commands::{NodeId, PortIndex};
 
 /// The most input ports a module may have. Inputs are passed to modules as a
@@ -256,6 +256,15 @@ impl GraphPlan {
             .iter()
             .filter_map(|node| node.module.as_deref())
             .find(|module| module.get_audio_output().is_some())
+    }
+
+    /// Takes the output module's meter readings since the last call.
+    pub fn take_output_levels(&mut self) -> Option<OutputLevels> {
+        self.nodes
+            .iter_mut()
+            .filter_map(|node| node.module.as_deref_mut())
+            .find(|module| module.get_audio_output().is_some())
+            .and_then(|module| module.take_output_levels())
     }
 
     /// The final stereo output, as (left, right). The slices span the

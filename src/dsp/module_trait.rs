@@ -11,6 +11,24 @@ use egui::Color32;
 use egui_node_graph2::CategoryTrait;
 use std::fmt;
 
+/// Meter readings from an output stage, covering one measurement period.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OutputLevels {
+    /// Peak level per channel (left, right) going into the limiter.
+    /// Can exceed 1.0: this is how hard the patch is driving the output.
+    pub pre: [f32; 2],
+    /// Peak level per channel leaving the output stage (what you hear).
+    pub post: [f32; 2],
+    /// Smallest gain the limiter applied (1.0 = no limiting).
+    pub limiter_gain: f32,
+}
+
+impl Default for OutputLevels {
+    fn default() -> Self {
+        Self { pre: [0.0; 2], post: [0.0; 2], limiter_gain: 1.0 }
+    }
+}
+
 /// Category of a DSP module, used for organization and UI coloring.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ModuleCategory {
@@ -259,11 +277,11 @@ pub trait DspModule: Send + 'static {
         None
     }
 
-    /// Returns peak levels for metering (for output modules).
+    /// Returns the output stage's meter readings since the last call, and
+    /// starts a new measurement (for output modules).
     ///
-    /// Returns (left_peak, right_peak) in the range 0.0 to 1.0+.
     /// Returns `None` for non-output modules.
-    fn get_peak_levels(&self) -> Option<(f32, f32)> {
+    fn take_output_levels(&mut self) -> Option<OutputLevels> {
         None
     }
 

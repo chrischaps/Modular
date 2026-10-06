@@ -638,6 +638,17 @@ impl NodeTemplateTrait for SynthNodeTemplate {
                     InputParamKind::ConstantOnly,
                     true,
                 );
+
+                // Character toggle: soft-clip colour ahead of the limiter.
+                // Added after Limiter so older patches still restore by position.
+                graph.add_input_param(
+                    node_id,
+                    "Character".to_string(),
+                    SynthDataType::new(SignalType::Control),
+                    SynthValueType::toggle(false, "Character"),
+                    InputParamKind::ConstantOnly,
+                    true,
+                );
             }
             SynthNodeTemplate::Lfo => {
                 // Rate: exposed parameter (Rate CV input + knob at bottom)

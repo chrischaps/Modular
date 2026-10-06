@@ -13,9 +13,7 @@ pub mod cpu_meter;
 pub mod oscilloscope_display;
 pub mod adsr_display;
 pub mod piano;
-
-// Future submodules:
-// pub mod vu_meter;
+pub mod level_meter;
 
 // Re-export commonly used items
 pub use knob::{knob, mini_knob, KnobConfig, ParamFormat};
@@ -33,3 +31,4 @@ pub use cpu_meter::{cpu_meter, CpuMeterConfig, cpu_load_color};
 pub use oscilloscope_display::{oscilloscope_display, OscilloscopeConfig, TriggerMode};
 pub use adsr_display::{adsr_display, AdsrConfig, AdsrParams, generate_adsr_curve, get_adsr_segment_boundaries};
 pub use piano::{piano, PianoConfig, PianoData};
+pub use level_meter::{level_meter, LevelMeter, LevelMeterConfig};

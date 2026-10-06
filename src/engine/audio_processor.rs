@@ -5,6 +5,7 @@
 
 use std::time::Instant;
 
+use crate::dsp::denormal::DenormalGuard;
 use crate::dsp::{ModuleRegistry, ProcessContext};
 use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Chorus, Clock, Compressor, Distortion, KeyboardInput, Lfo, MidiMonitor, MidiNote, Mixer, Oscilloscope, ParametricEq, Reverb, SampleHold, SineOscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
 
@@ -107,6 +108,10 @@ impl AudioProcessor {
     /// * `output` - The output buffer to fill with audio samples
     /// * `channels` - Number of output channels (typically 2 for stereo)
     pub fn process(&mut self, output: &mut [f32], channels: usize) {
+        // Decaying filter and reverb tails must not fall into slow denormal
+        // arithmetic; restored when the callback returns
+        let _denormals = DenormalGuard::new();
+
         // Process pending messages from UI
         self.process_messages();
 
@@ -172,10 +177,10 @@ impl AudioProcessor {
         });
     }
 
-    /// Sends output levels to the UI for metering.
+    /// Sends this callback's output levels to the UI for metering.
     fn send_output_level(&mut self) {
-        if let Some((left, right)) = self.plan.output_module().and_then(|m| m.get_peak_levels()) {
-            self.engine_handle.send_event_lossy(EngineEvent::OutputLevel { left, right });
+        if let Some(levels) = self.plan.take_output_levels() {
+            self.engine_handle.send_event_lossy(EngineEvent::OutputLevel(levels));
         }
     }
 
@@ -375,7 +380,13 @@ mod tests {
         ui.flush();
         processor.process(&mut output, 2);
         assert_eq!(processor.plan().len(), 1);
-        assert!(output.iter().all(|&s| s == 0.0), "oscillator is gone");
+
+        // The output limiter's 1 ms lookahead still holds the last of it, and
+        // the DC blocker settles with a slow sub-audio tail. Neither moves
+        // like a 261 Hz oscillator (about 0.02 per sample at full scale).
+        processor.process(&mut output, 2);
+        let left: Vec<f32> = output.iter().step_by(2).copied().collect();
+        assert!(left.windows(2).all(|w| (w[1] - w[0]).abs() < 1e-3), "oscillator is gone");
         assert!(ui.flush());
     }
 }
