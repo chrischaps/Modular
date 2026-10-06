@@ -260,8 +260,10 @@ pub struct MidiEngine {
     selected_device: Option<usize>,
     /// Active MIDI connection.
     connection: Option<MidiInputConnection<()>>,
-    /// Producer for sending events to consumers.
-    event_producer: Option<Producer<TimestampedMidiEvent>>,
+    /// Producer for sending events to consumers. Shared with the midir
+    /// callback; each connection clones the Arc, and closing the connection
+    /// drops that clone, so the producer outlives any one device.
+    event_producer: Arc<Mutex<Producer<TimestampedMidiEvent>>>,
     /// Shared state for device enumeration.
     state: Arc<Mutex<MidiState>>,
     /// Flag to signal device scan thread to stop.
@@ -334,7 +336,7 @@ impl MidiEngine {
             devices,
             selected_device: None,
             connection: None,
-            event_producer: Some(producer),
+            event_producer: Arc::new(Mutex::new(producer)),
             state,
             scan_running,
             scan_thread: Some(scan_thread),
@@ -375,30 +377,29 @@ impl MidiEngine {
         // Disconnect existing connection
         self.disconnect();
 
-        // Get the port from our state
+        // Resolve the port by name: the scan thread may have reordered the
+        // port list since the UI's device list was cached.
+        let name = self
+            .devices
+            .get(device_index)
+            .map(|d| d.name.clone())
+            .ok_or(MidiError::DeviceNotFound)?;
         let port = {
             let state = self.state.lock().map_err(|_| {
                 MidiError::ConnectionError("Failed to lock state".to_string())
             })?;
 
-            if device_index >= state.ports.len() {
-                return Err(MidiError::DeviceNotFound);
-            }
-
-            state.ports[device_index].clone()
+            let pos = state
+                .port_names
+                .iter()
+                .position(|n| *n == name)
+                .ok_or(MidiError::DeviceNotFound)?;
+            state.ports[pos].clone()
         };
 
         // Create a new MIDI input for this connection
         let midi_in = MidiInput::new("Modular Synth Input")
             .map_err(|e| MidiError::InitError(e.to_string()))?;
-
-        // Take the producer for use in the callback
-        let producer = self.event_producer.take().ok_or_else(|| {
-            MidiError::ConnectionError("Event producer already in use".to_string())
-        })?;
-
-        // Wrap producer in Arc<Mutex> for the callback
-        let producer = Arc::new(Mutex::new(producer));
 
         // Connect with callback
         let connection = midi_in
@@ -406,7 +407,7 @@ impl MidiEngine {
                 &port,
                 "Modular Synth Input",
                 {
-                    let producer = Arc::clone(&producer);
+                    let producer = Arc::clone(&self.event_producer);
                     move |timestamp_us, data, _| {
                         if let Some(event) = MidiEvent::from_bytes(data) {
                             let timestamped = TimestampedMidiEvent {
@@ -424,19 +425,19 @@ impl MidiEngine {
                 },
                 (),
             )
-            .map_err(|e| MidiError::ConnectionError(e.to_string()))?;
+            .map_err(|e| {
+                // On Windows, a port already opened by another app (a DAW,
+                // Arturia MIDI Control Center, a browser) refuses a second open.
+                MidiError::ConnectionError(format!(
+                    "{}: {} (is another app using it?)",
+                    name, e
+                ))
+            })?;
 
-        // Store connection and put producer back (wrapped in Arc)
         self.connection = Some(connection);
-        // We can't get the producer back out of the callback, so we leave it as None
-        // This is fine because we only support one connection at a time
         self.selected_device = Some(device_index);
 
-        eprintln!(
-            "MIDI connected to device {}: {}",
-            device_index,
-            self.devices.get(device_index).map(|d| d.name.as_str()).unwrap_or("Unknown")
-        );
+        eprintln!("MIDI connected to device {}: {}", device_index, name);
 
         Ok(())
     }

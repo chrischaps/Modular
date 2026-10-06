@@ -30,6 +30,10 @@ use super::theme;
 /// Type alias for our graph editor state
 type SynthGraphEditorState = GraphEditorState<SynthNodeData, SynthDataType, SynthValueType, SynthNodeTemplate, SynthGraphState>;
 
+/// Max popup height for the toolbar device dropdowns. egui's default (200px)
+/// fits only ~3 rows at the theme's padding; egui still clamps to the window.
+const DEVICE_MENU_HEIGHT: f32 = 480.0;
+
 /// Target parameter for MIDI Learn mode.
 ///
 /// When the user activates MIDI Learn on a knob, this stores the target
@@ -272,6 +276,8 @@ impl SynthApp {
                     self.midi_error_message = None;
                 }
                 Err(e) => {
+                    // connect() drops the previous connection before trying
+                    self.selected_midi_device = None;
                     self.midi_error_message = Some(e.to_string());
                 }
             }
@@ -283,6 +289,7 @@ impl SynthApp {
         if let Some(ref mut engine) = self.midi_engine {
             engine.disconnect();
             self.selected_midi_device = None;
+            self.midi_error_message = None;
         }
     }
 
@@ -703,6 +710,7 @@ impl SynthApp {
                     egui::ComboBox::from_id_salt("device_selector")
                         .selected_text(display_name)
                         .width(200.0)
+                        .height(DEVICE_MENU_HEIGHT)
                         .show_ui(ui, |ui| {
                             for device in &self.audio_devices {
                                 let label = if device.is_default {
@@ -754,6 +762,7 @@ impl SynthApp {
                     egui::ComboBox::from_id_salt("midi_device_selector")
                         .selected_text(format!("{}{}", midi_indicator, midi_display_name))
                         .width(180.0)
+                        .height(DEVICE_MENU_HEIGHT)
                         .show_ui(ui, |ui| {
                             // Option to disconnect / select none
                             if ui.selectable_label(
@@ -1825,6 +1834,10 @@ impl SynthApp {
                     .small());
             } else if let Some(ref error) = self.audio_error_message {
                 // Show audio error
+                ui.label(RichText::new(format!("⚠ {}", error))
+                    .color(theme::accent::ERROR)
+                    .small());
+            } else if let Some(ref error) = self.midi_error_message {
                 ui.label(RichText::new(format!("⚠ {}", error))
                     .color(theme::accent::ERROR)
                     .small());
