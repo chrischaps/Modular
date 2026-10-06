@@ -13,6 +13,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::dsp::bypass::{bypass_routes, can_bypass};
 use crate::dsp::{DspModule, ModuleRegistry, PortDefinition, SignalBuffer};
 use crate::engine::commands::{EngineCommand, NodeId, PortIndex};
 use crate::engine::graph_plan::{
@@ -51,6 +52,11 @@ struct NodeSpec {
     ports: Vec<PortDefinition>,
     /// Current parameter values (denormalized, ready to pass to process()).
     parameters: Vec<f32>,
+    /// For each output, the input it passes while bypassed. Empty if the
+    /// module can't be bypassed.
+    bypass_routes: Vec<Option<usize>>,
+    /// Whether the module is bypassed.
+    bypassed: bool,
     /// A module created and prepared here but not yet handed to a plan.
     /// Once compiled into a plan it lives on the audio thread, and later
     /// plans take it over from their predecessor.
@@ -60,9 +66,17 @@ struct NodeSpec {
 impl NodeSpec {
     fn new(mut module: Box<dyn DspModule>, sample_rate: f32, block_size: usize) -> Self {
         module.prepare(sample_rate, block_size);
+        let ports = module.ports().to_vec();
+        let bypass_routes = if can_bypass(module.info().category, &ports) {
+            bypass_routes(&ports)
+        } else {
+            Vec::new()
+        };
         Self {
-            ports: module.ports().to_vec(),
+            ports,
             parameters: module.parameters().iter().map(|p| p.default).collect(),
+            bypass_routes,
+            bypassed: false,
             fresh: Some(module),
         }
     }
@@ -372,6 +386,27 @@ impl AudioGraph {
         }
     }
 
+    /// Bypasses a module or brings it back.
+    ///
+    /// Like [`set_parameter`](Self::set_parameter), this updates the graph's
+    /// copy for the next compiled plan; a running plan is updated separately
+    /// with [`GraphPlan::set_bypass`]. Returns false if the node doesn't
+    /// exist or can't be bypassed.
+    pub fn set_bypass(&mut self, node_id: NodeId, bypassed: bool) -> bool {
+        match self.nodes.get_mut(&node_id) {
+            Some(spec) if !spec.bypass_routes.is_empty() => {
+                spec.bypassed = bypassed;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether a module is bypassed, or `None` if it doesn't exist.
+    pub fn is_bypassed(&self, node_id: NodeId) -> Option<bool> {
+        self.nodes.get(&node_id).map(|spec| spec.bypassed)
+    }
+
     /// Clears the entire graph.
     pub fn clear(&mut self) {
         self.nodes.clear();
@@ -506,6 +541,7 @@ impl AudioGraph {
                 param_index,
                 value,
             } => self.set_parameter(node_id, param_index, value),
+            EngineCommand::SetBypass { node_id, bypassed } => self.set_bypass(node_id, bypassed),
             EngineCommand::SetPlaying(_) => {
                 // Handled on the audio side
                 true
@@ -604,12 +640,28 @@ impl AudioGraph {
                     .map(|p| SignalBuffer::new(block_size, p.signal_type)),
             );
 
+            // A stereo effect fed only on its left input normals the left
+            // across, so bypassing it passes the left to both sides as well
+            let patched = |input: usize| matches!(inputs.get(input), Some(InputSource::Output(_)));
+            let first_route = spec.bypass_routes.iter().flatten().next().copied();
+            let dry = spec
+                .bypass_routes
+                .iter()
+                .map(|route| match (*route, first_route) {
+                    (Some(input), Some(first)) if !patched(input) && patched(first) => Some(first),
+                    (route, _) => route,
+                })
+                .collect();
+
             plan.nodes.push(PlanNode {
                 node_id,
                 module: None,
                 params: spec.parameters.clone(),
                 inputs,
                 outputs: start..plan.outputs.len(),
+                bypassed: spec.bypassed,
+                wet: if spec.bypassed { 0.0 } else { 1.0 },
+                dry,
             });
         }
 
@@ -876,6 +928,66 @@ mod tests {
                 direction: crate::dsp::PortDirection::Output,
                 default_value: 0.0,
             }];
+            PORTS
+        }
+
+        fn parameters(&self) -> &[ParameterDefinition] {
+            &[]
+        }
+
+        fn prepare(&mut self, _sample_rate: f32, _max_block_size: usize) {}
+
+        fn process(
+            &mut self,
+            _inputs: &[&SignalBuffer],
+            outputs: &mut [SignalBuffer],
+            _params: &[f32],
+            _context: &ProcessContext,
+        ) {
+            self.blocks += 1.0;
+            outputs[0].fill(self.blocks);
+        }
+
+        fn reset(&mut self) {
+            self.blocks = 0.0;
+        }
+    }
+
+    /// An effect that ignores its input and outputs how many blocks it has
+    /// processed since it was last reset.
+    #[derive(Default)]
+    struct TestEffect {
+        blocks: f32,
+    }
+
+    impl DspModule for TestEffect {
+        fn info(&self) -> &ModuleInfo {
+            static INFO: ModuleInfo = ModuleInfo {
+                id: "test.effect",
+                name: "Test Effect",
+                category: ModuleCategory::Effect,
+                description: "Counts blocks, over an audio input",
+            };
+            &INFO
+        }
+
+        fn ports(&self) -> &[PortDefinition] {
+            static PORTS: &[PortDefinition] = &[
+                PortDefinition {
+                    id: "in",
+                    name: "In",
+                    signal_type: SignalType::Audio,
+                    direction: crate::dsp::PortDirection::Input,
+                    default_value: 0.0,
+                },
+                PortDefinition {
+                    id: "out",
+                    name: "Out",
+                    signal_type: SignalType::Audio,
+                    direction: crate::dsp::PortDirection::Output,
+                    default_value: 0.0,
+                },
+            ];
             PORTS
         }
 
@@ -1288,6 +1400,65 @@ mod tests {
         plan.process(&ProcessContext::new(44100.0, 4));
 
         assert_eq!(plan.outputs[0].samples, [1.0; 4]);
+    }
+
+    #[test]
+    fn test_bypass_crossfades_rests_and_comes_back_fresh() {
+        use crate::engine::graph_plan::BYPASS_FADE_SECONDS;
+
+        const BLOCK: usize = 1024;
+        let fade = (BYPASS_FADE_SECONDS * 44100.0) as usize;
+        let mut graph = AudioGraph::new(44100.0, BLOCK);
+        graph.add_module_instance(1, Box::new(TestOscillator::new(0.5)));
+        graph.add_module_instance(2, Box::new(TestEffect::default()));
+        graph.connect(1, 0, 2, 0);
+        let mut plan = run_block(&mut graph, BLOCK);
+        let out = |plan: &GraphPlan| {
+            let node = plan.nodes.iter().find(|n| n.node_id == 2).unwrap();
+            plan.outputs[node.outputs.start].samples.clone()
+        };
+        assert_eq!(out(&plan), [1.0; BLOCK]);
+
+        // Bypassing fades from the effect (2.0 on its second block) to the
+        // dry 0.5 over the fade time, then holds the dry signal exactly
+        assert!(graph.set_bypass(2, true));
+        assert!(plan.set_bypass(2, true));
+        plan.process(&ProcessContext::new(44100.0, BLOCK));
+        let fading = out(&plan);
+        assert!(fading[0] < 2.0 && fading[0] > 1.99, "starts at the effect: {}", fading[0]);
+        assert!((fading[fade / 2] - 1.25).abs() < 0.01, "halfway: {}", fading[fade / 2]);
+        assert!(fading.windows(2).all(|w| w[1] <= w[0]), "a smooth fall, no jumps back");
+        assert!(fading[fade..].iter().all(|&s| s == 0.5));
+
+        // Fully bypassed, the effect rests, and a recompile keeps it bypassed
+        graph.add_module_instance(3, Box::new(TestOscillator::default()));
+        install(&mut graph, &mut plan);
+        plan.process(&ProcessContext::new(44100.0, BLOCK));
+        assert_eq!(out(&plan), [0.5; BLOCK]);
+
+        // Switched back in, it starts over from a reset: its first block is 1.0
+        assert!(plan.set_bypass(2, false));
+        plan.process(&ProcessContext::new(44100.0, BLOCK));
+        let returning = out(&plan);
+        assert!(returning[0] > 0.5 && returning[0] < 0.51, "starts dry: {}", returning[0]);
+        assert!(returning[fade..].iter().all(|&s| s == 1.0));
+    }
+
+    #[test]
+    fn test_only_effects_with_audio_through_them_take_bypass() {
+        let mut graph = AudioGraph::new(44100.0, 4);
+        graph.add_module_instance(1, Box::new(TestOscillator::default()));
+        graph.add_module_instance(2, Box::new(TestPassthrough::default()));
+        graph.add_module_instance(3, Box::new(TestEffect::default()));
+        assert!(!graph.set_bypass(1, true), "a source has nothing to pass");
+        assert!(!graph.set_bypass(2, true), "utilities aren't bypassable");
+        assert!(graph.set_bypass(3, true));
+        assert!(!graph.set_bypass(99, true));
+
+        let mut plan = graph.compile();
+        assert_eq!(plan.is_bypassed(3), Some(true));
+        assert!(!plan.set_bypass(1, true));
+        assert_eq!(plan.is_bypassed(1), Some(false));
     }
 
     #[test]

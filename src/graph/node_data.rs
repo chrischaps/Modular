@@ -247,7 +247,16 @@ pub struct SynthNodeData {
     /// Output ports to monitor for feedback without LED indicators.
     /// Used for waveform displays, phase indicators, etc.
     pub monitored_outputs: Vec<usize>,
+    /// Whether the module can be bypassed (a filter or effect with audio
+    /// in and out). Bypassable nodes get a power switch in the header.
+    pub bypassable: bool,
+    /// Whether the module is bypassed: its audio input passes straight
+    /// through, and the node is drawn dimmed.
+    pub bypassed: bool,
 }
+
+/// How much of the node body shows through while it's bypassed.
+const BYPASSED_OPACITY: f32 = 0.4;
 
 /// Configuration for MIDI mapping display on a knob.
 ///
@@ -279,6 +288,8 @@ impl SynthNodeData {
             knobs_per_row: 0,
             led_indicators: Vec::new(),
             monitored_outputs: Vec::new(),
+            bypassable: false,
+            bypassed: false,
         }
     }
 
@@ -318,9 +329,60 @@ impl SynthNodeData {
         self
     }
 
+    /// Builder method to give the node a bypass switch.
+    pub fn with_bypassable(mut self, bypassable: bool) -> Self {
+        self.bypassable = bypassable;
+        self
+    }
+
     /// Get the header color for this node based on its category.
     pub fn header_color(&self) -> Color32 {
         self.category.color()
+    }
+
+    /// The header colour as drawn: the category colour, faded toward the
+    /// node body's grey while bypassed, as if the module had powered down.
+    pub fn titlebar_fill(&self) -> Color32 {
+        let color = self.header_color();
+        if !self.bypassed {
+            return color;
+        }
+        let grey = 74.0;
+        let mix = |c: u8| (c as f32 * 0.3 + grey * 0.7).round() as u8;
+        Color32::from_rgb(mix(color.r()), mix(color.g()), mix(color.b()))
+    }
+
+    /// Draws the bypass switch: the power symbol, lit while the module is in
+    /// the signal path and dark when it's bypassed, like a pedal's LED.
+    fn draw_power_switch(&self, painter: &egui::Painter, center: egui::Pos2, size: f32, hovered: bool) {
+        let color = match (self.bypassed, hovered) {
+            (false, _) => Color32::WHITE,
+            (true, true) => Color32::from_gray(205),
+            (true, false) => Color32::from_gray(150),
+        };
+        let radius = size * 0.4;
+        let stroke = egui::Stroke::new((size * 0.13).max(1.0), color);
+
+        if !self.bypassed {
+            // A soft halo, so the switch reads as lit against the header
+            painter.circle_filled(center, radius * 1.45, Color32::from_white_alpha(28));
+        }
+
+        // The ring, open at the top where the stem passes through
+        let gap = 0.75_f32;
+        let start = -std::f32::consts::FRAC_PI_2 + gap;
+        let sweep = std::f32::consts::TAU - 2.0 * gap;
+        let points: Vec<egui::Pos2> = (0..=20)
+            .map(|i| {
+                let angle = start + sweep * i as f32 / 20.0;
+                center + egui::vec2(angle.cos(), angle.sin()) * radius
+            })
+            .collect();
+        painter.add(egui::Shape::line(points, stroke));
+        painter.line_segment(
+            [center + egui::vec2(0.0, -radius * 1.2), center + egui::vec2(0.0, -radius * 0.15)],
+            stroke,
+        );
     }
 
     /// Draw the category icon at the given position.
@@ -561,7 +623,7 @@ impl NodeDataTrait for SynthNodeData {
     fn top_bar_ui(
         &self,
         ui: &mut egui::Ui,
-        _node_id: egui_node_graph2::NodeId,
+        node_id: egui_node_graph2::NodeId,
         _graph: &egui_node_graph2::Graph<Self, Self::DataType, Self::ValueType>,
         _user_state: &mut Self::UserState,
         zoom: f32,
@@ -569,6 +631,27 @@ impl NodeDataTrait for SynthNodeData {
     where
         Self::Response: UserResponseTrait,
     {
+        let mut responses = Vec::new();
+
+        // The bypass switch leads the header, like a footswitch
+        if self.bypassable {
+            let switch_size = 13.0 * zoom;
+            let (switch_rect, switch) = ui.allocate_exact_size(
+                egui::vec2(switch_size + 3.0 * zoom, switch_size),
+                egui::Sense::click(),
+            );
+            let center = egui::pos2(switch_rect.left() + switch_size * 0.5, switch_rect.center().y);
+            self.draw_power_switch(ui.painter(), center, switch_size, switch.hovered());
+            let hint = if self.bypassed {
+                "Bypassed: audio passes straight through. Click to switch back in (Ctrl+B)"
+            } else {
+                "Bypass: pass audio straight through (Ctrl+B)"
+            };
+            if switch.on_hover_text(hint).clicked() {
+                responses.push(NodeResponse::User(SynthResponse::ToggleBypass(node_id)));
+            }
+        }
+
         // Allocate space for the category icon (drawn before the title)
         let icon_size = 14.0 * zoom;
         let icon_padding = 4.0 * zoom;
@@ -585,9 +668,10 @@ impl NodeDataTrait for SynthNodeData {
             icon_rect.left() + icon_size * 0.5,
             icon_rect.center().y,
         );
-        self.draw_category_icon(ui.painter(), icon_center, icon_size, Color32::WHITE);
+        let icon_color = if self.bypassed { Color32::from_gray(170) } else { Color32::WHITE };
+        self.draw_category_icon(ui.painter(), icon_center, icon_size, icon_color);
 
-        Vec::new()
+        responses
     }
 
     fn bottom_ui(
@@ -602,6 +686,11 @@ impl NodeDataTrait for SynthNodeData {
         Self::Response: UserResponseTrait,
     {
         let mut responses = Vec::new();
+
+        // A bypassed module's controls fade back but stay adjustable
+        if self.bypassed {
+            ui.multiply_opacity(BYPASSED_OPACITY);
+        }
 
         // Get the engine node ID for looking up input values
         let engine_node_id = user_state.get_engine_node_id(node_id);
@@ -1889,7 +1978,7 @@ impl NodeDataTrait for SynthNodeData {
         _user_state: &mut Self::UserState,
     ) -> Option<Color32> {
         // Return the category-based header color
-        Some(self.header_color())
+        Some(self.titlebar_fill())
     }
 }
 

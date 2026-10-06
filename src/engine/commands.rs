@@ -66,6 +66,15 @@ pub enum EngineCommand {
         value: f32,
     },
 
+    /// Take a filter or effect out of the signal path, or put it back.
+    /// Ignored for modules that can't be bypassed.
+    SetBypass {
+        /// Target node.
+        node_id: NodeId,
+        /// True to pass the module's audio input straight to its output.
+        bypassed: bool,
+    },
+
     /// Start or stop audio processing.
     SetPlaying(bool),
 
@@ -122,6 +131,8 @@ pub enum AudioMessage {
         param_index: usize,
         value: f32,
     },
+    /// Bypass a running module, or bring it back.
+    SetBypass { node_id: NodeId, bypassed: bool },
     /// Start or stop audio processing.
     SetPlaying(bool),
 }

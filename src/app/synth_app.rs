@@ -886,6 +886,8 @@ impl SynthApp {
         let mut invalid_connections: Vec<(egui_node_graph2::OutputId, egui_node_graph2::InputId)> = Vec::new();
         // Collect commands to send (to avoid borrow issues)
         let mut commands_to_send: Vec<EngineCommand> = Vec::new();
+        // Nodes whose bypass switch was clicked
+        let mut bypass_toggles: Vec<egui_node_graph2::NodeId> = Vec::new();
         // Track if we clicked in the editor area
         let mut cursor_in_editor = false;
         // Store editor rect for coordinate conversion
@@ -1059,6 +1061,9 @@ impl SynthApp {
                             self.clear_mapping_for_param(engine_node_id, param_index);
                             // Update the user state
                             self.user_state.remove_midi_mapping(engine_node_id, param_index);
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::ToggleBypass(node_id)) => {
+                            bypass_toggles.push(node_id);
                         }
                         _ => {
                             // Other responses not yet handled
@@ -1250,10 +1255,28 @@ impl SynthApp {
         for cmd in commands_to_send {
             self.send_command(cmd);
         }
+        for node_id in bypass_toggles {
+            self.toggle_bypass(node_id);
+        }
 
         // Remove invalid connections outside the UI closure
         for (output, input) in invalid_connections {
             self.graph_state.graph.remove_connection(input, output);
+        }
+    }
+
+    /// Bypasses a filter or effect, or switches it back in.
+    fn toggle_bypass(&mut self, node_id: egui_node_graph2::NodeId) {
+        let Some(node) = self.graph_state.graph.nodes.get_mut(node_id) else {
+            return;
+        };
+        if !node.user_data.bypassable {
+            return;
+        }
+        node.user_data.bypassed = !node.user_data.bypassed;
+        let bypassed = node.user_data.bypassed;
+        if let Some(engine_node_id) = self.user_state.get_engine_node_id(node_id) {
+            self.send_command(EngineCommand::SetBypass { node_id: engine_node_id, bypassed });
         }
     }
 
@@ -1599,6 +1622,9 @@ impl SynthApp {
                 node_id: engine_node_id,
                 module_id: node.template.module_id(),
             });
+            if self.graph_state.graph[node.graph_id].user_data.bypassed {
+                self.send_command(EngineCommand::SetBypass { node_id: engine_node_id, bypassed: true });
+            }
 
             // Set up output monitoring for LED indicators and monitored outputs
             let output_indices: Vec<usize> = self.graph_state.graph.nodes
@@ -2111,6 +2137,7 @@ impl eframe::App for SynthApp {
         // Handle keyboard shortcuts
         let mut keyboard_save = false;
         let mut keyboard_load = false;
+        let mut keyboard_bypass = false;
 
         ctx.input(|i| {
             // Ctrl+S: Save
@@ -2121,7 +2148,17 @@ impl eframe::App for SynthApp {
             if i.modifiers.ctrl && i.key_pressed(egui::Key::O) {
                 keyboard_load = true;
             }
+            // Ctrl+B: Bypass the selected nodes
+            if i.modifiers.ctrl && i.key_pressed(egui::Key::B) {
+                keyboard_bypass = true;
+            }
         });
+
+        if keyboard_bypass {
+            for node_id in self.graph_state.selected_nodes.clone() {
+                self.toggle_bypass(node_id);
+            }
+        }
 
         // Handle musical keyboard input (QWERTY to notes)
         self.handle_keyboard_events(ctx);

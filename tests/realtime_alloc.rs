@@ -3,7 +3,8 @@
 //! A counting global allocator watches `AudioProcessor::process` while it
 //! plays a patch of more than 30 modules (every built-in module, some
 //! twice), through odd device buffer sizes, while the patch is edited and
-//! its Clock changes tempo under a tempo-synced Delay. Edits are compiled on the "UI" side
+//! its Clock changes tempo under a tempo-synced Delay and its effects are
+//! bypassed and brought back. Edits are compiled on the "UI" side
 //! (outside the counted region); installing them happens inside it.
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -155,6 +156,13 @@ fn audio_callback_never_allocates() {
             param_index: 0,
             value: 60.0 + (round % 120) as f32,
         });
+        // Every few blocks, bypass every filter and effect or bring them all
+        // back: crossfades, fully bypassed rests, and resets on return
+        if round % 8 == 3 {
+            for &(node_id, _) in &nodes {
+                ui.send_command(EngineCommand::SetBypass { node_id, bypassed: round % 16 == 3 });
+            }
+        }
         if round % 50 == 25 {
             let (node_id, module_id) = nodes[round / 50 % nodes.len()];
             ui.send_command(EngineCommand::RemoveModule { node_id });

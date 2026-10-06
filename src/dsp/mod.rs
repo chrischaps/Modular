@@ -4,6 +4,7 @@
 //! Defines the DspModule trait, ports, parameters, and signal types.
 
 pub mod analysis;
+pub mod bypass;
 pub mod context;
 pub mod denormal;
 pub mod dynamics;

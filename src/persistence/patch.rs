@@ -133,6 +133,10 @@ pub struct NodeData {
     /// Parameter values by name, in the order they appear in the node.
     /// These are the actual values (Hz for frequency, seconds for time, etc.).
     pub parameters: Vec<NamedParameter>,
+    /// Whether the module is bypassed. Only written when true, so patches
+    /// without bypassed modules read the same as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bypassed: bool,
 }
 
 impl NodeData {
@@ -143,6 +147,7 @@ impl NodeData {
             module_id: module_id.into(),
             position,
             parameters: Vec::new(),
+            bypassed: false,
         }
     }
 }
@@ -335,6 +340,7 @@ pub fn migrate_v2_to_v3(old: PatchV2) -> Patch {
                     .zip(node.parameters)
                     .map(|(name, value)| NamedParameter { name, value })
                     .collect(),
+                bypassed: false,
             }
         })
         .collect();
@@ -489,6 +495,7 @@ mod tests {
                 NamedParameter::new("Frequency", ParameterValue::Frequency(440.0)),
                 NamedParameter::new("Amplitude", ParameterValue::Scalar(0.5)),
             ],
+            bypassed: false,
         });
         patch.connections.push(ConnectionData::new(1, "Out", 2, "In"));
 

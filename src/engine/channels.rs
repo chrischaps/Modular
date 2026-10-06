@@ -186,8 +186,9 @@ impl UiHandle {
     /// - Graph edits are applied to the UI-side graph and delivered by
     ///   [`flush`](Self::flush) as a compiled plan, held back until the queue
     ///   has room.
-    /// - Parameter changes are queued immediately. If the queue is full the
-    ///   value is still recorded in the graph, and travels with the next plan.
+    /// - Parameter and bypass changes are queued immediately. If the queue is
+    ///   full the value is still recorded in the graph, and travels with the
+    ///   next plan.
     /// - Play/stop is queued immediately, or kept until `flush` finds room.
     pub fn send_command(&mut self, cmd: EngineCommand) {
         match cmd {
@@ -196,6 +197,12 @@ impl UiHandle {
                 let message = AudioMessage::SetParameter { node_id, param_index, value };
                 if self.message_tx.push(message).is_err() {
                     // Make sure the value travels with the next plan instead
+                    self.graph.mark_dirty();
+                }
+            }
+            EngineCommand::SetBypass { node_id, bypassed } => {
+                self.graph.set_bypass(node_id, bypassed);
+                if self.message_tx.push(AudioMessage::SetBypass { node_id, bypassed }).is_err() {
                     self.graph.mark_dirty();
                 }
             }
@@ -387,6 +394,10 @@ mod tests {
                     let old = std::mem::replace(current, plan);
                     engine.retire_plan(old);
                     seen.push("plan");
+                }
+                AudioMessage::SetBypass { node_id, bypassed } => {
+                    current.set_bypass(node_id, bypassed);
+                    seen.push("bypass");
                 }
                 AudioMessage::SetParameter { node_id, param_index, value } => {
                     current.set_parameter(node_id, param_index, value);

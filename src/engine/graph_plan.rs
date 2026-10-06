@@ -13,6 +13,10 @@
 //! the outgoing plan into the new one. That is a pointer move, so swapping
 //! plans on the audio thread is real-time safe. The outgoing plan, holding
 //! any removed modules, is handed back to be dropped on another thread.
+//!
+//! A bypassed filter or effect passes its audio input straight to its output.
+//! Switching crossfades over [`BYPASS_FADE_SECONDS`] so nothing clicks, and
+//! once fully bypassed the module isn't run at all.
 
 use std::ops::Range;
 
@@ -22,6 +26,9 @@ use crate::engine::commands::{NodeId, PortIndex};
 /// The most input ports a module may have. Inputs are passed to modules as a
 /// stack array of buffer references, so this bounds that array.
 pub const MAX_INPUTS: usize = 32;
+
+/// How long bypassing a module, or bringing it back, crossfades for.
+pub const BYPASS_FADE_SECONDS: f32 = 0.02;
 
 /// Filler for unused entries of the per-module input array.
 static EMPTY_BUFFER: SignalBuffer = SignalBuffer::EMPTY;
@@ -55,6 +62,14 @@ pub(crate) struct PlanNode {
     pub(crate) inputs: Vec<InputSource>,
     /// This node's output buffers within `GraphPlan::outputs`.
     pub(crate) outputs: Range<usize>,
+    /// Whether the module is bypassed: where the crossfade is heading.
+    pub(crate) bypassed: bool,
+    /// How much of the module's own output is heard: 1 in the signal path,
+    /// 0 fully bypassed, in between while crossfading.
+    pub(crate) wet: f32,
+    /// For each output, the input (index into `inputs`) it passes while
+    /// bypassed. Empty for modules that can't be bypassed.
+    pub(crate) dry: Vec<Option<usize>>,
 }
 
 /// A monitored input port, reported to the UI for knob animation.
@@ -134,6 +149,8 @@ impl GraphPlan {
         for node in self.nodes.iter_mut().filter(|node| node.module.is_none()) {
             if let Some(old) = previous.nodes.iter_mut().find(|old| old.node_id == node.node_id) {
                 node.module = old.module.take();
+                // A crossfade in progress carries on where it was
+                node.wet = old.wet;
             }
         }
     }
@@ -148,6 +165,19 @@ impl GraphPlan {
             .find(|node| node.node_id == node_id)
             .and_then(|node| node.params.get_mut(param_index))
             .map(|param| *param = value)
+            .is_some()
+    }
+
+    /// Bypasses a module or brings it back, crossfading over the next
+    /// [`BYPASS_FADE_SECONDS`]. Returns false if the node doesn't exist in
+    /// this plan or can't be bypassed.
+    ///
+    /// REAL-TIME SAFE.
+    pub fn set_bypass(&mut self, node_id: NodeId, bypassed: bool) -> bool {
+        self.nodes
+            .iter_mut()
+            .find(|node| node.node_id == node_id && !node.dry.is_empty())
+            .map(|node| node.bypassed = bypassed)
             .is_some()
     }
 
@@ -187,6 +217,7 @@ impl GraphPlan {
             context.transport.tempo_bpm = Some(bpm);
         }
         let context = &context;
+        let fade_step = 1.0 / (BYPASS_FADE_SECONDS * context.sample_rate).max(1.0);
 
         let Self { nodes, outputs, defaults, .. } = self;
         for node in nodes.iter_mut() {
@@ -209,8 +240,31 @@ impl GraphPlan {
                 };
             }
 
-            module.process(&inputs[..node.inputs.len()], own, &node.params, context);
+            let inputs = &inputs[..node.inputs.len()];
+
+            if node.bypassed && node.wet == 0.0 {
+                // Fully bypassed: the module rests while its input passes by
+                pass_dry(own, &node.dry, inputs);
+                continue;
+            }
+            if !node.bypassed && node.wet == 0.0 {
+                // Coming back from a full bypass. Start from silence rather
+                // than replay whatever the delay lines held when it left
+                module.reset();
+            }
+
+            module.process(inputs, own, &node.params, context);
+
+            let target = if node.bypassed { 0.0 } else { 1.0 };
+            if node.wet != target {
+                node.wet = crossfade(own, &node.dry, inputs, node.wet, target, fade_step);
+            }
         }
+    }
+
+    /// Whether a node is bypassed, or `None` if it isn't in this plan.
+    pub fn is_bypassed(&self, node_id: NodeId) -> Option<bool> {
+        self.nodes.iter().find(|node| node.node_id == node_id).map(|node| node.bypassed)
     }
 
     /// The patch tempo: set by the first tempo source (a Clock) in processing
@@ -303,4 +357,41 @@ impl GraphPlan {
             }
         }
     }
+}
+
+/// Copies each bypassed output's input straight through. Outputs with
+/// nothing to pass stay silent.
+fn pass_dry(outputs: &mut [SignalBuffer], dry: &[Option<usize>], inputs: &[&SignalBuffer]) {
+    for (output, source) in outputs.iter_mut().zip(dry) {
+        if let Some(input) = source.and_then(|index| inputs.get(index)) {
+            for (out, &sample) in output.samples.iter_mut().zip(&input.samples) {
+                *out = sample;
+            }
+        }
+    }
+}
+
+/// Blends the module's outputs with its dry inputs, moving the wet amount
+/// from `from` toward `to` by `step` per sample. Returns where it got to.
+fn crossfade(
+    outputs: &mut [SignalBuffer],
+    dry: &[Option<usize>],
+    inputs: &[&SignalBuffer],
+    from: f32,
+    to: f32,
+    step: f32,
+) -> f32 {
+    let advance = |wet: f32| if to > wet { (wet + step).min(to) } else { (wet - step).max(to) };
+    let mut reached = from;
+    for (output, source) in outputs.iter_mut().zip(dry) {
+        let input = source.and_then(|index| inputs.get(index));
+        let mut wet = from;
+        for (i, sample) in output.samples.iter_mut().enumerate() {
+            wet = advance(wet);
+            let dry = input.and_then(|buffer| buffer.samples.get(i)).copied().unwrap_or(0.0);
+            *sample = dry + wet * (*sample - dry);
+        }
+        reached = wet;
+    }
+    reached
 }

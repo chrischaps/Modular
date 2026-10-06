@@ -112,6 +112,8 @@ pub fn stage_patch(patch: &Patch) -> Result<StagedPatch, PatchError> {
             |graph, node_id| template.build_node(graph, &mut user_state, node_id),
         );
         restore_parameters(&mut graph, graph_id, node_data, &mut warnings);
+        let user_data = &mut graph[graph_id].user_data;
+        user_data.bypassed = node_data.bypassed && user_data.bypassable;
 
         nodes.push(StagedNode {
             patch_id: node_data.id,
@@ -246,6 +248,7 @@ pub fn capture_patch(
             continue;
         };
         let mut node_data = NodeData::new(id, node.user_data.module_id, position(node_id));
+        node_data.bypassed = node.user_data.bypassed;
         node_data.parameters = node
             .inputs
             .iter()
@@ -309,6 +312,28 @@ mod tests {
 
     fn param(patch: &Patch, module_id: &str, name: &str) -> f32 {
         node(patch, module_id).parameters.iter().find(|p| p.name == name).unwrap().value.as_f32()
+    }
+
+    #[test]
+    fn test_bypass_survives_a_round_trip() {
+        let mut patch = Patch::new("bypass");
+        let mut delay = NodeData::new(1, "fx.delay", (0.0, 0.0));
+        delay.bypassed = true;
+        // An oscillator has nothing to pass through, so it can't be bypassed
+        let mut osc = NodeData::new(2, "osc.sine", (0.0, 0.0));
+        osc.bypassed = true;
+        patch.nodes.extend([delay, osc, NodeData::new(3, "fx.reverb", (0.0, 0.0))]);
+
+        let (saved, warnings) = reload(&patch, 0);
+        assert!(warnings.is_empty(), "{:?}", warnings);
+        assert!(node(&saved, "fx.delay").bypassed);
+        assert!(!node(&saved, "osc.sine").bypassed);
+        assert!(!node(&saved, "fx.reverb").bypassed);
+
+        // Only bypassed nodes mention it in the file
+        let json = serde_json::to_string(&saved).unwrap();
+        assert_eq!(json.matches("bypassed").count(), 1);
+        assert_eq!(patch_from_json(&json).unwrap(), saved);
     }
 
     #[test]

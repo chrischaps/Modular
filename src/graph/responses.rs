@@ -24,6 +24,8 @@ pub enum SynthResponse {
     DeleteNode(egui_node_graph2::NodeId),
     /// Request to reset a node's parameters to defaults.
     ResetNode(egui_node_graph2::NodeId),
+    /// Request to bypass a node, or bring it back.
+    ToggleBypass(egui_node_graph2::NodeId),
     /// Request to start MIDI Learn mode for a parameter.
     MidiLearnStart {
         engine_node_id: u64,

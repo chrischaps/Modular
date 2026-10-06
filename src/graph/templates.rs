@@ -21,6 +21,7 @@
 use std::borrow::Cow;
 use egui_node_graph2::{Graph, InputParamKind, NodeId, NodeTemplateIter, NodeTemplateTrait};
 
+use crate::dsp::bypass::can_bypass;
 use crate::dsp::{ModuleCategory, ParameterDefinition, ParameterDisplay, SignalType};
 use super::catalog::{self, ModuleSpec};
 use super::module_ui::{self, KnobHint, ModuleUi};
@@ -219,6 +220,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
             .with_knobs_per_row(ui.knobs_per_row)
             .with_monitored_outputs(monitored_outputs)
             .with_display(ui.display)
+            .with_bypassable(can_bypass(self.category(), &self.spec.ports))
     }
 
     fn build_node(

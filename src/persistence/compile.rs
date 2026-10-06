@@ -61,6 +61,10 @@ pub fn compile_patch(patch: &Patch) -> Result<CompiledPatch, PatchError> {
                 value: graph.get_input(input_id).value.actual_value(),
             });
         }
+
+        if graph[node.graph_id].user_data.bypassed {
+            compiled.commands.push(EngineCommand::SetBypass { node_id: engine_node_id, bypassed: true });
+        }
     }
 
     for (input_id, output_id) in graph.iter_connections() {

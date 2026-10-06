@@ -53,9 +53,15 @@ impl OfflineRenderer {
 
     /// Applies an engine command (add module, connect, set parameter, ...).
     pub fn apply(&mut self, command: EngineCommand) -> bool {
-        if let EngineCommand::SetParameter { node_id, param_index, value } = command {
-            // Keep the running plan in step, as the live engine does
-            self.plan.set_parameter(node_id, param_index, value);
+        // Keep the running plan in step, as the live engine does
+        match command {
+            EngineCommand::SetParameter { node_id, param_index, value } => {
+                self.plan.set_parameter(node_id, param_index, value);
+            }
+            EngineCommand::SetBypass { node_id, bypassed } => {
+                self.plan.set_bypass(node_id, bypassed);
+            }
+            _ => {}
         }
         self.graph.handle_command(command)
     }
@@ -258,6 +264,63 @@ mod tests {
         assert_eq!(at_80.len(), 2, "pulse and echo at 80 BPM: {at_80:?}");
         let beat = at_80[1] - at_80[0];
         assert!((beat - 0.75).abs() < 0.002, "echo after {beat} s at 80 BPM");
+    }
+
+    /// Oscillator (saw) into a delay's left input, both delay outputs to the
+    /// output module, with the delay bypassed or not.
+    fn osc_through_delay(bypassed: bool) -> Patch {
+        let mut patch = osc_patch(1);
+        patch.connections.clear();
+        let mut delay = NodeData::new(3, "fx.delay", (100.0, 0.0));
+        delay.parameters = vec![NamedParameter::new("Feedback", ParameterValue::Number(0.9))];
+        delay.bypassed = bypassed;
+        patch.nodes.push(delay);
+        patch.connections.push(ConnectionData::new(1, "Out", 3, "In L"));
+        patch.connections.push(ConnectionData::new(3, "Out L", 2, "Left"));
+        patch.connections.push(ConnectionData::new(3, "Out R", 2, "Right"));
+        patch
+    }
+
+    #[test]
+    fn test_bypassed_effect_passes_its_input_untouched() {
+        let dry = OfflineRenderer::from_patch(&osc_patch(1), 48000.0, 256).unwrap().0.render(4096);
+
+        let (mut r, compiled) = OfflineRenderer::from_patch(&osc_through_delay(true), 48000.0, 256).unwrap();
+        assert!(compiled.warnings.is_empty(), "{:?}", compiled.warnings);
+        let out = r.render(4096);
+
+        // Only the left input is patched, and bypass normals it to both sides
+        // just as the running delay would
+        assert_eq!(out.left, dry.left);
+        assert_eq!(out.right, dry.left);
+    }
+
+    #[test]
+    fn test_effect_comes_back_from_bypass_without_old_echoes() {
+        let (mut r, compiled) = OfflineRenderer::from_patch(&osc_through_delay(false), 48000.0, 256).unwrap();
+        let delay = compiled.node_ids[&3];
+
+        // Fill the delay line with echoes, then bypass and pull the cable
+        r.render_seconds(0.5);
+        r.apply(EngineCommand::SetBypass { node_id: delay, bypassed: true });
+        r.apply(EngineCommand::Disconnect { node_id: delay, port: 0, is_input: true });
+        let bypassed = r.render_seconds(0.3);
+        let tail = &bypassed.left[bypassed.left.len() - 1024..];
+        assert!(peak(tail) < 1e-4, "nothing patched in, nothing passes: {}", peak(tail));
+
+        // Switched back in, the echoes it held when bypassed are gone
+        r.apply(EngineCommand::SetBypass { node_id: delay, bypassed: false });
+        let back = r.render_seconds(1.0);
+        assert!(peak(&back.left) < 1e-6, "old echoes came back: peak {}", peak(&back.left));
+    }
+
+    #[test]
+    fn test_modules_that_cant_bypass_ignore_it() {
+        let whole = OfflineRenderer::from_patch(&osc_patch(0), 48000.0, 256).unwrap().0.render(2048);
+
+        let (mut r, compiled) = OfflineRenderer::from_patch(&osc_patch(0), 48000.0, 256).unwrap();
+        r.apply(EngineCommand::SetBypass { node_id: compiled.node_ids[&1], bypassed: true });
+        assert_eq!(r.render(2048).left, whole.left);
     }
 
     #[test]
