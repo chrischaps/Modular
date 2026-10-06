@@ -169,6 +169,11 @@ cargo run --release
 
 # Render a patch to WAV offline (no audio device) and print peak/RMS levels
 cargo run --release --bin render -- patch.json out.wav --seconds 5
+# ...playing a short phrase into Keyboard/MIDI nodes (for patches that need a player)
+cargo run --release --bin render -- patches/lush-pad.json out.wav --audition
+
+# Open a patch at launch (otherwise the First Sound example opens)
+cargo run -- patches/fm-synthesis.json
 
 # GitHub CLI
 gh issue list --state open

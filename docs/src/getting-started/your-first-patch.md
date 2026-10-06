@@ -5,6 +5,10 @@ Let's build a simple synthesizer patch from scratch. By the end of this tutorial
 ![Completed First Patch](../images/tutorial-first-patch.png)
 *The completed first patch*
 
+> **Already have sound?** The app opens on the **First Sound** example: an Oscillator, an ADSR Envelope and a VCA,
+> played from the Keyboard. Press **Play** and play the Z to M keys. Every recipe in this guide is also in
+> **📚 Examples** in the toolbar. To build your own patch from scratch, click **📄 New** and follow along.
+
 ## Step 1: Add an Oscillator
 
 Every synthesizer needs a sound source. Let's start with an oscillator.

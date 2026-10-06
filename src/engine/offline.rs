@@ -157,6 +157,95 @@ impl OfflineRenderer {
         let frames = (seconds * self.context.sample_rate).round() as usize;
         self.render(frames)
     }
+
+    /// Renders `seconds` of audio while [`AUDITION`] is played into every
+    /// Keyboard, MIDI Note and Poly MIDI node of `patch`, so patches that wait
+    /// for a player make sound offline too. `compiled` must be the patch's
+    /// compilation (as returned by [`from_patch`](Self::from_patch)).
+    ///
+    /// MIDI modules get the notes as MIDI, sample-accurately. Keyboard nodes
+    /// are set the way the editor sets them, at block boundaries, and being
+    /// monophonic they play the most recent held note.
+    pub fn render_audition(&mut self, patch: &Patch, compiled: &CompiledPatch, seconds: f32) -> StereoBuffer {
+        let nodes_of = |module_id: &str| -> Vec<_> {
+            patch
+                .nodes
+                .iter()
+                .filter(|n| n.module_id == module_id)
+                .filter_map(|n| compiled.node_ids.get(&n.id).copied())
+                .collect()
+        };
+        let keyboards = nodes_of("input.keyboard");
+        let has_midi = !nodes_of("input.midi_note").is_empty() || !nodes_of("input.poly_midi").is_empty();
+
+        let (start, sample_rate) = (self.position, self.context.sample_rate);
+        let frame = |seconds: f32| start + (seconds * sample_rate).round() as u64;
+        let mut events: Vec<(u64, u8, bool)> = AUDITION
+            .iter()
+            .flat_map(|&(note, start, length)| [(frame(start), note, true), (frame(start + length), note, false)])
+            .collect();
+        events.sort_by_key(|&(at, _, on)| (at, on));
+
+        if has_midi {
+            for &(at, note, on) in &events {
+                let message = if on {
+                    MidiMessage::NoteOn { note, velocity: 100 }
+                } else {
+                    MidiMessage::NoteOff { note, velocity: 0 }
+                };
+                self.queue_midi(at, 0, message);
+            }
+        }
+
+        let end = frame(seconds);
+        let mut out = StereoBuffer::default();
+        let mut held: Vec<u8> = Vec::new();
+        let block = self.context.block_size as u64;
+        for &(at, note, on) in events.iter().filter(|_| !keyboards.is_empty()) {
+            // Whole blocks only, so no rendered frames are dropped between calls
+            let frames = at.min(end).saturating_sub(self.position).div_ceil(block) * block;
+            out.append(self.render(frames as usize));
+
+            held.retain(|&n| n != note);
+            if on {
+                held.push(note);
+            }
+            for &node_id in &keyboards {
+                if let Some(&last) = held.last() {
+                    self.apply(EngineCommand::SetParameter { node_id, param_index: 0, value: last as f32 });
+                }
+                let gate = if held.is_empty() { 0.0 } else { 1.0 };
+                self.apply(EngineCommand::SetParameter { node_id, param_index: 1, value: gate });
+            }
+        }
+        out.append(self.render(end.saturating_sub(self.position) as usize));
+        // The last whole block before an event can run past the end
+        let frames = (end - start) as usize;
+        out.left.truncate(frames);
+        out.right.truncate(frames);
+        out
+    }
+}
+
+/// The phrase [`OfflineRenderer::render_audition`] plays, as (MIDI note,
+/// start, length) with times in seconds: a rising C major arpeggio, then the
+/// chord held.
+pub const AUDITION: &[(u8, f32, f32)] = &[
+    (60, 0.0, 0.4),
+    (64, 0.5, 0.4),
+    (67, 1.0, 0.4),
+    (72, 1.5, 0.8),
+    (60, 2.5, 1.5),
+    (64, 2.5, 1.5),
+    (67, 2.5, 1.5),
+];
+
+impl StereoBuffer {
+    /// Adds `other` to the end of this buffer.
+    pub fn append(&mut self, other: StereoBuffer) {
+        self.left.extend(other.left);
+        self.right.extend(other.right);
+    }
 }
 
 #[cfg(test)]
@@ -180,6 +269,44 @@ mod tests {
         patch.nodes.push(NodeData::new(2, "output.audio", (200.0, 0.0)));
         patch.connections.push(ConnectionData::new(1, "Out", 2, "Mono"));
         patch
+    }
+
+    /// `player` (Keyboard or MIDI Note) playing a sine, gated straight into a VCA.
+    fn played_sine(player: &str) -> Patch {
+        let mut patch = Patch::new("played");
+        patch.nodes.push(NodeData::new(1, player, (0.0, 0.0)));
+        patch.nodes.push(NodeData::new(2, "osc.sine", (0.0, 0.0)));
+        patch.nodes.push(NodeData::new(3, "util.vca", (0.0, 0.0)));
+        patch.nodes.push(NodeData::new(4, "output.audio", (0.0, 0.0)));
+        patch.connections.push(ConnectionData::new(1, "Pitch", 2, "V/Oct"));
+        patch.connections.push(ConnectionData::new(1, "Gate", 3, "CV"));
+        patch.connections.push(ConnectionData::new(2, "Out", 3, "In"));
+        patch.connections.push(ConnectionData::new(3, "Out", 4, "Mono"));
+        patch
+    }
+
+    #[test]
+    fn test_audition_plays_keyboard_and_midi_patches() {
+        let sr = 48000.0;
+        for player in ["input.keyboard", "input.midi_note"] {
+            let patch = played_sine(player);
+            let (mut r, compiled) = OfflineRenderer::from_patch(&patch, sr, 256).unwrap();
+            // Not a whole number of blocks, and ending mid-phrase
+            assert_eq!(r.render_audition(&patch, &compiled, 0.7).left.len(), (0.7 * sr) as usize, "{}", player);
+
+            let (mut r, compiled) = OfflineRenderer::from_patch(&patch, sr, 256).unwrap();
+            let out = r.render_audition(&patch, &compiled, 2.0);
+            assert_eq!(out.left.len(), 2 * sr as usize, "{}", player);
+
+            let window = |from: f32, to: f32| &out.left[(from * sr) as usize..(to * sr) as usize];
+            // The gap between the first two notes is silent, once the VCA's
+            // declick has faded the first one out
+            assert!(rms(window(0.44, 0.49)) < 0.01, "{}: gate should be closed between notes", player);
+            // The second note is E4
+            let f = Spectrum::of(window(0.55, 0.85), sr).dominant_frequency();
+            let cents = 1200.0 * (f / (Oscillator::C4_HZ as f64 * 2f64.powf(4.0 / 12.0))).log2();
+            assert!(cents.abs() < 5.0, "{}: expected E4, measured {:.2} Hz", player, f);
+        }
     }
 
     #[test]

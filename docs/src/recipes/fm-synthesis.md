@@ -5,6 +5,13 @@ Create bell-like tones, metallic sounds, and complex timbres using frequency mod
 ![FM Synthesis Patch](../images/recipe-fm-synthesis.png)
 *The FM synthesis patch*
 
+> **Play it now:** this recipe ships with the app. Choose **📚 Examples → FM Synthesis** in the toolbar,
+> or download [`patches/fm-synthesis.json`](https://github.com/chrischaps/Modular/blob/master/patches/fm-synthesis.json) and open it.
+>
+> - Press **Play**, then play the Z to M keys.
+> - This is the bell. The modulator is tuned up 6 semitones, a ratio of √2:1.
+> - **FM Depth** has no CV input, so the FM depth envelope uses the second routing below: the modulator passes through a VCA that ADSR 1 closes. **FM Depth** is a modulation index from 0 to 5. The patch uses 2.5.
+
 ## Overview
 
 FM (Frequency Modulation) synthesis uses one oscillator (modulator) to modulate the frequency of another (carrier). This creates complex harmonic and inharmonic spectra without traditional filtering, producing distinctive metallic, bell-like, and electric piano tones.

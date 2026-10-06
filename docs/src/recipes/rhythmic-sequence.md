@@ -5,6 +5,13 @@ Create driving, rhythmic synthesizer patterns with sequencers and clock division
 ![Rhythmic Sequence Patch](../images/recipe-rhythmic-sequence.png)
 *The rhythmic sequence patch*
 
+> **Play it now:** this recipe ships with the app. Choose **📚 Examples → Rhythmic Sequence** in the toolbar,
+> or download [`patches/rhythmic-sequence.json`](https://github.com/chrischaps/Modular/blob/master/patches/rhythmic-sequence.json) and open it.
+>
+> - Press **Play** and listen. It plays itself.
+> - The filter's **Cutoff** input is 1 per octave, so one envelope opens it by only one octave. The patch sends the filter envelope into both inputs of a Mixer, which sums them to two octaves of sweep above a 300 Hz cutoff. That is a lot more squelch.
+> - The Delay's **Sync** is set to 1/8D, so it follows the Clock's tempo.
+
 ## Overview
 
 This patch creates a complete rhythmic synthesizer pattern with a driving bassline, sequenced filter movement, and rhythmic interest. It demonstrates how to build compelling electronic music patterns from scratch.

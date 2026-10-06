@@ -5,6 +5,12 @@ A classic subtractive synthesizer with oscillators, filter, envelope, and modula
 ![Basic Subtractive Patch](../images/recipe-basic-subtractive.png)
 *The basic subtractive synth patch*
 
+> **Play it now:** this recipe ships with the app. Choose **📚 Examples → Basic Subtractive** in the toolbar,
+> or download [`patches/basic-subtractive.json`](https://github.com/chrischaps/Modular/blob/master/patches/basic-subtractive.json) and open it.
+>
+> - Press **Play**, then play the Z to M keys.
+> - There is no CV Amount knob: the filter's **Cutoff** input is 1 per octave, so the envelope's 0 to 1 opens the filter by up to one octave above the **Cutoff** knob, which is set to 700 Hz.
+
 ## Overview
 
 Subtractive synthesis starts with a harmonically rich waveform (saw or square) and uses a filter to "subtract" frequencies, shaping the tone. Combined with envelopes for dynamic control, this creates expressive, versatile sounds.

@@ -5,6 +5,13 @@ Create rich, evolving pad sounds with multiple oscillators, modulation, and effe
 ![Lush Pad Patch](../images/recipe-lush-pad.png)
 *The lush pad patch*
 
+> **Play it now:** this recipe ships with the app. Choose **📚 Examples → Lush Pad** in the toolbar,
+> or download [`patches/lush-pad.json`](https://github.com/chrischaps/Modular/blob/master/patches/lush-pad.json) and open it.
+>
+> - Press **Play**, then hold chords on the Z to M keys or a MIDI keyboard.
+> - The shipped patch is **polyphonic**. A [Poly MIDI](../modules/midi/poly-midi.md) module gives each held note its own oscillator, filter, envelope and VCA. See [Polyphony](../concepts/polyphony.md).
+> - Instead of two detuned oscillators and a Mixer, it uses one saw with 5 unison **Voices** and 30% **Detune**. The Mixer is a mono module, so it would merge every note into one voice. There is no second LFO.
+
 ## Overview
 
 Pads are sustained, atmospheric sounds that fill space and create ambience. This recipe combines detuned oscillators, slow modulation, and effects to create a rich, evolving pad sound.

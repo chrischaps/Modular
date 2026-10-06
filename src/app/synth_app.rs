@@ -4,7 +4,7 @@
 //! the synthesizer's UI state, audio engine, and graph state.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use eframe::egui::{self, RichText, Layout, Align};
@@ -21,7 +21,8 @@ use crate::graph::{
 };
 use crate::modules::keyboard::{key_to_note, relative_to_midi};
 use crate::persistence::{
-    capture_patch, load_from_file, save_to_file, stage_patch, MidiMapping, Patch, PatchError,
+    capture_patch, examples, load_from_file, save_to_file, stage_patch, Example, MidiMapping, Patch, PatchError,
+    EXAMPLES,
 };
 use crate::widgets::{cpu_meter, CpuMeterConfig};
 use super::theme;
@@ -86,6 +87,8 @@ pub struct SynthApp {
 
     /// Current patch file path (None if unsaved/new).
     current_patch_path: Option<PathBuf>,
+    /// The example the graph was opened from, until it's saved as a file or replaced.
+    current_example: Option<&'static Example>,
 
     /// Status message for save/load operations (auto-clears after display).
     status_message: Option<String>,
@@ -214,6 +217,7 @@ impl SynthApp {
             selected_device_index,
             cached_params: HashMap::new(),
             current_patch_path: None,
+            current_example: None,
             status_message: None,
             load_warnings: Vec::new(),
             pressed_keys: Vec::new(),
@@ -550,6 +554,15 @@ impl SynthApp {
             if ui.button("📂 Open").on_hover_text("Ctrl+O").clicked() {
                 actions.load_patch = true;
             }
+
+            ui.menu_button("📚 Examples", |ui| {
+                for example in EXAMPLES {
+                    if ui.button(example.name).on_hover_text(example.description).clicked() {
+                        actions.open_example = Some(example);
+                        ui.close_menu();
+                    }
+                }
+            });
 
             if ui.button("💾 Save").on_hover_text("Ctrl+S").clicked() {
                 actions.save_patch = true;
@@ -1591,6 +1604,7 @@ impl SynthApp {
         self.clear_graph();
         self.load_warnings.clear();
         self.current_patch_path = None;
+        self.current_example = None;
         self.status_message = Some("New patch created".to_string());
     }
 
@@ -1600,6 +1614,7 @@ impl SynthApp {
             .as_ref()
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
+            .or(self.current_example.map(|e| e.file_name))
             .unwrap_or("patch.json");
 
         if let Some(path) = rfd::FileDialog::new()
@@ -1616,6 +1631,7 @@ impl SynthApp {
             match save_to_file(&patch, &path) {
                 Ok(()) => {
                     self.current_patch_path = Some(path.clone());
+                    self.current_example = None;
                     self.status_message = Some(format!("Saved: {}", path.display()));
                 }
                 Err(e) => {
@@ -1631,27 +1647,56 @@ impl SynthApp {
             .add_filter("Synth Patch", &["json"])
             .pick_file()
         {
-            match load_from_file(&path) {
-                Ok(patch) => {
-                    match self.load_patch(&patch) {
-                        Ok(warnings) => {
-                            for warning in &warnings {
-                                eprintln!("Patch load warning: {}", warning);
-                            }
-                            self.current_patch_path = Some(path.clone());
-                            self.status_message = Some(format!("Loaded: {}", patch.name));
-                            self.load_warnings = warnings;
-                        }
-                        Err(e) => {
-                            self.status_message = Some(format!("Load failed: {}", e));
-                        }
-                    }
-                }
-                Err(e) => {
-                    self.status_message = Some(format!("Load failed: {}", e));
-                }
+            self.open_file(&path);
+        }
+    }
+
+    /// Load the patch file at `path`, replacing the current graph.
+    fn open_file(&mut self, path: &Path) {
+        match load_from_file(path).and_then(|patch| Ok((self.load_patch(&patch)?, patch.name))) {
+            Ok((warnings, name)) => {
+                self.current_patch_path = Some(path.to_path_buf());
+                self.current_example = None;
+                self.status_message = Some(format!("Loaded: {}", name));
+                self.show_load_warnings(warnings);
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Load failed: {}", e));
             }
         }
+    }
+
+    /// Open one of the bundled example patches. It has no file, so saving
+    /// it asks where to put the copy.
+    fn open_example(&mut self, example: &'static Example) {
+        match example.patch().and_then(|patch| self.load_patch(&patch)) {
+            Ok(warnings) => {
+                self.current_patch_path = None;
+                self.current_example = Some(example);
+                self.status_message = Some(format!("Opened example: {}", example.name));
+                self.show_load_warnings(warnings);
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Couldn't open example {}: {}", example.name, e));
+            }
+        }
+    }
+
+    /// Opens the patch the app starts with: the file named on the command
+    /// line, or else the First Sound example, so the canvas is never empty.
+    pub fn open_on_launch(&mut self, path: Option<&Path>) {
+        match path {
+            Some(path) => self.open_file(path),
+            None => self.open_example(examples::first_sound()),
+        }
+    }
+
+    /// Keep the problems from a load on screen (and on stderr) until dismissed.
+    fn show_load_warnings(&mut self, warnings: Vec<String>) {
+        for warning in &warnings {
+            eprintln!("Patch load warning: {}", warning);
+        }
+        self.load_warnings = warnings;
     }
 
     /// Quick save to the current path, or show save dialog if no path.
@@ -1796,15 +1841,18 @@ impl SynthApp {
                 }
 
                 // Show current patch name if any
-                if let Some(ref path) = self.current_patch_path {
-                    if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                        ui.label(RichText::new(name)
-                            .color(theme::text::SECONDARY)
-                            .small());
-                        ui.label(RichText::new("|")
-                            .color(theme::text::DISABLED)
-                            .small());
-                    }
+                let patch_name = match (&self.current_patch_path, self.current_example) {
+                    (Some(path), _) => path.file_stem().and_then(|s| s.to_str()).map(str::to_string),
+                    (None, Some(example)) => Some(format!("{} (example)", example.name)),
+                    (None, None) => None,
+                };
+                if let Some(name) = patch_name {
+                    ui.label(RichText::new(name)
+                        .color(theme::text::SECONDARY)
+                        .small());
+                    ui.label(RichText::new("|")
+                        .color(theme::text::DISABLED)
+                        .small());
                 }
                 ui.label(RichText::new("Modular Synth v0.1")
                     .color(theme::text::DISABLED)
@@ -1996,6 +2044,7 @@ struct ToolbarActions {
     save_patch: bool,
     save_as_patch: bool,
     load_patch: bool,
+    open_example: Option<&'static Example>,
     new_patch: bool,
     // MIDI actions
     connect_midi_device: Option<usize>,
@@ -2111,6 +2160,9 @@ impl eframe::App for SynthApp {
         }
         if toolbar_actions.load_patch || keyboard_load {
             self.show_load_dialog();
+        }
+        if let Some(example) = toolbar_actions.open_example {
+            self.open_example(example);
         }
         if toolbar_actions.new_patch {
             self.new_patch();

@@ -22,7 +22,7 @@ pub use channels::{
 };
 pub use commands::{AudioMessage, ChannelPeaks, EngineCommand, EngineEvent, NodeId, PortIndex, ScopeFrame};
 pub use graph_plan::GraphPlan;
-pub use offline::{OfflineRenderer, StereoBuffer};
+pub use offline::{OfflineRenderer, StereoBuffer, AUDITION};
 pub use midi_engine::{
     MidiDeviceInfo, MidiEngine, MidiError, MidiEvent, MidiReceivers, TimestampedMidiEvent,
 };

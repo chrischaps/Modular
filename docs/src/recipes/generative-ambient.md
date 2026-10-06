@@ -5,6 +5,15 @@ Create a self-playing ambient patch that evolves endlessly without input.
 ![Generative Ambient Patch](../images/recipe-generative-ambient.png)
 *The generative ambient patch*
 
+> **Play it now:** this recipe ships with the app. Choose **📚 Examples → Generative Ambient** in the toolbar,
+> or download [`patches/generative-ambient.json`](https://github.com/chrischaps/Modular/blob/master/patches/generative-ambient.json) and open it.
+>
+> - Press **Play** and listen. It plays itself.
+> - The sequence is C4 D4 E4 G4 A4 G4 E4 D4. Step 6's gate is off, so the melody takes a breath. Oscillator 1 (Triangle) sits an octave below Oscillator 2 (Sine).
+> - The Clock's quarter notes trigger the Sample & Hold, so each note brings a new filter brightness.
+> - LFO 2 drifts Oscillator 1's pitch through **Exp FM**. The depth is 0.01 octave, about ±12 cents. LFO 2 also moves the filter's **Resonance**.
+> - The Delay has a single 600 ms **Time** with **Ping-Pong** on.
+
 ## Overview
 
 Generative music creates itself through interconnected systems of clocks, sequences, and randomness. This patch plays indefinitely, always changing, always familiar—perfect for ambient backgrounds, meditation, or sleep.

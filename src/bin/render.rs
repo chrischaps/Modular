@@ -1,13 +1,14 @@
 //! Render a patch to a WAV file without opening the app.
 //!
 //! ```text
-//! cargo run --release --bin render -- <patch.json> <out.wav> [--seconds N] [--sample-rate HZ]
+//! cargo run --release --bin render -- <patch.json> <out.wav> [--seconds N] [--sample-rate HZ] [--audition]
 //! ```
 //!
 //! Prints the peak and RMS level of each channel so renders can be compared
 //! before and after a DSP change. Patches that need live input (Keyboard,
-//! MIDI Note) render silence unless something in the patch triggers them,
-//! such as a Clock or Sequencer.
+//! MIDI Note, Poly MIDI) render silence unless something in the patch
+//! triggers them, such as a Clock or Sequencer, or `--audition` is given to
+//! play a short phrase into them.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -17,7 +18,7 @@ use modular_synth::engine::OfflineRenderer;
 use modular_synth::persistence::load_from_file;
 
 const USAGE: &str =
-    "usage: render <patch.json> <out.wav> [--seconds N] [--sample-rate HZ] [--block-size N]";
+    "usage: render <patch.json> <out.wav> [--seconds N] [--sample-rate HZ] [--block-size N] [--audition]";
 
 struct Args {
     patch: PathBuf,
@@ -25,6 +26,7 @@ struct Args {
     seconds: f32,
     sample_rate: u32,
     block_size: usize,
+    audition: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -32,6 +34,7 @@ fn parse_args() -> Result<Args, String> {
     let mut seconds = 5.0;
     let mut sample_rate = 48_000;
     let mut block_size = 256;
+    let mut audition = false;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -44,6 +47,7 @@ fn parse_args() -> Result<Args, String> {
             "--block-size" => {
                 block_size = value("--block-size")?.parse().map_err(|e| format!("--block-size: {}", e))?
             }
+            "--audition" => audition = true,
             "-h" | "--help" => return Err(USAGE.to_string()),
             flag if flag.starts_with("--") => return Err(format!("unknown option {}\n{}", flag, USAGE)),
             _ => positional.push(PathBuf::from(arg)),
@@ -57,6 +61,7 @@ fn parse_args() -> Result<Args, String> {
             seconds,
             sample_rate,
             block_size,
+            audition,
         }),
         _ => Err(USAGE.to_string()),
     }
@@ -71,7 +76,11 @@ fn run(args: Args) -> Result<(), String> {
         eprintln!("warning: {}", warning);
     }
 
-    let audio = renderer.render_seconds(args.seconds);
+    let audio = if args.audition {
+        renderer.render_audition(&patch, &compiled, args.seconds)
+    } else {
+        renderer.render_seconds(args.seconds)
+    };
 
     let spec = hound::WavSpec {
         channels: 2,
