@@ -6,9 +6,15 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::graph::SynthNodeTemplate;
+
 /// Current patch format version.
 /// Increment this when making breaking changes to the format.
-pub const PATCH_VERSION: u32 = 2;
+///
+/// - v1: positional parameters
+/// - v2: adds `midi_mappings`
+/// - v3: parameters are stored by name
+pub const PATCH_VERSION: u32 = 3;
 
 /// A MIDI CC to parameter mapping.
 ///
@@ -23,7 +29,8 @@ pub struct MidiMapping {
     pub node_id: u64,
     /// Target parameter index within the node.
     pub param_index: usize,
-    /// Name of the parameter (for display).
+    /// Name of the parameter. On load this wins over `param_index`, so a
+    /// mapping survives the module's parameters being reordered.
     pub param_name: String,
     /// Minimum value of the mapped range.
     pub min_value: f32,
@@ -69,7 +76,7 @@ impl MidiMapping {
 ///
 /// Contains all the information needed to recreate a graph configuration:
 /// nodes with their positions and parameters, and all connections between them.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Patch {
     /// Human-readable name for the patch.
     pub name: String,
@@ -109,7 +116,7 @@ impl Default for Patch {
 }
 
 /// Serialized data for a single node in the patch.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NodeData {
     /// Unique identifier for this node within the patch.
     /// Used for referencing in connections.
@@ -119,9 +126,9 @@ pub struct NodeData {
     pub module_id: String,
     /// Node position in the graph editor (x, y).
     pub position: (f32, f32),
-    /// Parameter values in order they appear in the node.
+    /// Parameter values by name, in the order they appear in the node.
     /// These are the actual values (Hz for frequency, seconds for time, etc.).
-    pub parameters: Vec<ParameterValue>,
+    pub parameters: Vec<NamedParameter>,
 }
 
 impl NodeData {
@@ -136,8 +143,27 @@ impl NodeData {
     }
 }
 
+/// A parameter value together with the name of the parameter it belongs to.
+///
+/// Serializes flat: `{"name": "Cutoff", "type": "Frequency", "value": 800.0}`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NamedParameter {
+    /// Parameter name, as shown on the node.
+    pub name: String,
+    /// The saved value.
+    #[serde(flatten)]
+    pub value: ParameterValue,
+}
+
+impl NamedParameter {
+    /// Create a named parameter.
+    pub fn new(name: impl Into<String>, value: ParameterValue) -> Self {
+        Self { name: name.into(), value }
+    }
+}
+
 /// A parameter value that preserves type information for proper restoration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "value")]
 pub enum ParameterValue {
     /// Scalar value (0.0-1.0 range).
@@ -172,7 +198,7 @@ impl ParameterValue {
 }
 
 /// Serialized data for a connection between two nodes.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ConnectionData {
     /// Source node ID.
     pub from_node: u64,
@@ -210,8 +236,6 @@ pub enum PatchError {
     SerializationError(serde_json::Error),
     /// Incompatible patch version.
     IncompatibleVersion { found: u32, expected: u32 },
-    /// Unknown module type in patch.
-    UnknownModule(String),
 }
 
 impl std::fmt::Display for PatchError {
@@ -222,7 +246,6 @@ impl std::fmt::Display for PatchError {
             Self::IncompatibleVersion { found, expected } => {
                 write!(f, "Incompatible patch version: found {}, expected <= {}", found, expected)
             }
-            Self::UnknownModule(id) => write!(f, "Unknown module type: {}", id),
         }
     }
 }
@@ -249,6 +272,82 @@ impl From<serde_json::Error> for PatchError {
     }
 }
 
+/// A v1/v2 patch, whose parameters are stored by position.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PatchV2 {
+    pub name: String,
+    pub version: u32,
+    pub nodes: Vec<NodeDataV2>,
+    pub connections: Vec<ConnectionData>,
+    #[serde(default)]
+    pub midi_mappings: Vec<MidiMapping>,
+}
+
+/// A v1/v2 node: parameter values in the order the node's parameters appeared.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NodeDataV2 {
+    pub id: u64,
+    pub module_id: String,
+    pub position: (f32, f32),
+    pub parameters: Vec<ParameterValue>,
+}
+
+/// Names positional parameters using each module's current parameter list.
+///
+/// Positions only meant something against the parameter order at save time,
+/// so this assumes that order hasn't changed since. That's why v3 had to land
+/// before any module's parameters change. Values past the end of the list,
+/// and all values of unknown modules, are dropped.
+pub fn migrate_v2_to_v3(old: PatchV2) -> Patch {
+    let nodes = old
+        .nodes
+        .into_iter()
+        .map(|node| {
+            let names = SynthNodeTemplate::from_module_id(&node.module_id)
+                .map(|t| t.parameter_names())
+                .unwrap_or_default();
+            NodeData {
+                id: node.id,
+                module_id: node.module_id,
+                position: node.position,
+                parameters: names
+                    .into_iter()
+                    .zip(node.parameters)
+                    .map(|(name, value)| NamedParameter { name, value })
+                    .collect(),
+            }
+        })
+        .collect();
+
+    Patch {
+        name: old.name,
+        version: 3,
+        nodes,
+        connections: old.connections,
+        midi_mappings: old.midi_mappings,
+    }
+}
+
+/// Parses a patch from JSON, migrating older versions to the current format.
+pub fn patch_from_json(json: &str) -> Result<Patch, PatchError> {
+    #[derive(Deserialize)]
+    struct VersionOnly {
+        version: u32,
+    }
+    let VersionOnly { version } = serde_json::from_str(json)?;
+
+    if version > PATCH_VERSION {
+        return Err(PatchError::IncompatibleVersion {
+            found: version,
+            expected: PATCH_VERSION,
+        });
+    }
+    if version < 3 {
+        return Ok(migrate_v2_to_v3(serde_json::from_str(json)?));
+    }
+    Ok(serde_json::from_str(json)?)
+}
+
 /// Save a patch to a JSON file.
 pub fn save_to_file(patch: &Patch, path: &std::path::Path) -> Result<(), PatchError> {
     let json = serde_json::to_string_pretty(patch)?;
@@ -259,17 +358,7 @@ pub fn save_to_file(patch: &Patch, path: &std::path::Path) -> Result<(), PatchEr
 /// Load a patch from a JSON file.
 pub fn load_from_file(path: &std::path::Path) -> Result<Patch, PatchError> {
     let json = std::fs::read_to_string(path)?;
-    let patch: Patch = serde_json::from_str(&json)?;
-
-    // Version check
-    if !patch.is_compatible() {
-        return Err(PatchError::IncompatibleVersion {
-            found: patch.version,
-            expected: PATCH_VERSION,
-        });
-    }
-
-    Ok(patch)
+    patch_from_json(&json)
 }
 
 #[cfg(test)]
@@ -293,8 +382,8 @@ mod tests {
             module_id: "osc.sine".to_string(),
             position: (100.0, 200.0),
             parameters: vec![
-                ParameterValue::Frequency(440.0),
-                ParameterValue::Scalar(0.5),
+                NamedParameter::new("Frequency", ParameterValue::Frequency(440.0)),
+                NamedParameter::new("Amplitude", ParameterValue::Scalar(0.5)),
             ],
         });
         patch.connections.push(ConnectionData::new(1, "Out", 2, "In"));
@@ -329,5 +418,57 @@ mod tests {
         assert!((ParameterValue::Toggle(true).as_f32() - 1.0).abs() < f32::EPSILON);
         assert!((ParameterValue::Toggle(false).as_f32()).abs() < f32::EPSILON);
         assert!((ParameterValue::Select(2).as_f32() - 2.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_named_parameter_serializes_flat() {
+        let param = NamedParameter::new("Cutoff", ParameterValue::Frequency(800.0));
+        let json = serde_json::to_value(&param).unwrap();
+        assert_eq!(json, serde_json::json!({"name": "Cutoff", "type": "Frequency", "value": 800.0}));
+        assert_eq!(serde_json::from_value::<NamedParameter>(json).unwrap(), param);
+    }
+
+    #[test]
+    fn test_v1_patch_without_mappings_migrates() {
+        let json = r#"{
+            "name": "Old", "version": 1,
+            "nodes": [{"id": 0, "module_id": "output.audio", "position": [0.0, 0.0],
+                       "parameters": [{"type": "Scalar", "value": 0.25}]}],
+            "connections": []
+        }"#;
+        let patch = patch_from_json(json).unwrap();
+        assert_eq!(patch.version, PATCH_VERSION);
+        assert_eq!(patch.nodes[0].parameters, vec![NamedParameter::new("Volume", ParameterValue::Scalar(0.25))]);
+        assert!(patch.midi_mappings.is_empty());
+    }
+
+    #[test]
+    fn test_migration_drops_values_it_cannot_name() {
+        let json = r#"{
+            "name": "Old", "version": 2,
+            "nodes": [
+                {"id": 0, "module_id": "output.audio", "position": [0.0, 0.0], "parameters": [
+                    {"type": "Scalar", "value": 0.25}, {"type": "Toggle", "value": true},
+                    {"type": "Toggle", "value": false}, {"type": "Scalar", "value": 9.0}]},
+                {"id": 1, "module_id": "gone.module", "position": [0.0, 0.0], "parameters": [
+                    {"type": "Scalar", "value": 0.5}]}
+            ],
+            "connections": []
+        }"#;
+        let patch = patch_from_json(json).unwrap();
+        let names: Vec<_> = patch.nodes[0].parameters.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Volume", "Limiter", "Character"]);
+        // Unknown modules keep their node (staging reports it) but lose their values
+        assert_eq!(patch.nodes[1].module_id, "gone.module");
+        assert!(patch.nodes[1].parameters.is_empty());
+    }
+
+    #[test]
+    fn test_future_version_is_rejected() {
+        let json = format!(r#"{{"name": "New", "version": {}, "nodes": [], "connections": []}}"#, PATCH_VERSION + 1);
+        assert!(matches!(
+            patch_from_json(&json),
+            Err(PatchError::IncompatibleVersion { found, .. }) if found == PATCH_VERSION + 1
+        ));
     }
 }

@@ -22,8 +22,7 @@ use crate::graph::{
 use crate::modules::keyboard::{key_to_note, relative_to_midi};
 use crate::modules::midi_note::MidiNote;
 use crate::persistence::{
-    ConnectionData, MidiMapping, NodeData, ParameterValue, Patch, PatchError,
-    load_from_file, save_to_file,
+    capture_patch, load_from_file, save_to_file, stage_patch, MidiMapping, Patch, PatchError,
 };
 use crate::widgets::{cpu_meter, CpuMeterConfig};
 use super::theme;
@@ -87,6 +86,9 @@ pub struct SynthApp {
 
     /// Status message for save/load operations (auto-clears after display).
     status_message: Option<String>,
+
+    /// Problems skipped while loading the current patch, shown in the status bar.
+    load_warnings: Vec<String>,
 
     /// Currently pressed keyboard keys for virtual keyboard.
     /// Stores (relative_note, egui::Key) in order of press for key priority.
@@ -218,6 +220,7 @@ impl SynthApp {
             cached_params: HashMap::new(),
             current_patch_path: None,
             status_message: None,
+            load_warnings: Vec::new(),
             pressed_keys: Vec::new(),
             last_gate_on: None,
             gate_held_high: false,
@@ -1514,25 +1517,19 @@ impl SynthApp {
 
     /// Create a Patch from the current graph state.
     fn create_patch(&self, name: &str) -> Patch {
-        let mut patch = Patch::new(name);
+        let pan_zoom = &self.graph_state.pan_zoom;
 
-        // Collect nodes
-        for (node_id, node) in self.graph_state.graph.nodes.iter() {
-            // Get engine node ID for this graph node
-            let Some(engine_node_id) = self.user_state.get_engine_node_id(node_id) else {
-                continue;
-            };
-
-            // Get node position, normalized to zoom=1.0 coordinates for persistence.
-            // The library's update_node_positions_after_zoom modifies positions when zooming,
-            // so we need to reverse that transformation to get zoom-independent positions.
-            // On load, we reset to zoom=1.0 and pan=0, so positions saved this way will match.
-            let position = self.graph_state.node_positions
+        // Get node positions normalized to zoom=1.0 coordinates for persistence.
+        // The library's update_node_positions_after_zoom modifies positions when zooming,
+        // so we need to reverse that transformation to get zoom-independent positions.
+        // On load, we reset to zoom=1.0 and pan=0, so positions saved this way will match.
+        let position = |node_id| {
+            self.graph_state.node_positions
                 .get(node_id)
                 .map(|pos| {
-                    let zoom = self.graph_state.pan_zoom.zoom;
-                    let pan = self.graph_state.pan_zoom.pan;
-                    let clip_rect = self.graph_state.pan_zoom.clip_rect;
+                    let zoom = pan_zoom.zoom;
+                    let pan = pan_zoom.pan;
+                    let clip_rect = pan_zoom.clip_rect;
 
                     // If zoom is ~1.0 or clip_rect is invalid, use position as-is
                     if (zoom - 1.0).abs() < 0.001 || clip_rect.is_negative() {
@@ -1548,83 +1545,26 @@ impl SynthApp {
                         (canonical.x, canonical.y)
                     }
                 })
-                .unwrap_or((0.0, 0.0));
+                .unwrap_or((0.0, 0.0))
+        };
 
-            let mut node_data = NodeData::new(
-                engine_node_id,
-                node.user_data.module_id,
-                position,
-            );
-
-            // Collect parameter values
-            for (_name, input_id) in &node.inputs {
-                let input = self.graph_state.graph.get_input(*input_id);
-
-                // Only save parameter values (not connection-only ports)
-                match input.kind {
-                    InputParamKind::ConstantOnly | InputParamKind::ConnectionOrConstant => {
-                        let param_value = match &input.value {
-                            SynthValueType::Scalar { value, .. } => ParameterValue::Scalar(*value),
-                            SynthValueType::Frequency { value, .. } => ParameterValue::Frequency(*value),
-                            SynthValueType::LinearHz { value, .. } => ParameterValue::LinearHz(*value),
-                            SynthValueType::Time { value, .. } => ParameterValue::Time(*value),
-                            SynthValueType::LinearRange { value, .. } => ParameterValue::LinearRange(*value),
-                            SynthValueType::Toggle { value, .. } => ParameterValue::Toggle(*value),
-                            SynthValueType::Select { value, .. } => ParameterValue::Select(*value),
-                        };
-                        node_data.parameters.push(param_value);
-                    }
-                    InputParamKind::ConnectionOnly => {
-                        // Skip connection-only inputs
-                    }
-                }
-            }
-
-            patch.nodes.push(node_data);
-        }
-
-        // Collect connections
-        for (input_id, output_id) in self.graph_state.graph.iter_connections() {
-            let input = self.graph_state.graph.get_input(input_id);
-            let output = self.graph_state.graph.get_output(output_id);
-
-            // Get node data to find port names
-            let from_node = self.graph_state.graph.nodes.get(output.node);
-            let to_node = self.graph_state.graph.nodes.get(input.node);
-
-            if let (Some(from_node), Some(to_node)) = (from_node, to_node) {
-                // Find output port name
-                let from_port = from_node.outputs
-                    .iter()
-                    .find(|(_, id)| *id == output_id)
-                    .map(|(name, _)| name.clone());
-
-                // Find input port name
-                let to_port = to_node.inputs
-                    .iter()
-                    .find(|(_, id)| *id == input_id)
-                    .map(|(name, _)| name.clone());
-
-                // Get engine node IDs
-                let from_engine_id = self.user_state.get_engine_node_id(output.node);
-                let to_engine_id = self.user_state.get_engine_node_id(input.node);
-
-                if let (Some(from_port), Some(to_port), Some(from_id), Some(to_id)) =
-                    (from_port, to_port, from_engine_id, to_engine_id)
-                {
-                    patch.connections.push(ConnectionData::new(from_id, from_port, to_id, to_port));
-                }
-            }
-        }
-
-        // Copy MIDI mappings to the patch
-        patch.midi_mappings = self.midi_mappings.clone();
-
-        patch
+        capture_patch(
+            name,
+            &self.graph_state.graph,
+            |node_id| self.user_state.get_engine_node_id(node_id),
+            position,
+            &self.midi_mappings,
+        )
     }
 
     /// Load a patch, replacing the current graph.
-    fn load_patch(&mut self, patch: &Patch) -> Result<(), PatchError> {
+    ///
+    /// The whole patch is built into a staging graph first, and the current
+    /// graph is only replaced once that has succeeded. Anything that couldn't
+    /// be restored is skipped and returned as warnings.
+    fn load_patch(&mut self, patch: &Patch) -> Result<Vec<String>, PatchError> {
+        let mut staged = stage_patch(patch)?;
+
         // Stop playback during load
         let was_playing = self.is_playing;
         if was_playing {
@@ -1642,132 +1582,64 @@ impl SynthApp {
         // at a different zoom than they were saved at would cause layout drift.
         self.graph_state.pan_zoom = egui_node_graph2::PanZoom::default();
 
-        // Map from patch node IDs to graph node IDs
-        let mut id_map: HashMap<u64, egui_node_graph2::NodeId> = HashMap::new();
+        // Swap in the staged graph. Its node IDs stay valid.
+        self.graph_state.graph = std::mem::take(&mut staged.graph);
 
-        // Create nodes
-        for node_data in &patch.nodes {
-            // Find the template for this module ID
-            let template = self.find_template_for_module(&node_data.module_id)
-                .ok_or_else(|| PatchError::UnknownModule(node_data.module_id.clone()))?;
+        for node in &staged.nodes {
+            let pos = egui::pos2(node.position.0, node.position.1);
+            self.graph_state.node_positions.insert(node.graph_id, pos);
+            self.graph_state.node_order.push(node.graph_id);
 
-            // Create the node
-            let graph_node_id = self.graph_state.graph.add_node(
-                template.node_graph_label(&mut self.user_state),
-                template.user_data(&mut self.user_state),
-                |graph, node_id| template.build_node(graph, &mut self.user_state, node_id),
-            );
+            // Engine IDs keep counting across loads, so they differ from the
+            // IDs in the patch file. MIDI mappings are remapped below.
+            let engine_node_id = self.user_state.allocate_engine_node_id(node.graph_id);
 
-            // Set node position
-            let pos = egui::pos2(node_data.position.0, node_data.position.1);
-            self.graph_state.node_positions.insert(graph_node_id, pos);
-            self.graph_state.node_order.push(graph_node_id);
-
-            // Allocate engine node ID (use the patch ID to maintain consistency)
-            // Note: We use our own ID allocation to keep engine and graph in sync
-            let engine_node_id = self.user_state.allocate_engine_node_id(graph_node_id);
-
-            // Send command to create the module in the audio engine
+            // Send command to create the module in the audio engine.
+            // Parameter values follow with the next parameter sync.
             self.send_command(EngineCommand::AddModule {
                 node_id: engine_node_id,
-                module_id: template.module_id(),
+                module_id: node.template.module_id(),
             });
 
             // Set up output monitoring for LED indicators and monitored outputs
-            // Collect indices first to avoid borrow issues
-            let (led_output_indices, monitored_output_indices): (Vec<usize>, Vec<usize>) = self.graph_state.graph.nodes
-                .get(graph_node_id)
-                .map(|node| (
-                    node.user_data.led_indicators.iter().map(|led| led.output_index).collect(),
-                    node.user_data.monitored_outputs.clone(),
-                ))
+            let output_indices: Vec<usize> = self.graph_state.graph.nodes
+                .get(node.graph_id)
+                .map(|n| {
+                    n.user_data.led_indicators.iter()
+                        .map(|led| led.output_index)
+                        .chain(n.user_data.monitored_outputs.iter().copied())
+                        .collect()
+                })
                 .unwrap_or_default();
 
-            for output_index in led_output_indices {
+            for output_index in output_indices {
                 self.send_command(EngineCommand::MonitorOutput {
                     node_id: engine_node_id,
                     output_index,
                 });
             }
+        }
 
-            for output_index in monitored_output_indices {
-                self.send_command(EngineCommand::MonitorOutput {
-                    node_id: engine_node_id,
-                    output_index,
-                });
+        // Send the staged connections to the engine
+        let connections: Vec<_> = self.graph_state.graph.iter_connections().collect();
+        for (input_id, output_id) in connections {
+            if let Some(cmd) = self.build_connect_command(output_id, input_id) {
+                self.send_command(cmd);
             }
 
-            // Map patch ID to graph ID for connection restoration
-            id_map.insert(node_data.id, graph_node_id);
+            // Set up input monitoring if this is an exposed parameter
+            if let Some(monitor_cmd) = self.build_monitor_input_command(input_id) {
+                self.send_command(monitor_cmd);
+            }
 
-            // Restore parameter values
-            if let Some(node) = self.graph_state.graph.nodes.get_mut(graph_node_id) {
-                let mut param_idx = 0;
-                for (_name, input_id) in &node.inputs {
-                    if let Some(input) = self.graph_state.graph.inputs.get_mut(*input_id) {
-                        match input.kind {
-                            InputParamKind::ConstantOnly | InputParamKind::ConnectionOrConstant => {
-                                if let Some(saved_value) = node_data.parameters.get(param_idx) {
-                                    input.value.set_actual_value(saved_value.as_f32());
-                                }
-                                param_idx += 1;
-                            }
-                            InputParamKind::ConnectionOnly => {
-                                // Skip
-                            }
-                        }
-                    }
-                }
+            // Set up output monitoring for cable animation
+            if let Some(monitor_cmd) = self.build_monitor_output_command(output_id) {
+                self.send_command(monitor_cmd);
             }
         }
 
-        // Restore connections
-        for conn in &patch.connections {
-            // Find graph node IDs from patch IDs
-            let from_graph_id = id_map.get(&conn.from_node);
-            let to_graph_id = id_map.get(&conn.to_node);
-
-            if let (Some(&from_graph_id), Some(&to_graph_id)) = (from_graph_id, to_graph_id) {
-                // Find output port by name
-                let output_id = self.graph_state.graph.nodes.get(from_graph_id)
-                    .and_then(|node| {
-                        node.outputs.iter()
-                            .find(|(name, _)| *name == conn.from_port)
-                            .map(|(_, id)| *id)
-                    });
-
-                // Find input port by name
-                let input_id = self.graph_state.graph.nodes.get(to_graph_id)
-                    .and_then(|node| {
-                        node.inputs.iter()
-                            .find(|(name, _)| *name == conn.to_port)
-                            .map(|(_, id)| *id)
-                    });
-
-                if let (Some(output_id), Some(input_id)) = (output_id, input_id) {
-                    // Add connection to graph (pos=0 adds at beginning, order doesn't matter for audio)
-                    self.graph_state.graph.add_connection(output_id, input_id, 0);
-
-                    // Send connection command to engine
-                    if let Some(cmd) = self.build_connect_command(output_id, input_id) {
-                        self.send_command(cmd);
-                    }
-
-                    // Set up input monitoring if this is an exposed parameter
-                    if let Some(monitor_cmd) = self.build_monitor_input_command(input_id) {
-                        self.send_command(monitor_cmd);
-                    }
-
-                    // Set up output monitoring for cable animation
-                    if let Some(monitor_cmd) = self.build_monitor_output_command(output_id) {
-                        self.send_command(monitor_cmd);
-                    }
-                }
-            }
-        }
-
-        // Load MIDI mappings
-        self.midi_mappings = patch.midi_mappings.clone();
+        // Load MIDI mappings, retargeted from the patch's node IDs to the new ones
+        self.midi_mappings = staged.remap_midi_mappings(|graph_id| self.user_state.get_engine_node_id(graph_id));
         // Sync mappings to user state for UI display
         for mapping in &self.midi_mappings {
             self.user_state.set_midi_mapping(
@@ -1785,7 +1657,7 @@ impl SynthApp {
             self.send_command(EngineCommand::SetPlaying(true));
         }
 
-        Ok(())
+        Ok(staged.warnings)
     }
 
     /// Clear the entire graph.
@@ -1812,13 +1684,9 @@ impl SynthApp {
     /// Start a new patch - clears the graph and resets the current file path.
     fn new_patch(&mut self) {
         self.clear_graph();
+        self.load_warnings.clear();
         self.current_patch_path = None;
         self.status_message = Some("New patch created".to_string());
-    }
-
-    /// Find the template for a given module ID.
-    fn find_template_for_module(&self, module_id: &str) -> Option<SynthNodeTemplate> {
-        SynthNodeTemplate::from_module_id(module_id)
     }
 
     /// Show a save file dialog and save the current patch.
@@ -1861,9 +1729,13 @@ impl SynthApp {
             match load_from_file(&path) {
                 Ok(patch) => {
                     match self.load_patch(&patch) {
-                        Ok(()) => {
+                        Ok(warnings) => {
+                            for warning in &warnings {
+                                eprintln!("Patch load warning: {}", warning);
+                            }
                             self.current_patch_path = Some(path.clone());
                             self.status_message = Some(format!("Loaded: {}", patch.name));
+                            self.load_warnings = warnings;
                         }
                         Err(e) => {
                             self.status_message = Some(format!("Load failed: {}", e));
@@ -1990,6 +1862,30 @@ impl SynthApp {
             }
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                // Problems from the last load stay visible until dismissed
+                if !self.load_warnings.is_empty() {
+                    let count = self.load_warnings.len();
+                    let label = ui.add(
+                        egui::Label::new(
+                            RichText::new(format!(
+                                "⚠ {} load warning{}",
+                                count,
+                                if count == 1 { "" } else { "s" }
+                            ))
+                            .color(theme::accent::WARNING)
+                            .small(),
+                        )
+                        .sense(egui::Sense::click()),
+                    );
+                    let details = format!("{}\n\nClick to dismiss", self.load_warnings.join("\n"));
+                    if label.on_hover_text(details).clicked() {
+                        self.load_warnings.clear();
+                    }
+                    ui.label(RichText::new("|")
+                        .color(theme::text::DISABLED)
+                        .small());
+                }
+
                 // Show current patch name if any
                 if let Some(ref path) = self.current_patch_path {
                     if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {

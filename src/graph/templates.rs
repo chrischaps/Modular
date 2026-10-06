@@ -68,6 +68,25 @@ impl SynthNodeTemplate {
             .find(|t| t.module_id() == module_id)
     }
 
+    /// Names of this module's parameters, in parameter-index order.
+    ///
+    /// Builds a throwaway node, so it always matches what the editor creates.
+    pub fn parameter_names(&self) -> Vec<String> {
+        let mut graph = super::SynthGraph::default();
+        let mut user_state = SynthGraphState::new();
+        let node_id = graph.add_node(
+            self.node_graph_label(&mut user_state),
+            self.user_data(&mut user_state),
+            |graph, node_id| self.build_node(graph, &mut user_state, node_id),
+        );
+        graph.nodes[node_id]
+            .inputs
+            .iter()
+            .filter(|(_, id)| super::port_mapping::is_parameter(graph.get_input(*id).kind))
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
     /// Get the module ID for this template.
     /// These IDs must match the `id` field in the corresponding DspModule::info().
     pub fn module_id(&self) -> &'static str {
@@ -2073,6 +2092,17 @@ impl NodeTemplateTrait for SynthNodeTemplate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parameter_names_are_unique_per_module() {
+        // Patches save parameters by name, so a duplicate would make one
+        // parameter's saved value land on the other
+        for template in AllNodeTemplates.all_kinds() {
+            let names = template.parameter_names();
+            let unique: std::collections::HashSet<_> = names.iter().collect();
+            assert_eq!(unique.len(), names.len(), "{}: {:?}", template.module_id(), names);
+        }
+    }
 
     #[test]
     fn test_all_templates() {

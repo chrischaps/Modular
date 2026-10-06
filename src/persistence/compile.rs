@@ -1,17 +1,17 @@
 //! Headless patch compilation.
 //!
 //! Turns a [`Patch`] into the [`EngineCommand`]s that build it in an audio
-//! engine, without a UI. Nodes are built through the same editor templates the
-//! UI uses, and ports and parameters are resolved with the shared
-//! [`port_mapping`] helpers, so the indices always match what the editor sends.
+//! engine, without a UI. The patch is staged with [`stage_patch`], the same
+//! loader the editor uses, and ports and parameters are resolved with the
+//! shared [`port_mapping`] helpers, so the indices always match what the
+//! editor sends.
 
 use std::collections::HashMap;
 
 use crate::engine::{EngineCommand, NodeId as EngineNodeId};
-use crate::graph::{port_mapping, SynthGraph, SynthGraphState, SynthNodeTemplate};
-use egui_node_graph2::NodeTemplateTrait;
+use crate::graph::port_mapping;
 
-use super::{Patch, PatchError};
+use super::{stage_patch, Patch, PatchError};
 
 /// The engine commands that build a patch, plus bookkeeping for callers.
 #[derive(Debug, Default)]
@@ -21,108 +21,62 @@ pub struct CompiledPatch {
     /// Engine node ID assigned to each patch node ID.
     pub node_ids: HashMap<u64, EngineNodeId>,
     /// Problems that were skipped rather than failing the whole patch,
-    /// e.g. a connection naming a port that no longer exists.
+    /// e.g. an unknown module or a connection naming a port that no longer exists.
     pub warnings: Vec<String>,
 }
 
 /// Compiles a patch into engine commands.
 ///
-/// Fails on an unknown module (the patch can't be represented faithfully).
-/// Connections to missing nodes or ports are skipped and reported in
-/// [`CompiledPatch::warnings`], matching how the editor loads patches.
+/// Fails only on an incompatible version. Anything else that can't be built
+/// is skipped and reported in [`CompiledPatch::warnings`], exactly as when the
+/// editor loads the patch.
 pub fn compile_patch(patch: &Patch) -> Result<CompiledPatch, PatchError> {
-    if !patch.is_compatible() {
-        return Err(PatchError::IncompatibleVersion {
-            found: patch.version,
-            expected: super::PATCH_VERSION,
-        });
-    }
+    let staged = stage_patch(patch)?;
+    let graph = &staged.graph;
+    let mut compiled = CompiledPatch {
+        warnings: staged.warnings.clone(),
+        ..Default::default()
+    };
+    let mut engine_ids = HashMap::new();
 
-    let mut graph = SynthGraph::default();
-    let mut user_state = SynthGraphState::new();
-    let mut compiled = CompiledPatch::default();
-    let mut graph_ids = HashMap::new();
-
-    for node_data in &patch.nodes {
-        let template = SynthNodeTemplate::from_module_id(&node_data.module_id)
-            .ok_or_else(|| PatchError::UnknownModule(node_data.module_id.clone()))?;
-
-        let graph_node_id = graph.add_node(
-            template.node_graph_label(&mut user_state),
-            template.user_data(&mut user_state),
-            |graph, node_id| template.build_node(graph, &mut user_state, node_id),
-        );
-        let engine_node_id = user_state.allocate_engine_node_id(graph_node_id);
-        graph_ids.insert(node_data.id, graph_node_id);
-        compiled.node_ids.insert(node_data.id, engine_node_id);
+    for (engine_node_id, node) in (0..).zip(&staged.nodes) {
+        engine_ids.insert(node.graph_id, engine_node_id);
+        compiled.node_ids.insert(node.patch_id, engine_node_id);
 
         compiled.commands.push(EngineCommand::AddModule {
             node_id: engine_node_id,
-            module_id: template.module_id(),
+            module_id: node.template.module_id(),
         });
 
-        // Restore saved values (by position, as the editor does), then send
-        // every parameter the way the editor's initial parameter sync does.
-        let skip = port_mapping::live_input_parameter_count(template.module_id());
-        for (param_index, input_id) in port_mapping::parameter_inputs(&graph, graph_node_id)
+        // Send every parameter the way the editor's initial parameter sync does
+        let skip = port_mapping::live_input_parameter_count(node.template.module_id());
+        for (param_index, input_id) in port_mapping::parameter_inputs(graph, node.graph_id)
             .into_iter()
             .enumerate()
+            .skip(skip)
         {
-            let Some(input) = graph.inputs.get_mut(input_id) else {
-                continue;
-            };
-            if let Some(saved) = node_data.parameters.get(param_index) {
-                input.value.set_actual_value(saved.as_f32());
-            }
-            if param_index < skip {
-                continue;
-            }
             compiled.commands.push(EngineCommand::SetParameter {
                 node_id: engine_node_id,
                 param_index,
-                value: input.value.actual_value(),
+                value: graph.get_input(input_id).value.actual_value(),
             });
         }
     }
 
-    for conn in &patch.connections {
-        let (Some(&from), Some(&to)) = (graph_ids.get(&conn.from_node), graph_ids.get(&conn.to_node)) else {
-            compiled.warnings.push(format!(
-                "connection {} -> {} references a missing node",
-                conn.from_node, conn.to_node
-            ));
+    for (input_id, output_id) in graph.iter_connections() {
+        let from = graph.get_output(output_id).node;
+        let to = graph.get_input(input_id).node;
+        // Staging only keeps connections between ports that map to the engine
+        let (Some(from_port), Some(to_port)) = (
+            port_mapping::output_port_index(graph, from, output_id),
+            port_mapping::input_port_index(graph, to, input_id),
+        ) else {
             continue;
         };
-
-        let output_id = graph.nodes[from]
-            .outputs
-            .iter()
-            .find(|(name, _)| *name == conn.from_port)
-            .map(|(_, id)| *id);
-        let input_id = graph.nodes[to]
-            .inputs
-            .iter()
-            .find(|(name, _)| *name == conn.to_port)
-            .map(|(_, id)| *id);
-
-        let ports = output_id.zip(input_id).and_then(|(output_id, input_id)| {
-            Some((
-                port_mapping::output_port_index(&graph, from, output_id)?,
-                port_mapping::input_port_index(&graph, to, input_id)?,
-            ))
-        });
-        let Some((from_port, to_port)) = ports else {
-            compiled.warnings.push(format!(
-                "connection '{}' -> '{}' names a port that doesn't exist",
-                conn.from_port, conn.to_port
-            ));
-            continue;
-        };
-
         compiled.commands.push(EngineCommand::Connect {
-            from_node: user_state.get_engine_node_id(from).expect("allocated above"),
+            from_node: engine_ids[&from],
             from_port,
-            to_node: user_state.get_engine_node_id(to).expect("allocated above"),
+            to_node: engine_ids[&to],
             to_port,
         });
     }
@@ -133,16 +87,16 @@ pub fn compile_patch(patch: &Patch) -> Result<CompiledPatch, PatchError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::persistence::{ConnectionData, NodeData, ParameterValue};
+    use crate::persistence::{ConnectionData, NamedParameter, NodeData, ParameterValue};
 
     fn osc_to_output() -> Patch {
         let mut patch = Patch::new("test");
         let mut osc = NodeData::new(10, "osc.sine", (0.0, 0.0));
         osc.parameters = vec![
-            ParameterValue::Frequency(110.0),
-            ParameterValue::LinearHz(0.0),
-            ParameterValue::Select(1),
-            ParameterValue::Scalar(0.5),
+            NamedParameter::new("Frequency", ParameterValue::Frequency(110.0)),
+            NamedParameter::new("FM Depth", ParameterValue::LinearHz(0.0)),
+            NamedParameter::new("Waveform", ParameterValue::Select(1)),
+            NamedParameter::new("Pulse Width", ParameterValue::LinearRange(0.5)),
         ];
         patch.nodes.push(osc);
         patch.nodes.push(NodeData::new(20, "output.audio", (200.0, 0.0)));
@@ -173,11 +127,14 @@ mod tests {
     }
 
     #[test]
-    fn test_old_output_patches_load_with_character_off() {
-        // Patches saved before the Character toggle have two output
-        // parameters; Limiter keeps its meaning and Character falls back to off
+    fn test_missing_parameters_fall_back_to_defaults() {
+        // Patches saved before the Character toggle don't name it; Limiter
+        // keeps its saved value and Character falls back to its default (off)
         let mut patch = osc_to_output();
-        patch.nodes[1].parameters = vec![ParameterValue::Scalar(0.5), ParameterValue::Toggle(false)];
+        patch.nodes[1].parameters = vec![
+            NamedParameter::new("Volume", ParameterValue::Scalar(0.5)),
+            NamedParameter::new("Limiter", ParameterValue::Toggle(false)),
+        ];
         let compiled = compile_patch(&patch).unwrap();
 
         let out = compiled.node_ids[&20];
@@ -195,10 +152,28 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_module_is_an_error() {
+    fn test_unknown_module_is_skipped_with_a_warning() {
         let mut patch = osc_to_output();
         patch.nodes.push(NodeData::new(30, "does.not.exist", (0.0, 0.0)));
-        assert!(matches!(compile_patch(&patch), Err(PatchError::UnknownModule(_))));
+        patch.connections.push(ConnectionData::new(30, "Out", 20, "Left"));
+        let compiled = compile_patch(&patch).unwrap();
+
+        // The other nodes and their connection still build
+        assert_eq!(compiled.node_ids.len(), 2);
+        assert!(!compiled.node_ids.contains_key(&30));
+        assert_eq!(
+            compiled.commands.iter().filter(|c| matches!(c, EngineCommand::Connect { .. })).count(),
+            1
+        );
+        // One warning for the node, one for its connection
+        assert_eq!(compiled.warnings.len(), 2, "{:?}", compiled.warnings);
+    }
+
+    #[test]
+    fn test_incompatible_version_is_an_error() {
+        let mut patch = osc_to_output();
+        patch.version = crate::persistence::PATCH_VERSION + 1;
+        assert!(matches!(compile_patch(&patch), Err(PatchError::IncompatibleVersion { .. })));
     }
 
     #[test]

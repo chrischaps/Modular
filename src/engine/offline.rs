@@ -121,17 +121,17 @@ mod tests {
     use super::*;
     use crate::dsp::analysis::{peak, rms, Spectrum};
     use crate::modules::SineOscillator;
-    use crate::persistence::{ConnectionData, NodeData, ParameterValue};
+    use crate::persistence::{ConnectionData, NamedParameter, NodeData, ParameterValue};
 
     /// Oscillator (default C4, chosen waveform) into the output's Mono input.
     fn osc_patch(waveform: usize) -> Patch {
         let mut patch = Patch::new("osc");
         let mut osc = NodeData::new(1, "osc.sine", (0.0, 0.0));
         osc.parameters = vec![
-            ParameterValue::Frequency(SineOscillator::C4_HZ),
-            ParameterValue::LinearHz(0.0),
-            ParameterValue::Select(waveform),
-            ParameterValue::Scalar(0.5),
+            NamedParameter::new("Frequency", ParameterValue::Frequency(SineOscillator::C4_HZ)),
+            NamedParameter::new("FM Depth", ParameterValue::LinearHz(0.0)),
+            NamedParameter::new("Waveform", ParameterValue::Select(waveform)),
+            NamedParameter::new("Pulse Width", ParameterValue::LinearRange(0.5)),
         ];
         patch.nodes.push(osc);
         patch.nodes.push(NodeData::new(2, "output.audio", (200.0, 0.0)));
