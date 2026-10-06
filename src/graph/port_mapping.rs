@@ -89,9 +89,7 @@ pub fn parameter_inputs(graph: &SynthGraph, node_id: NodeId) -> Vec<InputId> {
 /// from the graph (Keyboard: Note, Gate; MIDI Note: Note, Gate, Velocity,
 /// Aftertouch). Parameter sync skips these.
 pub fn live_input_parameter_count(module_id: &str) -> usize {
-    match module_id {
-        "input.keyboard" => 2,
-        "input.midi_note" => 4,
-        _ => 0,
-    }
+    super::SynthNodeTemplate::from_module_id(module_id)
+        .map(|template| template.live_parameter_count())
+        .unwrap_or(0)
 }

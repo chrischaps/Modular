@@ -151,7 +151,7 @@ impl DspModule for SvfFilter {
     fn info(&self) -> &ModuleInfo {
         static INFO: ModuleInfo = ModuleInfo {
             id: "filter.svf",
-            name: "State Variable Filter",
+            name: "SVF Filter",
             category: ModuleCategory::Filter,
             description: "Multi-mode filter with LP, HP, and BP outputs",
         };
@@ -184,7 +184,7 @@ impl DspModule for SvfFilter {
         // Set smoothing targets from parameters
         self.cutoff_smooth.set_target(params[Self::PARAM_CUTOFF]);
         self.resonance_smooth.set_target(params[Self::PARAM_RESONANCE]);
-        self.drive_smooth.set_target(params[Self::PARAM_DRIVE]);
+        self.drive_smooth.set_target(params[Self::PARAM_DRIVE].clamp(1.0, 10.0));
 
         // Get input buffers
         let audio_in = inputs.get(Self::PORT_IN);
@@ -203,8 +203,8 @@ impl DspModule for SvfFilter {
             // Get smoothed parameter values (per-sample for click-free changes)
             let base_cutoff = self.cutoff_smooth.next();
             let base_resonance = self.resonance_smooth.next();
-            // Map drive from 0-1 (UI) to 1-10 (DSP) so signal always passes through
-            let drive = 1.0 + self.drive_smooth.next() * 9.0;
+            // Drive is input gain, 1x (clean) to 10x
+            let drive = self.drive_smooth.next();
 
             // Get input sample with drive
             let input = audio_in
@@ -267,7 +267,7 @@ mod tests {
     fn test_svf_filter_info() {
         let filter = SvfFilter::new();
         assert_eq!(filter.info().id, "filter.svf");
-        assert_eq!(filter.info().name, "State Variable Filter");
+        assert_eq!(filter.info().name, "SVF Filter");
         assert_eq!(filter.info().category, ModuleCategory::Filter);
     }
 
@@ -349,7 +349,7 @@ mod tests {
         ];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        filter.process(&[&input], &mut outputs, &[1000.0, 0.5, 0.0], &ctx);
+        filter.process(&[&input], &mut outputs, &[1000.0, 0.5, 1.0], &ctx);
 
         // All outputs should have non-zero values
         let lp_has_signal = outputs[0].samples.iter().any(|&s| s.abs() > 0.001);
@@ -393,7 +393,7 @@ mod tests {
         let ctx = ProcessContext::new(sample_rate, 4410);
 
         // Set cutoff to 500 Hz (well below our 5000 Hz signal)
-        filter.process(&[&input], &mut outputs, &[500.0, 0.5, 0.0], &ctx);
+        filter.process(&[&input], &mut outputs, &[500.0, 0.5, 1.0], &ctx);
 
         // Calculate RMS of input and lowpass output (after initial transient)
         let skip = 441; // Skip first ~10ms for filter settling
@@ -434,7 +434,7 @@ mod tests {
         let ctx = ProcessContext::new(sample_rate, 4410);
 
         // Set cutoff to 2000 Hz (well above our 100 Hz signal)
-        filter.process(&[&input], &mut outputs, &[2000.0, 0.5, 0.0], &ctx);
+        filter.process(&[&input], &mut outputs, &[2000.0, 0.5, 1.0], &ctx);
 
         // Calculate RMS of input and highpass output (after initial transient)
         let skip = 441;
@@ -469,7 +469,7 @@ mod tests {
             SignalBuffer::audio(256),
         ];
         let ctx = ProcessContext::new(44100.0, 256);
-        filter.process(&[&input], &mut outputs, &[1000.0, 0.5, 0.0], &ctx);
+        filter.process(&[&input], &mut outputs, &[1000.0, 0.5, 1.0], &ctx);
 
         // Reset should clear internal state
         filter.reset();
@@ -482,7 +482,7 @@ mod tests {
             SignalBuffer::audio(256),
         ];
         let ctx2 = ProcessContext::new(44100.0, 256);
-        filter.process(&[&silence], &mut outputs2, &[1000.0, 0.5, 0.0], &ctx2);
+        filter.process(&[&silence], &mut outputs2, &[1000.0, 0.5, 1.0], &ctx2);
 
         // First output sample should be near zero after reset
         assert!(
@@ -511,7 +511,7 @@ mod tests {
         let ctx = ProcessContext::new(44100.0, 4410);
 
         // High resonance, should still be stable
-        filter.process(&[&input], &mut outputs, &[1000.0, 0.95, 1.0], &ctx);
+        filter.process(&[&input], &mut outputs, &[1000.0, 0.95, 10.0], &ctx);
 
         // Check that no outputs explode (all within reasonable bounds)
         for output in &outputs {
@@ -551,7 +551,7 @@ mod tests {
 
         let module = module.unwrap();
         assert_eq!(module.info().id, "filter.svf");
-        assert_eq!(module.info().name, "State Variable Filter");
+        assert_eq!(module.info().name, "SVF Filter");
         assert_eq!(module.ports().len(), 6);
         assert_eq!(module.parameters().len(), 3);
     }
@@ -586,10 +586,10 @@ mod tests {
             SignalBuffer::audio(n),
         ];
         let ctx = ProcessContext::new(sample_rate, n);
-        // Resonance 0 => k = 2 (Butterworth-like -6 dB at cutoff); drive 0 => unity
+        // Resonance 0 => k = 2 (Butterworth-like -6 dB at cutoff); drive 1 => unity
         filter.reset();
         filter.cutoff_smooth.reset(cutoff);
-        filter.process(&[&input], &mut outputs, &[cutoff, 0.0, 0.0], &ctx);
+        filter.process(&[&input], &mut outputs, &[cutoff, 0.0, 1.0], &ctx);
         let skip = n / 2;
         let rms = |s: &[f32]| (s.iter().map(|x| x * x).sum::<f32>() / s.len() as f32).sqrt();
         rms(&outputs[0].samples[skip..]) / rms(&input.samples[skip..])
@@ -641,7 +641,7 @@ mod tests {
 
         let ctx = ProcessContext::new(44100.0, 256);
 
-        // Process with drive = 0.0 (UI value) -> actual drive = 1.0 (unity)
+        // Process with drive = 1.0 (unity)
         let mut outputs1 = vec![
             SignalBuffer::audio(256),
             SignalBuffer::audio(256),
@@ -649,10 +649,10 @@ mod tests {
         ];
         // Process multiple times to let parameter smoothing settle
         for _ in 0..20 {
-            filter1.process(&[&input], &mut outputs1, &[1000.0, 0.5, 0.0], &ctx);
+            filter1.process(&[&input], &mut outputs1, &[1000.0, 0.5, 1.0], &ctx);
         }
 
-        // Process with drive = 0.5 (UI value) -> actual drive = 5.5
+        // Process with drive = 5.5
         let mut outputs2 = vec![
             SignalBuffer::audio(256),
             SignalBuffer::audio(256),
@@ -660,7 +660,7 @@ mod tests {
         ];
         // Process multiple times to let parameter smoothing settle
         for _ in 0..20 {
-            filter2.process(&[&input], &mut outputs2, &[1000.0, 0.5, 0.5], &ctx);
+            filter2.process(&[&input], &mut outputs2, &[1000.0, 0.5, 5.5], &ctx);
         }
 
         // With higher drive, the output should be louder (until saturation)

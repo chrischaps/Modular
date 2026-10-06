@@ -19,8 +19,10 @@ pub enum ParamFormat {
     Percent,
     /// Frequency in Hz/kHz.
     Frequency,
-    /// Time in ms/s.
+    /// Time in ms/s, from a value in seconds.
     Time,
+    /// Time in ms/s, from a value in milliseconds.
+    Milliseconds,
     /// Decibels (dB).
     Decibels,
     /// Semitones.
@@ -60,6 +62,7 @@ impl ParamFormat {
                     format!("{:.1} ms", value * 1000.0)
                 }
             }
+            ParamFormat::Milliseconds => ParamFormat::Time.format(value / 1000.0),
             ParamFormat::Decibels => {
                 if value <= -60.0 {
                     "-∞ dB".to_string()
@@ -439,6 +442,8 @@ mod tests {
         assert_eq!(ParamFormat::Time.format(1.0), "1.00 s");
         assert_eq!(ParamFormat::Time.format(0.5), "500 ms");
         assert_eq!(ParamFormat::Time.format(0.001), "1.0 ms");
+        assert_eq!(ParamFormat::Milliseconds.format(500.0), "500 ms");
+        assert_eq!(ParamFormat::Milliseconds.format(1500.0), "1.50 s");
     }
 
     #[test]

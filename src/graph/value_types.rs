@@ -1,50 +1,70 @@
 //! Value types for node graph parameters.
 //!
 //! Defines how parameter values are displayed and edited in the graph UI.
+//! Values are built from each module's `ParameterDefinition`, so the editor
+//! and the DSP agree on range, default, unit and curve.
 
 use eframe::egui;
 use egui_node_graph2::WidgetValueTrait;
+use crate::dsp::{ParameterDefinition, ParameterDisplay};
+use crate::widgets::ParamFormat;
 use super::{SynthGraphState, SynthNodeData, SynthResponse};
+
+/// Range, default, unit and curve of a continuous parameter.
+///
+/// Copied from the module's `ParameterDefinition`, so values are real units
+/// (Hz, seconds, dB, ...) on both sides of the UI → engine boundary.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NumberSpec {
+    pub min: f32,
+    pub max: f32,
+    pub default: f32,
+    pub unit: &'static str,
+    pub logarithmic: bool,
+}
+
+impl NumberSpec {
+    /// Builds the spec for a continuous parameter definition.
+    pub fn from_definition(def: &ParameterDefinition) -> Self {
+        Self {
+            min: def.min,
+            max: def.max,
+            default: def.default,
+            unit: def.display.unit().unwrap_or(""),
+            // A log curve needs a positive range
+            logarithmic: def.display.is_logarithmic() && def.min > 0.0,
+        }
+    }
+
+    /// How a knob should print values of this parameter.
+    pub fn format(&self) -> ParamFormat {
+        let unit_interval = self.min == 0.0 && self.max == 1.0;
+        match self.unit {
+            "Hz" => ParamFormat::Frequency,
+            "s" => ParamFormat::Time,
+            "ms" => ParamFormat::Milliseconds,
+            "dB" => ParamFormat::Decibels,
+            "st" => ParamFormat::Semitones,
+            "" | "%" if unit_interval => ParamFormat::Percent,
+            "%" | "BPM" => ParamFormat::RawWithUnit { decimals: 0, unit: self.unit },
+            "" => ParamFormat::Raw { decimals: if self.logarithmic { 2 } else { 1 } },
+            unit => ParamFormat::RawWithUnit { decimals: 1, unit },
+        }
+    }
+}
 
 /// Parameter value types for the synthesizer.
 ///
-/// Each variant represents a different kind of parameter with its own
+/// Each variant represents a different kind of input with its own
 /// UI widget and value handling.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SynthValueType {
-    /// A scalar value in 0.0-1.0 range (normalized parameter).
-    Scalar {
+    /// An input that only takes a cable and has no value of its own.
+    Port,
+    /// A continuous value in real units, shown as a knob.
+    Number {
         value: f32,
-        label: String,
-    },
-    /// A frequency value in Hz, displayed logarithmically.
-    Frequency {
-        value: f32,
-        min: f32,
-        max: f32,
-        label: String,
-    },
-    /// A linear Hz range (for FM depth, etc. where 0 is valid).
-    LinearHz {
-        value: f32,
-        min: f32,
-        max: f32,
-        label: String,
-    },
-    /// A time value in seconds or milliseconds.
-    Time {
-        value: f32,
-        min: f32,
-        max: f32,
-        label: String,
-    },
-    /// A linear range with custom min/max and unit (e.g., BPM, percentage).
-    LinearRange {
-        value: f32,
-        min: f32,
-        max: f32,
-        unit: String,
-        label: String,
+        spec: NumberSpec,
     },
     /// A boolean toggle.
     Toggle {
@@ -60,59 +80,30 @@ pub enum SynthValueType {
 }
 
 impl SynthValueType {
-    /// Create a new scalar parameter.
-    pub fn scalar(value: f32, label: impl Into<String>) -> Self {
-        Self::Scalar {
-            value,
-            label: label.into(),
+    /// Builds the editor value for a parameter, starting at its default.
+    ///
+    /// `label` is the short label shown next to toggles and dropdowns.
+    pub fn from_definition(def: &ParameterDefinition, label: impl Into<String>) -> Self {
+        match def.display {
+            ParameterDisplay::Toggle { .. } => Self::Toggle {
+                value: def.default > 0.5,
+                label: label.into(),
+            },
+            ParameterDisplay::Discrete { labels } => Self::Select {
+                value: def.default.round().max(0.0) as usize,
+                options: labels.iter().map(|s| s.to_string()).collect(),
+                label: label.into(),
+            },
+            ParameterDisplay::Linear { .. } | ParameterDisplay::Logarithmic { .. } => Self::Number {
+                value: def.default,
+                spec: NumberSpec::from_definition(def),
+            },
         }
     }
 
-    /// Create a new frequency parameter (logarithmic scaling).
-    pub fn frequency(value: f32, min: f32, max: f32, label: impl Into<String>) -> Self {
-        Self::Frequency {
-            value,
-            min,
-            max,
-            label: label.into(),
-        }
-    }
-
-    /// Create a new linear Hz parameter (for ranges that include 0).
-    pub fn linear_hz(value: f32, min: f32, max: f32, label: impl Into<String>) -> Self {
-        Self::LinearHz {
-            value,
-            min,
-            max,
-            label: label.into(),
-        }
-    }
-
-    /// Create a new time parameter.
-    pub fn time(value: f32, min: f32, max: f32, label: impl Into<String>) -> Self {
-        Self::Time {
-            value,
-            min,
-            max,
-            label: label.into(),
-        }
-    }
-
-    /// Create a new linear range parameter with custom min/max and unit.
-    pub fn linear_range(
-        value: f32,
-        min: f32,
-        max: f32,
-        unit: impl Into<String>,
-        label: impl Into<String>,
-    ) -> Self {
-        Self::LinearRange {
-            value,
-            min,
-            max,
-            unit: unit.into(),
-            label: label.into(),
-        }
+    /// Create a continuous value with the given spec.
+    pub fn number(value: f32, spec: NumberSpec) -> Self {
+        Self::Number { value, spec }
     }
 
     /// Create a new toggle parameter.
@@ -132,87 +123,43 @@ impl SynthValueType {
         }
     }
 
-    /// Get the current value as a normalized f32 (0.0-1.0).
-    pub fn normalized_value(&self) -> f32 {
-        match self {
-            Self::Scalar { value, .. } => *value,
-            Self::Frequency { value, min, max, .. } => {
-                // Logarithmic normalization for frequency
-                let log_min = min.ln();
-                let log_max = max.ln();
-                let log_val = value.ln();
-                (log_val - log_min) / (log_max - log_min)
-            }
-            Self::LinearHz { value, min, max, .. } => {
-                // Linear normalization
-                (value - min) / (max - min)
-            }
-            Self::Time { value, min, max, .. } => {
-                // Linear normalization for time
-                (value - min) / (max - min)
-            }
-            Self::LinearRange { value, min, max, .. } => {
-                // Linear normalization
-                (value - min) / (max - min)
-            }
-            Self::Toggle { value, .. } => if *value { 1.0 } else { 0.0 },
-            Self::Select { value, options, .. } => {
-                if options.is_empty() {
-                    0.0
-                } else {
-                    *value as f32 / (options.len() - 1) as f32
-                }
-            }
-        }
-    }
-
-    /// Get the actual/raw value (not normalized).
-    ///
-    /// This returns the value in its natural units:
-    /// - Scalar: 0.0-1.0 (already in natural range)
-    /// - Frequency: Hz
-    /// - LinearHz: Hz
-    /// - Time: seconds
-    /// - LinearRange: value in its unit
-    /// - Toggle: 0.0 or 1.0
-    /// - Select: index as f32
+    /// The value in real units, as the engine receives it:
+    /// Hz, seconds, dB, ... for numbers; 0.0/1.0 for toggles; index for selects.
     pub fn actual_value(&self) -> f32 {
         match self {
-            Self::Scalar { value, .. } => *value,
-            Self::Frequency { value, .. } => *value,  // Hz
-            Self::LinearHz { value, .. } => *value,   // Hz (linear)
-            Self::Time { value, .. } => *value,       // seconds
-            Self::LinearRange { value, .. } => *value, // value in its unit
+            Self::Port => 0.0,
+            Self::Number { value, .. } => *value,
             Self::Toggle { value, .. } => if *value { 1.0 } else { 0.0 },
             Self::Select { value, .. } => *value as f32,
         }
     }
 
-    /// Set the actual/raw value directly.
-    ///
-    /// This sets the value in its natural units (Hz for frequency, seconds for time, etc.).
-    /// Values are clamped to valid ranges where applicable.
+    /// Set the value in real units, clamped to the valid range.
     pub fn set_actual_value(&mut self, new_value: f32) {
         match self {
-            Self::Scalar { value, .. } => *value = new_value.clamp(0.0, 1.0),
-            Self::Frequency { value, min, max, .. } => *value = new_value.clamp(*min, *max),
-            Self::LinearHz { value, min, max, .. } => *value = new_value.clamp(*min, *max),
-            Self::Time { value, min, max, .. } => *value = new_value.clamp(*min, *max),
-            Self::LinearRange { value, min, max, .. } => *value = new_value.clamp(*min, *max),
+            Self::Port => {}
+            Self::Number { value, spec } => *value = new_value.clamp(spec.min, spec.max),
             Self::Toggle { value, .. } => *value = new_value > 0.5,
             Self::Select { value, options, .. } => {
-                *value = (new_value as usize).min(options.len().saturating_sub(1));
+                *value = (new_value.max(0.0) as usize).min(options.len().saturating_sub(1));
             }
+        }
+    }
+
+    /// The (min, max) range of the value in real units.
+    pub fn range(&self) -> (f32, f32) {
+        match self {
+            Self::Port => (0.0, 1.0),
+            Self::Number { spec, .. } => (spec.min, spec.max),
+            Self::Toggle { .. } => (0.0, 1.0),
+            Self::Select { options, .. } => (0.0, options.len().saturating_sub(1) as f32),
         }
     }
 }
 
 impl Default for SynthValueType {
     fn default() -> Self {
-        Self::Scalar {
-            value: 0.0,
-            label: String::new(),
-        }
+        Self::Port
     }
 }
 
@@ -227,7 +174,7 @@ impl WidgetValueTrait for SynthValueType {
         _node_id: egui_node_graph2::NodeId,
         ui: &mut egui::Ui,
         _user_state: &mut Self::UserState,
-        node_data: &Self::NodeData,
+        _node_data: &Self::NodeData,
     ) -> Vec<Self::Response> {
         // Design Philosophy: Inputs vs Knobs
         // ==================================
@@ -240,35 +187,9 @@ impl WidgetValueTrait for SynthValueType {
         // Therefore, inline widgets for inputs should be minimal - just labels for
         // most types. Only Toggle and Select get inline widgets since they're not
         // suitable for knobs.
-
-        // For params that have a knob in bottom_ui, just show the label (no widget)
-        // The knob at the bottom is the primary control
-        if node_data.knob_params.iter().any(|kp| kp.param_name == param_name) {
-            ui.label(param_name);
-            return Vec::new();
-        }
-
-        // For continuous value types, show just the label (no knob widget)
         match self {
-            Self::Scalar { label, .. } => {
-                let display_label = if label.is_empty() { param_name } else { label.as_str() };
-                ui.label(display_label);
-            }
-            Self::Frequency { label, .. } => {
-                let display_label = if label.is_empty() { param_name } else { label.as_str() };
-                ui.label(display_label);
-            }
-            Self::LinearHz { label, .. } => {
-                let display_label = if label.is_empty() { param_name } else { label.as_str() };
-                ui.label(display_label);
-            }
-            Self::Time { label, .. } => {
-                let display_label = if label.is_empty() { param_name } else { label.as_str() };
-                ui.label(display_label);
-            }
-            Self::LinearRange { label, .. } => {
-                let display_label = if label.is_empty() { param_name } else { label.as_str() };
-                ui.label(display_label);
+            Self::Port | Self::Number { .. } => {
+                ui.label(param_name);
             }
             Self::Toggle { value, label } => {
                 // Toggle gets an inline checkbox - not suitable for knob
@@ -304,83 +225,70 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_scalar_creation() {
-        let scalar = SynthValueType::scalar(0.5, "Volume");
-        match scalar {
-            SynthValueType::Scalar { value, label } => {
-                assert!((value - 0.5).abs() < f32::EPSILON);
-                assert_eq!(label, "Volume");
+    fn test_number_from_definition_keeps_range_default_and_curve() {
+        let def = ParameterDefinition::frequency("cutoff", "Cutoff", 20.0, 20000.0, 1000.0);
+        let value = SynthValueType::from_definition(&def, "");
+        assert_eq!(
+            value,
+            SynthValueType::Number {
+                value: 1000.0,
+                spec: NumberSpec { min: 20.0, max: 20000.0, default: 1000.0, unit: "Hz", logarithmic: true },
             }
-            _ => panic!("Expected Scalar variant"),
-        }
-    }
-
-    #[test]
-    fn test_frequency_creation() {
-        let freq = SynthValueType::frequency(440.0, 20.0, 20000.0, "Frequency");
-        match freq {
-            SynthValueType::Frequency { value, min, max, label } => {
-                assert!((value - 440.0).abs() < f32::EPSILON);
-                assert!((min - 20.0).abs() < f32::EPSILON);
-                assert!((max - 20000.0).abs() < f32::EPSILON);
-                assert_eq!(label, "Frequency");
-            }
-            _ => panic!("Expected Frequency variant"),
-        }
-    }
-
-    #[test]
-    fn test_toggle_creation() {
-        let toggle = SynthValueType::toggle(true, "Enable");
-        match toggle {
-            SynthValueType::Toggle { value, label } => {
-                assert!(value);
-                assert_eq!(label, "Enable");
-            }
-            _ => panic!("Expected Toggle variant"),
-        }
-    }
-
-    #[test]
-    fn test_select_creation() {
-        let select = SynthValueType::select(
-            1,
-            vec!["Sine".to_string(), "Saw".to_string(), "Square".to_string()],
-            "Waveform",
         );
-        match select {
-            SynthValueType::Select { value, options, label } => {
-                assert_eq!(value, 1);
-                assert_eq!(options.len(), 3);
-                assert_eq!(label, "Waveform");
-            }
-            _ => panic!("Expected Select variant"),
-        }
     }
 
     #[test]
-    fn test_normalized_scalar() {
-        let scalar = SynthValueType::scalar(0.75, "Test");
-        assert!((scalar.normalized_value() - 0.75).abs() < f32::EPSILON);
+    fn test_toggle_and_select_from_definition() {
+        let toggle = SynthValueType::from_definition(&ParameterDefinition::toggle("run", "Run", true), "Run");
+        assert_eq!(toggle, SynthValueType::toggle(true, "Run"));
+
+        let def = ParameterDefinition::choice("wave", "Waveform", &["Sine", "Saw"], 1);
+        let select = SynthValueType::from_definition(&def, "Wave");
+        assert_eq!(select, SynthValueType::select(1, vec!["Sine".into(), "Saw".into()], "Wave"));
     }
 
     #[test]
-    fn test_normalized_toggle() {
-        let on = SynthValueType::toggle(true, "Test");
-        let off = SynthValueType::toggle(false, "Test");
-        assert!((on.normalized_value() - 1.0).abs() < f32::EPSILON);
-        assert!(off.normalized_value().abs() < f32::EPSILON);
+    fn test_set_actual_value_clamps_to_definition_range() {
+        let def = ParameterDefinition::new("drive", "Drive", 1.0, 10.0, 1.0, ParameterDisplay::linear("x"));
+        let mut value = SynthValueType::from_definition(&def, "");
+        value.set_actual_value(0.5);
+        assert_eq!(value.actual_value(), 1.0);
+        value.set_actual_value(4.0);
+        assert_eq!(value.actual_value(), 4.0);
+        value.set_actual_value(50.0);
+        assert_eq!(value.actual_value(), 10.0);
     }
 
     #[test]
-    fn test_default() {
-        let default = SynthValueType::default();
-        match default {
-            SynthValueType::Scalar { value, label } => {
-                assert!(value.abs() < f32::EPSILON);
-                assert!(label.is_empty());
-            }
-            _ => panic!("Expected Scalar default"),
-        }
+    fn test_log_curve_needs_positive_minimum() {
+        let def = ParameterDefinition::new("x", "X", 0.0, 1.0, 0.5, ParameterDisplay::logarithmic(""));
+        assert!(!NumberSpec::from_definition(&def).logarithmic);
+    }
+
+    #[test]
+    fn test_format_follows_unit() {
+        let spec = |min, max, unit| NumberSpec { min, max, default: min, unit, logarithmic: false };
+        assert_eq!(spec(1.0, 2000.0, "ms").format().format(500.0), "500 ms");
+        assert_eq!(spec(0.001, 10.0, "s").format().format(0.25), "250 ms");
+        assert_eq!(spec(0.0, 1.0, "").format().format(0.5), "50%");
+        assert_eq!(spec(1.0, 99.0, "%").format().format(50.0), "50 %");
+        assert_eq!(spec(1.0, 10.0, "x").format().format(2.0), "2.0 x");
+    }
+
+    #[test]
+    fn test_toggle_and_select_values() {
+        let mut select = SynthValueType::select(0, vec!["A".into(), "B".into()], "");
+        select.set_actual_value(7.0);
+        assert_eq!(select.actual_value(), 1.0);
+        assert_eq!(select.range(), (0.0, 1.0));
+
+        let mut toggle = SynthValueType::toggle(false, "");
+        toggle.set_actual_value(1.0);
+        assert_eq!(toggle.actual_value(), 1.0);
+    }
+
+    #[test]
+    fn test_default_is_port() {
+        assert_eq!(SynthValueType::default(), SynthValueType::Port);
     }
 }

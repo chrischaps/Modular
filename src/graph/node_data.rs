@@ -15,7 +15,7 @@ use egui_node_graph2::{NodeDataTrait, NodeResponse, UserResponseTrait};
 
 use crate::dsp::ModuleCategory;
 use crate::engine::midi_engine::MidiEvent;
-use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, ParamFormat, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, SpectrumConfig, SpectrumStyle, generate_filter_response, FilterResponseType, piano, PianoConfig, PianoData};
+use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, SpectrumConfig, SpectrumStyle, generate_filter_response, FilterResponseType, piano, PianoConfig, PianoData};
 use super::{SynthResponse, SynthValueType};
 
 /// MIDI event colors for the MIDI Monitor display.
@@ -191,6 +191,34 @@ impl LedIndicator {
     }
 }
 
+/// Custom visualization a node draws above its knob row.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NodeDisplay {
+    /// No custom display.
+    #[default]
+    None,
+    /// Oscillator: one cycle of the selected waveform.
+    OscillatorWave,
+    /// LFO: waveform with a live phase marker.
+    LfoWave,
+    /// ADSR: envelope shape.
+    Envelope,
+    /// Filter: frequency response curve.
+    FilterResponse,
+    /// Keyboard: piano showing held keys.
+    KeyboardPiano,
+    /// MIDI Note: piano showing incoming notes.
+    MidiPiano,
+    /// MIDI Monitor: scrolling event log.
+    MidiLog,
+    /// Oscilloscope: live traces.
+    Scope,
+    /// Step Sequencer: step grid.
+    StepGrid,
+    /// Audio Output: output stage level meter.
+    OutputMeter,
+}
+
 /// Data stored per node in the graph.
 ///
 /// This contains information about which module type this node represents
@@ -203,6 +231,10 @@ pub struct SynthNodeData {
     pub display_name: String,
     /// The category of this module (for header coloring).
     pub category: ModuleCategory,
+    /// What the module does, shown as a tooltip on the header icon.
+    pub description: &'static str,
+    /// Custom visualization drawn above the knob row.
+    pub display: NodeDisplay,
     /// Knob parameters to display in the bottom section of the node.
     pub knob_params: Vec<KnobParam>,
     /// LED indicators to display in the bottom section of the node.
@@ -236,10 +268,24 @@ impl SynthNodeData {
             module_id,
             display_name: display_name.into(),
             category,
+            description: "",
+            display: NodeDisplay::None,
             knob_params: Vec::new(),
             led_indicators: Vec::new(),
             monitored_outputs: Vec::new(),
         }
+    }
+
+    /// Builder method to set the tooltip description.
+    pub fn with_description(mut self, description: &'static str) -> Self {
+        self.description = description;
+        self
+    }
+
+    /// Builder method to set the custom display.
+    pub fn with_display(mut self, display: NodeDisplay) -> Self {
+        self.display = display;
+        self
     }
 
     /// Builder method to add knob parameters.
@@ -428,13 +474,15 @@ impl SynthNodeData {
         let alpha = if is_connected { 0.5 } else { 1.0 };
 
         match value {
-            SynthValueType::Scalar { value: val, .. } => {
+            SynthValueType::Port => {}
+            SynthValueType::Number { value: val, spec } => {
+                // Range, default, unit and curve all come from the DSP definition
                 let config = KnobConfig {
                     size,
-                    range: 0.0..=1.0,
-                    default: 0.5,
-                    format: ParamFormat::Percent,
-                    logarithmic: false,
+                    range: spec.min..=spec.max,
+                    default: spec.default,
+                    format: spec.format(),
+                    logarithmic: spec.logarithmic,
                     label: Some(label.to_string()),
                     show_value: true,
                     ..Default::default()
@@ -442,7 +490,7 @@ impl SynthNodeData {
                 let original_val = *val;
                 // Use signal value if connected and available, otherwise use stored value
                 let mut display_val = signal_value
-                    .map(|sv| sv.clamp(0.0, 1.0))
+                    .map(|sv| sv.clamp(spec.min, spec.max))
                     .unwrap_or(original_val);
                 ui.scope(|ui| {
                     ui.style_mut().visuals.widgets.inactive.fg_stroke.color =
@@ -453,126 +501,8 @@ impl SynthNodeData {
                     knob(ui, &mut display_val, &config);
                 });
                 // Emit response if value changed and not connected
-                if !is_connected && (display_val - original_val).abs() > f32::EPSILON {
-                    responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
-                        node_id,
-                        param_name: param_name.to_string(),
-                        value: display_val,
-                    }));
-                }
-            }
-            SynthValueType::Frequency { value: val, min, max, .. } => {
-                let config = KnobConfig::frequency(*min, *max, 440.0)
-                    .with_label(label)
-                    .with_size(size);
-                let original_val = *val;
-                // For frequency, the signal value represents the actual Hz value
-                let mut display_val = signal_value
-                    .map(|sv| sv.clamp(*min, *max))
-                    .unwrap_or(original_val);
-                ui.scope(|ui| {
-                    ui.style_mut().visuals.widgets.inactive.fg_stroke.color =
-                        ui.style().visuals.widgets.inactive.fg_stroke.color.gamma_multiply(alpha);
-                    if is_connected {
-                        ui.disable();
-                    }
-                    knob(ui, &mut display_val, &config);
-                });
-                if !is_connected && (display_val - original_val).abs() > 0.01 {
-                    responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
-                        node_id,
-                        param_name: param_name.to_string(),
-                        value: display_val,
-                    }));
-                }
-            }
-            SynthValueType::LinearHz { value: val, min, max, .. } => {
-                let config = KnobConfig {
-                    size,
-                    range: *min..=*max,
-                    default: *min,
-                    format: ParamFormat::Frequency,
-                    logarithmic: false,
-                    label: Some(label.to_string()),
-                    show_value: true,
-                    ..Default::default()
-                };
-                let original_val = *val;
-                let mut display_val = signal_value
-                    .map(|sv| sv.clamp(*min, *max))
-                    .unwrap_or(original_val);
-                ui.scope(|ui| {
-                    ui.style_mut().visuals.widgets.inactive.fg_stroke.color =
-                        ui.style().visuals.widgets.inactive.fg_stroke.color.gamma_multiply(alpha);
-                    if is_connected {
-                        ui.disable();
-                    }
-                    knob(ui, &mut display_val, &config);
-                });
-                if !is_connected && (display_val - original_val).abs() > 0.01 {
-                    responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
-                        node_id,
-                        param_name: param_name.to_string(),
-                        value: display_val,
-                    }));
-                }
-            }
-            SynthValueType::Time { value: val, min, max, .. } => {
-                let config = KnobConfig::time(*min, *max, (*min + *max) / 2.0)
-                    .with_label(label)
-                    .with_size(size);
-                let original_val = *val;
-                let mut display_val = signal_value
-                    .map(|sv| sv.clamp(*min, *max))
-                    .unwrap_or(original_val);
-                ui.scope(|ui| {
-                    ui.style_mut().visuals.widgets.inactive.fg_stroke.color =
-                        ui.style().visuals.widgets.inactive.fg_stroke.color.gamma_multiply(alpha);
-                    if is_connected {
-                        ui.disable();
-                    }
-                    knob(ui, &mut display_val, &config);
-                });
-                if !is_connected && (display_val - original_val).abs() > 0.0001 {
-                    responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
-                        node_id,
-                        param_name: param_name.to_string(),
-                        value: display_val,
-                    }));
-                }
-            }
-            SynthValueType::LinearRange { value: val, min, max, unit, .. } => {
-                // Map common unit strings to static format specifiers
-                let format = match unit.as_str() {
-                    "BPM" => ParamFormat::RawWithUnit { decimals: 0, unit: "BPM" },
-                    "%" => ParamFormat::RawWithUnit { decimals: 0, unit: "%" },
-                    "dB" => ParamFormat::Decibels,
-                    "st" => ParamFormat::Semitones,
-                    _ => ParamFormat::Raw { decimals: 1 },
-                };
-                let config = KnobConfig {
-                    size,
-                    range: *min..=*max,
-                    default: (*min + *max) / 2.0,
-                    format,
-                    logarithmic: false,
-                    label: Some(label.to_string()),
-                    show_value: true,
-                    ..Default::default()
-                };
-                let original_val = *val;
-                let mut display_val = signal_value
-                    .map(|sv| sv.clamp(*min, *max))
-                    .unwrap_or(original_val);
-                ui.scope(|ui| {
-                    ui.style_mut().visuals.widgets.inactive.fg_stroke.color =
-                        ui.style().visuals.widgets.inactive.fg_stroke.color.gamma_multiply(alpha);
-                    if is_connected {
-                        ui.disable();
-                    }
-                    knob(ui, &mut display_val, &config);
-                });
-                if !is_connected && (display_val - original_val).abs() > 0.01 {
+                let tolerance = (spec.max - spec.min).abs() * 1e-6;
+                if !is_connected && (display_val - original_val).abs() > tolerance {
                     responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
                         node_id,
                         param_name: param_name.to_string(),
@@ -629,10 +559,13 @@ impl NodeDataTrait for SynthNodeData {
         // Allocate space for the category icon (drawn before the title)
         let icon_size = 14.0 * zoom;
         let icon_padding = 4.0 * zoom;
-        let (icon_rect, _response) = ui.allocate_exact_size(
+        let (icon_rect, response) = ui.allocate_exact_size(
             egui::vec2(icon_size + icon_padding, icon_size),
             egui::Sense::hover(),
         );
+        if !self.description.is_empty() {
+            response.on_hover_text(self.description);
+        }
 
         // Draw the category icon centered in the allocated space
         let icon_center = egui::pos2(
@@ -661,7 +594,7 @@ impl NodeDataTrait for SynthNodeData {
         let engine_node_id = user_state.get_engine_node_id(node_id);
 
         // Special rendering for MIDI Monitor module
-        if self.module_id == "util.midi_monitor" {
+        if self.display == NodeDisplay::MidiLog {
             // Get filter settings from the node's input parameters
             let (channel_filter, show_notes, show_cc, show_pitch_bend) = if let Some(node) = graph.nodes.get(node_id) {
                 let mut channel = 0usize; // 0 = all channels
@@ -764,7 +697,7 @@ impl NodeDataTrait for SynthNodeData {
         }
 
         // Special rendering for Audio Output module - output stage meter
-        if self.module_id == "output.audio" {
+        if self.display == NodeDisplay::OutputMeter {
             // Add separator with zoom-scaled margins
             ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
@@ -812,7 +745,7 @@ impl NodeDataTrait for SynthNodeData {
         }
 
         // Special rendering for Oscilloscope module
-        if self.module_id == "util.oscilloscope" {
+        if self.display == NodeDisplay::Scope {
             // Add separator with zoom-scaled margins
             ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
@@ -841,7 +774,7 @@ impl NodeDataTrait for SynthNodeData {
                 for (name, input_id) in &node.inputs {
                     if name == "Trigger Level" {
                         let input = graph.get_input(*input_id);
-                        if let SynthValueType::LinearRange { value, .. } = &input.value {
+                        if let SynthValueType::Number { value, .. } = &input.value {
                             level = *value;
                         }
                     }
@@ -866,7 +799,7 @@ impl NodeDataTrait for SynthNodeData {
         }
 
         // Special rendering for Step Sequencer module
-        if self.module_id == "seq.step" {
+        if self.display == NodeDisplay::StepGrid {
             // Add separator with zoom-scaled margins
             ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
@@ -895,7 +828,7 @@ impl NodeDataTrait for SynthNodeData {
                     let input = graph.get_input(*input_id);
 
                     if name == "Steps" {
-                        if let SynthValueType::LinearRange { value, .. } = &input.value {
+                        if let SynthValueType::Number { value, .. } = &input.value {
                             steps = (*value as usize).clamp(1, 16);
                         }
                     }
@@ -903,7 +836,7 @@ impl NodeDataTrait for SynthNodeData {
                     // Parse step parameters
                     for step in 1..=16 {
                         if *name == format!("Step {} Pitch", step) {
-                            if let SynthValueType::LinearRange { value, .. } = &input.value {
+                            if let SynthValueType::Number { value, .. } = &input.value {
                                 pitches[step - 1] = *value as u8;
                             }
                         }
@@ -1177,7 +1110,7 @@ impl NodeDataTrait for SynthNodeData {
         }
 
         // Special rendering for Oscillator module - waveform preview
-        if self.module_id == "osc.sine" {
+        if self.display == NodeDisplay::OscillatorWave {
             // Add separator with zoom-scaled margins
             ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
@@ -1210,7 +1143,7 @@ impl NodeDataTrait for SynthNodeData {
                             }
                         }
                         "Pulse Width" => {
-                            if let SynthValueType::LinearRange { value, .. } = &input.value {
+                            if let SynthValueType::Number { value, .. } = &input.value {
                                 pw = *value;
                             }
                         }
@@ -1246,7 +1179,7 @@ impl NodeDataTrait for SynthNodeData {
         }
 
         // Special rendering for ADSR Envelope module - envelope shape display
-        if self.module_id == "mod.adsr" {
+        if self.display == NodeDisplay::Envelope {
             // Add separator with zoom-scaled margins
             ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
@@ -1276,22 +1209,22 @@ impl NodeDataTrait for SynthNodeData {
                     let input = graph.get_input(*input_id);
                     match name.as_str() {
                         "Attack" => {
-                            if let SynthValueType::Time { value, .. } = &input.value {
+                            if let SynthValueType::Number { value, .. } = &input.value {
                                 attack = *value;
                             }
                         }
                         "Decay" => {
-                            if let SynthValueType::Time { value, .. } = &input.value {
+                            if let SynthValueType::Number { value, .. } = &input.value {
                                 decay = *value;
                             }
                         }
                         "Sustain" => {
-                            if let SynthValueType::Scalar { value, .. } = &input.value {
+                            if let SynthValueType::Number { value, .. } = &input.value {
                                 sustain = *value;
                             }
                         }
                         "Release" => {
-                            if let SynthValueType::Time { value, .. } = &input.value {
+                            if let SynthValueType::Number { value, .. } = &input.value {
                                 release = *value;
                             }
                         }
@@ -1314,7 +1247,7 @@ impl NodeDataTrait for SynthNodeData {
         }
 
         // Special rendering for SVF Filter module - frequency response display
-        if self.module_id == "filter.svf" {
+        if self.display == NodeDisplay::FilterResponse {
             // Add separator with zoom-scaled margins
             ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
@@ -1342,12 +1275,12 @@ impl NodeDataTrait for SynthNodeData {
                     let input = graph.get_input(*input_id);
                     match name.as_str() {
                         "Cutoff" => {
-                            if let SynthValueType::Frequency { value, .. } = &input.value {
+                            if let SynthValueType::Number { value, .. } = &input.value {
                                 cutoff = *value;
                             }
                         }
                         "Resonance" => {
-                            if let SynthValueType::Scalar { value, .. } = &input.value {
+                            if let SynthValueType::Number { value, .. } = &input.value {
                                 res = *value;
                             }
                         }
@@ -1382,7 +1315,7 @@ impl NodeDataTrait for SynthNodeData {
         }
 
         // Special rendering for LFO module - waveform preview with phase marker
-        if self.module_id == "mod.lfo" {
+        if self.display == NodeDisplay::LfoWave {
             // Add separator with zoom-scaled margins
             ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
@@ -1421,7 +1354,7 @@ impl NodeDataTrait for SynthNodeData {
                             }
                         }
                         "Rate" => {
-                            if let SynthValueType::Frequency { value, .. } = &input.value {
+                            if let SynthValueType::Number { value, .. } = &input.value {
                                 rate = *value;
                             }
                         }
@@ -1528,7 +1461,7 @@ impl NodeDataTrait for SynthNodeData {
         }
 
         // Special rendering for Keyboard module - piano keyboard display
-        if self.module_id == "input.keyboard" {
+        if self.display == NodeDisplay::KeyboardPiano {
             // Add separator with zoom-scaled margins
             ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
@@ -1553,7 +1486,7 @@ impl NodeDataTrait for SynthNodeData {
                 for (name, input_id) in &node.inputs {
                     if name == "Octave" {
                         let input = graph.get_input(*input_id);
-                        if let SynthValueType::LinearRange { value, .. } = &input.value {
+                        if let SynthValueType::Number { value, .. } = &input.value {
                             octave = *value as i32;
                         }
                     }
@@ -1582,7 +1515,7 @@ impl NodeDataTrait for SynthNodeData {
         }
 
         // Special rendering for MIDI Note module - piano keyboard display
-        if self.module_id == "input.midi_note" {
+        if self.display == NodeDisplay::MidiPiano {
             // Add separator with zoom-scaled margins
             ui.add_space(4.0 * zoom);
             let category_color = self.category.color();
@@ -1607,7 +1540,7 @@ impl NodeDataTrait for SynthNodeData {
                 for (name, input_id) in &node.inputs {
                     if name == "Octave" {
                         let input = graph.get_input(*input_id);
-                        if let SynthValueType::LinearRange { value, .. } = &input.value {
+                        if let SynthValueType::Number { value, .. } = &input.value {
                             octave = *value as i32;
                         }
                     }
@@ -1702,15 +1635,7 @@ impl NodeDataTrait for SynthNodeData {
                                 .unwrap_or(false);
 
                             // Get min/max values for MIDI Learn
-                            let (min_value, max_value) = match &input.value {
-                                SynthValueType::Scalar { .. } => (0.0, 1.0),
-                                SynthValueType::Frequency { min, max, .. } => (*min, *max),
-                                SynthValueType::LinearHz { min, max, .. } => (*min, *max),
-                                SynthValueType::Time { min, max, .. } => (*min, *max),
-                                SynthValueType::LinearRange { min, max, .. } => (*min, *max),
-                                SynthValueType::Toggle { .. } => (0.0, 1.0),
-                                SynthValueType::Select { options, .. } => (0.0, (options.len() - 1) as f32),
-                            };
+                            let (min_value, max_value) = input.value.range();
 
                             // Build MIDI config for the knob
                             let midi_config = KnobMidiConfig {

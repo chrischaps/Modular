@@ -14,19 +14,22 @@ use super::commands::{AudioMessage, EngineEvent, ScopeFrame};
 use super::graph_plan::GraphPlan;
 
 /// Creates a module registry with all built-in modules.
+///
+/// Registering a module here is all it takes to make it available in the
+/// editor: node templates are generated from the registry. Registration
+/// order is the order modules appear in the add-node menu.
 pub fn create_module_registry() -> ModuleRegistry {
     let mut registry = ModuleRegistry::new();
     registry.register::<SineOscillator>();
+    registry.register::<KeyboardInput>();
+    registry.register::<MidiNote>();
     registry.register::<SvfFilter>();
     registry.register::<AdsrEnvelope>();
+    registry.register::<Lfo>();
     registry.register::<Clock>();
     registry.register::<Vca>();
     registry.register::<Attenuverter>();
-    registry.register::<AudioOutput>();
-    registry.register::<Lfo>();
-    registry.register::<KeyboardInput>();
-    registry.register::<MidiMonitor>();
-    registry.register::<MidiNote>();
+    registry.register::<Mixer>();
     registry.register::<SampleHold>();
     registry.register::<Oscilloscope>();
     registry.register::<StepSequencer>();
@@ -36,7 +39,8 @@ pub fn create_module_registry() -> ModuleRegistry {
     registry.register::<Distortion>();
     registry.register::<Chorus>();
     registry.register::<Compressor>();
-    registry.register::<Mixer>();
+    registry.register::<MidiMonitor>();
+    registry.register::<AudioOutput>();
     registry
 }
 

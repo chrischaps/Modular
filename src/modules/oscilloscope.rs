@@ -157,7 +157,7 @@ impl Oscilloscope {
                 // Trigger Level: -1 to +1
                 ParameterDefinition::new(
                     "trigger_level",
-                    "Trig Lvl",
+                    "Trigger Level",
                     -1.0,
                     1.0,
                     0.0, // Default: 0.0 (center)

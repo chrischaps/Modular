@@ -61,7 +61,8 @@ pub enum EngineCommand {
         node_id: NodeId,
         /// Parameter index.
         param_index: usize,
-        /// New value (normalized 0.0-1.0).
+        /// New value in the parameter's real units (Hz, seconds, dB, ...),
+        /// within the range its `ParameterDefinition` declares.
         value: f32,
     },
 

@@ -215,11 +215,7 @@ fn parameter_index(graph: &SynthGraph, node_id: NodeId, name: &str) -> Option<us
 /// The saved form of an editor value.
 fn parameter_value(value: &SynthValueType) -> ParameterValue {
     match value {
-        SynthValueType::Scalar { value, .. } => ParameterValue::Scalar(*value),
-        SynthValueType::Frequency { value, .. } => ParameterValue::Frequency(*value),
-        SynthValueType::LinearHz { value, .. } => ParameterValue::LinearHz(*value),
-        SynthValueType::Time { value, .. } => ParameterValue::Time(*value),
-        SynthValueType::LinearRange { value, .. } => ParameterValue::LinearRange(*value),
+        SynthValueType::Port | SynthValueType::Number { .. } => ParameterValue::Number(value.actual_value()),
         SynthValueType::Toggle { value, .. } => ParameterValue::Toggle(*value),
         SynthValueType::Select { value, .. } => ParameterValue::Select(*value),
     }
@@ -358,7 +354,8 @@ mod tests {
         assert_eq!(param(&saved, "osc.sine", "Pulse Width"), 0.3);
         assert_eq!(param(&saved, "filter.svf", "Cutoff"), 640.0);
         assert_eq!(param(&saved, "filter.svf", "Resonance"), 0.8);
-        assert_eq!(param(&saved, "filter.svf", "Drive"), 0.25);
+        // Saved as 0-1 before v4; now in real units (1-10x)
+        assert_eq!(param(&saved, "filter.svf", "Drive"), 3.25);
         assert_eq!(param(&saved, "mod.adsr", "Sustain"), 0.2);
         assert_eq!(param(&saved, "mod.adsr", "Release"), 0.4);
         assert_eq!(param(&saved, "output.audio", "Volume"), 0.6);
@@ -396,7 +393,7 @@ mod tests {
         let mut patch = Patch::new("reordered");
         let mut filter = NodeData::new(1, "filter.svf", (0.0, 0.0));
         filter.parameters = vec![
-            NamedParameter::new("Drive", ParameterValue::Scalar(0.9)),
+            NamedParameter::new("Drive", ParameterValue::Number(4.5)),
             NamedParameter::new("Retired Knob", ParameterValue::Scalar(0.1)),
             NamedParameter::new("Cutoff", ParameterValue::Frequency(300.0)),
         ];
@@ -404,7 +401,7 @@ mod tests {
 
         let (saved, warnings) = reload(&patch, 0);
         assert_eq!(param(&saved, "filter.svf", "Cutoff"), 300.0);
-        assert_eq!(param(&saved, "filter.svf", "Drive"), 0.9);
+        assert_eq!(param(&saved, "filter.svf", "Drive"), 4.5);
         // Missing from the patch, so it keeps its default
         assert_eq!(param(&saved, "filter.svf", "Resonance"), 0.5);
         assert_eq!(warnings.len(), 1);

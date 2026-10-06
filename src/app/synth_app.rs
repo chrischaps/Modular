@@ -1150,7 +1150,7 @@ impl SynthApp {
 
                                 for template in templates {
                                     let label = template.node_finder_label(&mut self.user_state);
-                                    if ui.button(label.as_ref()).clicked() {
+                                    if ui.button(label.as_ref()).on_hover_text(template.description()).clicked() {
                                         template_to_create = Some(*template);
                                         close_menu = true;
                                     }
@@ -1440,9 +1440,9 @@ impl SynthApp {
                 continue;
             };
 
-            // Check if this is a keyboard or MIDI note module - we handle Note/Gate params separately
-            let is_keyboard = node.user_data.module_id == "input.keyboard";
-            let is_midi_note = node.user_data.module_id == "input.midi_note";
+            // Keyboard and MIDI Note drive their leading params (Note, Gate, ...)
+            // from live input, not from the graph UI
+            let live_params = port_mapping::live_input_parameter_count(node.user_data.module_id);
 
             // Track which param index we're at (only count ConstantOnly params)
             let mut param_index = 0;
@@ -1455,22 +1455,12 @@ impl SynthApp {
                 use egui_node_graph2::InputParamKind;
                 match input.kind {
                     InputParamKind::ConstantOnly | InputParamKind::ConnectionOrConstant => {
-                        // Skip Note (0) and Gate (1) params for keyboard modules
-                        // These are controlled by keyboard events, not the graph UI
-                        if is_keyboard && param_index < 2 {
+                        if param_index < live_params {
                             param_index += 1;
                             continue;
                         }
 
-                        // Skip Note (0), Gate (1), Velocity (2), and Aftertouch (3) params for MIDI Note modules
-                        // These are controlled by MIDI events, not the graph UI
-                        if is_midi_note && param_index < 4 {
-                            param_index += 1;
-                            continue;
-                        }
-
-                        // Get the actual value (not normalized) for the audio engine
-                        // This ensures frequency values are in Hz, time values in seconds, etc.
+                        // The engine takes real units: Hz, seconds, dB, ...
                         let actual_value = input.value.actual_value();
 
                         // Create cache key

@@ -14,7 +14,8 @@ use crate::graph::SynthNodeTemplate;
 /// - v1: positional parameters
 /// - v2: adds `midi_mappings`
 /// - v3: parameters are stored by name
-pub const PATCH_VERSION: u32 = 3;
+/// - v4: every value is in the parameter's real units (filter Drive was 0-1)
+pub const PATCH_VERSION: u32 = 4;
 
 /// A MIDI CC to parameter mapping.
 ///
@@ -163,9 +164,14 @@ impl NamedParameter {
 }
 
 /// A parameter value that preserves type information for proper restoration.
+///
+/// New patches save continuous values as `Number`. The older continuous tags
+/// are still read; they all hold a value in real units.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "value")]
 pub enum ParameterValue {
+    /// Continuous value in the parameter's real units (Hz, seconds, dB, ...).
+    Number(f32),
     /// Scalar value (0.0-1.0 range).
     Scalar(f32),
     /// Frequency value in Hz.
@@ -186,6 +192,7 @@ impl ParameterValue {
     /// Get the value as f32 for engine parameter setting.
     pub fn as_f32(&self) -> f32 {
         match self {
+            Self::Number(v) => *v,
             Self::Scalar(v) => *v,
             Self::Frequency(v) => *v,
             Self::LinearHz(v) => *v,
@@ -328,6 +335,31 @@ pub fn migrate_v2_to_v3(old: PatchV2) -> Patch {
     }
 }
 
+/// Converts v3 values that weren't in real units.
+///
+/// The filter's Drive knob sent 0-1 and the DSP mapped it to 1-10x; Drive is
+/// now 1-10x end to end. MIDI mappings to Drive get the same conversion.
+pub fn migrate_v3_to_v4(mut patch: Patch) -> Patch {
+    let drive = |v: f32| 1.0 + 9.0 * v.clamp(0.0, 1.0);
+    let mut filters = Vec::new();
+    for node in patch.nodes.iter_mut().filter(|n| n.module_id == "filter.svf") {
+        filters.push(node.id);
+        for param in node.parameters.iter_mut().filter(|p| p.name == "Drive") {
+            param.value = ParameterValue::Number(drive(param.value.as_f32()));
+        }
+    }
+    for mapping in patch
+        .midi_mappings
+        .iter_mut()
+        .filter(|m| m.param_name == "Drive" && filters.contains(&m.node_id))
+    {
+        mapping.min_value = drive(mapping.min_value);
+        mapping.max_value = drive(mapping.max_value);
+    }
+    patch.version = 4;
+    patch
+}
+
 /// Parses a patch from JSON, migrating older versions to the current format.
 pub fn patch_from_json(json: &str) -> Result<Patch, PatchError> {
     #[derive(Deserialize)]
@@ -342,10 +374,15 @@ pub fn patch_from_json(json: &str) -> Result<Patch, PatchError> {
             expected: PATCH_VERSION,
         });
     }
-    if version < 3 {
-        return Ok(migrate_v2_to_v3(serde_json::from_str(json)?));
+    let patch = if version < 3 {
+        migrate_v2_to_v3(serde_json::from_str(json)?)
+    } else {
+        serde_json::from_str(json)?
+    };
+    if patch.version < 4 {
+        return Ok(migrate_v3_to_v4(patch));
     }
-    Ok(serde_json::from_str(json)?)
+    Ok(patch)
 }
 
 /// Save a patch to a JSON file.
@@ -461,6 +498,50 @@ mod tests {
         // Unknown modules keep their node (staging reports it) but lose their values
         assert_eq!(patch.nodes[1].module_id, "gone.module");
         assert!(patch.nodes[1].parameters.is_empty());
+    }
+
+    #[test]
+    fn test_v3_filter_drive_migrates_to_real_units() {
+        // v3 saved filter Drive as 0-1 (the DSP mapped it to 1-10x)
+        let json = r#"{
+            "name": "Old", "version": 3,
+            "nodes": [
+                {"id": 4, "module_id": "filter.svf", "position": [0.0, 0.0], "parameters": [
+                    {"name": "Cutoff", "type": "Frequency", "value": 800.0},
+                    {"name": "Drive", "type": "Scalar", "value": 0.5}]},
+                {"id": 5, "module_id": "fx.distortion", "position": [0.0, 0.0], "parameters": [
+                    {"name": "Drive", "type": "Scalar", "value": 0.5}]}
+            ],
+            "connections": [],
+            "midi_mappings": [
+                {"cc_number": 1, "channel": 0, "node_id": 4, "param_index": 2, "param_name": "Drive",
+                 "min_value": 0.0, "max_value": 1.0},
+                {"cc_number": 2, "channel": 0, "node_id": 5, "param_index": 0, "param_name": "Drive",
+                 "min_value": 0.0, "max_value": 1.0}
+            ]
+        }"#;
+        let patch = patch_from_json(json).unwrap();
+        assert_eq!(patch.version, PATCH_VERSION);
+        let filter = &patch.nodes[0].parameters;
+        assert_eq!(filter[0], NamedParameter::new("Cutoff", ParameterValue::Frequency(800.0)));
+        assert_eq!(filter[1], NamedParameter::new("Drive", ParameterValue::Number(5.5)));
+        // Distortion's Drive really is 0-1, so it's untouched
+        assert_eq!(patch.nodes[1].parameters[0].value.as_f32(), 0.5);
+
+        let ranges: Vec<_> = patch.midi_mappings.iter().map(|m| (m.min_value, m.max_value)).collect();
+        assert_eq!(ranges, vec![(1.0, 10.0), (0.0, 1.0)]);
+    }
+
+    #[test]
+    fn test_v4_patch_is_not_migrated_again() {
+        let json = r#"{
+            "name": "New", "version": 4,
+            "nodes": [{"id": 4, "module_id": "filter.svf", "position": [0.0, 0.0], "parameters": [
+                {"name": "Drive", "type": "Number", "value": 5.5}]}],
+            "connections": []
+        }"#;
+        let patch = patch_from_json(json).unwrap();
+        assert_eq!(patch.nodes[0].parameters[0].value, ParameterValue::Number(5.5));
     }
 
     #[test]
