@@ -249,11 +249,12 @@ in   Mix                Control  ConstantOnly         inline=false num 0.5 [0..1
 in   High Cut           Control  ConstantOnly         inline=false num 10000 [100..20000] Hz log
 in   Low Cut            Control  ConstantOnly         inline=false num 20 [20..2000] Hz log
 in   Ping-Pong          Control  ConstantOnly         inline=true  toggle false "P-P"
-in   Sync               Control  ConstantOnly         inline=true  select 0 ["Off", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32"] "Sync"
+in   Sync               Control  ConstantOnly         inline=true  select 0 ["Off", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/4D", "1/8D"] "Sync"
+in   Tape               Control  ConstantOnly         inline=true  toggle false "Tape"
 out  Out L              Audio
 out  Out R              Audio
-knob Time               "Time" Exposed
-knob Feedback           "FB" Exposed
+knob Time               "Time" Modulatable
+knob Feedback           "FB" Modulatable
 knob Mix                "Mix" KnobOnly
 knob High Cut           "HiCut" KnobOnly
 knob Low Cut            "LoCut" KnobOnly

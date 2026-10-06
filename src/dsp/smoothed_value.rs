@@ -110,10 +110,15 @@ impl SmoothedValue {
         // and skip unnecessary computation when already converged.
         // Threshold of 1e-4 accounts for f32 precision limits in the smoothing calculation.
         let diff = self.current - self.target;
-        if diff.abs() <= 1e-4 {
+        let next = self.target + self.smoothing_factor * diff;
+        // Also snap when a step rounds to nothing: with a slow time constant
+        // on a large value (a 645 ms delay time) the step falls below half an
+        // f32 ulp long before the 1e-4 threshold, and the value would stall
+        // short of its target for good.
+        if diff.abs() <= 1e-4 || next == self.current {
             self.current = self.target;
         } else {
-            self.current = self.target + self.smoothing_factor * diff;
+            self.current = next;
         }
         self.current
     }
@@ -258,6 +263,18 @@ mod tests {
 
         // With zero time constant, should jump to target immediately
         assert_eq!(sv.current(), 1.0);
+    }
+
+    #[test]
+    fn test_slow_smoothing_of_a_large_value_reaches_its_target() {
+        // A 250 ms glide from 500 to 645.16 used to stall about 0.4 short,
+        // where each step rounded away to nothing
+        let mut sv = SmoothedValue::new(500.0, 250.0, 48000.0);
+        sv.set_target(645.161_3);
+        for _ in 0..48000 * 5 {
+            sv.next();
+        }
+        assert_eq!(sv.current(), sv.target());
     }
 
     #[test]

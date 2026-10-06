@@ -205,8 +205,9 @@ static MODULE_UI: &[ModuleUi] = &[
     ModuleUi {
         module_id: "fx.delay",
         knobs: &[
-            knob("Time"),
-            knob_as("Feedback", "FB"),
+            // CV swings Time by ±50% and adds to Feedback, around the knobs
+            modulatable("Time", "Time"),
+            modulatable("Feedback", "FB"),
             knob("Mix"),
             knob_as("High Cut", "HiCut"),
             knob_as("Low Cut", "LoCut"),

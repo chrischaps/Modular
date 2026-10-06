@@ -9,229 +9,157 @@
 
 ## Description
 
-The Stereo Delay creates echoes and rhythmic repetitions by playing back a delayed copy of the input signal. It features independent left and right delay times, feedback for multiple echoes, and filtering to shape the delay character.
+The Stereo Delay plays back a delayed copy of its input, then feeds that copy back in to make repeats. It filters the feedback, can bounce the repeats between channels, and can lock its time to the patch tempo. Its **Tape** mode turns it into a worn tape echo.
 
 Delays are essential for:
 - Adding depth and space
 - Creating rhythmic patterns
 - Doubling and thickening sounds
-- Ambient and experimental textures
+- Dub, ambient and experimental textures
+
+### How it works
+
+1. The input is written into a delay line for each channel.
+2. A read head plays the line back **Time** later. Reads fall between samples, and a cubic (Catmull-Rom) spline fills in the gap, so time changes and modulation glide instead of clicking or dulling the top end.
+3. The playback runs through the **High Cut** and **Low Cut** filters, is scaled by **Feedback**, and goes back into the line with the input. Every repeat passes through the filters once more than the repeat before it.
+4. **Mix** blends the dry input with the playback.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Left In** | Audio (Blue) | Left channel input |
-| **Right In** | Audio (Blue) | Right channel input (normalled to Left) |
-| **Time CV** | Control (Orange) | Modulation input for delay time |
-| **Feedback CV** | Control (Orange) | Modulation input for feedback amount |
+| **In L** | Audio (Blue) | Left channel input |
+| **In R** | Audio (Blue) | Right channel input (normalled to In L when unpatched) |
+| **Time CV** | Control (Orange) | Swings Time by up to ±50% around the knob |
+| **Feedback CV** | Control (Orange) | Added to Feedback (±50%) around the knob |
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Left Out** | Audio (Blue) | Processed left channel |
-| **Right Out** | Audio (Blue) | Processed right channel |
+| **Out L** | Audio (Blue) | Processed left channel |
+| **Out R** | Audio (Blue) | Processed right channel |
 
 ## Parameters
 
-| Knob | Range | Default | Description |
-|------|-------|---------|-------------|
-| **Time L** | 1 ms - 2000 ms | 375 ms | Left channel delay time |
-| **Time R** | 1 ms - 2000 ms | 500 ms | Right channel delay time |
-| **Feedback** | 0.0 - 0.95 | 0.3 | Amount of output fed back to input |
-| **Mix** | 0.0 - 1.0 | 0.5 | Dry/wet balance |
-| **HP Filter** | 20 Hz - 2000 Hz | 80 Hz | High-pass filter in feedback path |
-| **LP Filter** | 200 Hz - 20 kHz | 12 kHz | Low-pass filter in feedback path |
-| **Ping Pong** | On/Off | Off | Bounces echoes between L/R channels |
-| **Sync** | On/Off | Off | Sync delay time to tempo (when clock connected) |
+| Control | Range | Default | Description |
+|---------|-------|---------|-------------|
+| **Time** | 1 ms - 2000 ms | 500 ms | Delay time (ignored while Sync is on) |
+| **FB** | 0% - 100% | 50% | Feedback: how much of each repeat comes back |
+| **Mix** | 0% - 100% | 50% | Dry/wet balance |
+| **HiCut** | 100 Hz - 20 kHz | 10 kHz | Low-pass filter in the feedback path |
+| **LoCut** | 20 Hz - 2 kHz | 20 Hz | High-pass filter in the feedback path |
+| **P-P** | On/Off | Off | Ping-pong: each repeat crosses to the other channel |
+| **Sync** | Off, 1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32, 1/4D, 1/8D | Off | Lock the time to a division of the patch tempo |
+| **Tape** | On/Off | Off | Tape echo character (see below) |
 
-## How It Works
+### Feedback
 
-1. Input signal enters the delay buffer
-2. A delayed copy is played back after the set time
-3. This output is mixed with dry signal
-4. Feedback routes output back to input for multiple echoes
-5. Filters shape each repetition
+In plain mode the feedback stops at 95%, and a soft clipper keeps the loop bounded:
 
-### Feedback Behavior
+- **0%**: one echo
+- **30%**: a few echoes, natural decay
+- **60%**: long trails
+- **95%**: near-endless repeats
 
-- **0%**: Single echo, no repetitions
-- **30%**: Several echoes, natural decay
-- **50%**: Many echoes, sustained
-- **70%+**: Long trails, approaching self-oscillation
-- **95%**: Near-infinite repeats (careful!)
+In Tape mode the knob goes further. See [Runaway](#runaway).
 
-### Ping Pong Mode
+## Tempo Sync
 
-When enabled, echoes alternate between left and right channels:
+Set **Sync** to a division and the delay time follows the patch tempo. A [Clock](../modulation/clock.md) anywhere in the patch sets the tempo, and turning its Tempo knob moves the echoes with it. The echoes glide to the new time, with a short pitch bend in the repeats. Without a Clock, the delay assumes 120 BPM.
 
-```
-L: Sound → (silence) → Echo → (silence) → Echo...
-R: (silence) → Echo → (silence) → Echo → ...
-```
+| Division | Beats | At 120 BPM |
+|----------|-------|-----------|
+| 1/4D | 1½ | 750 ms |
+| 1/4 | 1 | 500 ms |
+| 1/8D | ¾ | 375 ms |
+| 1/8 | ½ | 250 ms |
+| 1/8T | ⅓ | 167 ms |
+| 1/16 | ¼ | 125 ms |
+| 1/16T | ⅙ | 83 ms |
+| 1/32 | ⅛ | 62.5 ms |
 
-Creates wide stereo movement.
+Synced times are capped at 2 seconds. Time CV still works while synced, and swings the synced time.
+
+## Tape Mode
+
+**Tape** makes the delay behave like a tape echo: a loop of tape passing a record head and a play head. The switch crossfades over a few tens of milliseconds, so you can flip it while the echoes are sounding.
+
+- **Wow and flutter.** The read head wanders: a slow wow (about 0.5 Hz, plus a slower drift) and a fast flutter (6–10 Hz). The pitch of the repeats wavers by a few cents. The motions run at unrelated rates, so the pattern doesn't loop.
+- **Record-head saturation.** The input and the feedback are recorded together through a soft, slightly lopsided saturation curve. Quiet signals pass unchanged; loud ones round off and pick up the even harmonics of magnetised tape. Because it sits inside the loop, a busy echo squashes and thickens as it builds.
+- **Tape loss.** The tape loses top end each time it records, so every repeat is darker than the one before. Longer delays mean slower tape and darker repeats: the loss starts around 7 kHz at 250 ms and falls to about 3.5 kHz at a second. High Cut still works on top of it.
+- **Motor glide.** Time changes glide over about a quarter second, like a motor finding its new speed. The repeats swoop in pitch as they go.
+
+### Runaway
+
+In Tape mode, Feedback past about 90% pushes the loop above unity, and the echoes build until the record head holds them. This is the classic dub runaway. The record head bounds the loop, so the output stays in range at any setting. Pull Feedback back below 90% and the echoes die away again.
 
 ## Usage Tips
 
-### Basic Slapback
-
-Short delay for doubling/thickening:
+### Slapback
 
 ```
-Time L: 80 ms
-Time R: 100 ms
-Feedback: 0
-Mix: 0.3
+Time: 80-120 ms
+FB: 0%
+Mix: 30%
+Tape: On
 ```
 
-Adds thickness without obvious echoes.
+A single, slightly smeared echo, like a 1950s vocal.
 
-### Rhythmic Delay
-
-Sync to tempo for musical echoes:
+### Dotted-Eighth Rhythm
 
 ```
-Time L: 375 ms (1/8 note at 120 BPM)
-Time R: 750 ms (1/4 note)
-Feedback: 0.4
-Ping Pong: On
+Sync: 1/8D
+FB: 40%
+Mix: 40%
+P-P: On (with a stereo source)
 ```
 
-Echoes fall on the beat.
+The repeats fall between the beats.
 
-### Tape Delay Simulation
-
-Warm, vintage-style delay:
+### Dub Throw
 
 ```
-Feedback: 0.5
-HP Filter: 200 Hz
-LP Filter: 4000 Hz
+Sync: 1/4 or 1/8D
+FB: 60%, then up to 95-100% to throw
+LoCut: 150 Hz
+Tape: On
 ```
 
-The filters remove highs and lows with each repeat, simulating tape degradation.
+Push Feedback up for a bar to let it run away, then pull it back.
 
-### Dub Delay
-
-Dark, spacious echoes:
-
-```
-Time: Long (600-1000 ms)
-Feedback: 0.6
-LP Filter: 2000 Hz
-```
-
-Low-passed feedback creates dark, dubbed-out echoes.
-
-### Tempo Sync
-
-With a clock connected and Sync enabled, Time knobs select musical divisions:
-
-| Division | At 120 BPM |
-|----------|-----------|
-| 1/32 | 62.5 ms |
-| 1/16 | 125 ms |
-| 1/8 | 250 ms |
-| 1/4 | 500 ms |
-| 1/2 | 1000 ms |
-| 1/1 | 2000 ms |
-
-### Dotted Note Delays
-
-For the classic U2/Edge sound, use dotted eighth notes:
-
-```
-Time: 1/8 dotted (375 ms at 120 BPM)
-Feedback: 0.4
-Mix: 0.5
-```
-
-### Modulated Delay (Chorus-like)
-
-Apply slow LFO to Time CV:
+### Chorus-like Modulation
 
 ```
 [LFO (0.5 Hz)] ──> [Delay Time CV]
+Time: 15-30 ms
+FB: 0-20%
 ```
 
-The varying delay time creates pitch modulation effects.
+The moving read head bends the pitch of the copy.
 
-### Self-Oscillation
-
-At high feedback (90%+), the delay can self-oscillate:
-
-1. Send a sound through the delay
-2. Turn feedback up high
-3. Remove input
-4. The delay continues generating sound
-
-Use filters to control the character of oscillation.
-
-### Sidechain-Pumping Delay
-
-Modulate feedback with an envelope:
+### Pumping Feedback
 
 ```
-[Kick Gate] ──> [Envelope] ──> [Inverted] ──> [Feedback CV]
+[Kick Gate] ──> [Envelope] ──> [Attenuverter (inverted)] ──> [Feedback CV]
 ```
 
-Feedback ducks on each kick, creating pumping echoes.
-
-## Delay Time Reference
-
-| BPM | 1/4 Note | 1/8 Note | 1/8 Dotted | 1/16 Note |
-|-----|----------|----------|------------|-----------|
-| 100 | 600 ms | 300 ms | 450 ms | 150 ms |
-| 120 | 500 ms | 250 ms | 375 ms | 125 ms |
-| 140 | 428 ms | 214 ms | 321 ms | 107 ms |
-| 160 | 375 ms | 187 ms | 281 ms | 93 ms |
-
-Formula: `60000 / BPM = quarter note in ms`
-
-## Connection Examples
-
-### Standard Insert
-```
-[Synth] ──> [Delay Left In]
-[Delay Left Out] ──> [Output Left]
-[Delay Right Out] ──> [Output Right]
-```
-
-### Send/Return
-```
-[Mixer Send] ──> [Delay]
-[Delay] ──> [Mixer Return]
-(Mix: 100% wet)
-```
-
-### Tempo-Synced
-```
-[Clock] ──> [Delay Sync]
-[Synth] ──> [Delay] ──> [Output]
-```
-
-### Modulated Delay
-```
-[LFO] ──> [Delay Time CV]
-[Audio] ──> [Delay] ──> [Output]
-```
+The feedback ducks on each kick.
 
 ## Sound Design Tips
 
-| Sound | Time | Feedback | Filters |
-|-------|------|----------|---------|
-| Slapback | 50-100 ms | 0% | Open |
-| Clean echo | 250-500 ms | 30% | Open |
-| Tape echo | 300-600 ms | 50% | HP:200, LP:4k |
-| Dub | 500-1000 ms | 60% | LP:2k |
-| Ambient | 700-1500 ms | 70% | HP:100, LP:8k |
-| Self-osc | Any | 90%+ | To taste |
+| Sound | Time | FB | Filters | Tape |
+|-------|------|----|---------|------|
+| Slapback | 80-120 ms | 0% | Open | On |
+| Clean echo | 250-500 ms | 30% | Open | Off |
+| Tape echo | 1/8D | 50% | LoCut 120 Hz | On |
+| Dub | 1/4 | 70-100% | LoCut 150 Hz, HiCut 4k | On |
+| Ambient | 700-1500 ms | 70% | LoCut 100, HiCut 8k | Off |
 
 ## Related Modules
 
 - [Reverb](./reverb.md) - For ambient space
 - [Chorus](./chorus.md) - For thickening without echoes
-- [Clock](../modulation/clock.md) - For tempo sync
+- [Clock](../modulation/clock.md) - Sets the tempo Sync follows
 - [LFO](../modulation/lfo.md) - For time modulation

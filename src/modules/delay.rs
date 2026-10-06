@@ -1,7 +1,9 @@
 //! Stereo Delay effect module.
 //!
-//! A versatile delay with feedback, filtering, and ping-pong mode.
-//! Features tempo sync options and smooth parameter changes.
+//! A stereo delay with feedback filtering, ping-pong and tempo sync, plus a
+//! Tape mode that behaves like a worn tape echo: the read head wanders with
+//! wow and flutter, the record head saturates, and every repeat comes back a
+//! little darker than the one before.
 
 use crate::dsp::{
     module_trait::{DspModule, ModuleCategory, ModuleInfo},
@@ -9,6 +11,7 @@ use crate::dsp::{
     denormal::flush,
     parameter::ParameterDefinition,
     port::PortDefinition,
+    primitives::{fast_tanh, FracDelay},
     signal::SignalBuffer,
     smoothed_value::SmoothedValue,
     connected_input, ParameterDisplay, SignalType,
@@ -17,7 +20,178 @@ use crate::dsp::{
 /// Maximum delay time in seconds.
 const MAX_DELAY_SECONDS: f32 = 2.0;
 
-/// Stereo delay effect with feedback, filtering, and ping-pong mode.
+/// Line kept beyond the longest delay so wow can swing past it.
+const WOW_HEADROOM_SECONDS: f32 = 0.005;
+
+/// Glide on delay-time changes. Plain mode follows the knob quickly; Tape mode
+/// glides like a motor changing speed, bending the pitch of the repeats.
+const TIME_GLIDE_MS: f32 = 50.0;
+const TAPE_TIME_GLIDE_MS: f32 = 250.0;
+
+/// Loop gain at full Feedback in Tape mode. Past unity, so the top of the
+/// knob runs away into the saturator the way a tape echo does.
+const TAPE_MAX_FEEDBACK: f32 = 1.1;
+
+/// Tape loss cutoff at a 250 ms delay. Longer delays mean slower tape and
+/// darker repeats: the cutoff falls with the square root of the time.
+const TAPE_LOSS_HZ: f32 = 7000.0;
+const TAPE_LOSS_MIN_HZ: f32 = 2500.0;
+const TAPE_LOSS_MAX_HZ: f32 = 12000.0;
+
+/// Tape can't record DC; this removes what the lopsided record head adds.
+const TAPE_DC_HZ: f32 = 10.0;
+
+/// A sine oscillator kept as a rotating unit vector: one complex multiply per
+/// sample instead of a `sin` call.
+#[derive(Clone, Copy, Debug)]
+struct Rotor {
+    re: f32,
+    im: f32,
+    cos: f32,
+    sin: f32,
+}
+
+impl Rotor {
+    fn new(freq_hz: f32, sample_rate: f32) -> Self {
+        let mut rotor = Self { re: 1.0, im: 0.0, cos: 1.0, sin: 0.0 };
+        rotor.set_frequency(freq_hz, sample_rate);
+        rotor
+    }
+
+    fn set_frequency(&mut self, freq_hz: f32, sample_rate: f32) {
+        let w = std::f32::consts::TAU * freq_hz / sample_rate;
+        self.cos = w.cos();
+        self.sin = w.sin();
+    }
+
+    /// Advances one sample and returns the sine.
+    #[inline]
+    fn next(&mut self) -> f32 {
+        let re = self.re * self.cos - self.im * self.sin;
+        self.im = self.re * self.sin + self.im * self.cos;
+        self.re = re;
+        self.im
+    }
+
+    /// Pulls the vector back onto the unit circle (rounding drifts it).
+    fn renormalize(&mut self) {
+        let gain = 1.5 - 0.5 * (self.re * self.re + self.im * self.im);
+        self.re *= gain;
+        self.im *= gain;
+    }
+
+    fn reset(&mut self) {
+        self.re = 1.0;
+        self.im = 0.0;
+    }
+}
+
+/// The wobble of a tape transport, as an offset to the read head in samples.
+///
+/// Wow is the slow lurch of an off-centre reel, flutter the fast shiver of the
+/// capstan. Each is a pair of sines at unrelated rates, so the pattern never
+/// quite repeats. Depths are given as peak pitch deviation: a read head
+/// swinging `A·sin(2πft)` samples bends the pitch by up to `A·2πf/sr`.
+#[derive(Clone, Debug)]
+struct TapeTransport {
+    partials: [Rotor; 4],
+    /// Peak offset of each partial, in samples.
+    depths: [f32; 4],
+}
+
+impl TapeTransport {
+    /// (rate in Hz, peak pitch deviation) for each partial.
+    const PARTIALS: [(f32, f32); 4] = [
+        (0.53, 0.0020), // wow
+        (0.21, 0.0010), // slow drift of the reel
+        (6.3, 0.0005),  // flutter
+        (9.7, 0.0003),  // capstan shimmer
+    ];
+
+    fn new(sample_rate: f32) -> Self {
+        let mut transport = Self {
+            partials: [Rotor::new(1.0, sample_rate); 4],
+            depths: [0.0; 4],
+        };
+        transport.set_sample_rate(sample_rate);
+        transport
+    }
+
+    fn set_sample_rate(&mut self, sample_rate: f32) {
+        for (i, &(freq, deviation)) in Self::PARTIALS.iter().enumerate() {
+            self.partials[i].set_frequency(freq, sample_rate);
+            self.depths[i] = deviation * sample_rate / (std::f32::consts::TAU * freq);
+        }
+    }
+
+    /// The read-head offset for the next sample. Zero-mean, starting at zero.
+    #[inline]
+    fn next(&mut self) -> f32 {
+        let mut offset = 0.0;
+        for (rotor, depth) in self.partials.iter_mut().zip(self.depths) {
+            offset += rotor.next() * depth;
+        }
+        offset
+    }
+
+    fn renormalize(&mut self) {
+        self.partials.iter_mut().for_each(Rotor::renormalize);
+    }
+
+    fn reset(&mut self) {
+        self.partials.iter_mut().for_each(Rotor::reset);
+    }
+}
+
+/// The record head: unity gain for quiet signals, a soft and slightly
+/// lopsided squash for loud ones.
+///
+/// `level·(tanh(x/level + b) − tanh b)·cosh²b` passes zero through zero with a
+/// slope of exactly 1, so it leaves the loop gain alone until the tape fills
+/// up. The bias tilts the ceilings (+0.78 / −1.06), which adds the even
+/// harmonics of magnetised tape.
+#[derive(Clone, Copy, Debug)]
+struct RecordHead {
+    tanh_bias: f32,
+    slope_gain: f32,
+}
+
+impl RecordHead {
+    const LEVEL: f32 = 0.9;
+    const BIAS: f32 = 0.15;
+
+    fn new() -> Self {
+        // The same tanh as `record`, so silence records as exactly zero
+        let tanh_bias = fast_tanh(Self::BIAS);
+        Self { tanh_bias, slope_gain: 1.0 / (1.0 - tanh_bias * tanh_bias) }
+    }
+
+    #[inline]
+    fn record(&self, x: f32) -> f32 {
+        Self::LEVEL * (fast_tanh(x / Self::LEVEL + Self::BIAS) - self.tanh_bias) * self.slope_gain
+    }
+}
+
+/// One channel of the tape path after the record head: a DC blocker, then
+/// the high-frequency loss of the tape itself.
+#[derive(Clone, Copy, Debug, Default)]
+struct TapeChannel {
+    dc_x: f32,
+    dc_y: f32,
+    loss: f32,
+}
+
+impl TapeChannel {
+    #[inline]
+    fn process(&mut self, x: f32, dc_pole: f32, loss_coeff: f32) -> f32 {
+        self.dc_y = flush(x - self.dc_x + dc_pole * self.dc_y);
+        self.dc_x = x;
+        self.loss = flush(self.loss + loss_coeff * (self.dc_y - self.loss));
+        self.loss
+    }
+}
+
+/// Stereo delay effect with feedback, filtering, ping-pong and Tape mode.
 ///
 /// # Ports
 ///
@@ -36,17 +210,17 @@ const MAX_DELAY_SECONDS: f32 = 2.0;
 /// - **High Cut** (100-20000 Hz): Lowpass filter in feedback path.
 /// - **Low Cut** (20-2000 Hz): Highpass filter in feedback path.
 /// - **Ping-Pong** (toggle): Alternates repeats between channels.
-/// - **Sync** (choice): Tempo sync division.
+/// - **Sync** (choice): Tempo sync division, following the Clock's tempo.
+/// - **Tape** (toggle): Wow and flutter, record-head saturation and tape
+///   loss; Feedback can pass unity.
 pub struct StereoDelay {
     /// Sample rate.
     sample_rate: f32,
-    /// Left channel delay buffer.
-    buffer_left: Vec<f32>,
-    /// Right channel delay buffer.
-    buffer_right: Vec<f32>,
-    /// Write position in the circular buffer.
-    write_pos: usize,
-    /// Smoothed delay time in samples.
+    /// Left channel delay line.
+    line_left: FracDelay,
+    /// Right channel delay line.
+    line_right: FracDelay,
+    /// Smoothed delay time in milliseconds.
     time_smooth: SmoothedValue,
     /// Smoothed feedback amount.
     feedback_smooth: SmoothedValue,
@@ -64,6 +238,19 @@ pub struct StereoDelay {
     low_cut_state_l: f32,
     /// Low cut filter state (right).
     low_cut_state_r: f32,
+    /// How far into Tape mode we are (0 plain, 1 tape), so the toggle crossfades.
+    tape_smooth: SmoothedValue,
+    /// Whether the time glide is currently set for Tape mode.
+    tape_glide: bool,
+    /// Wow and flutter.
+    transport: TapeTransport,
+    /// Record-head saturation.
+    record_head: RecordHead,
+    /// Tape path state, per channel.
+    tape_left: TapeChannel,
+    tape_right: TapeChannel,
+    /// DC blocker pole for the tape path.
+    dc_pole: f32,
     /// Port definitions.
     ports: Vec<PortDefinition>,
     /// Parameter definitions.
@@ -74,14 +261,12 @@ impl StereoDelay {
     /// Creates a new stereo delay.
     pub fn new() -> Self {
         let sample_rate = 44100.0;
-        let max_samples = (MAX_DELAY_SECONDS * sample_rate) as usize;
 
         Self {
             sample_rate,
-            buffer_left: vec![0.0; max_samples],
-            buffer_right: vec![0.0; max_samples],
-            write_pos: 0,
-            time_smooth: SmoothedValue::new(500.0, 50.0, sample_rate), // 50ms smoothing for time
+            line_left: FracDelay::new(Self::line_length(sample_rate)),
+            line_right: FracDelay::new(Self::line_length(sample_rate)),
+            time_smooth: SmoothedValue::new(500.0, TIME_GLIDE_MS, sample_rate),
             feedback_smooth: SmoothedValue::with_default_smoothing(0.5, sample_rate),
             mix_smooth: SmoothedValue::with_default_smoothing(0.5, sample_rate),
             high_cut_smooth: SmoothedValue::with_default_smoothing(10000.0, sample_rate),
@@ -90,6 +275,13 @@ impl StereoDelay {
             high_cut_state_r: 0.0,
             low_cut_state_l: 0.0,
             low_cut_state_r: 0.0,
+            tape_smooth: SmoothedValue::new(0.0, 15.0, sample_rate),
+            tape_glide: false,
+            transport: TapeTransport::new(sample_rate),
+            record_head: RecordHead::new(),
+            tape_left: TapeChannel::default(),
+            tape_right: TapeChannel::default(),
+            dc_pole: Self::dc_pole(sample_rate),
             ports: vec![
                 // Input ports
                 PortDefinition::input_with_default("in_l", "In L", SignalType::Audio, 0.0),
@@ -114,12 +306,14 @@ impl StereoDelay {
                 ParameterDefinition::frequency("high_cut", "High Cut", 100.0, 20000.0, 10000.0),
                 ParameterDefinition::frequency("low_cut", "Low Cut", 20.0, 2000.0, 20.0),
                 ParameterDefinition::toggle("ping_pong", "Ping-Pong", false),
+                // Patches save the index, so new divisions go on the end
                 ParameterDefinition::choice(
                     "sync",
                     "Sync",
-                    &["Off", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32"],
+                    &["Off", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/4D", "1/8D"],
                     0,
                 ),
+                ParameterDefinition::toggle("tape", "Tape", false),
             ],
         }
     }
@@ -140,31 +334,16 @@ impl StereoDelay {
     const PARAM_LOW_CUT: usize = 4;
     const PARAM_PING_PONG: usize = 5;
     const PARAM_SYNC: usize = 6;
+    const PARAM_TAPE: usize = 7;
 
-    /// Reads from the delay buffer with linear interpolation.
-    #[inline]
-    fn read_interpolated(buffer: &[f32], write_pos: usize, delay_samples: f32) -> f32 {
-        let buffer_size = buffer.len();
-        let int_delay = delay_samples as usize;
-        let frac = delay_samples - int_delay as f32;
+    /// Delay-line length for a sample rate: the longest delay plus wow headroom.
+    fn line_length(sample_rate: f32) -> usize {
+        ((MAX_DELAY_SECONDS + WOW_HEADROOM_SECONDS) * sample_rate) as usize + 2
+    }
 
-        // Calculate read positions (circular buffer)
-        let read_pos_1 = if write_pos >= int_delay {
-            write_pos - int_delay
-        } else {
-            buffer_size - (int_delay - write_pos)
-        };
-
-        let read_pos_2 = if read_pos_1 == 0 {
-            buffer_size - 1
-        } else {
-            read_pos_1 - 1
-        };
-
-        // Linear interpolation
-        let sample_1 = buffer[read_pos_1];
-        let sample_2 = buffer[read_pos_2];
-        sample_1 + frac * (sample_2 - sample_1)
+    /// Pole of the tape path's DC blocker.
+    fn dc_pole(sample_rate: f32) -> f32 {
+        1.0 - std::f32::consts::TAU * TAPE_DC_HZ / sample_rate
     }
 
     /// Simple one-pole lowpass filter coefficient.
@@ -183,6 +362,11 @@ impl StereoDelay {
         1.0 / (1.0 + tan)
     }
 
+    /// Tape loss cutoff for a delay time: slower tape for longer delays.
+    fn tape_loss_hz(time_ms: f32) -> f32 {
+        (TAPE_LOSS_HZ * (250.0 / time_ms.max(1.0)).sqrt()).clamp(TAPE_LOSS_MIN_HZ, TAPE_LOSS_MAX_HZ)
+    }
+
     /// Soft clip to prevent runaway feedback.
     #[inline]
     fn soft_clip(x: f32) -> f32 {
@@ -199,6 +383,8 @@ impl StereoDelay {
             4 => Some(0.25),     // 1/16 = 0.25 beats
             5 => Some(1.0 / 6.0), // 1/16T = triplet
             6 => Some(0.125),    // 1/32 = 0.125 beats
+            7 => Some(1.5),      // 1/4D = dotted quarter
+            8 => Some(0.75),     // 1/8D = dotted eighth
             _ => None,
         }
     }
@@ -216,7 +402,7 @@ impl DspModule for StereoDelay {
             id: "fx.delay",
             name: "Stereo Delay",
             category: ModuleCategory::Effect,
-            description: "Stereo delay with feedback, filtering, and ping-pong mode",
+            description: "Stereo delay with feedback filtering, ping-pong, tempo sync and tape mode",
         };
         &INFO
     }
@@ -230,14 +416,11 @@ impl DspModule for StereoDelay {
     }
 
     fn prepare(&mut self, sample_rate: f32, _max_block_size: usize) {
-        self.sample_rate = sample_rate;
-
-        // Resize buffers if needed
-        let max_samples = (MAX_DELAY_SECONDS * sample_rate) as usize;
-        if self.buffer_left.len() != max_samples {
-            self.buffer_left.resize(max_samples, 0.0);
-            self.buffer_right.resize(max_samples, 0.0);
+        if sample_rate != self.sample_rate {
+            self.line_left.allocate(Self::line_length(sample_rate));
+            self.line_right.allocate(Self::line_length(sample_rate));
         }
+        self.sample_rate = sample_rate;
 
         // Update sample rate for smoothed values
         self.time_smooth.set_sample_rate(sample_rate);
@@ -245,6 +428,10 @@ impl DspModule for StereoDelay {
         self.mix_smooth.set_sample_rate(sample_rate);
         self.high_cut_smooth.set_sample_rate(sample_rate);
         self.low_cut_smooth.set_sample_rate(sample_rate);
+        self.tape_smooth.set_sample_rate(sample_rate);
+
+        self.transport.set_sample_rate(sample_rate);
+        self.dc_pole = Self::dc_pole(sample_rate);
     }
 
     fn process(
@@ -262,6 +449,7 @@ impl DspModule for StereoDelay {
         let low_cut = params[Self::PARAM_LOW_CUT];
         let ping_pong = params[Self::PARAM_PING_PONG] > 0.5;
         let sync_index = params[Self::PARAM_SYNC] as usize;
+        let tape = params[Self::PARAM_TAPE] > 0.5;
 
         // Calculate delay time (either from sync or direct)
         let base_time_ms = if let Some(beats) = Self::sync_to_beats(sync_index) {
@@ -273,12 +461,30 @@ impl DspModule for StereoDelay {
             time_ms
         };
 
+        // Tape glides between times like a motor finding its new speed
+        if tape != self.tape_glide {
+            self.tape_glide = tape;
+            // Tape coming on from rest starts its wobble from rest too, so the
+            // read head eases in instead of jumping to wherever the reels were
+            if tape && self.tape_smooth.current() == 0.0 {
+                self.transport.reset();
+            }
+            self.time_smooth
+                .set_time_constant(if tape { TAPE_TIME_GLIDE_MS } else { TIME_GLIDE_MS });
+        }
+
         // Set smoothing targets
         self.time_smooth.set_target(base_time_ms);
         self.feedback_smooth.set_target(feedback);
         self.mix_smooth.set_target(mix);
         self.high_cut_smooth.set_target(high_cut);
         self.low_cut_smooth.set_target(low_cut);
+        self.tape_smooth.set_target(if tape { 1.0 } else { 0.0 });
+
+        // Tape loss follows the tape speed; it changes slowly, so once a block is enough
+        let loss_hz = Self::tape_loss_hz(self.time_smooth.current());
+        let loss_coeff = 1.0 - (-std::f32::consts::TAU * loss_hz / self.sample_rate).exp();
+        self.transport.renormalize();
 
         // Get input buffers
         let in_left = inputs.get(Self::PORT_IN_L);
@@ -292,7 +498,7 @@ impl DspModule for StereoDelay {
         let out_left = &mut out_left_slice[Self::PORT_OUT_L];
         let out_right = &mut out_right_slice[0];
 
-        let buffer_size = self.buffer_left.len();
+        let max_delay_samples = MAX_DELAY_SECONDS * self.sample_rate;
 
         // Process each sample
         for i in 0..context.block_size {
@@ -302,6 +508,7 @@ impl DspModule for StereoDelay {
             let mix_smoothed = self.mix_smooth.next();
             let high_cut_smoothed = self.high_cut_smooth.next();
             let low_cut_smoothed = self.low_cut_smooth.next();
+            let tape_amount = self.tape_smooth.next();
 
             // Apply time CV modulation (bipolar, +/- 50% range)
             let time_mod = time_cv
@@ -309,15 +516,19 @@ impl DspModule for StereoDelay {
                 .unwrap_or(0.0);
             let modulated_time_ms = (time_ms_smoothed * (1.0 + time_mod * 0.5)).clamp(1.0, 2000.0);
 
-            // Apply feedback CV modulation
+            // Apply feedback CV modulation. Plain mode stops short of unity;
+            // Tape mode goes past it and leans on the record head instead.
             let fb_mod = feedback_cv
                 .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
                 .unwrap_or(0.0);
-            let modulated_feedback = (feedback_smoothed + fb_mod * 0.5).clamp(0.0, 0.95);
+            let feedback_amount = feedback_smoothed + fb_mod * 0.5;
+            let plain_feedback = feedback_amount.clamp(0.0, 0.95);
+            let tape_feedback = feedback_amount.clamp(0.0, 1.0) * TAPE_MAX_FEEDBACK;
 
-            // Convert time to samples
+            // Convert time to samples, and let the tape transport wobble the read head
             let delay_samples = (modulated_time_ms * 0.001 * self.sample_rate)
-                .clamp(1.0, (buffer_size - 1) as f32);
+                .clamp(1.0, max_delay_samples);
+            let read_at = delay_samples - 1.0 + self.transport.next() * tape_amount;
 
             // Get dry input samples
             let dry_left = in_left
@@ -330,9 +541,9 @@ impl DspModule for StereoDelay {
                 None => dry_left,
             };
 
-            // Read delayed samples
-            let wet_left = Self::read_interpolated(&self.buffer_left, self.write_pos, delay_samples);
-            let wet_right = Self::read_interpolated(&self.buffer_right, self.write_pos, delay_samples);
+            // Read delayed samples (written delay_samples ago; the lines haven't been pushed yet)
+            let wet_left = self.line_left.read(read_at);
+            let wet_right = self.line_right.read(read_at);
 
             // Calculate filter coefficients
             let lp_coeff = Self::lowpass_coeff(high_cut_smoothed, self.sample_rate);
@@ -352,27 +563,34 @@ impl DspModule for StereoDelay {
             let hp_filtered_right = hp_coeff * (filtered_right - self.low_cut_state_r);
             self.low_cut_state_r = flush(filtered_right - hp_filtered_right);
 
-            // Calculate feedback signals
-            let (feedback_left, feedback_right) = if ping_pong {
-                // Ping-pong: cross-feed channels
-                (
-                    Self::soft_clip(hp_filtered_right * modulated_feedback),
-                    Self::soft_clip(hp_filtered_left * modulated_feedback),
-                )
+            // Ping-pong cross-feeds the channels; otherwise each feeds itself
+            let (loop_left, loop_right) = if ping_pong {
+                (hp_filtered_right, hp_filtered_left)
             } else {
-                // Normal: same-channel feedback
-                (
-                    Self::soft_clip(hp_filtered_left * modulated_feedback),
-                    Self::soft_clip(hp_filtered_right * modulated_feedback),
-                )
+                (hp_filtered_left, hp_filtered_right)
             };
 
-            // Write to delay buffer (input + feedback)
-            self.buffer_left[self.write_pos] = flush(dry_left + feedback_left);
-            self.buffer_right[self.write_pos] = flush(dry_right + feedback_right);
+            // Plain: the input plus soft-clipped feedback
+            let plain_left = dry_left + Self::soft_clip(loop_left * plain_feedback);
+            let plain_right = dry_right + Self::soft_clip(loop_right * plain_feedback);
 
-            // Advance write position
-            self.write_pos = (self.write_pos + 1) % buffer_size;
+            // Tape: input and feedback recorded together through the record
+            // head, then the tape's loss, which every repeat passes once more
+            let record = &self.record_head;
+            let tape_left = self.tape_left.process(
+                record.record(dry_left + loop_left * tape_feedback),
+                self.dc_pole,
+                loss_coeff,
+            );
+            let tape_right = self.tape_right.process(
+                record.record(dry_right + loop_right * tape_feedback),
+                self.dc_pole,
+                loss_coeff,
+            );
+
+            // Write to the delay lines
+            self.line_left.push(plain_left + tape_amount * (tape_left - plain_left));
+            self.line_right.push(plain_right + tape_amount * (tape_right - plain_right));
 
             // Mix dry and wet signals
             let out_l = dry_left * (1.0 - mix_smoothed) + wet_left * mix_smoothed;
@@ -385,16 +603,18 @@ impl DspModule for StereoDelay {
     }
 
     fn reset(&mut self) {
-        // Clear delay buffers
-        self.buffer_left.fill(0.0);
-        self.buffer_right.fill(0.0);
-        self.write_pos = 0;
+        // Clear delay lines
+        self.line_left.clear();
+        self.line_right.clear();
 
         // Clear filter states
         self.high_cut_state_l = 0.0;
         self.high_cut_state_r = 0.0;
         self.low_cut_state_l = 0.0;
         self.low_cut_state_r = 0.0;
+        self.tape_left = TapeChannel::default();
+        self.tape_right = TapeChannel::default();
+        self.transport.reset();
 
         // Reset smoothed values
         self.time_smooth.reset(self.time_smooth.target());
@@ -402,12 +622,36 @@ impl DspModule for StereoDelay {
         self.mix_smooth.reset(self.mix_smooth.target());
         self.high_cut_smooth.reset(self.high_cut_smooth.target());
         self.low_cut_smooth.reset(self.low_cut_smooth.target());
+        self.tape_smooth.reset(self.tape_smooth.target());
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dsp::{analysis::Spectrum, context::TransportState};
+
+    /// Parameters: time, feedback, mix, high cut, low cut, ping-pong, sync, tape.
+    fn params(time_ms: f32, feedback: f32, mix: f32) -> [f32; 8] {
+        [time_ms, feedback, mix, 20000.0, 20.0, 0.0, 0.0, 0.0]
+    }
+
+    /// Runs `input` (mono, normalled to both sides) through the delay in
+    /// blocks, returning the left output.
+    fn run(delay: &mut StereoDelay, input: &[f32], params: &[f32], ctx: &ProcessContext) -> Vec<f32> {
+        let block = ctx.block_size;
+        let right = SignalBuffer::unconnected(block, SignalType::Audio);
+        let cv = SignalBuffer::control(block);
+        let mut outputs = vec![SignalBuffer::audio(block), SignalBuffer::audio(block)];
+        let mut out = Vec::with_capacity(input.len());
+        for chunk in input.chunks(block) {
+            let mut left = SignalBuffer::audio(block);
+            left.samples[..chunk.len()].copy_from_slice(chunk);
+            delay.process(&[&left, &right, &cv, &cv], &mut outputs, params, ctx);
+            out.extend_from_slice(&outputs[0].samples[..chunk.len()]);
+        }
+        out
+    }
 
     #[test]
     fn test_delay_info() {
@@ -456,7 +700,7 @@ mod tests {
         let delay = StereoDelay::new();
         let params = delay.parameters();
 
-        assert_eq!(params.len(), 7);
+        assert_eq!(params.len(), 8);
         assert_eq!(params[0].id, "time");
         assert_eq!(params[1].id, "feedback");
         assert_eq!(params[2].id, "mix");
@@ -464,6 +708,7 @@ mod tests {
         assert_eq!(params[4].id, "low_cut");
         assert_eq!(params[5].id, "ping_pong");
         assert_eq!(params[6].id, "sync");
+        assert_eq!(params[7].id, "tape");
     }
 
     #[test]
@@ -486,7 +731,7 @@ mod tests {
         delay.process(
             &[&input, &input, &empty_cv, &empty_cv],
             &mut outputs,
-            &[10.0, 0.0, 0.5, 10000.0, 20.0, 0.0, 0.0],
+            &[10.0, 0.0, 0.5, 10000.0, 20.0, 0.0, 0.0, 0.0],
             &ctx,
         );
 
@@ -497,76 +742,28 @@ mod tests {
 
     #[test]
     fn test_delay_feedback() {
+        // An impulse comes back exactly one delay later, then again at half level
+        let sr = 44100.0;
         let mut delay = StereoDelay::new();
-        let sample_rate = 44100.0;
-        let block_size = 4410;
-        delay.prepare(sample_rate, block_size);
+        delay.prepare(sr, 441);
+        let ctx = ProcessContext::new(sr, 441);
 
-        // Use 500ms delay (the default smoothing start point) for reliable timing
-        let delay_ms = 500.0;
-        let delay_samples = (delay_ms * 0.001 * sample_rate) as usize;
+        let delay_samples = 22050; // 500 ms, the smoother's starting point
+        let mut input = vec![0.0; delay_samples * 3];
+        input[0] = 1.0;
+        let out = run(&mut delay, &input, &params(500.0, 0.5, 1.0), &ctx);
 
-        // First, warm up the delay with silence to let parameters settle
-        let silence = SignalBuffer::audio(block_size);
-        let empty_cv = SignalBuffer::control(block_size);
-        let mut outputs = vec![
-            SignalBuffer::audio(block_size),
-            SignalBuffer::audio(block_size),
-        ];
-        let ctx = ProcessContext::new(sample_rate, block_size);
-
-        // Process silence for a few blocks to let smoothing settle
-        for _ in 0..10 {
-            delay.process(
-                &[&silence, &silence, &empty_cv, &empty_cv],
-                &mut outputs,
-                &[delay_ms, 0.5, 1.0, 20000.0, 20.0, 0.0, 0.0],
-                &ctx,
-            );
-        }
-
-        // Now send an impulse
-        let mut input = SignalBuffer::audio(block_size);
-        input.samples[0] = 1.0;
-
-        delay.process(
-            &[&input, &input, &empty_cv, &empty_cv],
-            &mut outputs,
-            &[delay_ms, 0.5, 1.0, 20000.0, 20.0, 0.0, 0.0],
-            &ctx,
-        );
-
-        // Process more blocks until we pass the delay time
-        // 500ms = 22050 samples, we need about 5 blocks of 4410 samples
-        let mut all_outputs: Vec<f32> = outputs[0].samples.clone();
-        for _ in 0..5 {
-            delay.process(
-                &[&silence, &silence, &empty_cv, &empty_cv],
-                &mut outputs,
-                &[delay_ms, 0.5, 1.0, 20000.0, 20.0, 0.0, 0.0],
-                &ctx,
-            );
-            all_outputs.extend_from_slice(&outputs[0].samples);
-        }
-
-        // Look for the delayed signal somewhere in the output
-        // Should appear around sample delay_samples (22050)
-        let search_start = delay_samples.saturating_sub(1000);
-        let search_end = (delay_samples + 1000).min(all_outputs.len());
-
-        let mut found_signal = false;
-        for i in search_start..search_end {
-            if all_outputs[i].abs() > 0.1 {
-                found_signal = true;
-                break;
-            }
-        }
-        assert!(
-            found_signal,
-            "Expected delayed signal around sample {} (out of {})",
-            delay_samples,
-            all_outputs.len()
-        );
+        assert!((out[delay_samples] - 1.0).abs() < 1e-3, "first echo {}", out[delay_samples]);
+        // The high cut (a one-pole near Nyquist) softens the click on its way round
+        let second = out[2 * delay_samples];
+        assert!(second > 0.35 && second < 0.5, "second echo {second}");
+        let elsewhere = out
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| i % delay_samples > 4 && i % delay_samples < delay_samples - 4)
+            .map(|(_, s)| s.abs())
+            .fold(0.0, f32::max);
+        assert!(elsewhere < 0.01, "stray output {elsewhere}");
     }
 
     #[test]
@@ -587,7 +784,7 @@ mod tests {
         delay.process(
             &[&input, &input, &empty_cv, &empty_cv],
             &mut outputs,
-            &[100.0, 0.5, 0.5, 10000.0, 20.0, 0.0, 0.0],
+            &[100.0, 0.5, 0.5, 10000.0, 20.0, 0.0, 0.0, 1.0],
             &ctx,
         );
 
@@ -604,15 +801,14 @@ mod tests {
         delay.process(
             &[&silence, &silence, &empty_cv, &empty_cv],
             &mut outputs2,
-            &[100.0, 0.5, 1.0, 10000.0, 20.0, 0.0, 0.0],
+            &[100.0, 0.5, 1.0, 10000.0, 20.0, 0.0, 0.0, 1.0],
             &ctx,
         );
 
-        // Output should be near zero (buffers cleared)
+        // Output should be silent (lines and tape path cleared)
         assert!(
-            outputs2[0].samples[0].abs() < 0.01,
-            "Expected near-zero output after reset, got {}",
-            outputs2[0].samples[0]
+            outputs2[0].samples.iter().all(|s| s.abs() < 1e-6),
+            "Expected silence after reset"
         );
     }
 
@@ -635,6 +831,197 @@ mod tests {
         assert_eq!(StereoDelay::sync_to_beats(2), Some(0.5)); // 1/8
         assert_eq!(StereoDelay::sync_to_beats(4), Some(0.25)); // 1/16
         assert_eq!(StereoDelay::sync_to_beats(6), Some(0.125)); // 1/32
+        assert_eq!(StereoDelay::sync_to_beats(7), Some(1.5)); // 1/4D
+        assert_eq!(StereoDelay::sync_to_beats(8), Some(0.75)); // 1/8D
+
+        // Every division in the dropdown has a length
+        let delay = StereoDelay::new();
+        let ParameterDisplay::Discrete { labels: choices } = delay.parameters()[StereoDelay::PARAM_SYNC].display else {
+            panic!("Sync should be a choice");
+        };
+        for i in 1..choices.len() {
+            assert!(StereoDelay::sync_to_beats(i).is_some(), "{} has no length", choices[i]);
+        }
+    }
+
+    #[test]
+    fn test_every_sync_division_lands_on_the_tempo() {
+        // At 93 BPM an impulse's echo arrives beats × 60/93 s later, to the sample
+        let sr = 48000.0;
+        let bpm = 93.0;
+        for sync in 1..=8 {
+            let beats = StereoDelay::sync_to_beats(sync).unwrap();
+            let expected = beats * 60.0 / bpm * sr;
+            let ctx = ProcessContext::with_transport(sr, 480, TransportState::playing_at(bpm));
+            let mut p = params(500.0, 0.0, 1.0);
+            p[StereoDelay::PARAM_SYNC] = sync as f32;
+
+            // Let the time glide from its 500 ms start onto the synced time
+            let mut delay = StereoDelay::new();
+            delay.prepare(sr, 480);
+            run(&mut delay, &vec![0.0; 48000], &p, &ctx);
+
+            let mut input = vec![0.0; 120000];
+            input[0] = 1.0;
+            let out = run(&mut delay, &input, &p, &ctx);
+            let arrival = (0..out.len()).max_by(|&a, &b| out[a].abs().total_cmp(&out[b].abs())).unwrap();
+            assert!(
+                (arrival as f32 - expected).abs() <= 1.0,
+                "sync {sync}: echo at {arrival}, expected {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_tape_max_feedback_stays_bounded() {
+        // Full feedback plus feedback CV past the top, a loud noise burst,
+        // then a long wait: the loop runs away into the record head and holds
+        let sr = 48000.0;
+        for ping_pong in [0.0, 1.0] {
+            let mut delay = StereoDelay::new();
+            delay.prepare(sr, 512);
+            let ctx = ProcessContext::new(sr, 512);
+            let right = SignalBuffer::unconnected(512, SignalType::Audio);
+            let mut time_cv = SignalBuffer::control(512);
+            time_cv.fill(-0.8); // short repeats, many passes
+            let mut fb_cv = SignalBuffer::control(512);
+            fb_cv.fill(1.0);
+            let mut outputs = vec![SignalBuffer::audio(512), SignalBuffer::audio(512)];
+            let p = [100.0, 1.0, 1.0, 20000.0, 20.0, ping_pong, 0.0, 1.0];
+
+            let mut seed = 1u32;
+            let mut peak = 0.0f32;
+            let mut late = Vec::new();
+            for block in 0..(sr as usize * 20 / 512) {
+                let mut left = SignalBuffer::audio(512);
+                if block < 50 {
+                    for s in left.samples.iter_mut() {
+                        seed ^= seed << 13;
+                        seed ^= seed >> 17;
+                        seed ^= seed << 5;
+                        *s = (seed as i32 as f32) / i32::MAX as f32;
+                    }
+                }
+                delay.process(&[&left, &right, &time_cv, &fb_cv], &mut outputs, &p, &ctx);
+                for out in &outputs {
+                    assert!(out.samples.iter().all(|s| s.is_finite()));
+                    peak = out.samples.iter().fold(peak, |m, s| m.max(s.abs()));
+                }
+                if block * 512 > sr as usize * 19 {
+                    late.extend_from_slice(&outputs[0].samples);
+                }
+            }
+            assert!(peak < 1.5, "ping-pong {ping_pong}: peak {peak}");
+            // Past unity it sustains rather than dying away
+            let late_rms = crate::dsp::analysis::rms(&late);
+            assert!(late_rms > 0.05, "ping-pong {ping_pong}: tail died ({late_rms})");
+        }
+    }
+
+    #[test]
+    fn test_tape_wow_and_flutter_bend_the_pitch() {
+        // A steady 1 kHz sine read through the tape wanders in pitch by a
+        // fraction of a percent; through the plain delay it doesn't move
+        let sr = 48000.0;
+        let input: Vec<f32> = (0..sr as usize * 5)
+            .map(|i| (std::f32::consts::TAU * 1000.0 * i as f32 / sr).sin() * 0.1)
+            .collect();
+        let deviation = |tape: f32| {
+            let mut delay = StereoDelay::new();
+            delay.prepare(sr, 480);
+            let ctx = ProcessContext::new(sr, 480);
+            // 500 ms is where the time smoother starts, so nothing glides
+            let mut p = params(500.0, 0.0, 1.0);
+            p[StereoDelay::PARAM_TAPE] = tape;
+            let out = run(&mut delay, &input, &p, &ctx);
+
+            // Instantaneous frequency from upward zero crossings, over 20 ms windows
+            let crossings: Vec<f32> = out[sr as usize * 6 / 10..]
+                .windows(2)
+                .enumerate()
+                .filter(|(_, w)| w[0] < 0.0 && w[1] >= 0.0)
+                .map(|(i, w)| i as f32 + w[0] / (w[0] - w[1]))
+                .collect();
+            let freqs: Vec<f32> = crossings
+                .windows(21)
+                .step_by(20)
+                .map(|w| 20.0 * sr / (w[20] - w[0]))
+                .collect();
+            let (lo, hi) = freqs.iter().fold((f32::MAX, f32::MIN), |(lo, hi), &f| (lo.min(f), hi.max(f)));
+            (hi - lo) / 1000.0
+        };
+
+        let plain = deviation(0.0);
+        let tape = deviation(1.0);
+        assert!(plain < 1e-4, "plain delay wobbles: {plain}");
+        assert!(tape > 0.002 && tape < 0.012, "tape pitch swing {tape}");
+    }
+
+    #[test]
+    fn test_tape_repeats_darken_progressively() {
+        // An impulse recirculating through the tape: each echo has less top
+        // end than the one before it
+        let sr = 48000.0;
+        let mut delay = StereoDelay::new();
+        delay.prepare(sr, 480);
+        let ctx = ProcessContext::new(sr, 480);
+        let mut p = params(500.0, 0.8, 1.0);
+        p[StereoDelay::PARAM_TAPE] = 1.0;
+        run(&mut delay, &vec![0.0; 4800], &p, &ctx); // crossfade into tape
+
+        let echo = 24000;
+        let mut input = vec![0.0; echo * 5];
+        input[0] = 0.5;
+        let out = run(&mut delay, &input, &p, &ctx);
+
+        let brightness = |n: usize| {
+            let window = &out[n * echo - 1024..n * echo + 1024];
+            let spectrum = Spectrum::of(window, sr);
+            let energy = |lo: f64, hi: f64| -> f64 {
+                spectrum
+                    .magnitudes
+                    .iter()
+                    .enumerate()
+                    .filter(|(k, _)| (lo..hi).contains(&(*k as f64 * spectrum.bin_hz)))
+                    .map(|(_, m)| m * m)
+                    .sum()
+            };
+            energy(4000.0, 12000.0) / energy(100.0, 1000.0)
+        };
+        let ratios: Vec<f64> = (1..=4).map(brightness).collect();
+        for pair in ratios.windows(2) {
+            assert!(pair[1] < pair[0] * 0.8, "repeats not darkening: {ratios:?}");
+        }
+    }
+
+    #[test]
+    fn test_record_head_is_transparent_when_quiet() {
+        let head = RecordHead::new();
+        assert!((head.record(1e-3) - 1e-3).abs() < 1e-6);
+        assert_eq!(head.record(0.0), 0.0);
+        // Loud signals squash, harder on one side than the other
+        assert!(head.record(10.0) < 0.8 && head.record(10.0) > 0.7);
+        assert!(head.record(-10.0) < -1.0 && head.record(-10.0) > -1.1);
+    }
+
+    #[test]
+    fn test_tape_toggle_does_not_click() {
+        // Switching Tape on mid-note crossfades rather than jumping
+        let sr = 48000.0;
+        let mut delay = StereoDelay::new();
+        delay.prepare(sr, 480);
+        let ctx = ProcessContext::new(sr, 480);
+        let input: Vec<f32> = (0..48000)
+            .map(|i| (std::f32::consts::TAU * 220.0 * i as f32 / sr).sin() * 0.3)
+            .collect();
+        let mut p = params(300.0, 0.4, 1.0);
+        let mut out = run(&mut delay, &input, &p, &ctx);
+        p[StereoDelay::PARAM_TAPE] = 1.0;
+        out.extend(run(&mut delay, &input, &p, &ctx));
+
+        // A 220 Hz sine at 0.3 (plus echoes) moves at most ~0.02 per sample
+        let worst_step = out.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
+        assert!(worst_step < 0.05, "step of {worst_step} at the toggle");
     }
 
     #[test]
@@ -653,7 +1040,7 @@ mod tests {
         assert_eq!(module.info().id, "fx.delay");
         assert_eq!(module.info().name, "Stereo Delay");
         assert_eq!(module.ports().len(), 6);
-        assert_eq!(module.parameters().len(), 7);
+        assert_eq!(module.parameters().len(), 8);
     }
 
     #[test]
@@ -673,7 +1060,7 @@ mod tests {
         delay.process(
             &[&left, &right],
             &mut outputs,
-            &[10.0, 0.5, 0.5, 10000.0, 20.0, 0.0, 0.0],
+            &[10.0, 0.5, 0.5, 10000.0, 20.0, 0.0, 0.0, 1.0],
             &ctx,
         );
 
@@ -696,7 +1083,7 @@ mod tests {
         delay.process(
             &[&left, &right],
             &mut outputs,
-            &[10.0, 0.0, 0.0, 10000.0, 20.0, 0.0, 0.0],
+            &[10.0, 0.0, 0.0, 10000.0, 20.0, 0.0, 0.0, 0.0],
             &ctx,
         );
 
