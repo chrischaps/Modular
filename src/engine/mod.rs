@@ -20,7 +20,7 @@ pub use channels::{
     EngineChannels, EngineHandle, UiHandle, DEFAULT_COMMAND_BUFFER_SIZE, DEFAULT_EVENT_BUFFER_SIZE,
     MAX_PLANS_IN_FLIGHT,
 };
-pub use commands::{AudioMessage, EngineCommand, EngineEvent, NodeId, PortIndex, ScopeFrame};
+pub use commands::{AudioMessage, ChannelPeaks, EngineCommand, EngineEvent, NodeId, PortIndex, ScopeFrame};
 pub use graph_plan::GraphPlan;
 pub use offline::{OfflineRenderer, StereoBuffer};
 pub use midi_engine::{

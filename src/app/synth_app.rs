@@ -729,9 +729,11 @@ impl SynthApp {
                         // Store the input value for UI feedback
                         self.user_state.set_input_value(node_id, input_index, value);
                     }
-                    crate::engine::EngineEvent::OutputValue { node_id, output_index, value } => {
-                        // Store the output value for LED indicators
+                    crate::engine::EngineEvent::OutputValue { node_id, output_index, value, channels } => {
+                        // Store the output value for LED indicators, and each
+                        // channel's for drawing poly cables strand by strand
                         self.user_state.set_output_value(node_id, output_index, value);
+                        self.user_state.set_output_channels(node_id, output_index, channels);
                     }
                     crate::engine::EngineEvent::ScopeBuffer { node_id, channel1, channel2, triggered } => {
                         // Store the oscilloscope waveform data for display

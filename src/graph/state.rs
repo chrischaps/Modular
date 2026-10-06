@@ -7,7 +7,7 @@ use egui_node_graph2::{ConnectionSignalTrait, GraphEditorState, NodeId};
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
-use crate::engine::NodeId as EngineNodeId;
+use crate::engine::{ChannelPeaks, NodeId as EngineNodeId};
 use crate::engine::midi_engine::MidiEvent;
 use crate::widgets::LevelMeter;
 use super::{SynthDataType, SynthNodeData, SynthValueType};
@@ -91,6 +91,11 @@ pub struct SynthGraphState {
     /// These values light up LED indicators on nodes.
     pub output_values: HashMap<(EngineNodeId, usize), f32>,
 
+    /// Per-channel output readings from the audio engine, for drawing
+    /// polyphonic cables. Key: (engine_node_id, output_port_index). Kept
+    /// while the transport is stopped, so poly cables stay drawn as bundles.
+    pub output_channels: HashMap<(EngineNodeId, usize), ChannelPeaks>,
+
     /// Recent MIDI events for display in MIDI Monitor modules.
     pub midi_events: VecDeque<DisplayMidiEvent>,
 
@@ -149,6 +154,7 @@ impl Default for SynthGraphState {
             context_menu_hover_intent: None,
             input_values: HashMap::new(),
             output_values: HashMap::new(),
+            output_channels: HashMap::new(),
             midi_events: VecDeque::new(),
             midi_first_event_time: None,
             midi_mappings: HashMap::new(),
@@ -200,6 +206,7 @@ impl SynthGraphState {
         self.context_menu_hover_intent = None;
         self.input_values.clear();
         self.output_values.clear();
+        self.output_channels.clear();
         self.midi_events.clear();
         self.midi_first_event_time = None;
         self.midi_mappings.clear();
@@ -288,6 +295,18 @@ impl SynthGraphState {
     /// Clear output values for a specific node (e.g., when node is deleted).
     pub fn clear_output_values_for_node(&mut self, engine_node_id: EngineNodeId) {
         self.output_values.retain(|(node_id, _), _| *node_id != engine_node_id);
+        self.output_channels.retain(|(node_id, _), _| *node_id != engine_node_id);
+    }
+
+    /// Update an output's per-channel reading from the audio engine feedback.
+    pub fn set_output_channels(&mut self, engine_node_id: EngineNodeId, output_index: usize, channels: ChannelPeaks) {
+        self.output_channels.insert((engine_node_id, output_index), channels);
+    }
+
+    /// The last per-channel reading of a graph node's output, if any.
+    fn output_peaks(&self, graph_node_id: NodeId, output_index: usize) -> Option<&ChannelPeaks> {
+        let engine_node_id = self.get_engine_node_id(graph_node_id)?;
+        self.output_channels.get(&(engine_node_id, output_index))
     }
 
     /// Add a MIDI event for display in MIDI Monitor modules.
@@ -388,6 +407,17 @@ impl ConnectionSignalTrait for SynthGraphState {
         let engine_node_id = self.get_engine_node_id(graph_node_id)?;
         // Get the output signal value from the audio engine feedback
         self.get_output_value(engine_node_id, output_index)
+    }
+
+    fn output_channel_count(&self, graph_node_id: NodeId, output_index: usize) -> usize {
+        self.output_peaks(graph_node_id, output_index).map_or(1, ChannelPeaks::count)
+    }
+
+    fn get_output_channel_signal_level(&self, graph_node_id: NodeId, output_index: usize, channel: usize) -> Option<f32> {
+        if !self.is_playing {
+            return Some(0.0);
+        }
+        self.output_peaks(graph_node_id, output_index).map(|peaks| peaks.peak(channel))
     }
 
     fn output_port_color(

@@ -3,7 +3,7 @@
 //! Defines the messages that flow between the UI thread and the audio engine thread.
 //! All types here must be Send + 'static for safe cross-thread communication.
 
-use crate::dsp::OutputLevels;
+use crate::dsp::{OutputLevels, SignalBuffer, MAX_CHANNELS};
 use crate::modules::oscilloscope::SCOPE_BUFFER_SIZE;
 
 use super::graph_plan::GraphPlan;
@@ -213,8 +213,12 @@ pub enum EngineEvent {
         node_id: NodeId,
         /// The output port index.
         output_index: PortIndex,
-        /// The sampled value (typically first sample or max of block).
+        /// The sample with the largest magnitude in the block, across every
+        /// channel, sign preserved.
         value: f32,
+        /// The same reading for each channel, so the UI can draw a
+        /// polyphonic cable strand by strand.
+        channels: ChannelPeaks,
     },
 
     /// Oscilloscope buffer data for waveform display.
@@ -231,9 +235,89 @@ pub enum EngineEvent {
     },
 }
 
+/// The peak of each channel of an output over one block: the sample with the
+/// largest magnitude, sign preserved, so bipolar signals such as LFOs can
+/// animate cables in reverse.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ChannelPeaks {
+    count: u8,
+    peaks: [f32; MAX_CHANNELS],
+}
+
+impl Default for ChannelPeaks {
+    /// One silent channel.
+    fn default() -> Self {
+        Self { count: 1, peaks: [0.0; MAX_CHANNELS] }
+    }
+}
+
+impl ChannelPeaks {
+    /// Reads the peaks of every channel `buffer` carries.
+    ///
+    /// REAL-TIME SAFE.
+    pub fn of(buffer: &SignalBuffer) -> Self {
+        let mut peaks = [0.0; MAX_CHANNELS];
+        let count = buffer.channels().min(MAX_CHANNELS);
+        for (channel, peak) in peaks[..count].iter_mut().enumerate() {
+            *peak = largest_magnitude(buffer.voice(channel).samples.iter().copied());
+        }
+        Self { count: count as u8, peaks }
+    }
+
+    /// How many channels the output carried.
+    pub fn count(&self) -> usize {
+        self.count as usize
+    }
+
+    /// The peak of channel `channel` (counting from 0), or silence past
+    /// [`count`](Self::count).
+    pub fn peak(&self, channel: usize) -> f32 {
+        if channel < self.count() {
+            self.peaks[channel]
+        } else {
+            0.0
+        }
+    }
+
+    /// The peak across every channel.
+    pub fn overall(&self) -> f32 {
+        largest_magnitude(self.peaks[..self.count()].iter().copied())
+    }
+}
+
+/// The value with the largest magnitude, sign preserved, or 0 when empty.
+fn largest_magnitude(values: impl Iterator<Item = f32>) -> f32 {
+    values.fold(0.0_f32, |acc, value| if value.abs() > acc.abs() { value } else { acc })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_channel_peaks_mono() {
+        let mut buffer = SignalBuffer::new(4, crate::dsp::SignalType::Audio);
+        buffer.samples.copy_from_slice(&[0.1, -0.7, 0.5, 0.0]);
+        let peaks = ChannelPeaks::of(&buffer);
+        assert_eq!(peaks.count(), 1);
+        assert_eq!(peaks.peak(0), -0.7);
+        assert_eq!(peaks.peak(1), 0.0, "silent past the channel count");
+        assert_eq!(peaks.overall(), -0.7);
+    }
+
+    #[test]
+    fn test_channel_peaks_poly() {
+        let mut buffer = SignalBuffer::polyphonic(4, crate::dsp::SignalType::Audio);
+        buffer.set_channels(3);
+        buffer.samples.fill(0.25);
+        buffer.channel_mut(1).fill(-0.5);
+        buffer.channel_mut(2).copy_from_slice(&[0.0, 0.9, 0.0, -0.1]);
+        let peaks = ChannelPeaks::of(&buffer);
+        assert_eq!(peaks.count(), 3);
+        assert_eq!([peaks.peak(0), peaks.peak(1), peaks.peak(2)], [0.25, -0.5, 0.9]);
+        assert_eq!(peaks.peak(3), 0.0);
+        assert_eq!(peaks.overall(), 0.9);
+    }
 
     #[test]
     fn test_command_debug() {

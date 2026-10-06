@@ -195,8 +195,8 @@ impl AudioProcessor {
         for (node_id, input_index, value) in plan.input_values() {
             engine_handle.send_event_lossy(EngineEvent::InputValue { node_id, input_index, value });
         }
-        for (node_id, output_index, value) in plan.output_values() {
-            engine_handle.send_event_lossy(EngineEvent::OutputValue { node_id, output_index, value });
+        for (node_id, output_index, value, channels) in plan.output_values() {
+            engine_handle.send_event_lossy(EngineEvent::OutputValue { node_id, output_index, value, channels });
         }
     }
 

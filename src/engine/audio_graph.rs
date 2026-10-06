@@ -1506,7 +1506,8 @@ mod tests {
 
         // Unpatched input reports the port default
         let mut plan = run_block(&mut graph, 4);
-        assert_eq!(plan.output_values().collect::<Vec<_>>(), vec![(1, 0, -0.5)]);
+        let outputs: Vec<_> = plan.output_values().map(|(id, idx, value, peaks)| (id, idx, value, peaks.count())).collect();
+        assert_eq!(outputs, vec![(1, 0, -0.5, 1)]);
         assert_eq!(plan.input_values().collect::<Vec<_>>(), vec![(2, 0, 0.0)]);
 
         // Patched input reports the incoming signal
@@ -1755,6 +1756,20 @@ mod tests {
         assert_eq!(first_output(&plan, 2).samples, [6.0; 4], "1 + 2 + 3");
         assert_eq!(first_output(&plan, 2).channels(), 1);
         assert_eq!(plan.mixdowns.len(), 1, "mono sources downstream need no mixdown");
+    }
+
+    #[test]
+    fn test_monitored_poly_output_reports_each_channel() {
+        let mut graph = AudioGraph::new(44100.0, 4);
+        graph.add_module_instance(1, Box::new(TestPolySource));
+        graph.monitor_output(1, 0);
+
+        let plan = run_block(&mut graph, 4);
+        let (node_id, output_index, value, peaks) = plan.output_values().next().unwrap();
+        assert_eq!((node_id, output_index), (1, 0));
+        assert_eq!(peaks.count(), 3);
+        assert_eq!([peaks.peak(0), peaks.peak(1), peaks.peak(2)], [1.0, 2.0, 3.0]);
+        assert_eq!(value, 3.0, "the loudest channel");
     }
 
     #[test]

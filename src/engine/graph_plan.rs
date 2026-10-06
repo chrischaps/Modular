@@ -26,7 +26,7 @@
 use std::ops::Range;
 
 use crate::dsp::{DspModule, OutputLevels, ProcessContext, SignalBuffer};
-use crate::engine::commands::{NodeId, PortIndex};
+use crate::engine::commands::{ChannelPeaks, NodeId, PortIndex};
 
 pub use crate::dsp::module_trait::MAX_INPUTS;
 
@@ -336,19 +336,14 @@ impl GraphPlan {
         })
     }
 
-    /// The values at monitored outputs after the last block: the sample with
-    /// the largest magnitude, sign preserved, so bipolar signals such as LFOs
-    /// can animate cables in reverse.
-    pub fn output_values(&self) -> impl Iterator<Item = (NodeId, PortIndex, f32)> + '_ {
+    /// The values at monitored outputs after the last block: the peak of each
+    /// channel, and across all of them, as the sample with the largest
+    /// magnitude, sign preserved, so bipolar signals such as LFOs can animate
+    /// cables in reverse.
+    pub fn output_values(&self) -> impl Iterator<Item = (NodeId, PortIndex, f32, ChannelPeaks)> + '_ {
         self.output_taps.iter().map(|tap| {
-            let value = self.outputs[tap.buffer].samples.iter().fold(0.0_f32, |acc, &sample| {
-                if sample.abs() > acc.abs() {
-                    sample
-                } else {
-                    acc
-                }
-            });
-            (tap.node_id, tap.output_index, value)
+            let peaks = ChannelPeaks::of(&self.outputs[tap.buffer]);
+            (tap.node_id, tap.output_index, peaks.overall(), peaks)
         })
     }
 

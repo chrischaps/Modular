@@ -11,7 +11,7 @@
 //! - Category labels in the footer
 
 use eframe::egui::{self, Color32, RichText};
-use egui_node_graph2::{NodeDataTrait, NodeResponse, UserResponseTrait};
+use egui_node_graph2::{ConnectionSignalTrait, NodeDataTrait, NodeResponse, UserResponseTrait};
 
 use crate::dsp::ModuleCategory;
 use crate::engine::midi_engine::MidiEvent;
@@ -1946,9 +1946,9 @@ impl NodeDataTrait for SynthNodeData {
     fn output_ui(
         &self,
         ui: &mut egui::Ui,
-        _node_id: egui_node_graph2::NodeId,
-        _graph: &egui_node_graph2::Graph<Self, Self::DataType, Self::ValueType>,
-        _user_state: &mut Self::UserState,
+        node_id: egui_node_graph2::NodeId,
+        graph: &egui_node_graph2::Graph<Self, Self::DataType, Self::ValueType>,
+        user_state: &mut Self::UserState,
         param_name: &str,
     ) -> Vec<NodeResponse<Self::Response, Self>>
     where
@@ -1958,14 +1958,50 @@ impl NodeDataTrait for SynthNodeData {
         // This allows the node to be narrow while still showing the label
         let font_id = egui::TextStyle::Body.resolve(ui.style());
         let text_color = ui.visuals().widgets.noninteractive.fg_stroke.color;
-        let galley = ui.painter().layout_no_wrap(param_name.to_string(), font_id, text_color);
+        let galley = ui.painter().layout_no_wrap(param_name.to_string(), font_id.clone(), text_color);
         let text_size = galley.size();
 
-        // Allocate exactly the text size, not the full available width
-        let (rect, _) = ui.allocate_exact_size(text_size, egui::Sense::hover());
+        // A polyphonic output also shows how many channels it carries
+        let outputs = &graph[node_id].outputs;
+        let poly = outputs.iter().position(|(name, _)| name == param_name).and_then(|index| {
+            let channels = user_state.output_channel_count(node_id, index);
+            (channels > 1).then(|| (channels, graph.get_output(outputs[index].1).typ.0.color()))
+        });
+        let Some((channels, color)) = poly else {
+            // Allocate exactly the text size, not the full available width
+            let (rect, _) = ui.allocate_exact_size(text_size, egui::Sense::hover());
 
-        // Draw text at the allocated position
-        ui.painter().galley(rect.min, galley, text_color);
+            // Draw text at the allocated position
+            ui.painter().galley(rect.min, galley, text_color);
+
+            return Vec::new();
+        };
+
+        // The count sits in a pill of the cable's color, between the label
+        // and the port, sized from the label so it follows the zoom
+        let badge_font = egui::FontId::monospace(font_id.size * 0.72);
+        let badge_text = color.lerp_to_gamma(Color32::WHITE, 0.35);
+        let badge_galley = ui.painter().layout_no_wrap(format!("×{channels}"), badge_font, badge_text);
+        let pad = egui::vec2(font_id.size * 0.3, font_id.size * 0.08);
+        let badge_size = badge_galley.size() + 2.0 * pad;
+        let gap = font_id.size * 0.3;
+
+        let size = egui::vec2(text_size.x + gap + badge_size.x, text_size.y.max(badge_size.y));
+        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+        let painter = ui.painter();
+        painter.galley(egui::pos2(rect.min.x, rect.center().y - text_size.y / 2.0), galley, text_color);
+
+        let badge = egui::Rect::from_min_size(
+            egui::pos2(rect.max.x - badge_size.x, rect.center().y - badge_size.y / 2.0),
+            badge_size,
+        );
+        painter.rect(
+            badge,
+            badge_size.y / 2.0,
+            color.gamma_multiply(0.22),
+            egui::Stroke::new(1.0, color.gamma_multiply(0.7)),
+        );
+        painter.galley(badge.min + pad, badge_galley, badge_text);
 
         Vec::new()
     }
