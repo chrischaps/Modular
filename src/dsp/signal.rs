@@ -103,6 +103,13 @@ pub struct SignalBuffer {
 }
 
 impl SignalBuffer {
+    /// An empty, unconnected buffer, usable in statics.
+    pub const EMPTY: SignalBuffer = SignalBuffer {
+        samples: Vec::new(),
+        signal_type: SignalType::Audio,
+        connected: false,
+    };
+
     /// Creates a new signal buffer with the specified size and type.
     ///
     /// The buffer is initialized with zeros.

@@ -1,14 +1,23 @@
-//! Audio graph for managing and processing DSP modules.
+//! The audio graph: the patch as modules and cables, edited off the audio thread.
 //!
-//! The AudioGraph holds module instances and their connections, determining
-//! the correct processing order via topological sort. It handles all
-//! graph manipulation commands from the UI thread in a real-time safe manner.
+//! [`AudioGraph`] holds the patch description (which modules exist, their
+//! parameter values, how they're connected and what the UI is monitoring)
+//! and handles the graph editing commands. It never runs audio itself.
+//! Whenever the structure changes, [`AudioGraph::compile`] produces a
+//! [`GraphPlan`]: the processing order, buffer routing and pre-allocated
+//! buffers, resolved up front so the audio thread only has to run it.
+//!
+//! This runs on the UI thread (inside [`UiHandle`](super::UiHandle)) or
+//! directly in the [`OfflineRenderer`](super::OfflineRenderer), so it may
+//! allocate freely.
 
 use std::collections::{HashMap, HashSet};
 
-use crate::dsp::{DspModule, ModuleRegistry, ProcessContext, SignalBuffer, SignalType};
-use crate::engine::buffer_pool::BufferPool;
+use crate::dsp::{DspModule, ModuleRegistry, PortDefinition, SignalBuffer};
 use crate::engine::commands::{EngineCommand, NodeId, PortIndex};
+use crate::engine::graph_plan::{
+    GraphPlan, InputSource, InputTap, MonitorSource, OutputTap, PlanNode, MAX_INPUTS,
+};
 
 /// A connection between two ports in the audio graph.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,108 +44,99 @@ impl Connection {
     }
 }
 
-/// Stored module data including the instance and parameter values.
-struct ModuleData {
-    /// The DSP module instance.
-    module: Box<dyn DspModule>,
+/// What the graph knows about one module.
+struct NodeSpec {
+    /// Port definitions, copied from the module so the graph can route
+    /// cables after the module itself has moved to the audio thread.
+    ports: Vec<PortDefinition>,
     /// Current parameter values (denormalized, ready to pass to process()).
     parameters: Vec<f32>,
+    /// A module created and prepared here but not yet handed to a plan.
+    /// Once compiled into a plan it lives on the audio thread, and later
+    /// plans take it over from their predecessor.
+    fresh: Option<Box<dyn DspModule>>,
 }
 
-impl ModuleData {
+impl NodeSpec {
     fn new(mut module: Box<dyn DspModule>, sample_rate: f32, block_size: usize) -> Self {
-        // Extract default parameter values
-        let parameters: Vec<f32> = module
-            .parameters()
-            .iter()
-            .map(|p| p.default)
-            .collect();
-
-        // Prepare the module
         module.prepare(sample_rate, block_size);
+        Self {
+            ports: module.ports().to_vec(),
+            parameters: module.parameters().iter().map(|p| p.default).collect(),
+            fresh: Some(module),
+        }
+    }
 
-        Self { module, parameters }
+    /// Maps a port index to its index among the node's output ports, or
+    /// `None` if the port isn't an output.
+    fn output_index(&self, port_index: PortIndex) -> Option<usize> {
+        let port = self.ports.get(port_index)?;
+        port.is_output()
+            .then(|| self.ports[..port_index].iter().filter(|p| p.is_output()).count())
+    }
+
+    fn output_count(&self) -> usize {
+        self.ports.iter().filter(|p| p.is_output()).count()
+    }
+
+    /// Input ports as (port index, definition), in port order.
+    fn inputs(&self) -> impl Iterator<Item = (PortIndex, &PortDefinition)> {
+        self.ports.iter().enumerate().filter(|(_, p)| p.is_input())
     }
 }
 
-/// The audio graph that manages modules and their connections.
+/// The patch being edited: modules, connections and monitors.
 ///
-/// The graph maintains:
-/// - A collection of module instances
-/// - Connections between module ports
-/// - A topologically sorted processing order
-/// - Pre-allocated buffers for all signals
+/// Edits mark the graph dirty; [`take_plan`](Self::take_plan) then compiles
+/// a new [`GraphPlan`] for the audio thread. Every plan compiled must be
+/// installed, in order, with [`GraphPlan::take_over`] from the plan before
+/// it, since modules carried over between plans exist only in the running one.
 pub struct AudioGraph {
-    /// Modules indexed by their node ID.
-    modules: HashMap<NodeId, ModuleData>,
+    nodes: HashMap<NodeId, NodeSpec>,
     /// All connections in the graph.
     connections: Vec<Connection>,
     /// Processing order (topologically sorted node IDs).
     processing_order: Vec<NodeId>,
-    /// Pre-allocated signal buffers.
-    buffers: BufferPool,
-    /// Current sample rate.
+    /// Sample rate new modules are prepared at.
     sample_rate: f32,
-    /// Current block size.
+    /// Largest block a compiled plan will process.
     block_size: usize,
-    /// Reference to the module registry for creating modules.
-    /// Note: This is an Option because we may not always have a registry.
+    /// Registry for creating modules by ID.
     registry: Option<ModuleRegistry>,
     /// Whether the graph needs resorting.
     needs_sort: bool,
+    /// Whether the structure changed since the last compiled plan.
+    dirty: bool,
     /// Inputs that should report values back to UI for knob animation.
     /// Key: (node_id, input_port_index).
     monitored_inputs: HashSet<(NodeId, PortIndex)>,
-    /// Temporary storage for sampled input values to send to UI.
-    /// Populated during process(), consumed by the caller.
-    sampled_input_values: Vec<(NodeId, PortIndex, f32)>,
     /// Outputs that should report values back to UI for LED indicators.
     /// Key: (node_id, output_port_index).
     monitored_outputs: HashSet<(NodeId, PortIndex)>,
-    /// Temporary storage for sampled output values to send to UI.
-    /// Populated during process(), consumed by the caller.
-    sampled_output_values: Vec<(NodeId, PortIndex, f32)>,
-    /// Pending scope buffer data to send to UI.
-    /// Populated during process(), consumed by the caller.
-    pending_scope_buffers: Vec<(NodeId, Vec<f32>, Vec<f32>, bool)>,
 }
 
 impl AudioGraph {
     /// Creates a new audio graph with the given sample rate and block size.
     pub fn new(sample_rate: f32, block_size: usize) -> Self {
         Self {
-            modules: HashMap::new(),
+            nodes: HashMap::new(),
             connections: Vec::new(),
             processing_order: Vec::new(),
-            buffers: BufferPool::new(block_size),
             sample_rate,
             block_size,
             registry: None,
             needs_sort: false,
+            dirty: false,
             monitored_inputs: HashSet::new(),
-            sampled_input_values: Vec::new(),
             monitored_outputs: HashSet::new(),
-            sampled_output_values: Vec::new(),
-            pending_scope_buffers: Vec::new(),
         }
     }
 
     /// Creates a new audio graph with a module registry.
     pub fn with_registry(sample_rate: f32, block_size: usize, registry: ModuleRegistry) -> Self {
         Self {
-            modules: HashMap::new(),
-            connections: Vec::new(),
-            processing_order: Vec::new(),
-            buffers: BufferPool::new(block_size),
-            sample_rate,
-            block_size,
             registry: Some(registry),
-            needs_sort: false,
-            monitored_inputs: HashSet::new(),
-            sampled_input_values: Vec::new(),
-            monitored_outputs: HashSet::new(),
-            sampled_output_values: Vec::new(),
-            pending_scope_buffers: Vec::new(),
+            ..Self::new(sample_rate, block_size)
         }
     }
 
@@ -145,46 +145,32 @@ impl AudioGraph {
         self.registry = Some(registry);
     }
 
-    /// Updates the block size, resizing all buffers and re-preparing modules.
-    ///
-    /// This should be called when the audio callback block size changes.
-    /// Note: This allocates memory and should ideally only be called during
-    /// initialization or configuration changes, not in the real-time audio path.
-    pub fn set_block_size(&mut self, block_size: usize) {
-        if block_size == self.block_size {
-            return;
-        }
-
-        self.block_size = block_size;
-
-        // Resize buffer pool
-        self.buffers.resize_all(block_size);
-
-        // Re-prepare all modules with new block size
-        for data in self.modules.values_mut() {
-            data.module.prepare(self.sample_rate, block_size);
-        }
+    /// The sample rate new modules are prepared at.
+    pub fn sample_rate(&self) -> f32 {
+        self.sample_rate
     }
 
-    /// Updates the sample rate and re-prepares every module (e.g. after the
-    /// output device changes). Not real-time safe: call with the stream stopped.
-    pub fn set_sample_rate(&mut self, sample_rate: f32) {
-        if sample_rate == self.sample_rate {
+    /// The largest block compiled plans will process.
+    pub fn block_size(&self) -> usize {
+        self.block_size
+    }
+
+    /// Sets the sample rate and block size that modules are prepared for and
+    /// plans are compiled with. Modules not yet handed to a plan are
+    /// re-prepared; modules already running are the audio side's to update
+    /// (see [`GraphPlan::set_sample_rate`]).
+    pub fn set_audio_config(&mut self, sample_rate: f32, block_size: usize) {
+        if sample_rate == self.sample_rate && block_size == self.block_size {
             return;
         }
-
+        if block_size != self.block_size {
+            // Running plans hold buffers sized for the old block
+            self.dirty = true;
+        }
         self.sample_rate = sample_rate;
-        for data in self.modules.values_mut() {
-            data.module.prepare(sample_rate, self.block_size);
-            data.module.reset();
-        }
-    }
-
-    /// Resets the internal state of every module (oscillator phases, filter
-    /// memory, delay and reverb tails) so playback restarts from silence.
-    pub fn reset_modules(&mut self) {
-        for data in self.modules.values_mut() {
-            data.module.reset();
+        self.block_size = block_size;
+        for module in self.nodes.values_mut().filter_map(|spec| spec.fresh.as_mut()) {
+            module.prepare(sample_rate, block_size);
         }
     }
 
@@ -195,7 +181,7 @@ impl AudioGraph {
 
     /// Returns the number of modules in the graph.
     pub fn module_count(&self) -> usize {
-        self.modules.len()
+        self.nodes.len()
     }
 
     /// Returns the number of connections in the graph.
@@ -205,22 +191,28 @@ impl AudioGraph {
 
     /// Checks if a module exists in the graph.
     pub fn contains_module(&self, node_id: NodeId) -> bool {
-        self.modules.contains_key(&node_id)
-    }
-
-    /// Returns a reference to a module by node ID.
-    pub fn get_module(&self, node_id: NodeId) -> Option<&dyn DspModule> {
-        self.modules.get(&node_id).map(|data| data.module.as_ref())
-    }
-
-    /// Returns a mutable reference to a module by node ID.
-    pub fn get_module_mut(&mut self, node_id: NodeId) -> Option<&mut Box<dyn DspModule>> {
-        self.modules.get_mut(&node_id).map(|data| &mut data.module)
+        self.nodes.contains_key(&node_id)
     }
 
     /// Returns the connections in the graph.
     pub fn connections(&self) -> &[Connection] {
         &self.connections
+    }
+
+    /// Returns a module's current parameter values.
+    pub fn parameters(&self, node_id: NodeId) -> Option<&[f32]> {
+        self.nodes.get(&node_id).map(|spec| spec.parameters.as_slice())
+    }
+
+    /// Returns true if the structure changed since the last compiled plan.
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// Forces the next [`take_plan`](Self::take_plan) to compile, e.g. to
+    /// deliver a parameter change whose own message couldn't be queued.
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
     }
 
     // ========================================================================
@@ -232,17 +224,11 @@ impl AudioGraph {
     /// Returns true if the module was added successfully.
     pub fn add_module(&mut self, node_id: NodeId, module_id: &str) -> bool {
         // Check if node already exists
-        if self.modules.contains_key(&node_id) {
+        if self.nodes.contains_key(&node_id) {
             return false;
         }
 
-        // Create module from registry
-        let module = match &self.registry {
-            Some(registry) => registry.create(module_id),
-            None => return false,
-        };
-
-        let module = match module {
+        let module = match self.registry.as_ref().and_then(|r| r.create(module_id)) {
             Some(m) => m,
             None => return false,
         };
@@ -251,30 +237,19 @@ impl AudioGraph {
         true
     }
 
-    /// Adds a pre-created module instance to the graph.
+    /// Adds a pre-created module instance to the graph, preparing it.
     pub fn add_module_instance(&mut self, node_id: NodeId, module: Box<dyn DspModule>) {
-        // Allocate buffers for output ports
-        let ports = module.ports();
-        let mut output_index = 0;
-        for port in ports {
-            if port.is_output() {
-                self.buffers.allocate(node_id, output_index, port.signal_type);
-                output_index += 1;
-            }
-        }
-
-        // Create module data with default parameters
-        let data = ModuleData::new(module, self.sample_rate, self.block_size);
-        self.modules.insert(node_id, data);
-
+        let spec = NodeSpec::new(module, self.sample_rate, self.block_size);
+        self.nodes.insert(node_id, spec);
         self.needs_sort = true;
+        self.dirty = true;
     }
 
     /// Removes a module from the graph.
     ///
     /// Also removes all connections to/from this module.
     pub fn remove_module(&mut self, node_id: NodeId) -> bool {
-        if self.modules.remove(&node_id).is_none() {
+        if self.nodes.remove(&node_id).is_none() {
             return false;
         }
 
@@ -283,10 +258,8 @@ impl AudioGraph {
             conn.from_node != node_id && conn.to_node != node_id
         });
 
-        // Deallocate buffers
-        self.buffers.deallocate_node(node_id);
-
         self.needs_sort = true;
+        self.dirty = true;
         true
     }
 
@@ -301,7 +274,7 @@ impl AudioGraph {
         to_port: PortIndex,
     ) -> bool {
         // Check that both nodes exist
-        if !self.modules.contains_key(&from_node) || !self.modules.contains_key(&to_node) {
+        if !self.nodes.contains_key(&from_node) || !self.nodes.contains_key(&to_node) {
             return false;
         }
 
@@ -330,6 +303,7 @@ impl AudioGraph {
         }
 
         self.needs_sort = true;
+        self.dirty = true;
         true
     }
 
@@ -352,11 +326,7 @@ impl AudioGraph {
             });
         }
 
-        let removed = self.connections.len() < original_len;
-        if removed {
-            self.needs_sort = true;
-        }
-        removed
+        self.connections_changed(original_len)
     }
 
     /// Disconnects a specific connection.
@@ -375,73 +345,62 @@ impl AudioGraph {
                 && conn.to_port == to_port)
         });
 
+        self.connections_changed(original_len)
+    }
+
+    /// Marks the graph for resorting if connections were removed.
+    fn connections_changed(&mut self, original_len: usize) -> bool {
         let removed = self.connections.len() < original_len;
         if removed {
             self.needs_sort = true;
+            self.dirty = true;
         }
         removed
     }
 
     /// Sets a parameter value on a module.
+    ///
+    /// This updates the graph's copy, which the next compiled plan carries.
+    /// A running plan is updated separately with [`GraphPlan::set_parameter`].
     pub fn set_parameter(&mut self, node_id: NodeId, param_index: usize, value: f32) -> bool {
-        if let Some(data) = self.modules.get_mut(&node_id) {
-            if param_index < data.parameters.len() {
-                data.parameters[param_index] = value;
-                return true;
+        match self.nodes.get_mut(&node_id).and_then(|spec| spec.parameters.get_mut(param_index)) {
+            Some(param) => {
+                *param = value;
+                true
             }
+            None => false,
         }
-        false
     }
 
     /// Clears the entire graph.
     pub fn clear(&mut self) {
-        self.modules.clear();
+        self.nodes.clear();
         self.connections.clear();
         self.processing_order.clear();
-        self.buffers.clear_pool();
         self.needs_sort = false;
+        self.dirty = true;
         self.monitored_inputs.clear();
-        self.sampled_input_values.clear();
         self.monitored_outputs.clear();
-        self.sampled_output_values.clear();
     }
 
     /// Start monitoring an input port for UI feedback.
     pub fn monitor_input(&mut self, node_id: NodeId, input_index: PortIndex) {
-        self.monitored_inputs.insert((node_id, input_index));
+        self.dirty |= self.monitored_inputs.insert((node_id, input_index));
     }
 
     /// Stop monitoring an input port.
     pub fn unmonitor_input(&mut self, node_id: NodeId, input_index: PortIndex) {
-        self.monitored_inputs.remove(&(node_id, input_index));
-    }
-
-    /// Drain sampled input values for sending to UI.
-    /// Call this after process() to get the values to send.
-    pub fn drain_sampled_input_values(&mut self) -> Vec<(NodeId, PortIndex, f32)> {
-        std::mem::take(&mut self.sampled_input_values)
+        self.dirty |= self.monitored_inputs.remove(&(node_id, input_index));
     }
 
     /// Start monitoring an output port for UI feedback (e.g., LED indicators).
     pub fn monitor_output(&mut self, node_id: NodeId, output_index: PortIndex) {
-        self.monitored_outputs.insert((node_id, output_index));
+        self.dirty |= self.monitored_outputs.insert((node_id, output_index));
     }
 
     /// Stop monitoring an output port.
     pub fn unmonitor_output(&mut self, node_id: NodeId, output_index: PortIndex) {
-        self.monitored_outputs.remove(&(node_id, output_index));
-    }
-
-    /// Drain sampled output values for sending to UI.
-    /// Call this after process() to get the values to send.
-    pub fn drain_sampled_output_values(&mut self) -> Vec<(NodeId, PortIndex, f32)> {
-        std::mem::take(&mut self.sampled_output_values)
-    }
-
-    /// Drain pending scope buffer data for sending to UI.
-    /// Call this after process() to get oscilloscope waveform captures.
-    pub fn drain_scope_buffers(&mut self) -> Vec<(NodeId, Vec<f32>, Vec<f32>, bool)> {
-        std::mem::take(&mut self.pending_scope_buffers)
+        self.dirty |= self.monitored_outputs.remove(&(node_id, output_index));
     }
 
     // ========================================================================
@@ -452,7 +411,7 @@ impl AudioGraph {
     fn has_cycle(&self) -> bool {
         // Use Kahn's algorithm - if we can't process all nodes, there's a cycle
         let sorted = self.compute_topological_order();
-        sorted.len() != self.modules.len()
+        sorted.len() != self.nodes.len()
     }
 
     /// Computes the topological order using Kahn's algorithm.
@@ -461,7 +420,7 @@ impl AudioGraph {
         let mut in_degree: HashMap<NodeId, usize> = HashMap::new();
 
         // Initialize all nodes with 0 in-degree
-        for &node_id in self.modules.keys() {
+        for &node_id in self.nodes.keys() {
             in_degree.insert(node_id, 0);
         }
 
@@ -482,7 +441,7 @@ impl AudioGraph {
         // Sort the queue for deterministic ordering
         queue.sort();
 
-        let mut result = Vec::with_capacity(self.modules.len());
+        let mut result = Vec::with_capacity(self.nodes.len());
 
         while let Some(node_id) = queue.pop() {
             result.push(node_id);
@@ -548,7 +507,7 @@ impl AudioGraph {
                 value,
             } => self.set_parameter(node_id, param_index, value),
             EngineCommand::SetPlaying(_) => {
-                // Handled at a higher level
+                // Handled on the audio side
                 true
             }
             EngineCommand::ClearGraph => {
@@ -575,238 +534,123 @@ impl AudioGraph {
     }
 
     // ========================================================================
-    // Audio Processing
+    // Plan Compilation
     // ========================================================================
 
-    /// Processes a block of audio through the graph.
+    /// Compiles a plan if the structure changed since the last one.
+    pub fn take_plan(&mut self) -> Option<Box<GraphPlan>> {
+        self.dirty.then(|| self.compile())
+    }
+
+    /// Compiles the graph into a [`GraphPlan`] for the audio thread.
     ///
-    /// This is the main audio processing method, called from the audio callback.
-    /// It processes all modules in topological order.
-    /// After processing, call `drain_sampled_input_values()` and `drain_sampled_output_values()`
-    /// to get monitored values.
-    pub fn process(&mut self, context: &ProcessContext) {
-        // Ensure processing order is up to date
+    /// Modules created since the last plan move into this one; modules
+    /// already running are left for [`GraphPlan::take_over`] to carry across.
+    pub fn compile(&mut self) -> Box<GraphPlan> {
         self.update_processing_order();
+        self.dirty = false;
 
-        // Clear all output buffers
-        self.buffers.clear_all();
+        let block_size = self.block_size;
+        let mut plan = Box::new(GraphPlan::empty(block_size));
 
-        // Clear sampled values from previous block
-        self.sampled_input_values.clear();
-        self.sampled_output_values.clear();
-
-        // Process modules in topological order
-        for &node_id in &self.processing_order.clone() {
-            self.process_module(node_id, context);
-        }
-
-        // Sample monitored inputs and outputs after processing
-        self.sample_monitored_inputs();
-        self.sample_monitored_outputs();
-
-        // Collect scope data from oscilloscope modules
-        self.collect_scope_data();
-    }
-
-    /// Samples the values of monitored inputs for UI feedback.
-    fn sample_monitored_inputs(&mut self) {
-        // Collect monitored inputs that we need to sample
-        let monitored: Vec<(NodeId, PortIndex)> = self.monitored_inputs.iter().copied().collect();
-
-        for (node_id, input_index) in monitored {
-            // Check if the node exists and get the input buffer value
-            if let Some(data) = self.modules.get(&node_id) {
-                // Find the connection to this input port
-                let connection = self.connections.iter().find(|conn| {
-                    conn.to_node == node_id && conn.to_port == input_index
-                });
-
-                if let Some(conn) = connection {
-                    // Get the output buffer from the source module
-                    if let Some(source_data) = self.modules.get(&conn.from_node) {
-                        let output_idx = self.port_to_output_index_for_data(source_data, conn.from_port);
-                        if let Some(buf) = self.buffers.get(conn.from_node, output_idx) {
-                            // Sample the first value from the buffer
-                            let value = buf.samples.first().copied().unwrap_or(0.0);
-                            self.sampled_input_values.push((node_id, input_index, value));
-                        }
-                    }
-                } else {
-                    // No connection - use default value
-                    let input_ports: Vec<_> = data
-                        .module
-                        .ports()
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, p)| p.is_input())
-                        .collect();
-
-                    if let Some((_, port_def)) = input_ports.get(input_index) {
-                        self.sampled_input_values.push((node_id, input_index, port_def.default_value));
-                    }
-                }
-            }
-        }
-    }
-
-    /// Samples the values of monitored outputs for UI feedback (LED indicators, cable animation).
-    fn sample_monitored_outputs(&mut self) {
-        // Collect monitored outputs that we need to sample
-        let monitored: Vec<(NodeId, PortIndex)> = self.monitored_outputs.iter().copied().collect();
-
-        for (node_id, output_index) in monitored {
-            // Get the output buffer for this port
-            if let Some(buf) = self.buffers.get(node_id, output_index) {
-                // Find the sample with the largest absolute value, preserving sign.
-                // This captures the "peak" of both positive and negative signals,
-                // which is important for bipolar signals like LFOs where we want
-                // negative values to animate cables in reverse.
-                let value = buf.samples.iter().copied().fold(0.0_f32, |acc, sample| {
-                    if sample.abs() > acc.abs() { sample } else { acc }
-                });
-                self.sampled_output_values.push((node_id, output_index, value));
-            }
-        }
-    }
-
-    /// Collects scope buffer data from oscilloscope modules.
-    fn collect_scope_data(&mut self) {
-        // Collect node IDs to iterate over (to avoid borrowing issues)
-        let node_ids: Vec<NodeId> = self.modules.keys().copied().collect();
-
-        for node_id in node_ids {
-            if let Some(data) = self.modules.get_mut(&node_id) {
-                if let Some((ch1, ch2, triggered)) = data.module.take_scope_data() {
-                    self.pending_scope_buffers.push((node_id, ch1, ch2, triggered));
-                }
-            }
-        }
-    }
-
-    /// Helper to convert port index to output index without borrowing self.modules.
-    fn port_to_output_index_for_data(&self, data: &ModuleData, port_index: PortIndex) -> usize {
-        data.module
-            .ports()
+        // Where each node's outputs start in the plan's output buffers
+        let mut output_base: HashMap<NodeId, usize> = HashMap::with_capacity(self.nodes.len());
+        // Which cable feeds each input
+        let feeds: HashMap<(NodeId, PortIndex), &Connection> = self
+            .connections
             .iter()
-            .take(port_index)
-            .filter(|p| p.is_output())
-            .count()
-    }
+            .map(|conn| ((conn.to_node, conn.to_port), conn))
+            .collect();
 
-    /// Processes a single module.
-    fn process_module(&mut self, node_id: NodeId, context: &ProcessContext) {
-        // Gather input buffers for this module
-        let input_buffers = self.gather_inputs(node_id);
-
-        // Get module data
-        let data = match self.modules.get_mut(&node_id) {
-            Some(d) => d,
-            None => return,
+        // Resolves the buffer an upstream output port writes to
+        let source_buffer = |conn: &Connection, output_base: &HashMap<NodeId, usize>| {
+            let base = output_base.get(&conn.from_node)?;
+            let source = self.nodes.get(&conn.from_node)?;
+            Some(base + source.output_index(conn.from_port)?)
         };
 
-        // Count output ports (for potential future use)
-        let _output_port_count = data.module.ports().iter().filter(|p| p.is_output()).count();
+        for &node_id in &self.processing_order {
+            let Some(spec) = self.nodes.get(&node_id) else {
+                continue;
+            };
 
-        // Create output buffer references
-        // We need to collect the signal types first
-        let output_types: Vec<SignalType> = data
-            .module
-            .ports()
-            .iter()
-            .filter(|p| p.is_output())
-            .map(|p| p.signal_type)
-            .collect();
-
-        // Create temporary output buffers
-        let mut output_buffers: Vec<SignalBuffer> = output_types
-            .iter()
-            .map(|&t| SignalBuffer::new(context.block_size, t))
-            .collect();
-
-        // Get parameter values
-        let params = data.parameters.clone();
-
-        // Process the module
-        data.module.process(
-            &input_buffers.iter().collect::<Vec<_>>(),
-            &mut output_buffers,
-            &params,
-            context,
-        );
-
-        // Copy output buffers to the buffer pool
-        for (i, output_buf) in output_buffers.into_iter().enumerate() {
-            if let Some(pool_buf) = self.buffers.get_mut(node_id, i) {
-                pool_buf.samples.copy_from_slice(&output_buf.samples);
+            let mut inputs = Vec::new();
+            for (port_index, port) in spec.inputs() {
+                // Sources precede this node in processing order, so their
+                // output buffers are already laid out
+                let source = feeds
+                    .get(&(node_id, port_index))
+                    .and_then(|conn| source_buffer(conn, &output_base));
+                inputs.push(match source {
+                    Some(buffer) => InputSource::Output(buffer),
+                    None => {
+                        let mut buffer = SignalBuffer::unconnected(block_size, port.signal_type);
+                        buffer.fill(port.default_value);
+                        plan.defaults.push(buffer);
+                        plan.default_values.push(port.default_value);
+                        InputSource::Default(plan.defaults.len() - 1)
+                    }
+                });
             }
-        }
-    }
+            debug_assert!(inputs.len() <= MAX_INPUTS, "module has more than {MAX_INPUTS} inputs");
+            inputs.truncate(MAX_INPUTS);
 
-    /// Gathers input buffers for a module based on its connections.
-    fn gather_inputs(&self, node_id: NodeId) -> Vec<SignalBuffer> {
-        let data = match self.modules.get(&node_id) {
-            Some(d) => d,
-            None => return Vec::new(),
-        };
+            let start = plan.outputs.len();
+            output_base.insert(node_id, start);
+            plan.outputs.extend(
+                spec.ports
+                    .iter()
+                    .filter(|p| p.is_output())
+                    .map(|p| SignalBuffer::new(block_size, p.signal_type)),
+            );
 
-        // Count input ports
-        let input_ports: Vec<_> = data
-            .module
-            .ports()
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| p.is_input())
-            .collect();
-
-        let mut inputs = Vec::with_capacity(input_ports.len());
-
-        for (port_idx, port_def) in input_ports {
-            // Find connection to this input port
-            let connection = self.connections.iter().find(|conn| {
-                conn.to_node == node_id && conn.to_port == port_idx
+            plan.nodes.push(PlanNode {
+                node_id,
+                module: None,
+                params: spec.parameters.clone(),
+                inputs,
+                outputs: start..plan.outputs.len(),
             });
-
-            if let Some(conn) = connection {
-                // Get the output buffer from the source module
-                // We need to map the from_port (which is a port index) to an output index
-                if let Some(source_data) = self.modules.get(&conn.from_node) {
-                    let output_idx = self.port_to_output_index(source_data, conn.from_port);
-                    if let Some(buf) = self.buffers.get(conn.from_node, output_idx) {
-                        inputs.push(buf.clone());
-                        continue;
-                    }
-                }
-            }
-
-            // No connection or buffer not found - use default
-            let default_value = port_def.default_value;
-            let mut buf = SignalBuffer::unconnected(self.block_size, port_def.signal_type);
-            buf.fill(default_value);
-            inputs.push(buf);
         }
 
-        inputs
-    }
+        // Monitor taps, in a stable order
+        let mut monitored_inputs: Vec<_> = self.monitored_inputs.iter().copied().collect();
+        monitored_inputs.sort_unstable();
+        for (node_id, input_index) in monitored_inputs {
+            let Some(spec) = self.nodes.get(&node_id) else {
+                continue;
+            };
+            let source = match feeds.get(&(node_id, input_index)) {
+                Some(conn) => source_buffer(conn, &output_base).map(MonitorSource::Output),
+                None => spec
+                    .inputs()
+                    .nth(input_index)
+                    .map(|(_, port)| MonitorSource::Constant(port.default_value)),
+            };
+            if let Some(source) = source {
+                plan.input_taps.push(InputTap { node_id, input_index, source });
+            }
+        }
 
-    /// Converts a port index to an output buffer index.
-    fn port_to_output_index(&self, data: &ModuleData, port_index: PortIndex) -> usize {
-        // Count how many output ports come before this port index
-        data.module
-            .ports()
-            .iter()
-            .take(port_index)
-            .filter(|p| p.is_output())
-            .count()
-    }
+        let mut monitored_outputs: Vec<_> = self.monitored_outputs.iter().copied().collect();
+        monitored_outputs.sort_unstable();
+        for (node_id, output_index) in monitored_outputs {
+            let (Some(spec), Some(&base)) = (self.nodes.get(&node_id), output_base.get(&node_id)) else {
+                continue;
+            };
+            if output_index < spec.output_count() {
+                plan.output_taps.push(OutputTap { node_id, output_index, buffer: base + output_index });
+            }
+        }
 
-    /// Gets the final output from the audio output module (if present).
-    ///
-    /// Returns the stereo output buffer as (left, right) slices.
-    pub fn get_output(&self) -> Option<(&[f32], &[f32])> {
-        // Like the live engine, use the first output module in processing order
-        self.processing_order
-            .iter()
-            .find_map(|id| self.modules.get(id)?.module.get_audio_output())
+        // Hand over modules that haven't run yet
+        for node in &mut plan.nodes {
+            if let Some(spec) = self.nodes.get_mut(&node.node_id) {
+                node.module = spec.fresh.take();
+            }
+        }
+
+        plan
     }
 }
 
@@ -819,7 +663,7 @@ impl Default for AudioGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsp::{ModuleCategory, ModuleInfo, ParameterDefinition, PortDefinition};
+    use crate::dsp::{ModuleCategory, ModuleInfo, ParameterDefinition, ProcessContext, SignalType};
 
     // ========================================================================
     // Test Module Implementations
@@ -920,7 +764,9 @@ mod tests {
             &[]
         }
 
-        fn prepare(&mut self, _sample_rate: f32, _max_block_size: usize) {}
+        fn prepare(&mut self, _sample_rate: f32, max_block_size: usize) {
+            self.received = vec![0.0; max_block_size];
+        }
 
         fn process(
             &mut self,
@@ -929,13 +775,17 @@ mod tests {
             _params: &[f32],
             _context: &ProcessContext,
         ) {
-            if !inputs.is_empty() {
-                self.received = inputs[0].samples.clone();
+            if let Some(input) = inputs.first() {
+                self.received[..input.len()].copy_from_slice(&input.samples);
             }
         }
 
         fn reset(&mut self) {
-            self.received.clear();
+            self.received.fill(0.0);
+        }
+
+        fn get_audio_output(&self) -> Option<(&[f32], &[f32])> {
+            Some((&self.received, &self.received))
         }
     }
 
@@ -998,6 +848,71 @@ mod tests {
         }
 
         fn reset(&mut self) {}
+    }
+
+    /// Counts the blocks it has processed and outputs the count, so tests can
+    /// tell whether a module kept its state across plans.
+    #[derive(Default)]
+    struct TestCounter {
+        blocks: f32,
+    }
+
+    impl DspModule for TestCounter {
+        fn info(&self) -> &ModuleInfo {
+            static INFO: ModuleInfo = ModuleInfo {
+                id: "test.counter",
+                name: "Test Counter",
+                category: ModuleCategory::Source,
+                description: "Counts blocks",
+            };
+            &INFO
+        }
+
+        fn ports(&self) -> &[PortDefinition] {
+            static PORTS: &[PortDefinition] = &[PortDefinition {
+                id: "out",
+                name: "Output",
+                signal_type: SignalType::Audio,
+                direction: crate::dsp::PortDirection::Output,
+                default_value: 0.0,
+            }];
+            PORTS
+        }
+
+        fn parameters(&self) -> &[ParameterDefinition] {
+            &[]
+        }
+
+        fn prepare(&mut self, _sample_rate: f32, _max_block_size: usize) {}
+
+        fn process(
+            &mut self,
+            _inputs: &[&SignalBuffer],
+            outputs: &mut [SignalBuffer],
+            _params: &[f32],
+            _context: &ProcessContext,
+        ) {
+            self.blocks += 1.0;
+            outputs[0].fill(self.blocks);
+        }
+
+        fn reset(&mut self) {
+            self.blocks = 0.0;
+        }
+    }
+
+    /// Compiles `graph` and runs one block of `block_size` samples.
+    fn run_block(graph: &mut AudioGraph, block_size: usize) -> Box<GraphPlan> {
+        let mut plan = graph.compile();
+        plan.process(&ProcessContext::new(44100.0, block_size));
+        plan
+    }
+
+    /// Installs the graph's next plan in place of `plan`, as the audio thread does.
+    fn install(graph: &mut AudioGraph, plan: &mut Box<GraphPlan>) {
+        let mut next = graph.take_plan().expect("graph changed");
+        next.take_over(plan);
+        *plan = next;
     }
 
     // ========================================================================
@@ -1214,21 +1129,24 @@ mod tests {
 
     #[test]
     fn test_unconnected_inputs_are_marked() {
-        use crate::dsp::connected_input;
-
         let mut graph = AudioGraph::new(44100.0, 64);
         graph.add_module_instance(1, Box::new(TestPassthrough::default()));
         graph.add_module_instance(2, Box::new(TestPassthrough::default()));
 
-        let inputs = graph.gather_inputs(2);
-        let refs: Vec<&SignalBuffer> = inputs.iter().collect();
-        assert!(connected_input(&refs, 0).is_none(), "nothing plugged in yet");
+        let plan = graph.compile();
+        let node = plan.nodes.iter().find(|n| n.node_id == 2).unwrap();
+        let InputSource::Default(index) = node.inputs[0] else {
+            panic!("nothing plugged in yet");
+        };
+        assert!(!plan.defaults[index].is_connected());
 
         graph.connect(1, 1, 2, 0);
-        graph.process(&ProcessContext::new(44100.0, 64));
-        let inputs = graph.gather_inputs(2);
-        let refs: Vec<&SignalBuffer> = inputs.iter().collect();
-        assert!(connected_input(&refs, 0).is_some(), "cable plugged in");
+        let plan = graph.compile();
+        let node = plan.nodes.iter().find(|n| n.node_id == 2).unwrap();
+        let InputSource::Output(index) = node.inputs[0] else {
+            panic!("cable plugged in");
+        };
+        assert!(plan.outputs[index].is_connected());
     }
 
     #[test]
@@ -1244,6 +1162,7 @@ mod tests {
         assert_eq!(graph.module_count(), 0);
         assert_eq!(graph.connection_count(), 0);
         assert!(graph.processing_order().is_empty());
+        assert!(graph.compile().is_empty());
     }
 
     #[test]
@@ -1254,11 +1173,160 @@ mod tests {
         graph.add_module_instance(2, Box::new(TestOutput::default()));
         graph.connect(1, 0, 2, 0);
 
-        let ctx = ProcessContext::new(44100.0, 4);
-        graph.process(&ctx);
+        let plan = run_block(&mut graph, 4);
+        let (left, _) = plan.audio_output().expect("output module");
+        assert_eq!(left, &[0.75; 4]);
+    }
 
-        // The output buffer should have been written to
-        // (We can't easily verify this without accessing the internal buffer)
+    #[test]
+    fn test_short_block_reaches_modules() {
+        let mut graph = AudioGraph::new(44100.0, 8);
+        graph.add_module_instance(1, Box::new(TestOscillator::new(0.5)));
+        graph.add_module_instance(2, Box::new(TestPassthrough::default()));
+        graph.connect(1, 0, 2, 0);
+
+        // A block shorter than the plan's capacity: modules see that length
+        let mut plan = graph.compile();
+        plan.process(&ProcessContext::new(44100.0, 3));
+        assert!(plan.outputs.iter().all(|b| b.samples == [0.5; 3]));
+        assert!(plan.defaults.iter().all(|b| b.len() == 3));
+
+        plan.process(&ProcessContext::new(44100.0, 8));
+        assert!(plan.outputs.iter().all(|b| b.samples == [0.5; 8]));
+    }
+
+    #[test]
+    fn test_unpatched_input_holds_port_default() {
+        struct DefaultedInput;
+        impl DspModule for DefaultedInput {
+            fn info(&self) -> &ModuleInfo {
+                static INFO: ModuleInfo = ModuleInfo {
+                    id: "test.defaulted",
+                    name: "Test Defaulted Input",
+                    category: ModuleCategory::Utility,
+                    description: "Checks its unpatched input",
+                };
+                &INFO
+            }
+            fn ports(&self) -> &[PortDefinition] {
+                static PORTS: &[PortDefinition] = &[PortDefinition {
+                    id: "in",
+                    name: "Input",
+                    signal_type: SignalType::Control,
+                    direction: crate::dsp::PortDirection::Input,
+                    default_value: 0.25,
+                }];
+                PORTS
+            }
+            fn parameters(&self) -> &[ParameterDefinition] {
+                &[]
+            }
+            fn prepare(&mut self, _: f32, _: usize) {}
+            fn process(&mut self, inputs: &[&SignalBuffer], _: &mut [SignalBuffer], _: &[f32], ctx: &ProcessContext) {
+                assert!(!inputs[0].is_connected());
+                assert_eq!(inputs[0].samples, vec![0.25; ctx.block_size]);
+            }
+            fn reset(&mut self) {}
+        }
+
+        let mut graph = AudioGraph::new(44100.0, 16);
+        graph.add_module_instance(1, Box::new(DefaultedInput));
+        let mut plan = graph.compile();
+        // Shrinking then growing the block must refill with the default
+        for block in [16, 5, 16] {
+            plan.process(&ProcessContext::new(44100.0, block));
+        }
+    }
+
+    #[test]
+    fn test_running_modules_survive_recompile() {
+        let mut graph = AudioGraph::new(44100.0, 4);
+        graph.add_module_instance(1, Box::new(TestCounter::default()));
+        graph.add_module_instance(2, Box::new(TestOutput::default()));
+        graph.connect(1, 0, 2, 0);
+
+        let mut plan = run_block(&mut graph, 4);
+        plan.process(&ProcessContext::new(44100.0, 4));
+
+        // Editing the patch builds a new plan; the counter keeps counting
+        graph.add_module_instance(3, Box::new(TestOscillator::default()));
+        install(&mut graph, &mut plan);
+        plan.process(&ProcessContext::new(44100.0, 4));
+
+        let (left, _) = plan.audio_output().unwrap();
+        assert_eq!(left, &[3.0; 4], "counter was carried over, not recreated");
+    }
+
+    #[test]
+    fn test_removed_module_stays_with_old_plan() {
+        let mut graph = AudioGraph::new(44100.0, 4);
+        graph.add_module_instance(1, Box::new(TestCounter::default()));
+        graph.add_module_instance(2, Box::new(TestCounter::default()));
+        let mut plan = graph.compile();
+
+        graph.remove_module(2);
+        let mut next = graph.take_plan().unwrap();
+        next.take_over(&mut plan);
+
+        assert_eq!(next.len(), 1);
+        assert!(next.nodes[0].module.is_some());
+        // The removed module is still owned by the old plan, to drop off-thread
+        let leftover: Vec<_> = plan.nodes.iter().filter(|n| n.module.is_some()).map(|n| n.node_id).collect();
+        assert_eq!(leftover, vec![2]);
+    }
+
+    #[test]
+    fn test_readded_node_gets_a_fresh_module() {
+        let mut graph = AudioGraph::new(44100.0, 4);
+        graph.add_module_instance(1, Box::new(TestCounter::default()));
+        let mut plan = run_block(&mut graph, 4);
+
+        // Same node ID, new module, in one batch: the old state must not leak in
+        graph.remove_module(1);
+        graph.add_module_instance(1, Box::new(TestCounter::default()));
+        install(&mut graph, &mut plan);
+        plan.process(&ProcessContext::new(44100.0, 4));
+
+        assert_eq!(plan.outputs[0].samples, [1.0; 4]);
+    }
+
+    #[test]
+    fn test_take_plan_only_when_dirty() {
+        let mut graph = AudioGraph::new(44100.0, 4);
+        assert!(graph.take_plan().is_none());
+
+        graph.add_module_instance(1, Box::new(TestOscillator::default()));
+        assert!(graph.take_plan().is_some());
+        assert!(graph.take_plan().is_none());
+
+        // Parameter changes travel separately and need no new plan
+        graph.set_parameter(1, 0, 0.5);
+        assert!(graph.take_plan().is_none());
+
+        graph.monitor_output(1, 0);
+        assert!(graph.take_plan().is_some());
+        graph.monitor_output(1, 0);
+        assert!(graph.take_plan().is_none(), "already monitored");
+    }
+
+    #[test]
+    fn test_monitor_taps() {
+        let mut graph = AudioGraph::new(44100.0, 4);
+        graph.add_module_instance(1, Box::new(TestOscillator::new(-0.5)));
+        graph.add_module_instance(2, Box::new(TestPassthrough::default()));
+        graph.monitor_output(1, 0);
+        graph.monitor_input(2, 0);
+
+        // Unpatched input reports the port default
+        let mut plan = run_block(&mut graph, 4);
+        assert_eq!(plan.output_values().collect::<Vec<_>>(), vec![(1, 0, -0.5)]);
+        assert_eq!(plan.input_values().collect::<Vec<_>>(), vec![(2, 0, 0.0)]);
+
+        // Patched input reports the incoming signal
+        graph.connect(1, 0, 2, 0);
+        install(&mut graph, &mut plan);
+        plan.process(&ProcessContext::new(44100.0, 4));
+        assert_eq!(plan.input_values().collect::<Vec<_>>(), vec![(2, 0, -0.5)]);
     }
 
     #[test]
@@ -1304,6 +1372,13 @@ mod tests {
         assert!(graph.set_parameter(1, 0, 0.8));
         assert!(!graph.set_parameter(1, 5, 0.5)); // Invalid index
         assert!(!graph.set_parameter(999, 0, 0.5)); // Invalid node
+
+        // The compiled plan carries the value, and can be updated in place
+        let mut plan = graph.compile();
+        assert_eq!(plan.nodes[0].params, vec![0.8]);
+        assert!(plan.set_parameter(1, 0, 0.3));
+        assert!(!plan.set_parameter(1, 5, 0.3));
+        assert_eq!(plan.nodes[0].params, vec![0.3]);
     }
 
     #[test]
@@ -1388,8 +1463,7 @@ mod tests {
         graph.add_module_instance(2, Box::new(TestOutput::default()));
 
         // Should not panic
-        let ctx = ProcessContext::new(44100.0, 4);
-        graph.process(&ctx);
+        run_block(&mut graph, 4);
     }
 
     #[test]
@@ -1415,5 +1489,15 @@ mod tests {
 
         assert_eq!(conn1, conn2);
         assert_ne!(conn1, conn3);
+    }
+
+    #[test]
+    fn test_builtin_modules_fit_input_array() {
+        let registry = crate::engine::create_module_registry();
+        for info in registry.list_modules() {
+            let (id, module) = (info.id, registry.create(info.id).unwrap());
+            let inputs = module.ports().iter().filter(|p| p.is_input()).count();
+            assert!(inputs <= MAX_INPUTS, "{id} has {inputs} inputs");
+        }
     }
 }

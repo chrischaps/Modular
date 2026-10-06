@@ -3,6 +3,10 @@
 //! Defines the messages that flow between the UI thread and the audio engine thread.
 //! All types here must be Send + 'static for safe cross-thread communication.
 
+use crate::modules::oscilloscope::SCOPE_BUFFER_SIZE;
+
+use super::graph_plan::GraphPlan;
+
 /// Unique identifier for a node in the audio graph.
 /// Maps to the node ID from egui_node_graph2.
 pub type NodeId = u64;
@@ -99,6 +103,63 @@ pub enum EngineCommand {
         /// The output port index to stop monitoring.
         output_index: PortIndex,
     },
+}
+
+/// Messages delivered to the audio thread.
+///
+/// The UI sends [`EngineCommand`]s; structural ones are applied to the
+/// [`AudioGraph`](super::AudioGraph) on the UI side and arrive here as a whole
+/// compiled plan. Plans and parameter changes share one queue so they apply
+/// in the order they were sent.
+pub enum AudioMessage {
+    /// Swap in a newly compiled graph.
+    InstallPlan(Box<GraphPlan>),
+    /// Set a parameter on a running module.
+    SetParameter {
+        node_id: NodeId,
+        param_index: usize,
+        value: f32,
+    },
+    /// Start or stop audio processing.
+    SetPlaying(bool),
+}
+
+/// One oscilloscope capture, sent from the audio thread by value so that
+/// sending it allocates nothing.
+pub struct ScopeFrame {
+    pub node_id: NodeId,
+    pub channel1: [f32; SCOPE_BUFFER_SIZE],
+    pub channel2: [f32; SCOPE_BUFFER_SIZE],
+    pub channel1_len: usize,
+    pub channel2_len: usize,
+    pub triggered: bool,
+}
+
+impl ScopeFrame {
+    /// Copies a capture into a frame, truncating channels that don't fit.
+    pub fn new(node_id: NodeId, channel1: &[f32], channel2: &[f32], triggered: bool) -> Self {
+        let mut frame = Self {
+            node_id,
+            channel1: [0.0; SCOPE_BUFFER_SIZE],
+            channel2: [0.0; SCOPE_BUFFER_SIZE],
+            channel1_len: channel1.len().min(SCOPE_BUFFER_SIZE),
+            channel2_len: channel2.len().min(SCOPE_BUFFER_SIZE),
+            triggered,
+        };
+        frame.channel1[..frame.channel1_len].copy_from_slice(&channel1[..frame.channel1_len]);
+        frame.channel2[..frame.channel2_len].copy_from_slice(&channel2[..frame.channel2_len]);
+        frame
+    }
+
+    /// Converts the frame into the event the UI consumes.
+    pub fn into_event(self) -> EngineEvent {
+        EngineEvent::ScopeBuffer {
+            node_id: self.node_id,
+            channel1: self.channel1[..self.channel1_len].into(),
+            channel2: self.channel2[..self.channel2_len].into(),
+            triggered: self.triggered,
+        }
+    }
 }
 
 /// Events sent from the audio engine to the UI thread.

@@ -2,13 +2,13 @@
 //!
 //! Runs an [`AudioGraph`] directly, with no audio device, so patches and
 //! modules can be rendered to sample buffers for tests, measurements, and the
-//! `render` tool. Uses the same module registry and patch compilation as the
-//! live app.
+//! `render` tool. Uses the same module registry, patch compilation and
+//! [`GraphPlan`] swapping as the live app.
 
 use crate::dsp::ProcessContext;
 use crate::persistence::{compile_patch, CompiledPatch, Patch, PatchError};
 
-use super::{create_module_registry, AudioGraph, EngineCommand};
+use super::{create_module_registry, AudioGraph, EngineCommand, GraphPlan};
 
 /// Rendered stereo audio.
 #[derive(Debug, Default, Clone)]
@@ -20,6 +20,7 @@ pub struct StereoBuffer {
 /// Drives an [`AudioGraph`] block by block without an audio device.
 pub struct OfflineRenderer {
     graph: AudioGraph,
+    plan: Box<GraphPlan>,
     context: ProcessContext,
 }
 
@@ -28,6 +29,7 @@ impl OfflineRenderer {
     pub fn new(sample_rate: f32, block_size: usize) -> Self {
         Self {
             graph: AudioGraph::with_registry(sample_rate, block_size, create_module_registry()),
+            plan: Box::new(GraphPlan::empty(block_size)),
             context: ProcessContext::new(sample_rate, block_size),
         }
     }
@@ -50,12 +52,25 @@ impl OfflineRenderer {
 
     /// Applies an engine command (add module, connect, set parameter, ...).
     pub fn apply(&mut self, command: EngineCommand) -> bool {
+        if let EngineCommand::SetParameter { node_id, param_index, value } = command {
+            // Keep the running plan in step, as the live engine does
+            self.plan.set_parameter(node_id, param_index, value);
+        }
         self.graph.handle_command(command)
     }
 
-    /// Mutable access to the underlying graph.
+    /// Mutable access to the underlying graph. Changes take effect from the
+    /// next render.
     pub fn graph_mut(&mut self) -> &mut AudioGraph {
         &mut self.graph
+    }
+
+    /// Installs a new plan if the graph changed, carrying running modules over.
+    fn sync_plan(&mut self) {
+        if let Some(mut plan) = self.graph.take_plan() {
+            plan.take_over(&mut self.plan);
+            self.plan = plan;
+        }
     }
 
     /// The sample rate being rendered at.
@@ -71,17 +86,12 @@ impl OfflineRenderer {
             right: Vec::with_capacity(frames),
         };
 
+        self.sync_plan();
         while out.left.len() < frames {
-            self.graph.process(&self.context);
-
-            // Monitoring data is only consumed by the UI; drop it so it
-            // doesn't accumulate across blocks.
-            self.graph.drain_sampled_input_values();
-            self.graph.drain_sampled_output_values();
-            self.graph.drain_scope_buffers();
+            self.plan.process(&self.context);
 
             let wanted = (frames - out.left.len()).min(self.context.block_size);
-            match self.graph.get_output() {
+            match self.plan.audio_output() {
                 Some((left, right)) => {
                     out.left.extend_from_slice(&left[..wanted]);
                     out.right.extend_from_slice(&right[..wanted]);
@@ -177,6 +187,21 @@ mod tests {
         let out = r.render_seconds(0.5);
         assert!(rms(&out.right) > 0.05, "right channel should carry the mono source");
         assert_eq!(out.left, out.right);
+    }
+
+    #[test]
+    fn test_editing_between_renders_keeps_module_state() {
+        // Rendering in two halves, with an unrelated edit in between, must
+        // match rendering in one go: the oscillator keeps its phase
+        let whole = OfflineRenderer::from_patch(&osc_patch(0), 48000.0, 256).unwrap().0.render(2048);
+
+        let (mut r, _) = OfflineRenderer::from_patch(&osc_patch(0), 48000.0, 256).unwrap();
+        let mut split = r.render(1024);
+        r.apply(EngineCommand::AddModule { node_id: 99, module_id: "mod.lfo" });
+        let second = r.render(1024);
+        split.left.extend(second.left);
+
+        assert_eq!(split.left, whole.left);
     }
 
     #[test]

@@ -339,33 +339,19 @@ impl AudioEngine {
         processor: Arc<Mutex<AudioProcessor>>,
     ) -> Result<(), AudioError> {
         let channels = self.config.channels as usize;
-        let processor_clone = processor;
-
-        // DEBUG: Count callback invocations and lock failures
-        use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-        static CALLBACK_COUNT: AtomicU64 = AtomicU64::new(0);
-        static LOCK_FAIL_COUNT: AtomicU64 = AtomicU64::new(0);
-
 
         let stream = self
             .device
             .build_output_stream(
                 &self.config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    let _count = CALLBACK_COUNT.fetch_add(1, AtomicOrdering::Relaxed);
-
-                    // Lock the processor - this should never block since we're the only user
-                    if let Ok(mut proc) = processor_clone.try_lock() {
-                        proc.process(data, channels);
-                    } else {
-                        // Fallback to silence if lock fails (should never happen)
-                        let fails = LOCK_FAIL_COUNT.fetch_add(1, AtomicOrdering::Relaxed);
-                        if fails % 1000 == 0 {
-                            eprintln!("[cpal callback] Lock failed! count={}", fails);
-                        }
-                        for sample in data.iter_mut() {
-                            *sample = 0.0;
-                        }
+                    // REAL-TIME SAFE: the lock is only ever taken here, or by
+                    // select_device while no stream is running, so try_lock
+                    // never fails in practice. If it did, output silence
+                    // rather than wait.
+                    match processor.try_lock() {
+                        Ok(mut proc) => proc.process(data, channels),
+                        Err(_) => data.fill(0.0),
                     }
                 },
                 move |err| {

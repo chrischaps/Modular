@@ -1,16 +1,16 @@
 //! Audio Processor
 //!
-//! Handles audio processing in the audio callback, integrating the AudioGraph
-//! with command handling from the UI thread.
+//! Handles audio processing in the audio callback: runs the compiled
+//! [`GraphPlan`] and applies plans and parameter changes from the UI thread.
 
 use std::time::Instant;
 
 use crate::dsp::{ModuleRegistry, ProcessContext};
 use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Chorus, Clock, Compressor, Distortion, KeyboardInput, Lfo, MidiMonitor, MidiNote, Mixer, Oscilloscope, ParametricEq, Reverb, SampleHold, SineOscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
 
-use super::audio_graph::AudioGraph;
 use super::channels::EngineHandle;
-use super::commands::{EngineCommand, EngineEvent};
+use super::commands::{AudioMessage, EngineEvent, ScopeFrame};
+use super::graph_plan::GraphPlan;
 
 /// Creates a module registry with all built-in modules.
 pub fn create_module_registry() -> ModuleRegistry {
@@ -43,16 +43,19 @@ pub fn create_module_registry() -> ModuleRegistry {
 ///
 /// This struct is moved into the audio callback closure and handles
 /// all audio processing, including:
-/// - Receiving and processing commands from the UI thread
-/// - Running the audio graph to generate samples
+/// - Receiving compiled plans and parameter changes from the UI thread
+/// - Running the current plan to generate samples
 /// - Extracting output from the AudioOutput module
+///
+/// Nothing here allocates once constructed: graph changes arrive fully
+/// built, and replaced plans are handed back to the UI thread to drop.
 pub struct AudioProcessor {
-    /// The audio processing graph.
-    graph: AudioGraph,
-    /// Handle for receiving commands from the UI thread.
+    /// The graph currently playing.
+    plan: Box<GraphPlan>,
+    /// Handle for receiving messages from the UI thread.
     engine_handle: EngineHandle,
-    /// Processing context (sample rate, block size).
-    context: ProcessContext,
+    /// Current sample rate.
+    sample_rate: f32,
     /// Whether audio processing is active.
     is_playing: bool,
     /// Frame counter for throttling CPU load events.
@@ -66,17 +69,17 @@ impl AudioProcessor {
     ///
     /// # Arguments
     /// * `sample_rate` - The audio sample rate in Hz
-    /// * `block_size` - The maximum number of samples per processing block
-    /// * `engine_handle` - Handle for receiving commands from the UI
+    /// * `block_size` - The largest block the graph processes at once; device
+    ///   buffers larger than this are processed in several blocks
+    /// * `engine_handle` - Handle for receiving messages from the UI
     pub fn new(sample_rate: f32, block_size: usize, engine_handle: EngineHandle) -> Self {
-        let registry = create_module_registry();
-        let graph = AudioGraph::with_registry(sample_rate, block_size, registry);
-        let context = ProcessContext::new(sample_rate, block_size);
+        // Tell the UI side what to prepare new modules for
+        engine_handle.set_audio_config(sample_rate, block_size);
 
         Self {
-            graph,
+            plan: Box::new(GraphPlan::empty(block_size)),
             engine_handle,
-            context,
+            sample_rate,
             is_playing: false,
             frame_counter: 0,
             cpu_load_avg: 0.0,
@@ -94,23 +97,23 @@ impl AudioProcessor {
     /// Processes a block of audio.
     ///
     /// This is called from the cpal audio callback. It:
-    /// 1. Processes any pending commands from the UI
-    /// 2. If playing, processes the audio graph
-    /// 3. Extracts audio from the output module and writes to the output buffer
+    /// 1. Applies pending messages from the UI (new plans, parameters, play/stop)
+    /// 2. If playing, runs the graph, in chunks of at most the plan's block size
+    /// 3. Writes the output module's audio to the output buffer
+    ///
+    /// REAL-TIME SAFE: no allocation, locking or blocking.
     ///
     /// # Arguments
     /// * `output` - The output buffer to fill with audio samples
     /// * `channels` - Number of output channels (typically 2 for stereo)
     pub fn process(&mut self, output: &mut [f32], channels: usize) {
-        // Process pending commands from UI
-        self.process_commands();
+        // Process pending messages from UI
+        self.process_messages();
 
         // Clear output buffer
-        for sample in output.iter_mut() {
-            *sample = 0.0;
-        }
+        output.fill(0.0);
 
-        if !self.is_playing {
+        if !self.is_playing || channels == 0 {
             // Reset CPU load when not playing
             self.cpu_load_avg = 0.0;
             return;
@@ -118,35 +121,23 @@ impl AudioProcessor {
 
         // Start timing for CPU measurement
         let start_time = Instant::now();
-
-        // Calculate number of frames in this callback
         let num_frames = output.len() / channels;
 
-        // Update context and graph block size if different
-        if num_frames != self.context.block_size {
-            self.context = ProcessContext::new(self.context.sample_rate, num_frames);
-            // Resize audio graph buffers to match new block size
-            self.graph.set_block_size(num_frames);
+        // Run the graph over the device buffer in plan-sized blocks
+        let chunk_len = self.plan.max_block_size().max(1) * channels;
+        for chunk in output.chunks_mut(chunk_len) {
+            let frames = chunk.len() / channels;
+            self.plan.process(&ProcessContext::new(self.sample_rate, frames));
+            self.write_output(chunk, channels, frames);
         }
 
-        // Process the audio graph
-        self.graph.process(&self.context);
-
-        // Send monitored input values to UI for knob animation
-        self.send_input_values();
-
-        // Send monitored output values to UI for LED indicators
-        self.send_output_values();
-
-        // Send oscilloscope buffer data to UI for waveform display
-        self.send_scope_buffers();
-
-        // Extract output from AudioOutput modules and write to output buffer
-        self.extract_output(output, channels, num_frames);
+        self.send_monitor_values();
+        self.send_scope_captures();
+        self.send_output_level();
 
         // Calculate CPU load
         let elapsed = start_time.elapsed();
-        let available_time = num_frames as f64 / self.context.sample_rate as f64;
+        let available_time = num_frames as f64 / self.sample_rate as f64;
         let cpu_percent = (elapsed.as_secs_f64() / available_time * 100.0) as f32;
 
         // Smooth the CPU load value using exponential moving average
@@ -161,55 +152,51 @@ impl AudioProcessor {
         }
     }
 
-    /// Sends monitored input values to the UI thread.
-    fn send_input_values(&mut self) {
-        for (node_id, input_index, value) in self.graph.drain_sampled_input_values() {
-            self.engine_handle.send_event_lossy(EngineEvent::InputValue {
-                node_id,
-                input_index,
-                value,
-            });
+    /// Sends monitored input and output values to the UI thread, for knob
+    /// animation and LED indicators.
+    fn send_monitor_values(&mut self) {
+        let Self { plan, engine_handle, .. } = self;
+        for (node_id, input_index, value) in plan.input_values() {
+            engine_handle.send_event_lossy(EngineEvent::InputValue { node_id, input_index, value });
+        }
+        for (node_id, output_index, value) in plan.output_values() {
+            engine_handle.send_event_lossy(EngineEvent::OutputValue { node_id, output_index, value });
         }
     }
 
-    /// Sends monitored output values to the UI thread.
-    fn send_output_values(&mut self) {
-        for (node_id, output_index, value) in self.graph.drain_sampled_output_values() {
-            self.engine_handle.send_event_lossy(EngineEvent::OutputValue {
-                node_id,
-                output_index,
-                value,
-            });
+    /// Sends oscilloscope captures to the UI thread for waveform display.
+    fn send_scope_captures(&mut self) {
+        let Self { plan, engine_handle, .. } = self;
+        plan.take_scope_captures(|node_id, channel1, channel2, triggered| {
+            engine_handle.send_scope_frame_lossy(ScopeFrame::new(node_id, channel1, channel2, triggered));
+        });
+    }
+
+    /// Sends output levels to the UI for metering.
+    fn send_output_level(&mut self) {
+        if let Some((left, right)) = self.plan.output_module().and_then(|m| m.get_peak_levels()) {
+            self.engine_handle.send_event_lossy(EngineEvent::OutputLevel { left, right });
         }
     }
 
-    /// Sends oscilloscope buffer data to the UI thread.
-    fn send_scope_buffers(&mut self) {
-        for (node_id, channel1, channel2, triggered) in self.graph.drain_scope_buffers() {
-            self.engine_handle.send_event_lossy(EngineEvent::ScopeBuffer {
-                node_id,
-                channel1: channel1.into_boxed_slice(),
-                channel2: channel2.into_boxed_slice(),
-                triggered,
-            });
-        }
-    }
-
-    /// Processes all pending commands from the UI thread.
-    fn process_commands(&mut self) {
-        // Collect commands first to avoid borrow issues
-        let mut commands = Vec::new();
-        while let Some(cmd) = self.engine_handle.recv_command() {
-            commands.push(cmd);
-        }
-
-        // Process collected commands
-        for cmd in commands {
-            match cmd {
-                EngineCommand::SetPlaying(playing) => {
+    /// Applies all pending messages from the UI thread.
+    fn process_messages(&mut self) {
+        while let Some(message) = self.engine_handle.recv_message() {
+            match message {
+                AudioMessage::InstallPlan(mut plan) => {
+                    // Running modules move into the new plan; the old one,
+                    // with any removed modules, goes back to be dropped
+                    plan.take_over(&mut self.plan);
+                    let retired = std::mem::replace(&mut self.plan, plan);
+                    self.engine_handle.retire_plan(retired);
+                }
+                AudioMessage::SetParameter { node_id, param_index, value } => {
+                    self.plan.set_parameter(node_id, param_index, value);
+                }
+                AudioMessage::SetPlaying(playing) => {
                     if self.is_playing && !playing {
                         // Clear tails so pressing Play again starts from silence
-                        self.graph.reset_modules();
+                        self.plan.reset_modules();
                     }
                     self.is_playing = playing;
                     let event = if playing {
@@ -219,52 +206,28 @@ impl AudioProcessor {
                     };
                     self.engine_handle.send_event_lossy(event);
                 }
-                other => {
-                    // Delegate graph-related commands to the audio graph
-                    self.graph.handle_command(other);
-                }
             }
         }
     }
 
-    /// Extracts audio from AudioOutput modules and writes to the output buffer.
-    fn extract_output(&mut self, output: &mut [f32], channels: usize, num_frames: usize) {
-        // Find the AudioOutput module(s) and extract their output
-        // For now, we support a single output module
+    /// Writes the output module's audio for one block into `output`
+    /// (interleaved), duplicating to any channels beyond stereo.
+    fn write_output(&self, output: &mut [f32], channels: usize, frames: usize) {
+        let Some((left, right)) = self.plan.audio_output() else {
+            return;
+        };
 
-        for node_id in self.graph.processing_order().to_vec() {
-            if let Some(module) = self.graph.get_module(node_id) {
-                // Check if this module provides audio output
-                if let Some((left, right)) = module.get_audio_output() {
-                    // Write to output (interleaved stereo)
-                    for (i, frame) in output.chunks_mut(channels).enumerate() {
-                        if i < num_frames {
-                            let l = left.get(i).copied().unwrap_or(0.0);
-                            let r = right.get(i).copied().unwrap_or(0.0);
+        for (i, frame) in output.chunks_mut(channels).take(frames).enumerate() {
+            let l = left.get(i).copied().unwrap_or(0.0);
+            let r = right.get(i).copied().unwrap_or(0.0);
 
-                            if channels >= 1 {
-                                frame[0] = l;
-                            }
-                            if channels >= 2 {
-                                frame[1] = r;
-                            }
-                            // For more than 2 channels, duplicate to additional channels
-                            for ch in frame.iter_mut().skip(2) {
-                                *ch = (l + r) * 0.5;
-                            }
-                        }
-                    }
-
-                    // Send output levels to UI for metering
-                    if let Some((peak_l, peak_r)) = module.get_peak_levels() {
-                        self.engine_handle.send_event_lossy(EngineEvent::OutputLevel {
-                            left: peak_l,
-                            right: peak_r,
-                        });
-                    }
-
-                    break; // Only process first output module
-                }
+            frame[0] = l;
+            if channels >= 2 {
+                frame[1] = r;
+            }
+            // For more than 2 channels, duplicate to additional channels
+            for ch in frame.iter_mut().skip(2) {
+                *ch = (l + r) * 0.5;
             }
         }
     }
@@ -274,18 +237,43 @@ impl AudioProcessor {
         self.is_playing
     }
 
+    /// The plan currently playing.
+    pub fn plan(&self) -> &GraphPlan {
+        &self.plan
+    }
+
     /// Changes the sample rate, re-preparing every module. Only call this
     /// while no audio stream is running the processor.
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.context = ProcessContext::new(sample_rate, self.context.block_size);
-        self.graph.set_sample_rate(sample_rate);
+        // Install anything already compiled for the old rate first, so it
+        // gets re-prepared below along with everything else
+        self.process_messages();
+
+        self.sample_rate = sample_rate;
+        self.plan.set_sample_rate(sample_rate);
+        self.engine_handle.set_audio_config(sample_rate, self.plan.max_block_size());
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::EngineChannels;
+    use crate::engine::{EngineChannels, EngineCommand, UiHandle};
+
+    fn processor() -> (UiHandle, AudioProcessor) {
+        let (ui, engine) = EngineChannels::with_defaults().split();
+        (ui, AudioProcessor::new(44100.0, 256, engine))
+    }
+
+    /// Oscillator into the output module's Mono input, playing.
+    fn playing_patch(ui: &mut UiHandle) {
+        ui.send_command(EngineCommand::AddModule { node_id: 1, module_id: "osc.sine" }).unwrap();
+        ui.send_command(EngineCommand::AddModule { node_id: 2, module_id: "output.audio" }).unwrap();
+        ui.send_command(EngineCommand::Connect { from_node: 1, from_port: 4, to_node: 2, to_port: 2 })
+            .unwrap();
+        ui.send_command(EngineCommand::SetPlaying(true)).unwrap();
+        ui.flush();
+    }
 
     #[test]
     fn test_create_module_registry() {
@@ -316,19 +304,13 @@ mod tests {
 
     #[test]
     fn test_audio_processor_creation() {
-        let channels = EngineChannels::with_defaults();
-        let (_ui, engine) = channels.split();
-
-        let processor = AudioProcessor::new(44100.0, 256, engine);
+        let (_ui, processor) = processor();
         assert!(!processor.is_playing());
     }
 
     #[test]
     fn test_audio_processor_silence_when_stopped() {
-        let channels = EngineChannels::with_defaults();
-        let (_ui, engine) = channels.split();
-
-        let mut processor = AudioProcessor::new(44100.0, 256, engine);
+        let (_ui, mut processor) = processor();
 
         let mut output = vec![1.0; 512]; // Fill with non-zero
         processor.process(&mut output, 2);
@@ -339,10 +321,7 @@ mod tests {
 
     #[test]
     fn test_audio_processor_responds_to_play_command() {
-        let channels = EngineChannels::with_defaults();
-        let (mut ui, engine) = channels.split();
-
-        let mut processor = AudioProcessor::new(44100.0, 256, engine);
+        let (mut ui, mut processor) = processor();
 
         // Send play command
         ui.send_command(EngineCommand::SetPlaying(true)).unwrap();
@@ -356,5 +335,47 @@ mod tests {
         // Check for Started event
         let event = ui.recv_event();
         assert!(matches!(event, Some(EngineEvent::Started)));
+    }
+
+    #[test]
+    fn test_plays_a_patch_built_on_the_ui_side() {
+        let (mut ui, mut processor) = processor();
+        playing_patch(&mut ui);
+
+        let mut output = vec![0.0; 1024];
+        processor.process(&mut output, 2);
+
+        assert_eq!(processor.plan().len(), 2);
+        assert!(output.iter().any(|&s| s.abs() > 0.01), "patch should be audible");
+    }
+
+    #[test]
+    fn test_device_buffers_larger_than_a_block_are_chunked() {
+        let (mut ui, mut processor) = processor();
+        playing_patch(&mut ui);
+
+        // 441 frames: one full 256-frame block and a shorter one
+        let mut output = vec![0.0; 441 * 2];
+        processor.process(&mut output, 2);
+
+        let tail = &output[256 * 2..];
+        assert!(tail.iter().any(|&s| s.abs() > 0.01), "second chunk was rendered");
+    }
+
+    #[test]
+    fn test_retired_plans_go_back_to_ui() {
+        let (mut ui, mut processor) = processor();
+        playing_patch(&mut ui);
+        let mut output = vec![0.0; 512];
+        processor.process(&mut output, 2);
+
+        // Remove the oscillator: the new plan drops it, the old plan carries
+        // it back to the UI thread
+        ui.send_command(EngineCommand::RemoveModule { node_id: 1 }).unwrap();
+        ui.flush();
+        processor.process(&mut output, 2);
+        assert_eq!(processor.plan().len(), 1);
+        assert!(output.iter().all(|&s| s == 0.0), "oscillator is gone");
+        assert!(ui.flush());
     }
 }

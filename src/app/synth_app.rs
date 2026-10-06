@@ -2286,6 +2286,11 @@ impl eframe::App for SynthApp {
         // Process pending MIDI events
         self.process_midi_events();
 
+        // Ship this frame's graph edits to the audio thread as one compiled plan
+        if let Some(ref mut handle) = self.ui_handle {
+            handle.flush();
+        }
+
         // Clear status message after showing it for one frame
         // This gives user time to read it but doesn't persist forever
         if had_status_message {

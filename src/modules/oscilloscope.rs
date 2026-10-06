@@ -14,7 +14,7 @@ use crate::dsp::{
 };
 
 /// Number of samples to capture for display.
-const SCOPE_BUFFER_SIZE: usize = 512;
+pub const SCOPE_BUFFER_SIZE: usize = 512;
 
 /// Trigger modes for the oscilloscope.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -426,14 +426,10 @@ impl DspModule for Oscilloscope {
         self.captured_ch2.fill(0.0);
     }
 
-    fn take_scope_data(&mut self) -> Option<(Vec<f32>, Vec<f32>, bool)> {
+    fn take_scope_data(&mut self) -> Option<(&[f32], &[f32], bool)> {
         if self.buffer_ready {
             self.buffer_ready = false;
-            Some((
-                self.captured_ch1.clone(),
-                self.captured_ch2.clone(),
-                self.captured_triggered,
-            ))
+            Some((&self.captured_ch1, &self.captured_ch2, self.captured_triggered))
         } else {
             None
         }

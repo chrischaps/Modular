@@ -8,17 +8,18 @@ This document describes how audio signals flow through the Modular Synth system,
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         UI THREAD                                    │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────┐    │
-│  │ egui_node_  │───▶│  SynthApp    │───▶│   EngineCommand     │    │
-│  │ graph2      │    │              │    │   (via rtrb)        │    │
-│  └─────────────┘    └──────────────┘    └──────────┬──────────┘    │
-└─────────────────────────────────────────────────────┼───────────────┘
-                                                      │ Lock-free
-                                                      │ ring buffer
-┌─────────────────────────────────────────────────────┼───────────────┐
-│                       AUDIO THREAD                  ▼               │
+│  │ egui_node_  │───▶│  SynthApp    │───▶│  UiHandle           │    │
+│  │ graph2      │    │              │    │  └─ AudioGraph      │    │
+│  └─────────────┘    └──────────────┘    │     compile() ──┐   │    │
+│                                         └─────────────────┼───┘    │
+└───────────────────────────────────────────────────────────┼────────┘
+                          GraphPlan, SetParameter, SetPlaying│ ▲ retired
+                                         (lock-free rtrb)   │ │ plans
+┌───────────────────────────────────────────────────────────┼─┼──────┐
+│                       AUDIO THREAD                        ▼ │      │
 │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────────┐    │
-│  │ cpal        │◀───│ AudioProc-   │◀───│    AudioGraph       │    │
-│  │ callback    │    │ essor        │    │                     │    │
+│  │ cpal        │◀───│ AudioProc-   │◀───│    GraphPlan        │    │
+│  │ callback    │    │ essor        │    │    (running)        │    │
 │  └──────┬──────┘    └──────────────┘    └─────────────────────┘    │
 └─────────┼───────────────────────────────────────────────────────────┘
           │
@@ -33,14 +34,16 @@ This document describes how audio signals flow through the Modular Synth system,
 ### UI Thread
 - Runs the egui event loop
 - Handles user interactions (adding nodes, making connections, adjusting parameters)
-- Sends commands to audio thread via lock-free ring buffer (rtrb)
+- Owns the patch (`AudioGraph`): creates modules, sorts the graph, allocates buffers
+- Compiles graph changes into a `GraphPlan` and sends it to the audio thread
+- Drops plans (and removed modules) the audio thread hands back
 - **Never blocks on audio thread**
 
 ### Audio Thread
 - Runs in cpal's audio callback
 - Processes audio in real-time with strict timing requirements
-- Receives commands from UI thread
-- **Must never allocate memory or block**
+- Swaps in new plans and applies parameter changes from the UI thread
+- **Must never allocate memory or block**. This is enforced by `tests/realtime_alloc.rs`
 
 ## Signal Flow Step-by-Step
 
@@ -63,189 +66,136 @@ Click Stop               →  SetPlaying(false)
 **Key file:** `src/app/synth_app.rs`
 - `sync_parameters()` - Sends parameter changes
 - Node response handlers - Send add/remove/connect commands
+- End of `update()` - `ui_handle.flush()` ships the frame's graph edits
 
-### 2. Command Channel (UI → Audio)
+### 2. The Graph Lives on the UI Side
 
-Commands flow through a lock-free ring buffer:
+`UiHandle` owns the `AudioGraph`, the patch as modules, cables, parameter values and monitors. Commands are sorted as they arrive:
 
-```rust
-// UI side (src/engine/channels.rs)
-ui_handle.send_command(EngineCommand::SetParameter { ... })
-
-// Audio side (src/engine/audio_processor.rs)
-while let Some(cmd) = engine_handle.recv_command() {
-    // Process command
-}
+```
+EngineCommand                      What happens
+───────────────────────────────────────────────────────────────────
+AddModule / RemoveModule /     →   Edit the AudioGraph (UI thread).
+Connect / Disconnect /             The module is created and prepare()d
+Monitor* / ClearGraph              here, never on the audio thread.
+SetParameter                   →   Recorded in the AudioGraph AND queued
+                                   straight to the audio thread.
+SetPlaying                     →   Queued straight to the audio thread.
 ```
 
-**Key file:** `src/engine/channels.rs`
-- `UIHandle` - UI thread's interface
-- `EngineHandle` - Audio thread's interface
-- Uses `rtrb` crate for lock-free communication
+Once per UI frame, `SynthApp::update()` calls `UiHandle::flush()`. If the graph changed, it is compiled into one `GraphPlan` and queued. So a whole patch load becomes a single plan, not hundreds of messages.
 
-### 3. Audio Callback
+**Key files:** `src/engine/channels.rs`, `src/engine/audio_graph.rs`
+
+### 3. Compiling a GraphPlan
+
+`AudioGraph::compile()` resolves everything the audio thread would otherwise have to look up:
+
+```
+GraphPlan
+├── nodes        (in topological order)
+│   └── PlanNode { node_id, module, params, inputs, outputs }
+│       ├── inputs:  [Output(3), Default(0), Output(1)]   ← one per input port
+│       └── outputs: 4..6                                 ← range into `outputs`
+├── outputs      every output port's SignalBuffer, grouped by node in order
+├── defaults     stand-ins for unpatched inputs, filled with the port default
+└── input_taps / output_taps   monitor points for knob and LED animation
+```
+
+Because buffers are laid out in processing order, every input a node reads lives *before* its own outputs. The engine can split the buffer list in two (`split_at_mut`) and hand the module shared input references and mutable outputs with no copying.
+
+Modules created since the last plan move into the new plan. Modules that are **already running** are left out (`module: None`); they are carried over when the plan is installed.
+
+### 4. Channels (UI ↔ Audio)
+
+Four lock-free `rtrb` ring buffers:
+
+| Queue | Direction | Carries |
+|-------|-----------|---------|
+| messages | UI → audio | `AudioMessage::{InstallPlan, SetParameter, SetPlaying}` |
+| retired plans | audio → UI | the plan each install replaced, to be dropped on the UI thread |
+| events | audio → UI | `EngineEvent` metering, monitor values, status |
+| scope frames | audio → UI | `ScopeFrame`: oscilloscope captures in fixed arrays |
+
+Plans and parameter changes share one queue, so they apply in the order they were sent. A parameter change can overtake its node's plan, because the plan is only sent at the end of the frame. That's harmless: the audio thread ignores the change for an unknown node, and the plan already carries the value.
+
+The UI keeps at most `MAX_PLANS_IN_FLIGHT` plans out, so the audio thread always has room to retire one.
+
+### 5. Audio Callback
 
 cpal calls our audio callback ~100 times per second (at 48kHz with 480 sample blocks):
 
 ```rust
-// src/engine/audio_engine.rs - start_with_processor()
+// src/engine/audio_engine.rs - build_processor_stream()
 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-    if let Ok(mut proc) = processor.try_lock() {
-        proc.process(data, channels);
+    match processor.try_lock() {
+        Ok(mut proc) => proc.process(data, channels),
+        Err(_) => data.fill(0.0),
     }
 }
 ```
 
 The `data` buffer is what cpal will send to the speakers.
 
-### 4. AudioProcessor::process()
-
-Main audio processing entry point:
+### 6. AudioProcessor::process()
 
 ```rust
 // src/engine/audio_processor.rs
 pub fn process(&mut self, output: &mut [f32], channels: usize) {
-    // 1. Process pending commands from UI
-    self.process_commands();
+    // 1. Apply messages: install plans, set parameters, play/stop
+    self.process_messages();
 
-    // 2. Clear output buffer
-    for sample in output.iter_mut() {
-        *sample = 0.0;
+    // 2. Run the plan over the device buffer in chunks of at most
+    //    max_block_size frames (cpal may hand us 441, 1024, ...)
+    for chunk in output.chunks_mut(chunk_len) {
+        self.plan.process(&ProcessContext::new(self.sample_rate, frames));
+        self.write_output(chunk, channels, frames);
     }
 
-    // 3. Early return if not playing
-    if !self.is_playing {
-        return;
-    }
-
-    // 4. Process the audio graph
-    self.graph.process(&self.context);
-
-    // 5. Extract output from AudioOutput module
-    self.extract_output(output, channels, num_frames);
+    // 3. Report monitor values, scope captures, levels, CPU load
 }
 ```
 
-### 5. AudioGraph::process()
-
-Processes all modules in topological order:
+Installing a plan is a handful of pointer moves:
 
 ```rust
-// src/engine/audio_graph.rs
-pub fn process(&mut self, context: &ProcessContext) {
-    // Ensure processing order is up to date
-    self.update_processing_order();
-
-    // Clear all output buffers in the pool
-    self.buffers.clear_all();
-
-    // Process modules in topological order
-    for &node_id in &self.processing_order.clone() {
-        self.process_module(node_id, context);
-    }
+AudioMessage::InstallPlan(mut plan) => {
+    plan.take_over(&mut self.plan);          // running modules move across
+    let retired = std::mem::replace(&mut self.plan, plan);
+    self.engine_handle.retire_plan(retired); // dropped on the UI thread
 }
 ```
 
-### 6. Module Processing
+Running modules keep their state, such as oscillator phase, envelope stage and delay tails, so editing a playing patch doesn't click.
 
-Each module is processed individually:
+### 7. GraphPlan::process()
 
 ```rust
-// src/engine/audio_graph.rs - process_module()
-fn process_module(&mut self, node_id: NodeId, context: &ProcessContext) {
-    // 1. Gather input buffers from connected modules
-    let input_buffers = self.gather_inputs(node_id);
-
-    // 2. Create temporary output buffers
-    let mut output_buffers: Vec<SignalBuffer> = ...;
-
-    // 3. Get parameter values
-    let params = data.parameters.clone();
-
-    // 4. Call module's process function
-    data.module.process(
-        &input_buffers.iter().collect::<Vec<_>>(),
-        &mut output_buffers,
-        &params,
-        context,
-    );
-
-    // 5. Copy outputs to buffer pool for downstream modules
-    for (i, output_buf) in output_buffers.into_iter().enumerate() {
-        if let Some(pool_buf) = self.buffers.get_mut(node_id, i) {
-            pool_buf.samples.copy_from_slice(&output_buf.samples);
-        }
+// src/engine/graph_plan.rs
+for node in nodes.iter_mut() {
+    let (upstream, rest) = outputs.split_at_mut(node.outputs.start);
+    let own = &mut rest[..node.outputs.len()];
+    // clear own outputs, then point each input at its buffer
+    let mut inputs = [&EMPTY_BUFFER; MAX_INPUTS];
+    for (slot, source) in inputs.iter_mut().zip(&node.inputs) {
+        *slot = match *source {
+            InputSource::Output(i) => &upstream[i],
+            InputSource::Default(i) => &defaults[i],
+        };
     }
+    module.process(&inputs[..node.inputs.len()], own, &node.params, context);
 }
 ```
 
-### 7. Input Gathering
-
-`gather_inputs()` resolves connections to get input data:
-
-```rust
-// src/engine/audio_graph.rs
-fn gather_inputs(&self, node_id: NodeId) -> Vec<SignalBuffer> {
-    for (port_idx, port_def) in input_ports {
-        // Find connection to this input port
-        let connection = self.connections.iter().find(|conn| {
-            conn.to_node == node_id && conn.to_port == port_idx
-        });
-
-        if let Some(conn) = connection {
-            // Get buffer from source module's output
-            let output_idx = self.port_to_output_index(...);
-            if let Some(buf) = self.buffers.get(conn.from_node, output_idx) {
-                inputs.push(buf.clone());
-                continue;
-            }
-        }
-
-        // No connection - use default value
-        let mut buf = SignalBuffer::new(...);
-        buf.fill(port_def.default_value);
-        inputs.push(buf);
-    }
-}
-```
+No allocation, no hashing, no searching: only slice indexing. Unpatched inputs get a buffer holding the port's default value with `is_connected() == false`, so modules can tell "silent" from "unplugged" via `connected_input()`.
 
 ### 8. Output Extraction
 
-After all modules are processed, audio is extracted from AudioOutput:
-
-```rust
-// src/engine/audio_processor.rs - extract_output()
-fn extract_output(&mut self, output: &mut [f32], channels: usize, num_frames: usize) {
-    for node_id in self.graph.processing_order() {
-        if let Some(module) = self.graph.get_module(node_id) {
-            // AudioOutput implements get_audio_output()
-            if let Some((left, right)) = module.get_audio_output() {
-                // Write interleaved stereo to cpal buffer
-                for (i, frame) in output.chunks_mut(channels).enumerate() {
-                    frame[0] = left[i];   // Left channel
-                    frame[1] = right[i];  // Right channel
-                }
-                break;
-            }
-        }
-    }
-}
-```
+The first module in processing order whose `get_audio_output()` returns `Some` (the AudioOutput module) provides the final stereo signal, which `write_output()` interleaves into the cpal buffer.
 
 ## Buffer Management
 
-### BufferPool
-
-Pre-allocated buffers for module outputs:
-
-```
-BufferPool
-├── (node_id=0, output_idx=0) → SignalBuffer [480 samples]
-├── (node_id=1, output_idx=0) → SignalBuffer [480 samples]
-└── ...
-```
-
-**Key file:** `src/engine/buffer_pool.rs`
+Every buffer is allocated at compile time with capacity for `max_block_size` samples. For shorter blocks, `GraphPlan` shortens buffers within that capacity, which never reallocates. Default-input buffers are refilled with their default value when they grow back.
 
 ### SignalBuffer
 
@@ -253,8 +203,9 @@ Holds audio/control/gate samples:
 
 ```rust
 pub struct SignalBuffer {
-    pub samples: Vec<f32>,      // The actual sample data
+    pub samples: Vec<f32>,       // The actual sample data
     pub signal_type: SignalType, // Audio, Control, Gate, or MIDI
+    connected: bool,             // false for an unpatched input's stand-in
 }
 ```
 
@@ -270,10 +221,12 @@ UI Slider (SynthValueType)
     ▼ actual_value() ← IMPORTANT: Returns Hz, not normalized!
 SetParameter { value: 440.0 }
     │
-    ▼ (via ring buffer)
-AudioGraph::set_parameter()
+    ├──▶ AudioGraph::set_parameter()      (UI-side copy, carried by the next plan)
     │
-    ▼ (stored in ModuleData)
+    ▼ (via ring buffer)
+GraphPlan::set_parameter()                (running plan, updated in place)
+    │
+    ▼
 module.process(..., params: &[f32], ...)
     │
     ▼
@@ -292,8 +245,8 @@ Ports are indexed differently in different contexts:
 
 ### In DspModule
 - Input ports and output ports are separate
-- `gather_inputs()` only iterates input ports
-- `port_to_output_index()` converts port index to output buffer index
+- `process()` receives one input buffer per input port, and one output buffer per output port
+- The compiler maps a connection's `from_port` (a port index) to that node's output buffer
 
 ### Example: SineOscillator
 ```
@@ -307,7 +260,7 @@ Output indices: [0: out]
 
 When connecting osc.out (port 2) → output.mono (port 2):
   - Connection stores: from_port=2, to_port=2
-  - port_to_output_index(2) returns 0 (first output)
+  - Port 2 is the oscillator's first output, so it reads output buffer 0
 ```
 
 ## Common Debugging Points
@@ -315,49 +268,35 @@ When connecting osc.out (port 2) → output.mono (port 2):
 ### No Sound - Checklist
 
 1. **Is playing?** Check `AudioProcessor::is_playing`
-2. **Modules added?** Check `graph.module_count()`
-3. **Processing order?** Check `graph.processing_order()` - should not be empty
-4. **Connections made?** Check `graph.connection_count()`
+2. **Was the edit flushed?** Graph edits reach the audio thread only on `UiHandle::flush()`
+3. **Modules in the plan?** Check `processor.plan().len()` / `plan.processing_order()`
+4. **Connections made?** Check `ui_handle.graph().connections()`
 5. **Parameters correct?** Verify frequency is in Hz, not normalized (0-1)
 6. **Output module exists?** Look for module with `get_audio_output()` returning `Some`
-7. **Buffers have data?** Log peak values at each stage
 
-### Debug Logging Locations
+### Reproduce Offline
 
-Add temporary logging at these points:
+Never add `eprintln!` to the audio callback: printing allocates and locks. Reproduce the problem in the offline renderer instead. It runs the same compile-and-swap path with no audio device:
 
-```rust
-// 1. Command receipt
-// src/engine/audio_processor.rs - process_commands()
-eprintln!("Received: {:?}", cmd);
-
-// 2. Module processing
-// src/engine/audio_graph.rs - process_module()
-eprintln!("Processing module: {}", module.info().id);
-
-// 3. Input gathering
-// src/engine/audio_graph.rs - gather_inputs()
-eprintln!("Input {} connected: {}", port_idx, connection.is_some());
-
-// 4. Output extraction
-// src/engine/audio_processor.rs - extract_output()
-eprintln!("Output peak: L={:.4}, R={:.4}", peak_l, peak_r);
-
-// 5. Final buffer
-// src/engine/audio_engine.rs - callback
-eprintln!("Buffer max: {:.4}", data.iter().fold(0.0f32, |a, &b| a.max(b.abs())));
+```bash
+cargo run --release --bin render -- patch.json out.wav --seconds 5
 ```
+
+or in a test with `OfflineRenderer::from_patch()` and the helpers in `dsp::analysis`, where you can inspect any buffer at leisure.
+
+`tests/realtime_alloc.rs` guards the "no allocation" rule. It fails if the audio callback allocates or frees memory while playing a patch that uses every module.
 
 ## Files Reference
 
 | File | Purpose |
 |------|---------|
 | `src/engine/audio_engine.rs` | cpal setup, audio callback |
-| `src/engine/audio_processor.rs` | Main processing loop, command handling |
-| `src/engine/audio_graph.rs` | Module graph, topological sort, processing |
-| `src/engine/buffer_pool.rs` | Pre-allocated output buffers |
-| `src/engine/channels.rs` | Lock-free command/event channels |
-| `src/engine/commands.rs` | Command and event definitions |
+| `src/engine/audio_processor.rs` | Audio-thread loop: messages, plan swaps, output |
+| `src/engine/audio_graph.rs` | Patch model, topological sort, plan compiler (UI side) |
+| `src/engine/graph_plan.rs` | Compiled graph and its real-time processing |
+| `src/engine/channels.rs` | Lock-free queues; `UiHandle::flush()` |
+| `src/engine/commands.rs` | Commands, audio messages, events, scope frames |
+| `src/engine/offline.rs` | Offline renderer for tests and the `render` tool |
 | `src/dsp/module_trait.rs` | DspModule trait definition |
 | `src/dsp/signal.rs` | SignalBuffer, SignalType |
 | `src/modules/oscillator.rs` | SineOscillator implementation |
