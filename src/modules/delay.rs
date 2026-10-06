@@ -265,7 +265,7 @@ impl DspModule for StereoDelay {
 
         // Calculate delay time (either from sync or direct)
         let base_time_ms = if let Some(beats) = Self::sync_to_beats(sync_index) {
-            // Use tempo from context if available, otherwise assume 120 BPM
+            // Follow the patch tempo (set by a Clock), or 120 BPM without one
             let bpm = context.transport.tempo_bpm.unwrap_or(120.0);
             let ms_per_beat = 60000.0 / bpm;
             (beats * ms_per_beat).clamp(1.0, 2000.0)

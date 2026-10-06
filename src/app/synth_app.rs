@@ -821,9 +821,9 @@ impl SynthApp {
     /// Send a command to the audio engine.
     fn send_command(&mut self, cmd: EngineCommand) {
         if let Some(ref mut handle) = self.ui_handle {
-            // Use lossy send - if buffer is full, command is dropped
-            // This is acceptable for rapid updates like parameter changes
-            handle.send_command_lossy(cmd);
+            // Never dropped: anything that doesn't fit in the queue now is
+            // held and delivered by a later flush
+            handle.send_command(cmd);
         }
     }
 
@@ -2299,7 +2299,11 @@ impl eframe::App for SynthApp {
 
         // Ship this frame's graph edits to the audio thread as one compiled plan
         if let Some(ref mut handle) = self.ui_handle {
-            handle.flush();
+            if !handle.flush() {
+                // The audio thread is behind; retry soon even if nothing else
+                // asks for a frame, so held-back edits aren't left waiting
+                ctx.request_repaint_after(std::time::Duration::from_millis(15));
+            }
         }
 
         // Clear status message after showing it for one frame

@@ -296,6 +296,15 @@ pub trait DspModule: Send + 'static {
     fn take_scope_data(&mut self) -> Option<(&[f32], &[f32], bool)> {
         None
     }
+
+    /// The tempo this module sets for the whole patch, for tempo sources such
+    /// as a clock. Read from `params` before each block and published to every
+    /// module as `context.transport.tempo_bpm`.
+    ///
+    /// Returns `None` for modules that don't set the tempo.
+    fn tempo_bpm(&self, _params: &[f32]) -> Option<f32> {
+        None
+    }
 }
 
 #[cfg(test)]

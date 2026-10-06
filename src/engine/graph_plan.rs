@@ -180,6 +180,14 @@ impl GraphPlan {
         debug_assert!(context.block_size <= self.max_block_size);
         self.set_block_len(context.block_size.min(self.max_block_size));
 
+        // Every module in the block sees the same tempo, whatever its place
+        // in the processing order
+        let mut context = *context;
+        if let Some(bpm) = self.tempo_bpm() {
+            context.transport.tempo_bpm = Some(bpm);
+        }
+        let context = &context;
+
         let Self { nodes, outputs, defaults, .. } = self;
         for node in nodes.iter_mut() {
             // Inputs come from earlier nodes, whose buffers all precede ours
@@ -203,6 +211,16 @@ impl GraphPlan {
 
             module.process(&inputs[..node.inputs.len()], own, &node.params, context);
         }
+    }
+
+    /// The patch tempo: set by the first tempo source (a Clock) in processing
+    /// order, or `None` if the patch has none.
+    ///
+    /// REAL-TIME SAFE.
+    pub fn tempo_bpm(&self) -> Option<f32> {
+        self.nodes.iter().find_map(|node| {
+            node.module.as_ref().and_then(|module| module.tempo_bpm(&node.params))
+        })
     }
 
     /// Sets every buffer's length to `len`, within its allocated capacity.

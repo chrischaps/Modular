@@ -272,11 +272,10 @@ mod tests {
 
     /// Oscillator into the output module's Mono input, playing.
     fn playing_patch(ui: &mut UiHandle) {
-        ui.send_command(EngineCommand::AddModule { node_id: 1, module_id: "osc.sine" }).unwrap();
-        ui.send_command(EngineCommand::AddModule { node_id: 2, module_id: "output.audio" }).unwrap();
-        ui.send_command(EngineCommand::Connect { from_node: 1, from_port: 4, to_node: 2, to_port: 2 })
-            .unwrap();
-        ui.send_command(EngineCommand::SetPlaying(true)).unwrap();
+        ui.send_command(EngineCommand::AddModule { node_id: 1, module_id: "osc.sine" });
+        ui.send_command(EngineCommand::AddModule { node_id: 2, module_id: "output.audio" });
+        ui.send_command(EngineCommand::Connect { from_node: 1, from_port: 4, to_node: 2, to_port: 2 });
+        ui.send_command(EngineCommand::SetPlaying(true));
         ui.flush();
     }
 
@@ -329,7 +328,7 @@ mod tests {
         let (mut ui, mut processor) = processor();
 
         // Send play command
-        ui.send_command(EngineCommand::SetPlaying(true)).unwrap();
+        ui.send_command(EngineCommand::SetPlaying(true));
 
         // Process to handle the command
         let mut output = vec![0.0; 512];
@@ -376,7 +375,7 @@ mod tests {
 
         // Remove the oscillator: the new plan drops it, the old plan carries
         // it back to the UI thread
-        ui.send_command(EngineCommand::RemoveModule { node_id: 1 }).unwrap();
+        ui.send_command(EngineCommand::RemoveModule { node_id: 1 });
         ui.flush();
         processor.process(&mut output, 2);
         assert_eq!(processor.plan().len(), 1);

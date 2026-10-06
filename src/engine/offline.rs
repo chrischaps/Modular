@@ -208,6 +208,58 @@ mod tests {
         assert_eq!(split.left, whole.left);
     }
 
+    /// Rising edges through `threshold`, in seconds.
+    fn onsets(samples: &[f32], threshold: f32, sample_rate: f32) -> Vec<f32> {
+        samples
+            .windows(2)
+            .enumerate()
+            .filter(|(_, w)| w[0] < threshold && w[1] >= threshold)
+            .map(|(i, _)| (i + 1) as f32 / sample_rate)
+            .collect()
+    }
+
+    #[test]
+    fn test_delay_sync_follows_clock_tempo() {
+        // Clock (one short pulse per whole note) -> Delay synced to 1/4,
+        // half dry and half wet. Each pulse is followed by its echo exactly
+        // one beat later, at whatever tempo the Clock is set to.
+        const CLOCK: u64 = 1;
+        const DELAY: u64 = 2;
+        const OUT: u64 = 3;
+        let sr = 48000.0;
+        let mut r = OfflineRenderer::new(sr, 256);
+        for command in [
+            EngineCommand::AddModule { node_id: CLOCK, module_id: "util.clock" },
+            EngineCommand::AddModule { node_id: DELAY, module_id: "fx.delay" },
+            EngineCommand::AddModule { node_id: OUT, module_id: "output.audio" },
+            EngineCommand::Connect { from_node: CLOCK, from_port: 1, to_node: DELAY, to_port: 0 },
+            EngineCommand::Connect { from_node: DELAY, from_port: 4, to_node: OUT, to_port: 2 },
+            EngineCommand::SetParameter { node_id: CLOCK, param_index: 0, value: 120.0 },
+            EngineCommand::SetParameter { node_id: CLOCK, param_index: 1, value: 2.0 }, // gate %
+            EngineCommand::SetParameter { node_id: CLOCK, param_index: 2, value: 0.0 }, // whole
+            EngineCommand::SetParameter { node_id: DELAY, param_index: 1, value: 0.0 }, // feedback
+            EngineCommand::SetParameter { node_id: DELAY, param_index: 6, value: 1.0 }, // 1/4
+        ] {
+            r.apply(command);
+        }
+
+        // 120 BPM: pulses at 0 s and 2 s, echoes half a second after each
+        let at_120 = onsets(&r.render_seconds(3.0).left, 0.15, sr);
+        assert_eq!(at_120.len(), 4, "pulses and echoes at 120 BPM: {at_120:?}");
+        for pair in at_120.chunks(2) {
+            let beat = pair[1] - pair[0];
+            assert!((beat - 0.5).abs() < 0.002, "echo after {beat} s at 120 BPM");
+        }
+
+        // Halfway through the clock's cycle, slow it to 80 BPM: the next pulse
+        // comes 1.5 s later, and its echo a beat (0.75 s) after that
+        r.apply(EngineCommand::SetParameter { node_id: CLOCK, param_index: 0, value: 80.0 });
+        let at_80 = onsets(&r.render_seconds(2.5).left, 0.15, sr);
+        assert_eq!(at_80.len(), 2, "pulse and echo at 80 BPM: {at_80:?}");
+        let beat = at_80[1] - at_80[0];
+        assert!((beat - 0.75).abs() < 0.002, "echo after {beat} s at 80 BPM");
+    }
+
     #[test]
     fn test_graph_without_output_renders_silence() {
         let mut r = OfflineRenderer::new(48000.0, 128);

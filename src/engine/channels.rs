@@ -65,6 +65,39 @@ impl AudioConfig {
     }
 }
 
+/// Play/stop changes waiting for room in the message queue, collapsed to
+/// what the audio thread still needs to see: at most a stop, then a play.
+#[derive(Debug, Default)]
+struct UnsentTransport {
+    /// A stop to deliver before `playing`, so its reset of module state
+    /// isn't skipped by a quick stop-then-play.
+    stop_first: bool,
+    playing: Option<bool>,
+}
+
+impl UnsentTransport {
+    fn push(&mut self, playing: bool) {
+        self.stop_first = playing && (self.stop_first || self.playing == Some(false));
+        self.playing = Some(playing);
+    }
+
+    fn peek(&self) -> Option<bool> {
+        if self.stop_first {
+            Some(false)
+        } else {
+            self.playing
+        }
+    }
+
+    fn pop(&mut self) {
+        if self.stop_first {
+            self.stop_first = false;
+        } else {
+            self.playing = None;
+        }
+    }
+}
+
 /// Both ends of the engine's communication channels.
 pub struct EngineChannels {
     ui: UiHandle,
@@ -97,6 +130,7 @@ impl EngineChannels {
                 scope_rx,
                 config: Arc::clone(&config),
                 unsent_plan: None,
+                unsent_transport: UnsentTransport::default(),
                 // The processor starts with an empty plan of its own, which
                 // it retires to us like any other
                 plans_in_flight: 1,
@@ -128,6 +162,7 @@ impl EngineChannels {
 /// Owns the [`AudioGraph`]. Graph edits are applied to it immediately and
 /// reach the audio thread on the next [`flush`](Self::flush), batched into a
 /// single compiled plan. Parameter changes and play/stop go straight through.
+/// Nothing sent through it is dropped when the queue is full.
 pub struct UiHandle {
     graph: AudioGraph,
     message_tx: Producer<AudioMessage>,
@@ -138,6 +173,8 @@ pub struct UiHandle {
     /// A compiled plan that didn't fit in the queue yet. Plans must arrive in
     /// order, so no newer plan is compiled until this one is sent.
     unsent_plan: Option<Box<GraphPlan>>,
+    /// Play/stop changes that didn't fit in the queue yet.
+    unsent_transport: UnsentTransport,
     /// Plans sent (or held by the audio thread) and not yet returned.
     plans_in_flight: usize,
 }
@@ -145,47 +182,52 @@ pub struct UiHandle {
 impl UiHandle {
     /// Send a command to the audio engine.
     ///
-    /// Graph edits are always accepted; they're applied to the UI-side graph
-    /// and delivered by the next [`flush`](Self::flush). Parameter changes
-    /// and play/stop are queued immediately; if the queue is full, Err(cmd)
-    /// is returned. A parameter change is still recorded in the graph and so
-    /// reaches the audio thread with the next plan.
-    ///
-    /// This is a non-blocking operation - it never waits for space.
-    pub fn send_command(&mut self, cmd: EngineCommand) -> Result<(), EngineCommand> {
+    /// No command is ever lost, and this never waits for space:
+    /// - Graph edits are applied to the UI-side graph and delivered by
+    ///   [`flush`](Self::flush) as a compiled plan, held back until the queue
+    ///   has room.
+    /// - Parameter changes are queued immediately. If the queue is full the
+    ///   value is still recorded in the graph, and travels with the next plan.
+    /// - Play/stop is queued immediately, or kept until `flush` finds room.
+    pub fn send_command(&mut self, cmd: EngineCommand) {
         match cmd {
             EngineCommand::SetParameter { node_id, param_index, value } => {
                 self.graph.set_parameter(node_id, param_index, value);
-                self.message_tx
-                    .push(AudioMessage::SetParameter { node_id, param_index, value })
-                    .map_err(|_| {
-                        // Make sure the value travels with the next plan instead
-                        self.graph.mark_dirty();
-                        cmd
-                    })
+                let message = AudioMessage::SetParameter { node_id, param_index, value };
+                if self.message_tx.push(message).is_err() {
+                    // Make sure the value travels with the next plan instead
+                    self.graph.mark_dirty();
+                }
             }
-            EngineCommand::SetPlaying(playing) => self
-                .message_tx
-                .push(AudioMessage::SetPlaying(playing))
-                .map_err(|_| cmd),
+            EngineCommand::SetPlaying(playing) => {
+                self.unsent_transport.push(playing);
+                self.send_transport();
+            }
             other => {
                 self.graph.handle_command(other);
-                Ok(())
             }
         }
     }
 
-    /// Try to send a command, dropping it silently if the buffer is full.
-    /// Use this for non-critical commands where dropping is acceptable.
-    pub fn send_command_lossy(&mut self, cmd: EngineCommand) {
-        let _ = self.send_command(cmd);
+    /// Sends any play/stop changes that are waiting for room in the queue.
+    /// Returns true if none are left waiting.
+    fn send_transport(&mut self) -> bool {
+        while let Some(playing) = self.unsent_transport.peek() {
+            if self.message_tx.push(AudioMessage::SetPlaying(playing)).is_err() {
+                return false;
+            }
+            self.unsent_transport.pop();
+        }
+        true
     }
 
     /// Delivers pending graph edits to the audio thread as a compiled plan,
     /// and drops plans the audio thread has retired.
     ///
     /// Call once per UI frame, after sending that frame's commands. Returns
-    /// true if every edit so far has been sent.
+    /// true if everything sent so far is on its way. If it returns false, the
+    /// audio thread is behind (or not running): call again soon, and the
+    /// held-back edits follow as soon as there is room.
     pub fn flush(&mut self) -> bool {
         while let Ok(retired) = self.retired_rx.pop() {
             drop(retired);
@@ -194,6 +236,10 @@ impl UiHandle {
 
         let (sample_rate, block_size) = self.config.load();
         self.graph.set_audio_config(sample_rate, block_size);
+
+        if !self.send_transport() {
+            return false;
+        }
 
         loop {
             if self.plans_in_flight >= MAX_PLANS_IN_FLIGHT {
@@ -346,7 +392,7 @@ mod tests {
                     current.set_parameter(node_id, param_index, value);
                     seen.push("param");
                 }
-                AudioMessage::SetPlaying(_) => seen.push("playing"),
+                AudioMessage::SetPlaying(playing) => seen.push(if playing { "play" } else { "stop" }),
             }
         }
         seen
@@ -364,10 +410,9 @@ mod tests {
         let (mut ui, mut engine) = EngineChannels::with_defaults().split();
         let mut plan = Box::new(GraphPlan::empty(256));
 
-        ui.send_command(add(1, "osc.sine")).unwrap();
-        ui.send_command(add(2, "output.audio")).unwrap();
-        ui.send_command(EngineCommand::Connect { from_node: 1, from_port: 4, to_node: 2, to_port: 2 })
-            .unwrap();
+        ui.send_command(add(1, "osc.sine"));
+        ui.send_command(add(2, "output.audio"));
+        ui.send_command(EngineCommand::Connect { from_node: 1, from_port: 4, to_node: 2, to_port: 2 });
         assert_eq!(engine.messages_pending(), 0, "nothing sent before flush");
 
         assert!(ui.flush());
@@ -383,14 +428,13 @@ mod tests {
     fn test_parameters_go_straight_through() {
         let (mut ui, mut engine) = EngineChannels::with_defaults().split();
         let mut plan = Box::new(GraphPlan::empty(256));
-        ui.send_command(add(1, "osc.sine")).unwrap();
+        ui.send_command(add(1, "osc.sine"));
         ui.flush();
         run_audio_side(&mut engine, &mut plan);
 
-        ui.send_command(EngineCommand::SetParameter { node_id: 1, param_index: 0, value: 220.0 })
-            .unwrap();
-        ui.send_command(EngineCommand::SetPlaying(true)).unwrap();
-        assert_eq!(run_audio_side(&mut engine, &mut plan), vec!["param", "playing"]);
+        ui.send_command(EngineCommand::SetParameter { node_id: 1, param_index: 0, value: 220.0 });
+        ui.send_command(EngineCommand::SetPlaying(true));
+        assert_eq!(run_audio_side(&mut engine, &mut plan), vec!["param", "play"]);
         assert_eq!(plan.nodes[0].params[0], 220.0);
         assert_eq!(ui.graph().parameters(1).unwrap()[0], 220.0);
     }
@@ -402,9 +446,8 @@ mod tests {
 
         // The parameter message overtakes the (unflushed) plan; the plan
         // still carries the value
-        ui.send_command(add(1, "osc.sine")).unwrap();
-        ui.send_command(EngineCommand::SetParameter { node_id: 1, param_index: 0, value: 330.0 })
-            .unwrap();
+        ui.send_command(add(1, "osc.sine"));
+        ui.send_command(EngineCommand::SetParameter { node_id: 1, param_index: 0, value: 330.0 });
         ui.flush();
         assert_eq!(run_audio_side(&mut engine, &mut plan), vec!["param", "plan"]);
         assert_eq!(plan.nodes[0].params[0], 330.0);
@@ -417,7 +460,7 @@ mod tests {
 
         // Many edits, each flushed and installed, never exhaust the plan budget
         for id in 0..(MAX_PLANS_IN_FLIGHT as u64 * 3) {
-            ui.send_command(add(id, "osc.sine")).unwrap();
+            ui.send_command(add(id, "osc.sine"));
             assert!(ui.flush(), "plan {id} was held back");
             run_audio_side(&mut engine, &mut plan);
         }
@@ -433,7 +476,7 @@ mod tests {
         // With no audio callbacks, at most MAX_PLANS_IN_FLIGHT plans go out
         // (one of which is the processor's initial plan)
         for id in 0..10 {
-            ui.send_command(add(id, "osc.sine")).unwrap();
+            ui.send_command(add(id, "osc.sine"));
             ui.flush();
         }
         assert_eq!(engine.messages_pending(), MAX_PLANS_IN_FLIGHT - 1);
@@ -451,18 +494,94 @@ mod tests {
         let (mut ui, mut engine) = EngineChannels::new(2, 8).split();
         let mut plan = Box::new(GraphPlan::empty(256));
 
-        ui.send_command(EngineCommand::SetPlaying(true)).unwrap();
-        ui.send_command(EngineCommand::SetPlaying(false)).unwrap();
+        ui.send_command(EngineCommand::SetPlaying(true));
+        ui.send_command(EngineCommand::SetPlaying(false));
         assert!(ui.is_command_buffer_full());
-        assert!(ui.send_command(EngineCommand::SetPlaying(true)).is_err());
+        // Held, not dropped
+        ui.send_command(EngineCommand::SetPlaying(true));
 
-        ui.send_command(add(1, "osc.sine")).unwrap();
+        ui.send_command(add(1, "osc.sine"));
         assert!(!ui.flush(), "no room for the plan yet");
 
-        run_audio_side(&mut engine, &mut plan);
+        assert_eq!(run_audio_side(&mut engine, &mut plan), vec!["play", "stop"]);
         assert!(ui.flush());
-        assert_eq!(run_audio_side(&mut engine, &mut plan), vec!["plan"]);
+        assert_eq!(run_audio_side(&mut engine, &mut plan), vec!["play", "plan"]);
         assert_eq!(plan.len(), 1);
+    }
+
+    #[test]
+    fn test_held_transport_collapses_but_keeps_the_stop() {
+        let (mut ui, mut engine) = EngineChannels::new(1, 8).split();
+        let mut plan = Box::new(GraphPlan::empty(256));
+
+        ui.send_command(EngineCommand::SetParameter { node_id: 1, param_index: 0, value: 1.0 });
+        assert!(ui.is_command_buffer_full());
+
+        // A burst of toggles while the queue is full: the stop still has to
+        // reach the audio thread, since stopping clears tails
+        for playing in [false, true, false, true] {
+            ui.send_command(EngineCommand::SetPlaying(playing));
+        }
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            seen.extend(run_audio_side(&mut engine, &mut plan));
+            ui.flush();
+        }
+        assert_eq!(seen, vec!["param", "stop", "play"]);
+
+        // Ending on a stop needs only the stop
+        ui.send_command(EngineCommand::SetParameter { node_id: 1, param_index: 0, value: 2.0 });
+        for playing in [true, false, true, false] {
+            ui.send_command(EngineCommand::SetPlaying(playing));
+        }
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            seen.extend(run_audio_side(&mut engine, &mut plan));
+            ui.flush();
+        }
+        assert_eq!(seen, vec!["param", "stop"]);
+    }
+
+    #[test]
+    fn test_large_patch_load_never_loses_nodes() {
+        // A tiny queue, an audio thread that only wakes every few frames, and
+        // a stream of knob moves competing for room with the patch
+        let (mut ui, mut engine) = EngineChannels::new(4, 8).split();
+        let mut plan = Box::new(GraphPlan::empty(256));
+        const NODES: u64 = 50;
+
+        ui.send_command(EngineCommand::ClearGraph);
+        for id in 1..=NODES {
+            let module_id = if id % 2 == 0 { "osc.sine" } else { "fx.delay" };
+            ui.send_command(add(id, module_id));
+            if id > 1 {
+                ui.send_command(EngineCommand::Connect { from_node: id - 1, from_port: 4, to_node: id, to_port: 0 });
+            }
+            ui.send_command(EngineCommand::SetParameter { node_id: id, param_index: 0, value: id as f32 });
+            ui.send_command(EngineCommand::SetPlaying(true));
+            if id % 10 == 0 {
+                ui.flush();
+            }
+            if id % 15 == 0 {
+                run_audio_side(&mut engine, &mut plan);
+            }
+        }
+
+        // Keep the UI's frames going until it has sent everything
+        let mut frames = 0;
+        while !ui.flush() {
+            run_audio_side(&mut engine, &mut plan);
+            frames += 1;
+            assert!(frames < 100, "edits still held back after {frames} frames");
+        }
+        run_audio_side(&mut engine, &mut plan);
+
+        assert_eq!(plan.len(), NODES as usize, "nodes were lost");
+        assert!(plan.nodes.iter().all(|n| n.module.is_some()));
+        for node in &plan.nodes {
+            assert_eq!(node.params[0], node.node_id as f32, "node {} lost its parameter", node.node_id);
+        }
+        assert_eq!(plan.processing_order().collect::<Vec<_>>(), (1..=NODES).collect::<Vec<_>>());
     }
 
     #[test]
@@ -503,19 +622,11 @@ mod tests {
     }
 
     #[test]
-    fn test_lossy_send() {
+    fn test_lossy_events() {
         let (mut ui, mut engine) = EngineChannels::new(1, 1).split();
-
-        // Fill buffers
-        ui.send_command_lossy(EngineCommand::SetPlaying(true));
-        ui.send_command_lossy(EngineCommand::SetPlaying(false)); // Should be dropped
 
         engine.send_event_lossy(EngineEvent::CpuLoad(0.5));
         engine.send_event_lossy(EngineEvent::CpuLoad(0.6)); // Should be dropped
-
-        // Should only receive one of each
-        assert!(engine.recv_message().is_some());
-        assert!(engine.recv_message().is_none());
 
         assert!(ui.recv_event().is_some());
         assert!(ui.recv_event().is_none());
@@ -545,7 +656,7 @@ mod tests {
         assert_eq!(ui.command_slots_available(), 10);
         assert_eq!(engine.event_slots_available(), 10);
 
-        ui.send_command_lossy(EngineCommand::SetPlaying(true));
+        ui.send_command(EngineCommand::SetPlaying(true));
         engine.send_event_lossy(EngineEvent::Started);
 
         assert_eq!(ui.command_slots_available(), 9);

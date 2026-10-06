@@ -64,7 +64,8 @@ impl ClockDivision {
 ///
 /// # Parameters
 ///
-/// - **Tempo** (20-300 BPM): Speed of the clock.
+/// - **Tempo** (20-300 BPM): Speed of the clock. Also sets the patch tempo
+///   that tempo-synced modules, such as the Delay, follow.
 /// - **Gate Length** (1-99%): Duration of the gate high as percentage of beat.
 /// - **Division** (0-4): Note division (whole, half, quarter, eighth, sixteenth).
 /// - **Run** (toggle): Whether the clock is running.
@@ -233,6 +234,10 @@ impl DspModule for Clock {
     fn reset(&mut self) {
         self.phase = 0.0;
         self.prev_sync = false;
+    }
+
+    fn tempo_bpm(&self, params: &[f32]) -> Option<f32> {
+        params.get(Self::PARAM_TEMPO).copied()
     }
 }
 
