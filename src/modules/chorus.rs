@@ -1,11 +1,14 @@
 //! Stereo Chorus effect module.
 //!
-//! A multi-voice chorus/flanger with stereo spread.
-//! Uses LFO-modulated delay lines to create movement and width.
+//! A multi-voice chorus/flanger. Each channel runs through its own delay
+//! line, and every voice is a pair of LFO-swept taps, one per line. The
+//! right tap's LFO runs half a voice-spacing behind the left's, so even a
+//! mono input comes out wide, while a stereo input keeps its image.
 
 use crate::dsp::{
     module_trait::{DspModule, ModuleCategory, ModuleInfo},
     context::ProcessContext,
+    denormal::flush,
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
@@ -15,103 +18,122 @@ use crate::dsp::{
 
 use std::f32::consts::TAU;
 
-/// Maximum delay time in seconds (for buffer allocation).
-const MAX_DELAY_SECONDS: f32 = 0.05; // 50ms max for chorus
+/// Maximum delay time in seconds (for buffer allocation): the 30 ms top of
+/// the Delay knob swung by full depth, with room for the interpolator.
+const MAX_DELAY_SECONDS: f32 = 0.065;
 
-/// Single chorus voice with its own LFO phase.
-struct ChorusVoice {
-    /// Delay line buffer.
-    delay_line: Vec<f32>,
-    /// Current write position in circular buffer.
-    write_pos: usize,
-    /// LFO phase (0.0 to 1.0).
-    lfo_phase: f32,
-    /// Stereo pan position (-1 = left, +1 = right).
-    pan: f32,
+/// Number of voices the module can run.
+const VOICE_SLOTS: usize = 4;
+
+/// How long a voice takes to fade in or out, and to slide to its new LFO
+/// phase, when the Voices choice changes.
+const VOICE_GLIDE_MS: f32 = 30.0;
+
+/// How long the LFO takes to morph between sine and triangle.
+const SHAPE_GLIDE_MS: f32 = 20.0;
+
+/// LFO value at `phase` (0..1), morphed from sine (`triangle` = 0) to
+/// triangle (`triangle` = 1). Both start at 0 rising and peak at 1/4, so
+/// the morph never jumps.
+#[inline]
+fn lfo(phase: f32, triangle: f32) -> f32 {
+    let tri = 1.0 - 4.0 * ((phase + 0.25).fract() - 0.5).abs();
+    if triangle >= 1.0 {
+        return tri;
+    }
+    let sine = (phase * TAU).sin();
+    sine + triangle * (tri - sine)
 }
 
-impl ChorusVoice {
-    fn new(max_samples: usize, initial_phase: f32, pan: f32) -> Self {
+/// Where voice `slot` sits on the LFO cycle when `voices` are running:
+/// (left phase, right phase). Voices are spread evenly around the cycle,
+/// and each right tap sits halfway to the next voice: 180° for one voice,
+/// 90° for two. A smaller offset would leave the right channel sweeping
+/// the same set of phases as the left once there are four voices.
+#[inline]
+fn voice_phases(slot: usize, voices: usize) -> (f32, f32) {
+    let spacing = 1.0 / voices as f32;
+    let left = slot as f32 * spacing;
+    (left, left + 0.5 * spacing)
+}
+
+/// One channel's delay line.
+struct DelayLine {
+    /// Circular buffer.
+    buffer: Vec<f32>,
+    /// Current write position.
+    write_pos: usize,
+}
+
+impl DelayLine {
+    fn new(len: usize) -> Self {
         Self {
-            delay_line: vec![0.0; max_samples],
+            buffer: vec![0.0; len],
             write_pos: 0,
-            lfo_phase: initial_phase,
-            pan,
         }
     }
 
-    /// Process one sample through this voice.
-    /// Returns the delayed/modulated sample.
-    fn process(
-        &mut self,
-        input: f32,
-        rate_hz: f32,
-        depth: f32,
-        base_delay_samples: f32,
-        feedback: f32,
-        sample_rate: f32,
-    ) -> f32 {
-        // Advance LFO
-        self.lfo_phase += rate_hz / sample_rate;
-        if self.lfo_phase >= 1.0 {
-            self.lfo_phase -= 1.0;
-        }
-
-        // Calculate LFO value (sine wave, -1 to +1)
-        let lfo = (self.lfo_phase * TAU).sin();
-
-        // Calculate modulated delay in samples
-        // depth is 0-1, scales the modulation amount (up to +/- base_delay)
-        let modulation = lfo * depth * base_delay_samples;
-        let delay_samples = (base_delay_samples + modulation).max(1.0);
-
-        // Read from delay line with linear interpolation
-        let delayed = self.read_interpolated(delay_samples);
-
-        // Write input + feedback to delay line
-        let buffer_len = self.delay_line.len();
-        self.delay_line[self.write_pos] = input + delayed * feedback;
-
-        // Advance write position
-        self.write_pos = (self.write_pos + 1) % buffer_len;
-
-        delayed
-    }
-
-    /// Read from delay buffer with linear interpolation.
+    /// Read `delay_samples` behind the write head, with linear interpolation.
     #[inline]
-    fn read_interpolated(&self, delay_samples: f32) -> f32 {
-        let buffer_size = self.delay_line.len();
+    fn read(&self, delay_samples: f32) -> f32 {
+        let buffer_size = self.buffer.len();
+        let delay_samples = delay_samples.clamp(1.0, (buffer_size - 2) as f32);
         let int_delay = delay_samples as usize;
         let frac = delay_samples - int_delay as f32;
 
-        // Calculate read positions (circular buffer)
-        let read_pos_1 = if self.write_pos >= int_delay {
-            self.write_pos - int_delay
-        } else {
-            buffer_size - (int_delay - self.write_pos)
-        };
+        let read_pos_1 = (self.write_pos + buffer_size - int_delay) % buffer_size;
+        let read_pos_2 = if read_pos_1 == 0 { buffer_size - 1 } else { read_pos_1 - 1 };
 
-        let read_pos_2 = if read_pos_1 == 0 {
-            buffer_size - 1
-        } else {
-            read_pos_1 - 1
-        };
-
-        // Linear interpolation
-        let sample_1 = self.delay_line[read_pos_1];
-        let sample_2 = self.delay_line[read_pos_2];
+        let sample_1 = self.buffer[read_pos_1];
+        let sample_2 = self.buffer[read_pos_2];
         sample_1 + frac * (sample_2 - sample_1)
     }
 
+    #[inline]
+    fn write(&mut self, sample: f32) {
+        self.buffer[self.write_pos] = sample;
+        self.write_pos = (self.write_pos + 1) % self.buffer.len();
+    }
+
     fn reset(&mut self) {
-        self.delay_line.fill(0.0);
+        self.buffer.fill(0.0);
         self.write_pos = 0;
-        // Keep LFO phase for continuity
     }
 }
 
-/// Stereo chorus effect with multiple voices and stereo spread.
+/// A voice: how loud it is and where its two taps sit on the LFO cycle,
+/// all gliding so a change in the Voices choice never clicks.
+struct VoiceSlot {
+    gain: SmoothedValue,
+    phase_left: SmoothedValue,
+    phase_right: SmoothedValue,
+}
+
+impl VoiceSlot {
+    fn new(slot: usize, voices: usize, sample_rate: f32) -> Self {
+        let active = slot < voices;
+        let (left, right) = voice_phases(slot, voices.max(slot + 1));
+        Self {
+            gain: SmoothedValue::new(if active { 1.0 } else { 0.0 }, VOICE_GLIDE_MS, sample_rate),
+            phase_left: SmoothedValue::new(left, VOICE_GLIDE_MS, sample_rate),
+            phase_right: SmoothedValue::new(right, VOICE_GLIDE_MS, sample_rate),
+        }
+    }
+
+    fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.gain.set_sample_rate(sample_rate);
+        self.phase_left.set_sample_rate(sample_rate);
+        self.phase_right.set_sample_rate(sample_rate);
+    }
+
+    fn settle(&mut self) {
+        self.gain.reset(self.gain.target());
+        self.phase_left.reset(self.phase_left.target());
+        self.phase_right.reset(self.phase_right.target());
+    }
+}
+
+/// Stereo chorus effect with multiple voices.
 ///
 /// # Ports
 ///
@@ -130,11 +152,16 @@ impl ChorusVoice {
 /// - **Feedback** (-50% to +50%): For flanger effect.
 /// - **Voices** (1-4): Number of chorus voices.
 /// - **Mix** (0-100%): Wet/dry blend.
+/// - **Shape** (Sine/Tri): LFO waveform.
 pub struct Chorus {
     /// Sample rate.
     sample_rate: f32,
-    /// Chorus voices (up to 4).
-    voices: Vec<ChorusVoice>,
+    /// Left and right delay lines, shared by all voices.
+    lines: [DelayLine; 2],
+    /// Voice slots (up to 4).
+    voices: [VoiceSlot; VOICE_SLOTS],
+    /// Master LFO phase (0.0 to 1.0); each voice is an offset from it.
+    lfo_phase: f32,
     /// Smoothed rate parameter.
     rate_smooth: SmoothedValue,
     /// Smoothed depth parameter.
@@ -145,6 +172,8 @@ pub struct Chorus {
     feedback_smooth: SmoothedValue,
     /// Smoothed mix parameter.
     mix_smooth: SmoothedValue,
+    /// LFO shape, 0 = sine to 1 = triangle, smoothed so switching morphs.
+    shape_smooth: SmoothedValue,
     /// Port definitions.
     ports: Vec<PortDefinition>,
     /// Parameter definitions.
@@ -156,25 +185,19 @@ impl Chorus {
     pub fn new() -> Self {
         let sample_rate = 44100.0;
         let max_samples = (MAX_DELAY_SECONDS * sample_rate) as usize;
-
-        // Create 4 voices with different LFO phases and pan positions
-        // Phase spread: 0°, 90°, 180°, 270°
-        // Pan spread: L, R, L, R (alternating)
-        let voices = vec![
-            ChorusVoice::new(max_samples, 0.0, -1.0),   // Voice 1: phase 0°, left
-            ChorusVoice::new(max_samples, 0.25, 1.0),  // Voice 2: phase 90°, right
-            ChorusVoice::new(max_samples, 0.5, -0.5),  // Voice 3: phase 180°, left-center
-            ChorusVoice::new(max_samples, 0.75, 0.5),  // Voice 4: phase 270°, right-center
-        ];
+        let default_voices = 2;
 
         Self {
             sample_rate,
-            voices,
+            lines: [DelayLine::new(max_samples), DelayLine::new(max_samples)],
+            voices: std::array::from_fn(|slot| VoiceSlot::new(slot, default_voices, sample_rate)),
+            lfo_phase: 0.0,
             rate_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
             depth_smooth: SmoothedValue::with_default_smoothing(0.5, sample_rate),
             delay_smooth: SmoothedValue::new(10.0, 20.0, sample_rate), // 20ms smoothing for delay
             feedback_smooth: SmoothedValue::with_default_smoothing(0.0, sample_rate),
             mix_smooth: SmoothedValue::with_default_smoothing(0.5, sample_rate),
+            shape_smooth: SmoothedValue::new(0.0, SHAPE_GLIDE_MS, sample_rate),
             ports: vec![
                 // Input ports
                 PortDefinition::input_with_default("in_l", "In L", SignalType::Audio, 0.0),
@@ -218,6 +241,8 @@ impl Chorus {
                     1, // Default: 2 voices
                 ),
                 ParameterDefinition::normalized("mix", "Mix", 0.5),
+                // Appended, so patches saved before it existed keep the sine
+                ParameterDefinition::choice("shape", "Shape", &["Sine", "Tri"], 0),
             ],
         }
     }
@@ -237,6 +262,7 @@ impl Chorus {
     const PARAM_FEEDBACK: usize = 3;
     const PARAM_VOICES: usize = 4;
     const PARAM_MIX: usize = 5;
+    const PARAM_SHAPE: usize = 6;
 }
 
 impl Default for Chorus {
@@ -267,11 +293,12 @@ impl DspModule for Chorus {
     fn prepare(&mut self, sample_rate: f32, _max_block_size: usize) {
         self.sample_rate = sample_rate;
 
-        // Resize voice buffers if needed
+        // Resize the delay lines if needed
         let max_samples = (MAX_DELAY_SECONDS * sample_rate) as usize;
-        for voice in &mut self.voices {
-            if voice.delay_line.len() != max_samples {
-                voice.delay_line.resize(max_samples, 0.0);
+        for line in &mut self.lines {
+            if line.buffer.len() != max_samples {
+                line.buffer.resize(max_samples, 0.0);
+                line.reset();
             }
         }
 
@@ -281,6 +308,10 @@ impl DspModule for Chorus {
         self.delay_smooth.set_sample_rate(sample_rate);
         self.feedback_smooth.set_sample_rate(sample_rate);
         self.mix_smooth.set_sample_rate(sample_rate);
+        self.shape_smooth.set_sample_rate(sample_rate);
+        for voice in &mut self.voices {
+            voice.set_sample_rate(sample_rate);
+        }
     }
 
     fn process(
@@ -290,20 +321,28 @@ impl DspModule for Chorus {
         params: &[f32],
         context: &ProcessContext,
     ) {
-        // Get parameter values
-        let rate = params[Self::PARAM_RATE];
-        let depth = params[Self::PARAM_DEPTH];
-        let delay_ms = params[Self::PARAM_DELAY];
-        let feedback = params[Self::PARAM_FEEDBACK];
-        let num_voices = (params[Self::PARAM_VOICES] as usize + 1).clamp(1, 4);
-        let mix = params[Self::PARAM_MIX];
-
         // Set smoothing targets
-        self.rate_smooth.set_target(rate);
-        self.depth_smooth.set_target(depth);
-        self.delay_smooth.set_target(delay_ms);
-        self.feedback_smooth.set_target(feedback);
-        self.mix_smooth.set_target(mix);
+        self.rate_smooth.set_target(params[Self::PARAM_RATE]);
+        self.depth_smooth.set_target(params[Self::PARAM_DEPTH]);
+        self.delay_smooth.set_target(params[Self::PARAM_DELAY]);
+        self.feedback_smooth.set_target(params[Self::PARAM_FEEDBACK]);
+        self.mix_smooth.set_target(params[Self::PARAM_MIX]);
+        let triangle = params.get(Self::PARAM_SHAPE).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+        self.shape_smooth.set_target(triangle);
+
+        // Fade voices in and out, and slide the running ones to their
+        // places for the new count. A voice fading out keeps its phase.
+        let num_voices = (params[Self::PARAM_VOICES] as usize + 1).clamp(1, VOICE_SLOTS);
+        for (slot, voice) in self.voices.iter_mut().enumerate() {
+            if slot < num_voices {
+                let (left, right) = voice_phases(slot, num_voices);
+                voice.gain.set_target(1.0);
+                voice.phase_left.set_target(left);
+                voice.phase_right.set_target(right);
+            } else {
+                voice.gain.set_target(0.0);
+            }
+        }
 
         // Get input buffers
         let in_left = inputs.get(Self::PORT_IN_L);
@@ -317,8 +356,6 @@ impl DspModule for Chorus {
         let out_left = &mut out_left_slice[Self::PORT_OUT_L];
         let out_right = &mut out_right_slice[0];
 
-        let max_delay_samples = (MAX_DELAY_SECONDS * self.sample_rate) as f32;
-
         // Process each sample
         for i in 0..context.block_size {
             // Get smoothed values
@@ -327,6 +364,7 @@ impl DspModule for Chorus {
             let delay_ms_smoothed = self.delay_smooth.next();
             let feedback_smoothed = self.feedback_smooth.next();
             let mix_smoothed = self.mix_smooth.next();
+            let shape = self.shape_smooth.next();
 
             // Apply rate CV modulation (bipolar, +/- 50% range)
             let rate_mod = rate_cv
@@ -340,69 +378,69 @@ impl DspModule for Chorus {
                 .unwrap_or(0.0);
             let modulated_depth = (depth_smoothed + depth_mod * 0.5).clamp(0.0, 1.0);
 
-            // Convert delay to samples
-            let base_delay_samples = (delay_ms_smoothed * 0.001 * self.sample_rate)
-                .clamp(1.0, max_delay_samples - 1.0);
+            // Advance the master LFO
+            self.lfo_phase += modulated_rate / self.sample_rate;
+            if self.lfo_phase >= 1.0 {
+                self.lfo_phase -= 1.0;
+            }
+
+            // Base delay in samples, and how far the LFO swings it
+            let base_delay_samples = (delay_ms_smoothed * 0.001 * self.sample_rate).max(1.0);
+            let swing = modulated_depth * base_delay_samples;
 
             // Get dry input samples
             let dry_left = in_left
                 .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
                 .unwrap_or(0.0);
 
-            // Right channel normalled from left if not connected/silent
+            // Right channel normalled from left if not connected
             let dry_right = match in_right {
                 Some(buf) => buf.samples.get(i).copied().unwrap_or(0.0),
                 None => dry_left,
             };
 
-            // Process through active voices and accumulate wet signal
+            // Each voice taps both lines, each tap swept by its own LFO phase
             let mut wet_left = 0.0;
             let mut wet_right = 0.0;
+            let mut total_gain = 0.0;
 
-            for voice_idx in 0..num_voices {
-                let voice = &mut self.voices[voice_idx];
+            for voice in &mut self.voices {
+                let gain = voice.gain.next();
+                let phase_left = voice.phase_left.next();
+                let phase_right = voice.phase_right.next();
+                if gain == 0.0 {
+                    continue;
+                }
 
-                // Mix left and right inputs for this voice
-                let input = (dry_left + dry_right) * 0.5;
-
-                let wet = voice.process(
-                    input,
-                    modulated_rate,
-                    modulated_depth,
-                    base_delay_samples,
-                    feedback_smoothed,
-                    self.sample_rate,
-                );
-
-                // Apply stereo panning with equal power
-                let pan_norm = (voice.pan + 1.0) * 0.5; // Convert -1..1 to 0..1
-                let left_gain = (1.0 - pan_norm).sqrt();
-                let right_gain = pan_norm.sqrt();
-
-                wet_left += wet * left_gain;
-                wet_right += wet * right_gain;
+                let lfo_left = lfo((self.lfo_phase + phase_left).fract(), shape);
+                let lfo_right = lfo((self.lfo_phase + phase_right).fract(), shape);
+                wet_left += gain * self.lines[0].read(base_delay_samples + lfo_left * swing);
+                wet_right += gain * self.lines[1].read(base_delay_samples + lfo_right * swing);
+                total_gain += gain;
             }
 
-            // Normalize wet signal by number of voices
-            let voice_scale = 1.0 / (num_voices as f32).sqrt();
+            // Feed back the voices' average, so the loop gain never exceeds
+            // the Feedback knob however many voices run
+            let feedback = feedback_smoothed / total_gain;
+            self.lines[0].write(flush(dry_left + wet_left * feedback));
+            self.lines[1].write(flush(dry_right + wet_right * feedback));
+
+            // Voices add up like uncorrelated signals
+            let voice_scale = 1.0 / total_gain.sqrt();
             wet_left *= voice_scale;
             wet_right *= voice_scale;
 
             // Mix dry and wet signals
-            let out_l = dry_left * (1.0 - mix_smoothed) + wet_left * mix_smoothed;
-            let out_r = dry_right * (1.0 - mix_smoothed) + wet_right * mix_smoothed;
-
-            // Write outputs
-            out_left.samples[i] = out_l;
-            out_right.samples[i] = out_r;
+            out_left.samples[i] = dry_left * (1.0 - mix_smoothed) + wet_left * mix_smoothed;
+            out_right.samples[i] = dry_right * (1.0 - mix_smoothed) + wet_right * mix_smoothed;
         }
     }
 
     fn reset(&mut self) {
-        // Reset all voices
-        for voice in &mut self.voices {
-            voice.reset();
+        for line in &mut self.lines {
+            line.reset();
         }
+        // Keep LFO phase for continuity
 
         // Reset smoothed values
         self.rate_smooth.reset(self.rate_smooth.target());
@@ -410,6 +448,10 @@ impl DspModule for Chorus {
         self.delay_smooth.reset(self.delay_smooth.target());
         self.feedback_smooth.reset(self.feedback_smooth.target());
         self.mix_smooth.reset(self.mix_smooth.target());
+        self.shape_smooth.reset(self.shape_smooth.target());
+        for voice in &mut self.voices {
+            voice.settle();
+        }
     }
 }
 
@@ -464,13 +506,14 @@ mod tests {
         let chorus = Chorus::new();
         let params = chorus.parameters();
 
-        assert_eq!(params.len(), 6);
+        assert_eq!(params.len(), 7);
         assert_eq!(params[0].id, "rate");
         assert_eq!(params[1].id, "depth");
         assert_eq!(params[2].id, "delay");
         assert_eq!(params[3].id, "feedback");
         assert_eq!(params[4].id, "voices");
         assert_eq!(params[5].id, "mix");
+        assert_eq!(params[6].id, "shape");
     }
 
     #[test]
@@ -588,6 +631,149 @@ mod tests {
         );
     }
 
+    /// Plays `seconds` of audio through a chorus at 48 kHz in 256-sample
+    /// blocks. `left(n)` and `right(n)` give the input at sample n; `right`
+    /// None leaves In R unpatched. `params(block)` gives each block's knobs.
+    /// Returns (out L, out R).
+    fn play(
+        seconds: f32,
+        left: impl Fn(usize) -> f32,
+        right: Option<&dyn Fn(usize) -> f32>,
+        params: impl Fn(usize) -> [f32; 7],
+    ) -> (Vec<f32>, Vec<f32>) {
+        let block = 256;
+        let mut chorus = Chorus::new();
+        chorus.prepare(48000.0, block);
+        let ctx = ProcessContext::new(48000.0, block);
+        let cv = SignalBuffer::control(block);
+        let mut in_l = SignalBuffer::audio(block);
+        let mut in_r = match right {
+            Some(_) => SignalBuffer::audio(block),
+            None => SignalBuffer::unconnected(block, SignalType::Audio),
+        };
+        let mut outputs = vec![SignalBuffer::audio(block), SignalBuffer::audio(block)];
+        let (mut out_l, mut out_r) = (Vec::new(), Vec::new());
+
+        for b in 0..(seconds * 48000.0) as usize / block {
+            for j in 0..block {
+                let n = b * block + j;
+                in_l.samples[j] = left(n);
+                if let Some(right) = right {
+                    in_r.samples[j] = right(n);
+                }
+            }
+            chorus.process(&[&in_l, &in_r, &cv, &cv], &mut outputs, &params(b), &ctx);
+            out_l.extend_from_slice(&outputs[0].samples);
+            out_r.extend_from_slice(&outputs[1].samples);
+        }
+        (out_l, out_r)
+    }
+
+    fn sine(freq: f32) -> impl Fn(usize) -> f32 {
+        move |n| 0.5 * (TAU * freq * n as f32 / 48000.0).sin()
+    }
+
+    fn peak(x: &[f32]) -> f32 {
+        x.iter().fold(0.0f32, |m, s| m.max(s.abs()))
+    }
+
+    #[test]
+    fn test_chorus_keeps_left_and_right_apart() {
+        // A tone on the left only, silence patched into the right, fully
+        // wet with feedback: nothing of the left may reach Out R
+        let silence = |_| 0.0;
+        for voices in 0..4 {
+            let (out_l, out_r) =
+                play(0.5, sine(440.0), Some(&silence), |_| [1.0, 0.8, 10.0, 0.4, voices as f32, 1.0, 0.0]);
+            assert!(peak(&out_l) > 0.2, "{} voices: left went quiet", voices + 1);
+            assert_eq!(peak(&out_r), 0.0, "{} voices: left leaked into the right", voices + 1);
+        }
+    }
+
+    #[test]
+    fn test_chorus_mono_input_comes_out_wide() {
+        // In R unpatched: In L is normalled across, and the right taps'
+        // LFO phases still make the two sides differ, at every voice count
+        for voices in 0..4 {
+            let (out_l, out_r) = play(1.0, sine(440.0), None, |_| [1.0, 0.8, 10.0, 0.0, voices as f32, 1.0, 0.0]);
+            let tail = out_l.len() / 2;
+            let side: Vec<f32> = out_l[tail..].iter().zip(&out_r[tail..]).map(|(l, r)| l - r).collect();
+            assert!(
+                peak(&side) > 0.1 * peak(&out_l[tail..]),
+                "{} voices: L and R nearly identical (side peak {})",
+                voices + 1,
+                peak(&side)
+            );
+        }
+    }
+
+    #[test]
+    fn test_lfo_shapes() {
+        for (phase, value) in [(0.0, 0.0), (0.25, 1.0), (0.5, 0.0), (0.75, -1.0)] {
+            assert!((lfo(phase, 0.0) - value).abs() < 1e-6);
+            assert!((lfo(phase, 1.0) - value).abs() < 1e-6);
+        }
+        // Halfway up, the triangle is a straight line, the sine already bowed
+        assert!((lfo(0.125, 1.0) - 0.5).abs() < 1e-6);
+        assert!((lfo(0.125, 0.0) - std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6);
+        assert!((lfo(0.125, 0.5) - (0.5 + std::f32::consts::FRAC_1_SQRT_2) / 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_triangle_lfo_changes_the_sound() {
+        let params = |shape: f32| move |_| [2.0, 1.0, 10.0, 0.0, 0.0, 1.0, shape];
+        let (sine_out, _) = play(0.5, sine(440.0), None, params(0.0));
+        let (tri_out, _) = play(0.5, sine(440.0), None, params(1.0));
+        let diff: Vec<f32> = sine_out.iter().zip(&tri_out).map(|(a, b)| a - b).collect();
+        assert!(peak(&diff) > 0.05);
+    }
+
+    /// Largest sample-to-sample step: a click shows up as a jump far
+    /// bigger than anything the chorused tone makes on its own.
+    fn largest_step(x: &[f32]) -> f32 {
+        x.windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()))
+    }
+
+    #[test]
+    fn test_changing_voices_or_shape_does_not_click() {
+        // Steady for 0.5 s, then a switch every 0.25 s
+        let switches = |block: usize| {
+            let step = (block * 256) / 12000;
+            let voices = [1.0, 3.0, 0.0, 2.0, 3.0, 1.0][step.min(5)];
+            let shape = [0.0, 0.0, 1.0, 1.0, 0.0, 0.0][step.min(5)];
+            [1.5, 0.6, 12.0, 0.3, voices, 1.0, shape]
+        };
+        let (out_l, out_r) = play(1.5, sine(220.0), None, switches);
+        let steady = 12000..24000;
+        let ceiling_l = 1.5 * largest_step(&out_l[steady.clone()]);
+        let ceiling_r = 1.5 * largest_step(&out_r[steady]);
+        assert!(largest_step(&out_l[24000..]) < ceiling_l, "left clicked");
+        assert!(largest_step(&out_r[24000..]) < ceiling_r, "right clicked");
+    }
+
+    #[test]
+    fn test_full_depth_at_longest_delay_stays_in_the_buffer() {
+        // 30 ms swung by full depth plus depth CV reaches 60 ms
+        let mut chorus = Chorus::new();
+        chorus.prepare(48000.0, 256);
+        let ctx = ProcessContext::new(48000.0, 256);
+        let mut input = SignalBuffer::audio(256);
+        input.fill(0.5);
+        let mut depth_cv = SignalBuffer::control(256);
+        depth_cv.fill(1.0);
+        let rate_cv = SignalBuffer::control(256);
+        let mut outputs = vec![SignalBuffer::audio(256), SignalBuffer::audio(256)];
+        for _ in 0..400 {
+            chorus.process(
+                &[&input, &input, &rate_cv, &depth_cv],
+                &mut outputs,
+                &[10.0, 1.0, 30.0, 0.5, 3.0, 1.0, 1.0],
+                &ctx,
+            );
+            assert!(outputs.iter().all(|o| o.samples.iter().all(|s| s.is_finite())));
+        }
+    }
+
     #[test]
     fn test_chorus_is_send() {
         fn assert_send<T: Send>() {}
@@ -616,6 +802,6 @@ mod tests {
         assert_eq!(module.info().id, "fx.chorus");
         assert_eq!(module.info().name, "Chorus");
         assert_eq!(module.ports().len(), 6);
-        assert_eq!(module.parameters().len(), 6);
+        assert_eq!(module.parameters().len(), 7);
     }
 }

@@ -29,22 +29,42 @@ The Chorus effect creates a thicker, richer sound by layering slightly detuned a
 
 ## Parameters
 
-| Knob | Range | Default | Description |
-|------|-------|---------|-------------|
-| **Rate** | 0.1 Hz - 5 Hz | 0.5 Hz | Speed of modulation LFO |
+| Control | Range | Default | Description |
+|---------|-------|---------|-------------|
+| **Rate** | 0.1 Hz - 10 Hz | 1 Hz | Speed of modulation LFO |
 | **Depth** | 0.0 - 1.0 | 0.5 | Amount of delay modulation |
 | **Delay** | 1 ms - 30 ms | 10 ms | Base delay time |
-| **Voices** | 1 - 4 | 2 | Number of chorus voices |
-| **Stereo** | 0.0 - 1.0 | 0.8 | Stereo spread of voices |
+| **Feedback** | -0.5 - +0.5 | 0 | Feeds the voices back into the delay lines, for flanging |
+| **Voices** | 1 - 4 | 2 | Number of chorus voices (inline select) |
 | **Mix** | 0.0 - 1.0 | 0.5 | Dry/wet balance |
+| **Shape** | Sine / Tri | Sine | LFO waveform (inline select) |
 
 ## How It Works
 
-1. Input signal is copied to multiple delay lines
-2. Each delay line has slightly different base delay
-3. An internal LFO modulates each delay time
+1. Each channel runs through its own delay line: left stays left, right stays right
+2. Every voice reads both lines through a pair of taps, each tap swept by the LFO
+3. The voices are spread evenly around the LFO cycle, so they never move in step
 4. The varying delays create pitch shifts and phase differences
 5. Mixed together, this creates the characteristic "ensemble" sound
+
+### True Stereo
+
+A stereo source keeps its image: nothing patched into **In L** ever reaches **Out R**.
+With **In R** unpatched, In L feeds both sides, and the chorus makes the width itself.
+Each right tap's LFO sits halfway between two left taps: 180° away with one voice,
+90° with two. The two sides then always pitch-bend in different directions.
+
+Changing **Voices** fades voices in and out and slides the rest to their new places
+on the cycle, so it never clicks.
+
+### LFO Shape
+
+| Shape | Character |
+|-------|-----------|
+| **Sine** | Smooth and vocal: the pitch eases in and out of each bend |
+| **Tri** | The delay sweeps at a constant speed, so each half-cycle holds one steady detune. Glassier, closer to the classic bucket-brigade choruses |
+
+Switching shape morphs between the two over 20 ms.
 
 ### The Chorus Sound
 
@@ -90,7 +110,6 @@ Rate: 0.8 Hz
 Depth: 0.6
 Delay: 15 ms
 Voices: 4
-Stereo: 1.0
 Mix: 0.6
 ```
 
@@ -129,7 +148,6 @@ For organ-like rotation:
 Rate: Slow: 0.7 Hz / Fast: 6 Hz (modulate via Rate CV)
 Depth: 0.7
 Voices: 2
-Stereo: 1.0
 ```
 
 Switch between slow and fast for classic organ effect.
@@ -139,12 +157,11 @@ Switch between slow and fast for classic organ effect.
 Use chorus to widen a mono source:
 
 ```
-[Mono Signal] ──> [Chorus] ──> [Stereo Output]
-                  Stereo: 1.0
+[Mono Signal] ──> [Chorus In L] ──> [Out L / Out R] ──> [Stereo Output]
                   Mix: 0.4
 ```
 
-The phase differences create stereo spread.
+Leave In R unpatched: the left and right taps sweep in opposite directions, creating stereo spread.
 
 ### Clean Guitar Chorus
 
@@ -185,7 +202,7 @@ The chorus speed itself changes over time.
 
 | Voices | Character |
 |--------|-----------|
-| 1 | Simple, flanger-like |
+| 1 | Simple, flanger-like; the sides sweep in opposite directions |
 | 2 | Classic stereo chorus |
 | 3 | Richer, more complex |
 | 4 | Full ensemble, thick |

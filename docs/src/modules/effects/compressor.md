@@ -27,23 +27,40 @@ The Compressor reduces the dynamic range of a signal by attenuating loud portion
 
 ## Parameters
 
-| Knob | Range | Default | Description |
-|------|-------|---------|-------------|
+| Control | Range | Default | Description |
+|---------|-------|---------|-------------|
 | **Threshold** | -60 dB to 0 dB | -20 dB | Level above which compression begins |
-| **Ratio** | 1:1 to ∞:1 | 4:1 | How much gain reduction is applied |
+| **Ratio** | 1:1 to 20:1 | 4:1 | How much gain reduction is applied |
 | **Attack** | 0.1 ms - 100 ms | 10 ms | How quickly compression engages |
 | **Release** | 10 ms - 1000 ms | 100 ms | How quickly compression releases |
-| **Makeup Gain** | 0 dB to +24 dB | 0 dB | Level boost after compression |
-| **Knee** | Hard/Soft | Soft | Gradual or abrupt compression onset |
+| **Knee** | 0 dB to 12 dB | 6 dB | Width of the soft knee (0 = hard knee) |
+| **Makeup** | 0 dB to +24 dB | 0 dB | Level boost after compression |
+| **Mix** | 0% to 100% | 100% | Blend of compressed and dry (parallel compression) |
+| **Detector** | Peak / RMS | Peak | What the level detector measures (inline select) |
 
 ## How It Works
 
-1. Signal level is measured (or sidechain input if connected)
-2. When level exceeds **Threshold**, compression begins
+1. The level of the input is measured, or of the sidechain if one is connected
+2. When the level exceeds **Threshold**, compression begins
 3. **Ratio** determines how much signals above threshold are reduced
 4. **Attack** controls how fast compression responds to transients
 5. **Release** controls how fast compression recovers
-6. **Makeup Gain** compensates for level reduction
+6. **Makeup** compensates for level reduction
+
+Attack and release shape the *gain reduction*, in dB, rather than the measured
+level. So a steady tone above threshold comes out exactly where the ratio says,
+however fast or slow the timing knobs are set. Attack and release only decide how
+it gets there.
+
+### Peak vs RMS
+
+| Detector | Measures | Character |
+|----------|----------|-----------|
+| **Peak** | Every peak of the waveform | Catches transients; keeps peaks in check. Good for drums and for limiting |
+| **RMS** | Average power over ~20 ms | Responds to loudness, as the ear does. Smoother, gentler leveling for buses, pads and vocals |
+
+A sine reads 3 dB lower on RMS than on Peak, so the same settings compress it a
+little less.
 
 ### Understanding Ratio
 
@@ -71,7 +88,8 @@ Threshold: -18 dB
 Ratio: 2:1
 Attack: 20 ms
 Release: 200 ms
-Knee: Soft
+Knee: 6 dB
+Detector: RMS
 ```
 
 ### Punchy Drums
@@ -107,7 +125,8 @@ Threshold: -20 dB
 Ratio: 3:1
 Attack: 10 ms
 Release: 100 ms
-Knee: Soft
+Knee: 6 dB
+Detector: RMS
 ```
 
 ### Synth Pad Sustain
@@ -192,19 +211,20 @@ Could modulate filter cutoff, pan, effects send, etc.
 | 150-400 ms | Slow, smooth, sustained |
 | 400+ ms | Very slow, sustained compression |
 
-## Knee Types
+## Knee
 
-### Hard Knee
+### Hard Knee (0 dB)
 Compression applies suddenly at threshold. More obvious compression, more aggressive.
 
-### Soft Knee
-Compression gradually increases around threshold. More transparent, natural sound.
+### Soft Knee (up to 12 dB)
+Compression eases in across a band centred on the threshold: with a 6 dB knee it
+starts 3 dB below and reaches the full ratio 3 dB above. More transparent and natural.
 
 ## Gain Staging
 
 1. Set Threshold to catch peaks you want to compress
 2. Adjust Ratio for desired amount
-3. Use Makeup Gain to match bypassed level
+3. Use Makeup to match bypassed level
 4. A/B compare with bypass to verify
 
 ## Connection Examples
@@ -251,7 +271,7 @@ Music ducks when voice is present.
 ## Tips
 
 1. **Don't overcompress**: 2-6 dB of gain reduction is usually enough
-2. **Match levels**: Use Makeup Gain to fairly compare compressed vs original
+2. **Match levels**: Use Makeup to fairly compare compressed vs original
 3. **Attack is key**: It determines if transients punch through
 4. **Release affects groove**: Too fast causes pumping, too slow causes sustained squash
 5. **Use your ears**: Watch meters but trust what sounds good

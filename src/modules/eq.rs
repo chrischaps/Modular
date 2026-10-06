@@ -16,6 +16,11 @@ use crate::dsp::{
     ParameterDisplay, SignalType,
 };
 
+/// Samples between coefficient updates while a band's knobs glide. Three
+/// biquads' worth of trig every sample was most of the EQ's cost; at 16 the
+/// steps are 0.3 ms apart, far finer than the 10 ms smoothing they follow.
+const COEFF_INTERVAL: usize = 16;
+
 /// Biquad filter coefficients.
 #[derive(Clone, Copy, Default)]
 struct BiquadCoeffs {
@@ -95,6 +100,18 @@ pub struct ParametricEq {
     mid_state: BiquadState,
     /// High shelf filter state.
     high_state: BiquadState,
+    /// Set when the coefficients no longer match the knobs (new sample
+    /// rate, reset); forces all three bands to be recomputed.
+    coeffs_dirty: bool,
+    /// Whether each band's knobs were gliding at the last update, so the
+    /// update after a glide ends lands the coefficients on its target.
+    low_moving: bool,
+    mid_moving: bool,
+    high_moving: bool,
+    /// Output gain in dB and as a factor, cached so the factor is only
+    /// recomputed while the Output knob moves.
+    output_gain_db: f32,
+    output_gain: f32,
     /// Smoothed low frequency.
     low_freq_smooth: SmoothedValue,
     /// Smoothed low gain.
@@ -130,6 +147,12 @@ impl ParametricEq {
             low_state: BiquadState::default(),
             mid_state: BiquadState::default(),
             high_state: BiquadState::default(),
+            coeffs_dirty: true,
+            low_moving: false,
+            mid_moving: false,
+            high_moving: false,
+            output_gain_db: 0.0,
+            output_gain: 1.0,
             low_freq_smooth: SmoothedValue::with_default_smoothing(100.0, sample_rate),
             low_gain_smooth: SmoothedValue::with_default_smoothing(0.0, sample_rate),
             mid_freq_smooth: SmoothedValue::with_default_smoothing(1000.0, sample_rate),
@@ -343,6 +366,40 @@ impl ParametricEq {
             a2: a2 / a0,
         }
     }
+
+    /// Recompute the coefficients of the bands whose knobs are gliding,
+    /// plus once more for a band whose glide just ended. A band at rest
+    /// keeps its coefficients and costs nothing here.
+    fn update_coeffs(&mut self) {
+        let dirty = self.coeffs_dirty;
+
+        let low = self.low_freq_smooth.is_smoothing() || self.low_gain_smooth.is_smoothing();
+        if dirty || low || self.low_moving {
+            self.low_coeffs = self.calc_low_shelf(self.low_freq_smooth.current(), self.low_gain_smooth.current());
+        }
+        self.low_moving = low;
+
+        let mid = self.mid_freq_smooth.is_smoothing()
+            || self.mid_gain_smooth.is_smoothing()
+            || self.mid_q_smooth.is_smoothing();
+        if dirty || mid || self.mid_moving {
+            self.mid_coeffs = self.calc_peaking(
+                self.mid_freq_smooth.current(),
+                self.mid_gain_smooth.current(),
+                self.mid_q_smooth.current(),
+            );
+        }
+        self.mid_moving = mid;
+
+        let high = self.high_freq_smooth.is_smoothing() || self.high_gain_smooth.is_smoothing();
+        if dirty || high || self.high_moving {
+            self.high_coeffs =
+                self.calc_high_shelf(self.high_freq_smooth.current(), self.high_gain_smooth.current());
+        }
+        self.high_moving = high;
+
+        self.coeffs_dirty = false;
+    }
 }
 
 impl Default for ParametricEq {
@@ -382,6 +439,9 @@ impl DspModule for ParametricEq {
         self.high_freq_smooth.set_sample_rate(sample_rate);
         self.high_gain_smooth.set_sample_rate(sample_rate);
         self.output_gain_smooth.set_sample_rate(sample_rate);
+
+        // The coefficients depend on the sample rate
+        self.coeffs_dirty = true;
     }
 
     fn process(
@@ -405,39 +465,42 @@ impl DspModule for ParametricEq {
         let audio_in = inputs.get(Self::PORT_IN);
         let out = &mut outputs[Self::PORT_OUT];
 
-        // Process each sample
-        for i in 0..context.block_size {
-            // Get smoothed parameter values
-            let low_freq = self.low_freq_smooth.next();
-            let low_gain = self.low_gain_smooth.next();
-            let mid_freq = self.mid_freq_smooth.next();
-            let mid_gain = self.mid_gain_smooth.next();
-            let mid_q = self.mid_q_smooth.next();
-            let high_freq = self.high_freq_smooth.next();
-            let high_gain = self.high_gain_smooth.next();
-            let output_gain_db = self.output_gain_smooth.next();
+        // Work in short runs: coefficients are brought up to date at the start
+        // of each run, the knobs glide sample by sample within it
+        let mut start = 0;
+        while start < context.block_size {
+            let end = (start + COEFF_INTERVAL).min(context.block_size);
+            self.update_coeffs();
 
-            // Update filter coefficients (done per-sample for smooth changes)
-            self.low_coeffs = self.calc_low_shelf(low_freq, low_gain);
-            self.mid_coeffs = self.calc_peaking(mid_freq, mid_gain, mid_q);
-            self.high_coeffs = self.calc_high_shelf(high_freq, high_gain);
+            for i in start..end {
+                self.low_freq_smooth.next();
+                self.low_gain_smooth.next();
+                self.mid_freq_smooth.next();
+                self.mid_gain_smooth.next();
+                self.mid_q_smooth.next();
+                self.high_freq_smooth.next();
+                self.high_gain_smooth.next();
 
-            // Get input sample
-            let input = audio_in
-                .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
-                .unwrap_or(0.0);
+                let output_gain_db = self.output_gain_smooth.next();
+                if output_gain_db != self.output_gain_db {
+                    self.output_gain_db = output_gain_db;
+                    self.output_gain = Self::db_to_linear(output_gain_db);
+                }
 
-            // Cascade through all three filter bands
-            let after_low = self.low_state.process(input, &self.low_coeffs);
-            let after_mid = self.mid_state.process(after_low, &self.mid_coeffs);
-            let after_high = self.high_state.process(after_mid, &self.high_coeffs);
+                // Get input sample
+                let input = audio_in
+                    .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
+                    .unwrap_or(0.0);
 
-            // Apply output gain
-            let output_gain = Self::db_to_linear(output_gain_db);
-            let output = after_high * output_gain;
+                // Cascade through all three filter bands
+                let after_low = self.low_state.process(input, &self.low_coeffs);
+                let after_mid = self.mid_state.process(after_low, &self.mid_coeffs);
+                let after_high = self.high_state.process(after_mid, &self.high_coeffs);
 
-            // Write output
-            out.samples[i] = output;
+                out.samples[i] = after_high * self.output_gain;
+            }
+
+            start = end;
         }
     }
 
@@ -456,6 +519,9 @@ impl DspModule for ParametricEq {
         self.high_freq_smooth.reset(self.high_freq_smooth.target());
         self.high_gain_smooth.reset(self.high_gain_smooth.target());
         self.output_gain_smooth.reset(self.output_gain_smooth.target());
+
+        // The knobs jumped to their targets
+        self.coeffs_dirty = true;
     }
 }
 
@@ -750,6 +816,133 @@ mod tests {
     fn test_eq_default() {
         let eq = ParametricEq::default();
         assert_eq!(eq.info().id, "fx.eq");
+    }
+
+    fn coeffs_eq(a: &BiquadCoeffs, b: &BiquadCoeffs) -> bool {
+        [a.b0, a.b1, a.b2, a.a1, a.a2] == [b.b0, b.b1, b.b2, b.a1, b.a2]
+    }
+
+    #[test]
+    fn test_eq_coefficients_land_on_the_knobs() {
+        let mut eq = ParametricEq::new();
+        eq.prepare(48000.0, 100);
+        let input = SignalBuffer::audio(100);
+        let mut outputs = vec![SignalBuffer::audio(100)];
+        let ctx = ProcessContext::new(48000.0, 100);
+
+        // A first set of knobs, then a turn of every band; odd block size so
+        // the 16-sample runs don't line up with blocks
+        for params in [
+            [80.0, 6.0, 700.0, -4.0, 0.7, 6000.0, 3.0, 0.0],
+            [250.0, -9.0, 3000.0, 10.0, 4.0, 12000.0, -6.0, 0.0],
+        ] {
+            for _ in 0..100 {
+                eq.process(&[&input], &mut outputs, &params, &ctx);
+            }
+            assert!(coeffs_eq(&eq.low_coeffs, &eq.calc_low_shelf(params[0], params[1])));
+            assert!(coeffs_eq(&eq.mid_coeffs, &eq.calc_peaking(params[2], params[3], params[4])));
+            assert!(coeffs_eq(&eq.high_coeffs, &eq.calc_high_shelf(params[5], params[6])));
+        }
+    }
+
+    #[test]
+    fn test_eq_new_sample_rate_recomputes_coefficients() {
+        let mut eq = ParametricEq::new();
+        let params = [100.0, 6.0, 1000.0, 6.0, 1.0, 8000.0, 6.0, 0.0];
+        let ctx = ProcessContext::new(44100.0, 256);
+        let input = SignalBuffer::audio(256);
+        let mut outputs = vec![SignalBuffer::audio(256)];
+        eq.prepare(44100.0, 256);
+        for _ in 0..50 {
+            eq.process(&[&input], &mut outputs, &params, &ctx);
+        }
+
+        // The knobs haven't moved, but every band's coefficients must follow the rate
+        eq.prepare(96000.0, 256);
+        eq.process(&[&input], &mut outputs, &params, &ProcessContext::new(96000.0, 256));
+        assert!(coeffs_eq(&eq.low_coeffs, &eq.calc_low_shelf(100.0, 6.0)));
+        assert!(coeffs_eq(&eq.mid_coeffs, &eq.calc_peaking(1000.0, 6.0, 1.0)));
+        assert!(coeffs_eq(&eq.high_coeffs, &eq.calc_high_shelf(8000.0, 6.0)));
+    }
+
+    #[test]
+    fn test_eq_control_rate_coefficients_match_per_sample_ones() {
+        // The old EQ recomputed every band every sample. Sweep all three
+        // bands at once over a saw and compare against that reference.
+        let sample_rate = 48000.0;
+        let block = 128;
+        let mut eq = ParametricEq::new();
+        eq.prepare(sample_rate, block);
+        let mut reference = ParametricEq::new();
+        reference.prepare(sample_rate, block);
+
+        let ctx = ProcessContext::new(sample_rate, block);
+        let mut input = SignalBuffer::audio(block);
+        let mut outputs = vec![SignalBuffer::audio(block)];
+        let mut phase = 0.0f32;
+        let mut error_energy = 0.0f64;
+        let mut signal_energy = 0.0f64;
+
+        for b in 0..400 {
+            // Jump the knobs every 40 ms so they are always gliding
+            let t = (b / 15) as f32;
+            let params = [
+                60.0 + 200.0 * (t * 1.3).sin().abs(),
+                12.0 * (t * 0.7).sin(),
+                300.0 + 4000.0 * (t * 0.9).sin().abs(),
+                12.0 * (t * 1.1).cos(),
+                0.5 + 3.0 * (t * 0.5).sin().abs(),
+                3000.0 + 10000.0 * (t * 0.4).cos().abs(),
+                -12.0 * (t * 0.8).sin(),
+                0.0,
+            ];
+            for s in input.samples.iter_mut() {
+                *s = 2.0 * phase - 1.0;
+                phase = (phase + 110.0 / sample_rate).fract();
+            }
+
+            eq.process(&[&input], &mut outputs, &params, &ctx);
+
+            // Reference: per-sample coefficients through the same smoothers
+            for (i, s) in input.samples.iter().enumerate() {
+                let r = &mut reference;
+                r.low_freq_smooth.set_target(params[0]);
+                r.low_gain_smooth.set_target(params[1]);
+                r.mid_freq_smooth.set_target(params[2]);
+                r.mid_gain_smooth.set_target(params[3]);
+                r.mid_q_smooth.set_target(params[4]);
+                r.high_freq_smooth.set_target(params[5]);
+                r.high_gain_smooth.set_target(params[6]);
+                // (from the knobs' values before this sample's step, as the module does)
+                let (lf, lg) = (r.low_freq_smooth.current(), r.low_gain_smooth.current());
+                let (mf, mg, mq) = (r.mid_freq_smooth.current(), r.mid_gain_smooth.current(), r.mid_q_smooth.current());
+                let (hf, hg) = (r.high_freq_smooth.current(), r.high_gain_smooth.current());
+                r.low_coeffs = r.calc_low_shelf(lf, lg);
+                r.mid_coeffs = r.calc_peaking(mf, mg, mq);
+                r.high_coeffs = r.calc_high_shelf(hf, hg);
+                for smoother in [
+                    &mut r.low_freq_smooth,
+                    &mut r.low_gain_smooth,
+                    &mut r.mid_freq_smooth,
+                    &mut r.mid_gain_smooth,
+                    &mut r.mid_q_smooth,
+                    &mut r.high_freq_smooth,
+                    &mut r.high_gain_smooth,
+                ] {
+                    smoother.next();
+                }
+                let y = r.low_state.process(*s, &r.low_coeffs);
+                let y = r.mid_state.process(y, &r.mid_coeffs);
+                let y = r.high_state.process(y, &r.high_coeffs);
+                error_energy += ((y - outputs[0].samples[i]) as f64).powi(2);
+                signal_energy += (y as f64).powi(2);
+            }
+        }
+
+        // Every knob jumping up to 24 dB at once is far rougher than a hand on a
+        // knob; the stepped glide still stays some 45 dB under the signal
+        let error_db = 10.0 * (error_energy / signal_energy).log10();
+        assert!(error_db < -40.0, "control-rate EQ strays {:.1} dB from per-sample", error_db);
     }
 
     #[test]

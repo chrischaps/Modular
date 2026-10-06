@@ -325,6 +325,7 @@ in   Delay              Control  ConstantOnly         inline=false num 10 [1..30
 in   Feedback           Control  ConstantOnly         inline=false num 0 [-0.5..0.5]
 in   Voices             Control  ConstantOnly         inline=true  select 1 ["1", "2", "3", "4"] "Voices"
 in   Mix                Control  ConstantOnly         inline=false num 0.5 [0..1] %
+in   Shape              Control  ConstantOnly         inline=true  select 0 ["Sine", "Tri"] "Shape"
 out  Out L              Audio
 out  Out R              Audio
 knob Rate               "Rate" Exposed
@@ -343,6 +344,7 @@ in   Release            Control  ConstantOnly         inline=false num 100 [10..
 in   Knee               Control  ConstantOnly         inline=false num 6 [0..12] dB
 in   Makeup             Control  ConstantOnly         inline=false num 0 [0..24] dB
 in   Mix                Control  ConstantOnly         inline=false num 1 [0..1] %
+in   Detector           Control  ConstantOnly         inline=true  select 0 ["Peak", "RMS"] "Detector"
 out  Out                Audio
 out  GR                 Control
 knob Threshold          "Thresh" KnobOnly

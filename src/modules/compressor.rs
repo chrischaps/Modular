@@ -1,12 +1,18 @@
 //! Dynamics Compressor effect module.
 //!
-//! A dynamics compressor for controlling dynamic range with adjustable
-//! threshold, ratio, attack, release, knee, makeup gain, and mix controls.
+//! A feed-forward compressor: a level detector (peak or RMS) feeds a
+//! soft-knee gain computer, and the gain reduction it asks for is smoothed
+//! in dB by the attack and release times. Smoothing the reduction rather
+//! than the level keeps the curve honest: a steady tone above threshold
+//! comes out where the ratio says, whatever the attack and release.
 //! Includes optional sidechain input and gain reduction output for metering.
+
+use std::f32::consts::LN_10;
 
 use crate::dsp::{
     module_trait::{DspModule, ModuleCategory, ModuleInfo},
     context::ProcessContext,
+    denormal::flush,
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
@@ -14,51 +20,50 @@ use crate::dsp::{
     connected_input, ParameterDisplay, SignalType,
 };
 
-/// Envelope follower for level detection.
-struct EnvelopeFollower {
-    /// Current envelope level.
-    level: f32,
-    /// Sample rate for coefficient calculation.
-    sample_rate: f32,
+/// `20·log10(x) == DB_PER_NEPER · ln(x)`: one `ln` instead of a `log10`.
+const DB_PER_NEPER: f32 = 20.0 / LN_10;
+
+/// `10^(db/20) == exp(db · NEPER_PER_DB)`: one `exp` instead of a `powf`.
+const NEPER_PER_DB: f32 = LN_10 / 20.0;
+
+/// Averaging time of the RMS detector. Long enough to hold steady on a
+/// 50 Hz bass note, short enough to catch a drum.
+const RMS_WINDOW_MS: f32 = 20.0;
+
+/// Gain reduction below this many dB is called none, so a compressor
+/// at rest does no transcendental math at all.
+const GR_FLOOR_DB: f32 = 1e-5;
+
+/// One-pole coefficient for a time constant in milliseconds.
+#[inline]
+fn time_coeff(ms: f32, sample_rate: f32) -> f32 {
+    (-1.0 / (ms * 0.001 * sample_rate)).exp()
 }
 
-impl EnvelopeFollower {
-    fn new(sample_rate: f32) -> Self {
-        Self {
-            level: 0.0,
-            sample_rate,
-        }
+/// A one-pole coefficient cached against the time it was computed for,
+/// so the `exp` runs only while the knob is moving.
+struct CachedCoeff {
+    ms: f32,
+    coeff: f32,
+}
+
+impl CachedCoeff {
+    fn new() -> Self {
+        // NaN never equals a real time, so the first lookup computes
+        Self { ms: f32::NAN, coeff: 0.0 }
     }
 
-    /// Process a sample and return the envelope level.
-    /// Uses peak detection with separate attack/release times.
     #[inline]
-    fn process(&mut self, input: f32, attack_ms: f32, release_ms: f32) -> f32 {
-        let input_abs = input.abs();
-
-        // Calculate coefficients from time constants
-        // Using standard exponential envelope follower formula
-        let attack_coeff = (-1.0 / (attack_ms * 0.001 * self.sample_rate)).exp();
-        let release_coeff = (-1.0 / (release_ms * 0.001 * self.sample_rate)).exp();
-
-        // Choose coefficient based on whether signal is above or below current level
-        if input_abs > self.level {
-            // Attack: input is louder than current level
-            self.level = attack_coeff * self.level + (1.0 - attack_coeff) * input_abs;
-        } else {
-            // Release: input is quieter than current level
-            self.level = release_coeff * self.level + (1.0 - release_coeff) * input_abs;
+    fn get(&mut self, ms: f32, sample_rate: f32) -> f32 {
+        if ms != self.ms {
+            self.ms = ms;
+            self.coeff = time_coeff(ms, sample_rate);
         }
-
-        self.level
+        self.coeff
     }
 
-    fn reset(&mut self) {
-        self.level = 0.0;
-    }
-
-    fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.sample_rate = sample_rate;
+    fn invalidate(&mut self) {
+        self.ms = f32::NAN;
     }
 }
 
@@ -80,11 +85,25 @@ impl EnvelopeFollower {
 /// - **Knee** (0dB to 12dB): Soft/hard knee width.
 /// - **Makeup** (0dB to +24dB): Output level boost.
 /// - **Mix** (0% to 100%): Parallel compression blend.
+/// - **Detector** (Peak/RMS): What the level detector measures.
 pub struct Compressor {
     /// Sample rate.
     sample_rate: f32,
-    /// Envelope follower for level detection.
-    envelope: EnvelopeFollower,
+    /// Running mean square of the sidechain (RMS detector).
+    mean_square: f32,
+    /// One-pole coefficient of the RMS averaging window.
+    rms_coeff: f32,
+    /// Gain reduction held at its peaks and let go at the release rate (dB).
+    gr_held: f32,
+    /// Gain reduction applied, the held value smoothed at the attack rate (dB).
+    gr_db: f32,
+    /// Attack and release coefficients, recomputed only when their knob moves.
+    attack_coeff: CachedCoeff,
+    release_coeff: CachedCoeff,
+    /// Linear sidechain level where the knee begins, cached against the
+    /// threshold and knee it came from; below it no `ln` is needed.
+    knee_start: f32,
+    knee_start_for: (f32, f32),
     /// Smoothed threshold parameter.
     threshold_smooth: SmoothedValue,
     /// Smoothed ratio parameter.
@@ -112,7 +131,14 @@ impl Compressor {
 
         Self {
             sample_rate,
-            envelope: EnvelopeFollower::new(sample_rate),
+            mean_square: 0.0,
+            rms_coeff: time_coeff(RMS_WINDOW_MS, sample_rate),
+            gr_held: 0.0,
+            gr_db: 0.0,
+            attack_coeff: CachedCoeff::new(),
+            release_coeff: CachedCoeff::new(),
+            knee_start: 0.0,
+            knee_start_for: (f32::NAN, f32::NAN),
             threshold_smooth: SmoothedValue::with_default_smoothing(-20.0, sample_rate),
             ratio_smooth: SmoothedValue::with_default_smoothing(4.0, sample_rate),
             attack_smooth: SmoothedValue::with_default_smoothing(10.0, sample_rate),
@@ -178,6 +204,9 @@ impl Compressor {
                     ParameterDisplay::Linear { unit: "dB" },
                 ),
                 ParameterDefinition::normalized("mix", "Mix", 1.0),
+                // Appended, so patches saved before it existed load as Peak,
+                // which is how they always sounded
+                ParameterDefinition::choice("detector", "Detector", &["Peak", "RMS"], 0),
             ],
         }
     }
@@ -196,6 +225,10 @@ impl Compressor {
     const PARAM_KNEE: usize = 4;
     const PARAM_MAKEUP: usize = 5;
     const PARAM_MIX: usize = 6;
+    const PARAM_DETECTOR: usize = 7;
+
+    /// Detector choices.
+    const DETECTOR_RMS: f32 = 1.0;
 
     /// Compute gain reduction in dB for a given input level in dB.
     /// Uses soft knee algorithm for smooth transition into compression.
@@ -230,6 +263,17 @@ impl Compressor {
             }
         }
     }
+
+    /// Linear sidechain level where the knee begins, recomputed only when
+    /// the threshold or knee has moved.
+    #[inline]
+    fn knee_start(&mut self, threshold_db: f32, knee_db: f32) -> f32 {
+        if (threshold_db, knee_db) != self.knee_start_for {
+            self.knee_start_for = (threshold_db, knee_db);
+            self.knee_start = ((threshold_db - 0.5 * knee_db) * NEPER_PER_DB).exp();
+        }
+        self.knee_start
+    }
 }
 
 impl Default for Compressor {
@@ -259,7 +303,9 @@ impl DspModule for Compressor {
 
     fn prepare(&mut self, sample_rate: f32, _max_block_size: usize) {
         self.sample_rate = sample_rate;
-        self.envelope.set_sample_rate(sample_rate);
+        self.rms_coeff = time_coeff(RMS_WINDOW_MS, sample_rate);
+        self.attack_coeff.invalidate();
+        self.release_coeff.invalidate();
 
         // Update sample rate for smoothed values
         self.threshold_smooth.set_sample_rate(sample_rate);
@@ -278,23 +324,15 @@ impl DspModule for Compressor {
         params: &[f32],
         context: &ProcessContext,
     ) {
-        // Get parameter values
-        let threshold = params[Self::PARAM_THRESHOLD];
-        let ratio = params[Self::PARAM_RATIO];
-        let attack = params[Self::PARAM_ATTACK];
-        let release = params[Self::PARAM_RELEASE];
-        let knee = params[Self::PARAM_KNEE];
-        let makeup = params[Self::PARAM_MAKEUP];
-        let mix = params[Self::PARAM_MIX];
-
         // Set smoothing targets
-        self.threshold_smooth.set_target(threshold);
-        self.ratio_smooth.set_target(ratio);
-        self.attack_smooth.set_target(attack);
-        self.release_smooth.set_target(release);
-        self.knee_smooth.set_target(knee);
-        self.makeup_smooth.set_target(makeup);
-        self.mix_smooth.set_target(mix);
+        self.threshold_smooth.set_target(params[Self::PARAM_THRESHOLD]);
+        self.ratio_smooth.set_target(params[Self::PARAM_RATIO]);
+        self.attack_smooth.set_target(params[Self::PARAM_ATTACK]);
+        self.release_smooth.set_target(params[Self::PARAM_RELEASE]);
+        self.knee_smooth.set_target(params[Self::PARAM_KNEE]);
+        self.makeup_smooth.set_target(params[Self::PARAM_MAKEUP]);
+        self.mix_smooth.set_target(params[Self::PARAM_MIX]);
+        let rms = params.get(Self::PARAM_DETECTOR).copied().unwrap_or(0.0) == Self::DETECTOR_RMS;
 
         // Get input buffers
         let input = inputs.get(Self::PORT_IN);
@@ -327,39 +365,62 @@ impl DspModule for Compressor {
                 .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
                 .unwrap_or(dry);
 
-            // Envelope follow the sidechain signal
-            let envelope_level = self.envelope.process(sidechain_sample, attack_ms, release_ms);
+            // Detect the level, and only take its log once it reaches the
+            // knee: below that the curve asks for no reduction anyway
+            let knee_start = self.knee_start(threshold_db, knee_db);
+            let target_gr = if rms {
+                self.mean_square = flush(
+                    self.rms_coeff * self.mean_square
+                        + (1.0 - self.rms_coeff) * sidechain_sample * sidechain_sample,
+                );
+                if self.mean_square > knee_start * knee_start {
+                    // 20·log10(sqrt(ms)) without the sqrt
+                    let level_db = 0.5 * DB_PER_NEPER * self.mean_square.ln();
+                    Self::compute_gain_reduction(level_db, threshold_db, ratio_val, knee_db)
+                } else {
+                    0.0
+                }
+            } else {
+                let level = sidechain_sample.abs();
+                if level > knee_start {
+                    let level_db = DB_PER_NEPER * level.ln();
+                    Self::compute_gain_reduction(level_db, threshold_db, ratio_val, knee_db)
+                } else {
+                    0.0
+                }
+            };
 
-            // Convert envelope level to dB (with floor to avoid -inf)
-            let level_db = 20.0 * envelope_level.max(0.00001).log10();
+            // Ballistics in dB. The held value jumps to every peak of the
+            // reduction asked for and lets go at the release rate; the
+            // applied value follows it at the attack rate. Between the
+            // peaks of a steady tone the hold barely moves, so the tone is
+            // reduced by what its level calls for.
+            let release = self.release_coeff.get(release_ms, self.sample_rate);
+            let attack = self.attack_coeff.get(attack_ms, self.sample_rate);
+            self.gr_held = target_gr.max(release * self.gr_held + (1.0 - release) * target_gr);
+            self.gr_db = attack * self.gr_db + (1.0 - attack) * self.gr_held;
+            if self.gr_db < GR_FLOOR_DB && self.gr_held < GR_FLOOR_DB {
+                self.gr_db = 0.0;
+                self.gr_held = 0.0;
+            }
 
-            // Compute gain reduction
-            let gr_db = Self::compute_gain_reduction(level_db, threshold_db, ratio_val, knee_db);
+            // Reduction and makeup together, in one exp (none at unity)
+            let gain_db = makeup_db - self.gr_db;
+            let gain = if gain_db == 0.0 { 1.0 } else { (gain_db * NEPER_PER_DB).exp() };
 
-            // Convert to linear gain (negative dB = less than 1.0)
-            let gr_linear = 10.0_f32.powf(-gr_db / 20.0);
-
-            // Apply makeup gain
-            let makeup_linear = 10.0_f32.powf(makeup_db / 20.0);
-
-            // Apply compression
-            let compressed = dry * gr_linear * makeup_linear;
-
-            // Mix dry and wet (parallel compression)
-            let output = dry * (1.0 - mix_val) + compressed * mix_val;
-
-            // Write outputs
-            out.samples[i] = output;
+            // Mix dry and compressed (parallel compression)
+            out.samples[i] = dry * (1.0 - mix_val) + dry * gain * mix_val;
 
             // Output gain reduction as control signal (0 = no GR, 1 = max GR)
             // Normalize GR to 0-1 range: 0dB GR = 0, 60dB GR = 1
-            let gr_normalized = (gr_db / 60.0).clamp(0.0, 1.0);
-            gr_out.samples[i] = gr_normalized;
+            gr_out.samples[i] = (self.gr_db / 60.0).clamp(0.0, 1.0);
         }
     }
 
     fn reset(&mut self) {
-        self.envelope.reset();
+        self.mean_square = 0.0;
+        self.gr_held = 0.0;
+        self.gr_db = 0.0;
 
         // Reset smoothed values
         self.threshold_smooth.reset(self.threshold_smooth.target());
@@ -415,7 +476,7 @@ mod tests {
         let compressor = Compressor::new();
         let params = compressor.parameters();
 
-        assert_eq!(params.len(), 7);
+        assert_eq!(params.len(), 8);
         assert_eq!(params[0].id, "threshold");
         assert_eq!(params[1].id, "ratio");
         assert_eq!(params[2].id, "attack");
@@ -423,6 +484,7 @@ mod tests {
         assert_eq!(params[4].id, "knee");
         assert_eq!(params[5].id, "makeup");
         assert_eq!(params[6].id, "mix");
+        assert_eq!(params[7].id, "detector");
     }
 
     #[test]
@@ -708,6 +770,140 @@ mod tests {
         );
     }
 
+    const PEAK: f32 = 0.0;
+    const RMS: f32 = 1.0;
+
+    /// Plays a steady 1 kHz sine of `amplitude` through the compressor for
+    /// 1.5 s at 48 kHz. Returns the last 0.25 s of output and of GR.
+    fn steady_tone(amplitude: f32, params: [f32; 8]) -> (Vec<f32>, Vec<f32>) {
+        let sample_rate = 48000.0;
+        let block = 256;
+        let mut compressor = Compressor::new();
+        compressor.prepare(sample_rate, block);
+        let ctx = ProcessContext::new(sample_rate, block);
+        let sidechain = SignalBuffer::unconnected(block, SignalType::Audio);
+        let mut input = SignalBuffer::audio(block);
+        let mut outputs = vec![SignalBuffer::audio(block), SignalBuffer::control(block)];
+        let mut out = Vec::new();
+        let mut gr = Vec::new();
+        let mut n = 0usize;
+
+        for _ in 0..(1.5 * sample_rate) as usize / block {
+            for s in input.samples.iter_mut() {
+                *s = amplitude * (std::f32::consts::TAU * 1000.0 * n as f32 / sample_rate).sin();
+                n += 1;
+            }
+            compressor.process(&[&input, &sidechain], &mut outputs, &params, &ctx);
+            out.extend_from_slice(&outputs[0].samples);
+            gr.extend_from_slice(&outputs[1].samples);
+        }
+        let keep = out.len() - 12000;
+        (out.split_off(keep), gr.split_off(keep))
+    }
+
+    fn db(x: f32) -> f32 {
+        20.0 * x.log10()
+    }
+
+    #[test]
+    fn test_steady_tone_is_reduced_by_the_ratio() {
+        // A 0.5 sine: -6.0 dB at its peaks, -9.0 dB RMS. Each detector
+        // measures its own kind of level, and the output's level of that
+        // kind lands where the curve says, whatever the attack and release.
+        let amplitude = 0.5f32;
+        for detector in [PEAK, RMS] {
+            for (threshold, ratio, knee) in [(-30.0, 2.0, 0.0), (-30.0, 4.0, 0.0), (-24.0, 10.0, 6.0), (-40.0, 20.0, 12.0)] {
+                for (attack, release) in [(0.1, 50.0), (10.0, 100.0), (30.0, 400.0)] {
+                    let params = [threshold, ratio, attack, release, knee, 0.0, 1.0, detector];
+                    let (out, gr) = steady_tone(amplitude, params);
+
+                    let (level_in, level_out) = if detector == RMS {
+                        let rms = |x: &[f32]| (x.iter().map(|s| s * s).sum::<f32>() / x.len() as f32).sqrt();
+                        (db(amplitude / 2f32.sqrt()), db(rms(&out)))
+                    } else {
+                        (db(amplitude), db(out.iter().fold(0.0f32, |m, s| m.max(s.abs()))))
+                    };
+                    let expected = threshold + (level_in - threshold) / ratio;
+                    let label = format!(
+                        "{} T{} {}:1 knee {} A{} R{}",
+                        if detector == RMS { "RMS" } else { "Peak" },
+                        threshold,
+                        ratio,
+                        knee,
+                        attack,
+                        release
+                    );
+                    assert!(
+                        (level_out - expected).abs() < 0.1,
+                        "{}: out {:.2} dB, expected {:.2} dB",
+                        label,
+                        level_out,
+                        expected
+                    );
+
+                    // GR reports the same reduction, steadily
+                    let gr_db = gr.iter().sum::<f32>() / gr.len() as f32 * 60.0;
+                    let expected_gr = (level_in - threshold) * (1.0 - 1.0 / ratio);
+                    assert!(
+                        (gr_db - expected_gr).abs() < 0.1,
+                        "{}: GR {:.2} dB, expected {:.2} dB",
+                        label,
+                        gr_db,
+                        expected_gr
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_rms_detector_hears_a_sine_3db_quieter() {
+        // The same tone and settings: RMS sees -9 dB where Peak sees -6 dB,
+        // so at 4:1 it asks for 3 * 3/4 = 2.25 dB less reduction
+        let params = |detector| [-30.0, 4.0, 10.0, 100.0, 0.0, 0.0, 1.0, detector];
+        let mean = |x: &[f32]| x.iter().sum::<f32>() / x.len() as f32 * 60.0;
+        let gr_peak = mean(&steady_tone(0.5, params(PEAK)).1);
+        let gr_rms = mean(&steady_tone(0.5, params(RMS)).1);
+        assert!((gr_peak - gr_rms - 2.25).abs() < 0.1, "peak {} dB vs rms {} dB", gr_peak, gr_rms);
+    }
+
+    #[test]
+    fn test_below_the_knee_is_untouched() {
+        // A tone under threshold - knee/2 passes bit for bit
+        for detector in [PEAK, RMS] {
+            let (out, gr) = steady_tone(0.05, [-20.0, 4.0, 10.0, 100.0, 6.0, 0.0, 1.0, detector]);
+            let (reference, _) = steady_tone(0.05, [-20.0, 1.0, 10.0, 100.0, 0.0, 0.0, 0.0, detector]);
+            assert_eq!(out, reference);
+            assert!(gr.iter().all(|&g| g == 0.0));
+        }
+    }
+
+    #[test]
+    fn test_gain_reduction_lets_go_after_the_tone() {
+        let mut compressor = Compressor::new();
+        compressor.prepare(48000.0, 256);
+        let ctx = ProcessContext::new(48000.0, 256);
+        let sidechain = SignalBuffer::unconnected(256, SignalType::Audio);
+        let mut loud = SignalBuffer::audio(256);
+        loud.fill(0.9);
+        let mut quiet = SignalBuffer::audio(256);
+        quiet.fill(0.01);
+        let mut outputs = vec![SignalBuffer::audio(256), SignalBuffer::control(256)];
+        let params = [-20.0, 4.0, 1.0, 50.0, 0.0, 0.0, 1.0, PEAK];
+
+        for _ in 0..50 {
+            compressor.process(&[&loud, &sidechain], &mut outputs, &params, &ctx);
+        }
+        assert!(outputs[1].samples[255] > 0.2);
+
+        // 2 s of quiet: well past the release, back to exactly unity
+        for _ in 0..375 {
+            compressor.process(&[&quiet, &sidechain], &mut outputs, &params, &ctx);
+        }
+        assert_eq!(outputs[1].samples[255], 0.0);
+        assert_eq!(outputs[0].samples[255], 0.01);
+    }
+
     #[test]
     fn test_compressor_is_send() {
         fn assert_send<T: Send>() {}
@@ -736,6 +932,6 @@ mod tests {
         assert_eq!(module.info().id, "fx.compressor");
         assert_eq!(module.info().name, "Compressor");
         assert_eq!(module.ports().len(), 4);
-        assert_eq!(module.parameters().len(), 7);
+        assert_eq!(module.parameters().len(), 8);
     }
 }
