@@ -2,6 +2,7 @@
 //!
 //! Everything here is allocation-free and safe to call on the audio thread.
 
+pub mod adaa;
 pub mod blep;
 pub mod delay;
 pub mod noise;
@@ -12,6 +13,7 @@ pub mod tpt;
 pub use blep::BlepDelay;
 pub use delay::FracDelay;
 pub use noise::NoiseFloor;
-pub use oversample::{Downsampler2x, Upsampler2x};
+pub use adaa::{Adaa1, BiasedTanh, Curve, HardClip, RoundedFolder, Tanh};
+pub use oversample::{Downsampler2x, Downsampler4x, Upsampler2x, Upsampler4x};
 pub use saturation::{fast_tanh, SoftSaturator};
 pub use tpt::{prewarp, TptIntegrator};

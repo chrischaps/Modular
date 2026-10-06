@@ -245,7 +245,16 @@ static MODULE_UI: &[ModuleUi] = &[
     },
     ModuleUi {
         module_id: "fx.distortion",
-        knobs: &[knob("Drive"), knob("Tone"), knob("Mix"), knob_as("Output", "Out")],
+        // The character of the curve on top, its colour and level below
+        knobs: &[
+            modulatable("Drive", "Drive"),
+            knob_as("Symmetry", "Sym"),
+            knob("Rate"),
+            knob("Tone"),
+            knob("Mix"),
+            knob_as("Output", "Out"),
+        ],
+        knobs_per_row: 3,
         ..ModuleUi::DEFAULT
     },
     ModuleUi {

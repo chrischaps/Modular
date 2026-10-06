@@ -302,11 +302,15 @@ knob Output             "Out" KnobOnly
 in   In                 Audio    ConnectionOnly       inline=true  port
 in   Drive              Control  ConnectionOrConstant inline=true  num 0.5 [0..1] %
 in   Tone               Control  ConstantOnly         inline=false num 0.5 [0..1] %
-in   Type               Control  ConstantOnly         inline=true  select 0 ["Soft", "Hard", "Fold", "Bit"] "Type"
+in   Type               Control  ConstantOnly         inline=true  select 0 ["Soft", "Hard", "Fold", "Bit", "Tube"] "Type"
 in   Mix                Control  ConstantOnly         inline=false num 1 [0..1] %
 in   Output             Control  ConstantOnly         inline=false num 0 [-12..12] dB
+in   Symmetry           Control  ConstantOnly         inline=false num 0 [-1..1] %
+in   Rate               Control  ConstantOnly         inline=false num 48000 [100..48000] Hz log
 out  Out                Audio
-knob Drive              "Drive" Exposed
+knob Drive              "Drive" Modulatable
+knob Symmetry           "Sym" KnobOnly
+knob Rate               "Rate" KnobOnly
 knob Tone               "Tone" KnobOnly
 knob Mix                "Mix" KnobOnly
 knob Output             "Out" KnobOnly

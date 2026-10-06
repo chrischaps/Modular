@@ -9,68 +9,74 @@
 
 ## Description
 
-The Distortion module adds harmonic richness and grit by clipping, saturating, or folding the input signal. From subtle warmth to aggressive destruction, distortion shapes the character of sounds and adds presence.
+The Distortion module adds harmonic richness and grit by clipping, saturating, folding, or crushing the input signal. From subtle warmth to aggressive destruction, distortion shapes the character of sounds and adds presence.
+
+Every curve runs at four times the sample rate with antiderivative anti-aliasing, so even full drive on a high note adds only harmonics of the note, not the inharmonic "digital fizz" that naive distortion folds back into the audible band.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Input** | Audio (Blue) | Signal to be distorted |
-| **Drive CV** | Control (Orange) | Modulation input for drive amount |
+| **In** | Audio (Blue) | Signal to be distorted |
+| **Drive CV** | Control (Orange) | Modulates drive around the knob (±1 CV sweeps ±50%) |
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Output** | Audio (Blue) | Distorted signal |
+| **Out** | Audio (Blue) | Distorted signal |
 
 ## Parameters
 
 | Knob | Range | Default | Description |
 |------|-------|---------|-------------|
-| **Drive** | 0.0 - 1.0 | 0.3 | Amount of distortion |
-| **Type** | Soft/Hard/Fold/Bit | Soft | Distortion algorithm |
-| **Tone** | 20 Hz - 20 kHz | 5 kHz | Output filter frequency |
-| **Mix** | 0.0 - 1.0 | 1.0 | Dry/wet balance |
-| **Output** | -12 dB - +6 dB | 0 dB | Output level compensation |
+| **Type** | Soft/Hard/Fold/Bit/Tube | Soft | Distortion algorithm |
+| **Drive** | 0 - 100% | 50% | Amount of distortion |
+| **Sym** | -100% - +100% | 0% | Fold only: offsets the wave into the folder |
+| **Rate** | 100 Hz - 48 kHz | 48 kHz | Bit only: crushed sample rate (the top of the range is off) |
+| **Tone** | 0 - 100% | 50% | Output low-pass, 200 Hz to 20 kHz |
+| **Mix** | 0 - 100% | 100% | Dry/wet balance |
+| **Out** | -12 dB - +12 dB | 0 dB | Output level compensation |
 
 ## Distortion Types
 
-### Soft Clip
+### Soft
 
-Gentle saturation that rounds off peaks:
+Smooth `tanh` saturation that rounds off peaks (input gain 1x to 11x):
 
-- Adds warm, even harmonics
-- Tube/tape-like character
+- Odd harmonics only, falling off smoothly
 - Compresses dynamics naturally
-- Good for subtle warmth
+- Good for warmth at low drive, fuzz at high drive
 
-### Hard Clip
+### Hard
 
-Aggressive clipping that chops off peaks:
+Clipping that chops off peaks (threshold falls from 1.0 to 0.1):
 
-- Adds harsh, odd harmonics
+- Bright, buzzy odd harmonics
 - Transistor/digital character
-- More aggressive, buzzy sound
 - Classic overdrive/fuzz
 
 ### Fold
 
-Wave folding that reflects the signal back:
+A wavefolder in the West Coast tradition of the Serge and Buchla folders. Past the clipping point the wave reflects back toward zero instead of flattening, then reflects again, so each step of drive (1x to 6x) adds another fold and another pair of peaks. The corners of each fold are rounded, as a real diode folder's are.
 
-- Complex harmonic content
-- Synth-like, metallic character
-- Creates additional partials
-- West Coast synthesis style
+- Bright, vocal, metallic tones from a plain sine
+- Sweeping Drive with CV gives the classic "wavefolder sweep"
+- **Sym** shifts the wave off centre: the two halves fold differently and even harmonics appear. Near ±100% a quiet sine sits on a fold's peak and comes out an octave up.
 
-### Bit Crush
+### Bit
 
-Reduces bit depth for lo-fi character:
+Bit depth and sample-rate reduction for lo-fi character:
 
-- Introduces quantization noise
-- Gritty, digital degradation
-- 8-bit/vintage sampler sound
-- Adds "crunchy" character
+- **Drive** lowers the bit depth from 16 down to 2 bits
+- **Rate** holds each sample for longer, like an old sampler. Below a few kHz the crushed rate's mirror images ring out as metallic, inharmonic tones: that aliasing is the sound. It is relative to Rate only; the engine's own sample rate adds nothing.
+
+### Tube
+
+Asymmetric saturation, like a triode biased off its centre (input gain 1x to 11x):
+
+- The two halves of the wave saturate at different levels, so even harmonics appear from the first touch of drive: warm, thick, slightly hollow
+- The DC offset this creates is removed automatically
 
 ## Usage Tips
 
@@ -93,7 +99,7 @@ Add harmonics that cut through the mix:
 ```
 Type: Soft
 Drive: 0.4
-Tone: 2000 Hz
+Tone: 50% (2 kHz)
 Mix: 0.7
 ```
 
@@ -106,7 +112,7 @@ In-your-face distortion:
 ```
 Type: Hard
 Drive: 0.8
-Tone: 4000 Hz
+Tone: 65% (4 kHz)
 Mix: 1.0
 ```
 
@@ -116,8 +122,29 @@ Vintage sampler vibes:
 
 ```
 Type: Bit
-Drive: 0.6
+Drive: 0.5
+Rate: 8000 Hz
 Mix: 0.8
+```
+
+### Tape-ish Warmth
+
+Thicken a bass or a drum bus:
+
+```
+Type: Tube
+Drive: 0.25
+Tone: 60%
+Mix: 0.6
+```
+
+### Octave Fold
+
+A sine folded off-centre jumps an octave:
+
+```
+[Sine Oscillator] ──> [Distortion (Fold)]
+                      Drive: 0, Sym: 100%
 ```
 
 ### Synth Processing
@@ -138,7 +165,7 @@ Add punch and presence:
 ```
 Type: Soft
 Drive: 0.3
-Tone: 6000 Hz
+Tone: 74% (6 kHz)
 Mix: 0.6
 ```
 
@@ -186,14 +213,14 @@ Even slow control signals become complex audio when folded.
 
 ## Tone Control
 
-The Tone knob is a low-pass filter on the output:
+The Tone knob is a low-pass filter on the distorted signal, from 200 Hz (0%) to 20 kHz (100%), spaced evenly in octaves:
 
-| Tone | Character |
-|------|-----------|
-| 1-2 kHz | Dark, muddy distortion |
-| 3-5 kHz | Warm, round distortion |
-| 6-10 kHz | Present, cutting distortion |
-| 10+ kHz | Bright, harsh distortion |
+| Tone | Cutoff | Character |
+|------|--------|-----------|
+| 0-30% | 200-800 Hz | Dark, muffled |
+| 30-60% | 0.8-3 kHz | Warm, round |
+| 60-80% | 3-8 kHz | Present, cutting |
+| 80-100% | 8-20 kHz | Bright, open |
 
 Distortion creates high harmonics—use Tone to control harshness.
 

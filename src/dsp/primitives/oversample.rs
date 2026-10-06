@@ -1,4 +1,4 @@
-//! 2x oversampling with polyphase IIR halfband filters.
+//! 2x and 4x oversampling with polyphase IIR halfband filters.
 //!
 //! A nonlinearity (a saturating filter stage, a waveshaper) creates harmonics
 //! above Nyquist that fold back down as inharmonic aliases. Running it at
@@ -21,6 +21,15 @@ use crate::dsp::denormal::flush;
 
 /// Allpass coefficients per halfband filter.
 pub const HALFBAND_COEFS: usize = 8;
+
+/// Allpass coefficients in the outer stage of a 4x oversampler.
+const OUTER_COEFS: usize = 6;
+
+/// Transition half-width of the outer stage, between 2x and 4x. Everything
+/// it has to pass was already band-limited to 27.8 kHz by the inner stage,
+/// and everything it has to stop lies above 67 kHz (at 48 kHz in), so a far
+/// wider transition, and half the coefficients, will do.
+const OUTER_TRANSITION: f64 = 0.1;
 
 /// Transition half-width, as a fraction of the oversampled rate. The filter
 /// passes up to `0.25 - HALFBAND_TRANSITION` and stops from
@@ -79,25 +88,25 @@ fn design_halfband<const N: usize>(transition: f64) -> [f32; N] {
 /// on branch 1. Each section is `H(z) = (c + z⁻¹) / (1 + c·z⁻¹)` at the low
 /// rate, which is `(c + z⁻²) / (1 + c·z⁻²)` at the high rate.
 #[derive(Clone, Debug)]
-struct AllpassPair {
-    coefs: [f32; HALFBAND_COEFS],
-    x: [f32; HALFBAND_COEFS],
-    y: [f32; HALFBAND_COEFS],
+struct AllpassPair<const N: usize = HALFBAND_COEFS> {
+    coefs: [f32; N],
+    x: [f32; N],
+    y: [f32; N],
 }
 
-impl AllpassPair {
-    fn new() -> Self {
+impl<const N: usize> AllpassPair<N> {
+    fn new(transition: f64) -> Self {
         Self {
-            coefs: design_halfband::<HALFBAND_COEFS>(HALFBAND_TRANSITION),
-            x: [0.0; HALFBAND_COEFS],
-            y: [0.0; HALFBAND_COEFS],
+            coefs: design_halfband::<N>(transition),
+            x: [0.0; N],
+            y: [0.0; N],
         }
     }
 
     /// Runs one sample through each branch.
     #[inline]
     fn process(&mut self, mut branch0: f32, mut branch1: f32) -> (f32, f32) {
-        for i in (0..HALFBAND_COEFS).step_by(2) {
+        for i in (0..N).step_by(2) {
             let y0 = (branch0 - self.y[i]) * self.coefs[i] + self.x[i];
             let y1 = (branch1 - self.y[i + 1]) * self.coefs[i + 1] + self.x[i + 1];
             self.x[i] = branch0;
@@ -111,8 +120,8 @@ impl AllpassPair {
     }
 
     fn reset(&mut self) {
-        self.x = [0.0; HALFBAND_COEFS];
-        self.y = [0.0; HALFBAND_COEFS];
+        self.x = [0.0; N];
+        self.y = [0.0; N];
     }
 }
 
@@ -125,7 +134,7 @@ pub struct Upsampler2x {
 
 impl Upsampler2x {
     pub fn new() -> Self {
-        Self { allpass: AllpassPair::new() }
+        Self { allpass: AllpassPair::new(HALFBAND_TRANSITION) }
     }
 
     /// Returns the two oversampled samples for one input sample, in order.
@@ -155,7 +164,7 @@ pub struct Downsampler2x {
 
 impl Downsampler2x {
     pub fn new() -> Self {
-        Self { allpass: AllpassPair::new() }
+        Self { allpass: AllpassPair::new(HALFBAND_TRANSITION) }
     }
 
     /// Returns one output sample for two oversampled input samples.
@@ -171,6 +180,78 @@ impl Downsampler2x {
 }
 
 impl Default for Downsampler2x {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Quadruples the sample rate with two cascaded halfband stages: the full
+/// filter from 1x to 2x, then a cheaper one from 2x to 4x.
+#[derive(Clone, Debug)]
+pub struct Upsampler4x {
+    inner: Upsampler2x,
+    outer: AllpassPair<OUTER_COEFS>,
+}
+
+impl Upsampler4x {
+    pub fn new() -> Self {
+        Self {
+            inner: Upsampler2x::new(),
+            outer: AllpassPair::new(OUTER_TRANSITION),
+        }
+    }
+
+    /// Returns the four oversampled samples for one input sample, in order.
+    #[inline]
+    pub fn process(&mut self, x: f32) -> [f32; 4] {
+        let [a, b] = self.inner.process(x);
+        let (a0, a1) = self.outer.process(a, a);
+        let (b0, b1) = self.outer.process(b, b);
+        [a0, a1, b0, b1]
+    }
+
+    pub fn reset(&mut self) {
+        self.inner.reset();
+        self.outer.reset();
+    }
+}
+
+impl Default for Upsampler4x {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Quarters the sample rate: the mirror image of [`Upsampler4x`].
+#[derive(Clone, Debug)]
+pub struct Downsampler4x {
+    outer: AllpassPair<OUTER_COEFS>,
+    inner: Downsampler2x,
+}
+
+impl Downsampler4x {
+    pub fn new() -> Self {
+        Self {
+            outer: AllpassPair::new(OUTER_TRANSITION),
+            inner: Downsampler2x::new(),
+        }
+    }
+
+    /// Returns one output sample for four oversampled input samples.
+    #[inline]
+    pub fn process(&mut self, x: [f32; 4]) -> f32 {
+        let (a0, a1) = self.outer.process(x[1], x[0]);
+        let (b0, b1) = self.outer.process(x[3], x[2]);
+        self.inner.process([0.5 * (a0 + a1), 0.5 * (b0 + b1)])
+    }
+
+    pub fn reset(&mut self) {
+        self.outer.reset();
+        self.inner.reset();
+    }
+}
+
+impl Default for Downsampler4x {
     fn default() -> Self {
         Self::new()
     }
@@ -225,6 +306,17 @@ mod tests {
     }
 
     #[test]
+    fn test_outer_stage_stopband_is_about_100_db() {
+        let coefs = design_halfband::<OUTER_COEFS>(OUTER_TRANSITION);
+        let stop = 0.25 + OUTER_TRANSITION;
+        let worst = (0..=500)
+            .map(|i| halfband_magnitude(&coefs, stop + (0.5 - stop) * i as f64 / 500.0))
+            .fold(0.0, f64::max);
+        let db = 20.0 * worst.log10();
+        assert!(db < -95.0, "outer stopband {:.1} dB", db);
+    }
+
+    #[test]
     fn test_coefficients_are_stable_and_ascending() {
         let coefs = design_halfband::<HALFBAND_COEFS>(HALFBAND_TRANSITION);
         for pair in coefs.windows(2) {
@@ -276,6 +368,53 @@ mod tests {
             let input = sine(f, 96000.0, 19200);
             let mut down = Downsampler2x::new();
             let out: Vec<f32> = input.chunks_exact(2).map(|p| down.process([p[0], p[1]])).collect();
+            let db = amp_to_db(rms(&out[4800..]) / rms(&input));
+            assert!(db < -85.0, "{} Hz leaks at {:.1} dB", f, db);
+        }
+    }
+
+    #[test]
+    fn test_4x_round_trip_passband_is_flat() {
+        let sr = 48000.0;
+        for f in [50.0, 1000.0, 10000.0, 18000.0, 20000.0] {
+            let input = sine(f, sr, 9600);
+            let mut up = Upsampler4x::new();
+            let mut down = Downsampler4x::new();
+            let out: Vec<f32> = input.iter().map(|&x| down.process(up.process(x))).collect();
+            let db = amp_to_db(rms(&out[4800..]) / rms(&input[4800..]));
+            assert!(db.abs() < 0.01, "{} Hz: {:.4} dB", f, db);
+        }
+    }
+
+    #[test]
+    fn test_4x_upsampler_removes_every_image() {
+        // 48 kHz to 192 kHz mirrors a tone at f to 48k ± f, 96k ± f and 144k ± f
+        for f in [5000.0, 15000.0, 20000.0] {
+            let input = sine(f, 48000.0, 8192);
+            let mut up = Upsampler4x::new();
+            let out: Vec<f32> = input.iter().flat_map(|&x| up.process(x)).collect();
+            let spectrum = Spectrum::of(&out[8192..], 192000.0);
+            let level = |hz: f64| {
+                let bin = (hz / spectrum.bin_hz).round() as usize;
+                spectrum.magnitudes[bin - 3..=bin + 3].iter().cloned().fold(0.0, f64::max)
+            };
+            let f = f as f64;
+            for image in [48000.0 - f, 48000.0 + f, 96000.0 - f] {
+                let db = 20.0 * (level(image) / level(f)).log10();
+                assert!(db < -85.0, "{} Hz image at {} Hz: {:.1} dB", f, image, db);
+            }
+        }
+    }
+
+    #[test]
+    fn test_4x_downsampler_rejects_everything_that_would_fold() {
+        for f in [28000.0, 40000.0, 60000.0, 70000.0, 90000.0] {
+            let input = sine(f, 192000.0, 38400);
+            let mut down = Downsampler4x::new();
+            let out: Vec<f32> = input
+                .chunks_exact(4)
+                .map(|p| down.process([p[0], p[1], p[2], p[3]]))
+                .collect();
             let db = amp_to_db(rms(&out[4800..]) / rms(&input));
             assert!(db < -85.0, "{} Hz leaks at {:.1} dB", f, db);
         }
