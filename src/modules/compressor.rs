@@ -11,7 +11,7 @@ use crate::dsp::{
     port::PortDefinition,
     signal::SignalBuffer,
     smoothed_value::SmoothedValue,
-    ParameterDisplay, SignalType,
+    connected_input, ParameterDisplay, SignalType,
 };
 
 /// Envelope follower for level detection.
@@ -298,18 +298,13 @@ impl DspModule for Compressor {
 
         // Get input buffers
         let input = inputs.get(Self::PORT_IN);
-        let sidechain = inputs.get(Self::PORT_SIDECHAIN);
+        // The detector follows the sidechain when connected, otherwise the input
+        let sidechain = connected_input(inputs, Self::PORT_SIDECHAIN);
 
         // Split outputs
         let (out_slice, gr_slice) = outputs.split_at_mut(1);
         let out = &mut out_slice[Self::PORT_OUT];
         let gr_out = &mut gr_slice[0];
-
-        // Use the sidechain only when it carries signal this block; otherwise
-        // the detector follows the input (interim until the engine reports
-        // real connection state). Deciding per block, not per sample, keeps
-        // the detector from jumping to the dry signal at zero crossings.
-        let sidechain = sidechain.filter(|buf| buf.samples.iter().any(|&s| s != 0.0));
 
         // Process each sample
         for i in 0..context.block_size {
@@ -471,7 +466,7 @@ mod tests {
             *sample = 0.01; // Very quiet
         }
 
-        let sidechain = SignalBuffer::audio(256); // Empty sidechain
+        let sidechain = SignalBuffer::unconnected(256, SignalType::Audio); // Nothing plugged in
         let mut outputs = vec![
             SignalBuffer::audio(256), // Out
             SignalBuffer::control(256), // GR
@@ -511,7 +506,7 @@ mod tests {
             *sample = 0.9; // Loud signal
         }
 
-        let sidechain = SignalBuffer::audio(256);
+        let sidechain = SignalBuffer::unconnected(256, SignalType::Audio); // Nothing plugged in
         let mut outputs = vec![
             SignalBuffer::audio(256),
             SignalBuffer::control(256),
@@ -557,7 +552,7 @@ mod tests {
             *sample = 0.5;
         }
 
-        let sidechain = SignalBuffer::audio(256);
+        let sidechain = SignalBuffer::unconnected(256, SignalType::Audio); // Nothing plugged in
 
         // Process without makeup
         let mut outputs_no_makeup = vec![
@@ -611,7 +606,7 @@ mod tests {
             *sample = 0.8;
         }
 
-        let sidechain = SignalBuffer::audio(256);
+        let sidechain = SignalBuffer::unconnected(256, SignalType::Audio); // Nothing plugged in
         let ctx = ProcessContext::new(44100.0, 256);
 
         // 100% wet
@@ -675,7 +670,7 @@ mod tests {
         // Fill with signal to build up envelope
         let mut input = SignalBuffer::audio(256);
         input.fill(0.9);
-        let sidechain = SignalBuffer::audio(256);
+        let sidechain = SignalBuffer::unconnected(256, SignalType::Audio); // Nothing plugged in
         let mut outputs = vec![
             SignalBuffer::audio(256),
             SignalBuffer::control(256),

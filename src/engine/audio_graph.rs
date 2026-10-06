@@ -311,6 +311,13 @@ impl AudioGraph {
             return false;
         }
 
+        // An input takes one cable: a new connection replaces any existing one
+        let replaced = self
+            .connections
+            .iter()
+            .position(|c| c.to_node == to_node && c.to_port == to_port)
+            .map(|index| self.connections.remove(index));
+
         // Check that we're not creating a cycle
         // (We'll do a full topological sort to verify)
         self.connections.push(new_conn);
@@ -318,6 +325,7 @@ impl AudioGraph {
         // Try to sort - if it fails, we have a cycle
         if self.has_cycle() {
             self.connections.pop(); // Remove the connection that caused the cycle
+            self.connections.extend(replaced); // Keep the cable that was there
             return false;
         }
 
@@ -772,7 +780,7 @@ impl AudioGraph {
 
             // No connection or buffer not found - use default
             let default_value = port_def.default_value;
-            let mut buf = SignalBuffer::new(self.block_size, port_def.signal_type);
+            let mut buf = SignalBuffer::unconnected(self.block_size, port_def.signal_type);
             buf.fill(default_value);
             inputs.push(buf);
         }
@@ -1172,6 +1180,55 @@ mod tests {
         // Try to create a cycle - should fail
         assert!(!graph.connect(2, 1, 1, 0));
         assert_eq!(graph.connection_count(), 1);
+    }
+
+    #[test]
+    fn test_new_cable_replaces_existing_one() {
+        let mut graph = AudioGraph::new(44100.0, 256);
+        for id in 1..=3 {
+            graph.add_module_instance(id, Box::new(TestPassthrough::default()));
+        }
+
+        assert!(graph.connect(1, 1, 3, 0));
+        assert!(graph.connect(2, 1, 3, 0));
+
+        // An input holds one cable: the second connection replaced the first
+        assert_eq!(graph.connection_count(), 1);
+        assert_eq!(graph.connections()[0].from_node, 2);
+    }
+
+    #[test]
+    fn test_rejected_replacement_keeps_existing_cable() {
+        let mut graph = AudioGraph::new(44100.0, 256);
+        for id in 1..=3 {
+            graph.add_module_instance(id, Box::new(TestPassthrough::default()));
+        }
+        assert!(graph.connect(1, 1, 2, 0)); // 1 -> 2
+        assert!(graph.connect(3, 1, 1, 0)); // 3 -> 1
+
+        // Replacing 3 -> 1 with 2 -> 1 would form a cycle, so it is refused
+        assert!(!graph.connect(2, 1, 1, 0));
+        assert_eq!(graph.connection_count(), 2);
+        assert!(graph.connections().iter().any(|c| c.from_node == 3 && c.to_node == 1));
+    }
+
+    #[test]
+    fn test_unconnected_inputs_are_marked() {
+        use crate::dsp::connected_input;
+
+        let mut graph = AudioGraph::new(44100.0, 64);
+        graph.add_module_instance(1, Box::new(TestPassthrough::default()));
+        graph.add_module_instance(2, Box::new(TestPassthrough::default()));
+
+        let inputs = graph.gather_inputs(2);
+        let refs: Vec<&SignalBuffer> = inputs.iter().collect();
+        assert!(connected_input(&refs, 0).is_none(), "nothing plugged in yet");
+
+        graph.connect(1, 1, 2, 0);
+        graph.process(&ProcessContext::new(44100.0, 64));
+        let inputs = graph.gather_inputs(2);
+        let refs: Vec<&SignalBuffer> = inputs.iter().collect();
+        assert!(connected_input(&refs, 0).is_some(), "cable plugged in");
     }
 
     #[test]

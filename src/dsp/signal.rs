@@ -75,6 +75,16 @@ impl SignalType {
     }
 }
 
+/// Returns the input buffer at `port` only if a cable is plugged into it.
+///
+/// Modules use this to tell "connected but silent" apart from "not
+/// connected", e.g. to normal a right input from the left, or to fall back
+/// from a sidechain to the main input.
+#[inline]
+pub fn connected_input<'a>(inputs: &[&'a SignalBuffer], port: usize) -> Option<&'a SignalBuffer> {
+    inputs.get(port).copied().filter(|buf| buf.is_connected())
+}
+
 /// A buffer containing signal samples.
 ///
 /// Used to pass data between modules in the audio graph.
@@ -85,6 +95,11 @@ pub struct SignalBuffer {
     pub samples: Vec<f32>,
     /// The type of signal stored in this buffer.
     pub signal_type: SignalType,
+    /// Whether a cable feeds this buffer. When an input has nothing plugged
+    /// in, the engine passes a buffer holding the port's default value with
+    /// this set to `false`. Use [`connected_input`] rather than reading it
+    /// directly.
+    connected: bool,
 }
 
 impl SignalBuffer {
@@ -95,7 +110,21 @@ impl SignalBuffer {
         Self {
             samples: vec![0.0; size],
             signal_type,
+            connected: true,
         }
+    }
+
+    /// Creates a buffer standing in for an input with no cable plugged in.
+    pub fn unconnected(size: usize, signal_type: SignalType) -> Self {
+        Self {
+            connected: false,
+            ..Self::new(size, signal_type)
+        }
+    }
+
+    /// Returns true if a cable feeds this buffer.
+    pub fn is_connected(&self) -> bool {
+        self.connected
     }
 
     /// Creates a new audio signal buffer.

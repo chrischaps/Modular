@@ -162,6 +162,24 @@ mod tests {
     }
 
     #[test]
+    fn test_unpatched_right_input_is_normalled_end_to_end() {
+        // osc -> Delay "In L" only; both delay outputs feed the output module.
+        // With nothing in "In R", the delay must output the same on both sides.
+        let mut patch = osc_patch(1);
+        patch.connections.clear();
+        patch.nodes.push(NodeData::new(3, "fx.delay", (100.0, 0.0)));
+        patch.connections.push(ConnectionData::new(1, "Out", 3, "In L"));
+        patch.connections.push(ConnectionData::new(3, "Out L", 2, "Left"));
+        patch.connections.push(ConnectionData::new(3, "Out R", 2, "Right"));
+
+        let (mut r, compiled) = OfflineRenderer::from_patch(&patch, 48000.0, 256).unwrap();
+        assert!(compiled.warnings.is_empty(), "{:?}", compiled.warnings);
+        let out = r.render_seconds(0.5);
+        assert!(rms(&out.right) > 0.05, "right channel should carry the mono source");
+        assert_eq!(out.left, out.right);
+    }
+
+    #[test]
     fn test_graph_without_output_renders_silence() {
         let mut r = OfflineRenderer::new(48000.0, 128);
         let out = r.render(300);

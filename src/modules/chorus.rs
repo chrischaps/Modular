@@ -10,7 +10,7 @@ use crate::dsp::{
     port::PortDefinition,
     signal::SignalBuffer,
     smoothed_value::SmoothedValue,
-    ParameterDisplay, SignalType,
+    connected_input, ParameterDisplay, SignalType,
 };
 
 use std::f32::consts::TAU;
@@ -307,7 +307,8 @@ impl DspModule for Chorus {
 
         // Get input buffers
         let in_left = inputs.get(Self::PORT_IN_L);
-        let in_right = inputs.get(Self::PORT_IN_R);
+        // Right is normalled from left when nothing is plugged into it
+        let in_right = connected_input(inputs, Self::PORT_IN_R);
         let rate_cv = inputs.get(Self::PORT_RATE_CV);
         let depth_cv = inputs.get(Self::PORT_DEPTH_CV);
 
@@ -315,12 +316,6 @@ impl DspModule for Chorus {
         let (out_left_slice, out_right_slice) = outputs.split_at_mut(1);
         let out_left = &mut out_left_slice[Self::PORT_OUT_L];
         let out_right = &mut out_right_slice[0];
-
-        // Normal the right input from the left when it carries no signal this
-        // block (interim until the engine reports real connection state).
-        let right_is_silent = in_right
-            .map(|buf| buf.samples.iter().all(|&s| s == 0.0))
-            .unwrap_or(true);
 
         let max_delay_samples = (MAX_DELAY_SECONDS * self.sample_rate) as f32;
 
@@ -355,12 +350,9 @@ impl DspModule for Chorus {
                 .unwrap_or(0.0);
 
             // Right channel normalled from left if not connected/silent
-            let dry_right = if right_is_silent {
-                dry_left
-            } else {
-                in_right
-                    .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
-                    .unwrap_or(0.0)
+            let dry_right = match in_right {
+                Some(buf) => buf.samples.get(i).copied().unwrap_or(0.0),
+                None => dry_left,
             };
 
             // Process through active voices and accumulate wet signal

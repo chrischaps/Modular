@@ -13,7 +13,7 @@ use crate::dsp::{
     port::PortDefinition,
     signal::SignalBuffer,
     smoothed_value::SmoothedValue,
-    ParameterDisplay, SignalType,
+    connected_input, ParameterDisplay, SignalType,
 };
 
 /// Waveform shapes for the oscillator.
@@ -294,14 +294,10 @@ impl DspModule for SineOscillator {
         // Get input buffers (may be empty if not connected, use defaults)
         let v_oct_input = inputs.get(Self::PORT_V_OCT);
         let fm_input = inputs.get(Self::PORT_FM);
-        let freq_in = inputs.get(Self::PORT_FREQ_IN);
+        // When a cable is plugged into Frequency it overrides the parameter
+        let freq_in = connected_input(inputs, Self::PORT_FREQ_IN);
+        let freq_in_connected = freq_in.is_some();
         let pwm_input = inputs.get(Self::PORT_PWM);
-
-        // Check if freq_in is connected (has non-zero signal)
-        // If connected, it overrides the base frequency parameter
-        let freq_in_connected = freq_in
-            .map(|buf| buf.samples.iter().any(|&s| s.abs() > f32::EPSILON))
-            .unwrap_or(false);
 
         // Get output buffer
         let output = &mut outputs[Self::PORT_OUT];

@@ -18,5 +18,5 @@ pub use module_trait::{DspModule, ModuleCategory, ModuleError, ModuleInfo};
 pub use parameter::{ParameterDefinition, ParameterDisplay};
 pub use port::{PortDefinition, PortDirection};
 pub use registry::{ModuleFactory, ModuleRegistry};
-pub use signal::{MidiEvent, MidiMessage, SignalBuffer, SignalType};
+pub use signal::{connected_input, MidiEvent, MidiMessage, SignalBuffer, SignalType};
 pub use smoothed_value::SmoothedValue;

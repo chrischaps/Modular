@@ -10,7 +10,7 @@ use crate::dsp::{
     port::PortDefinition,
     signal::SignalBuffer,
     smoothed_value::SmoothedValue,
-    ParameterDisplay, SignalType,
+    connected_input, ParameterDisplay, SignalType,
 };
 
 /// Maximum delay time in seconds.
@@ -281,7 +281,8 @@ impl DspModule for StereoDelay {
 
         // Get input buffers
         let in_left = inputs.get(Self::PORT_IN_L);
-        let in_right = inputs.get(Self::PORT_IN_R);
+        // Right is normalled from left when nothing is plugged into it
+        let in_right = connected_input(inputs, Self::PORT_IN_R);
         let time_cv = inputs.get(Self::PORT_TIME_CV);
         let feedback_cv = inputs.get(Self::PORT_FEEDBACK_CV);
 
@@ -289,12 +290,6 @@ impl DspModule for StereoDelay {
         let (out_left_slice, out_right_slice) = outputs.split_at_mut(1);
         let out_left = &mut out_left_slice[Self::PORT_OUT_L];
         let out_right = &mut out_right_slice[0];
-
-        // Normal the right input from the left when it carries no signal this
-        // block (interim until the engine reports real connection state).
-        let right_is_silent = in_right
-            .map(|buf| buf.samples.iter().all(|&s| s == 0.0))
-            .unwrap_or(true);
 
         let buffer_size = self.buffer_left.len();
 
@@ -329,12 +324,9 @@ impl DspModule for StereoDelay {
                 .unwrap_or(0.0);
 
             // Right channel is normalled from left if not connected
-            let dry_right = if right_is_silent {
-                dry_left
-            } else {
-                in_right
-                    .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
-                    .unwrap_or(0.0)
+            let dry_right = match in_right {
+                Some(buf) => buf.samples.get(i).copied().unwrap_or(0.0),
+                None => dry_left,
             };
 
             // Read delayed samples
@@ -665,8 +657,8 @@ mod tests {
 
     #[test]
     fn test_mono_input_normals_to_right() {
-        // The engine hands unconnected inputs to modules as zero-filled
-        // buffers, so a mono source on In L must still reach Out R.
+        // With nothing plugged into In R, a mono source on In L must
+        // reach both outputs.
         let mut delay = StereoDelay::new();
         delay.prepare(44100.0, 4410);
         let ctx = ProcessContext::new(44100.0, 4410);
@@ -675,7 +667,7 @@ mod tests {
         for i in 0..4410 {
             left.samples[i] = (i as f32 * 0.05).sin();
         }
-        let right = SignalBuffer::audio(4410); // unconnected
+        let right = SignalBuffer::unconnected(4410, SignalType::Audio);
         let mut outputs = vec![SignalBuffer::audio(4410), SignalBuffer::audio(4410)];
         delay.process(
             &[&left, &right],
@@ -686,5 +678,27 @@ mod tests {
 
         assert!(outputs[1].samples.iter().any(|s| s.abs() > 0.1), "Out R is silent");
         assert_eq!(outputs[0].samples, outputs[1].samples, "Mono input should be centred");
+    }
+
+    #[test]
+    fn test_connected_silent_right_stays_silent() {
+        // A cable carrying silence into In R is a real (silent) right channel,
+        // not a reason to copy the left one.
+        let mut delay = StereoDelay::new();
+        delay.prepare(44100.0, 4410);
+        let ctx = ProcessContext::new(44100.0, 4410);
+
+        let mut left = SignalBuffer::audio(4410);
+        left.fill(0.5);
+        let right = SignalBuffer::audio(4410); // connected, silent
+        let mut outputs = vec![SignalBuffer::audio(4410), SignalBuffer::audio(4410)];
+        delay.process(
+            &[&left, &right],
+            &mut outputs,
+            &[10.0, 0.0, 0.0, 10000.0, 20.0, 0.0, 0.0],
+            &ctx,
+        );
+
+        assert!(outputs[1].samples.iter().all(|&s| s == 0.0), "Out R should be silent");
     }
 }
