@@ -26,6 +26,8 @@ The main area of the interface is the **node graph canvas**. This is where you c
 - Press `Space` or `Tab` over the canvas to add a module by name
 - Use the scroll wheel to zoom in for detailed work or out for an overview
 - Modules can be freely positioned anywhere on the canvas
+- Hover a jack's name or a knob to see what it does. Jacks also show their signal type in its cable colour, and knobs their range
+- The background grid moves and zooms with the patch, with a brighter line every five squares
 
 ## Adding Modules
 
@@ -196,7 +198,25 @@ Undo covers adding, deleting, moving and bypassing modules, patching and unpatch
 
 ### Recent Patches
 
-Access recently opened patches from the **File** menu.
+The **Recent** menu in the toolbar's **File** group lists the last eight patches you opened or saved, newest first. Hover one to see where it lives. A file that has since been moved or deleted is greyed out. **Clear Recent** empties the list.
+
+### Unsaved Changes
+
+While a patch has changes you haven't saved, the window title starts with a dot (`● Lush Pad · Modular Synth`), and so does its name in the status bar. Undoing back to the saved patch clears the dot.
+
+**New**, **Open**, opening an example or a recent file, and closing the window all ask first when there are unsaved changes:
+
+- **Save** saves the patch (asking where, if it has never been saved), then carries on. Cancelling the save dialog cancels the whole thing.
+- **Don't Save** (**Quit Without Saving**, when closing) carries on and lets the changes go.
+- **Cancel** (or `Escape`) goes back to the patch.
+
+### Autosave and Recovery
+
+Every 30 seconds, a patch with unsaved changes is autosaved alongside the app's settings. Saving the patch, or choosing **Quit Without Saving**, clears the autosave. So the only way one survives is if Modular closes without asking, after a crash or a forced quit.
+
+The next time Modular starts, it offers the patch back: **Recover** reopens it exactly as it was at the last autosave, still marked unsaved, and **Discard** lets it go. You lose at most the last 30 seconds of work.
+
+Recent files, the autosave and the window's size and position are kept in Modular's settings file (`%APPDATA%\Modular Synth\data\app.ron` on Windows, `~/.local/share/modularsynth/app.ron` on Linux, `~/Library/Application Support/Modular-Synth/app.ron` on macOS).
 
 ## MIDI Setup
 

@@ -28,6 +28,7 @@ use crate::widgets::{cpu_meter, CpuMeterConfig};
 use super::editing;
 use super::engine_sync;
 use super::palette::{PaletteAction, QuickAdd};
+use super::session::{self, Answer, Autosave, Discard, RecentFiles};
 use super::theme;
 use super::undo::{Applied, History};
 
@@ -155,6 +156,21 @@ pub struct SynthApp {
     /// Where the last paste was aimed and where it landed, so pasting again
     /// without moving the mouse fans the copies out instead of stacking them.
     last_paste: Option<(egui::Pos2, egui::Pos2)>,
+
+    // --- Session safety ---
+    /// Patch files opened or saved lately, for the Recent menu.
+    recent_files: RecentFiles,
+    /// What's waiting on an answer to "Save changes?".
+    pending_discard: Option<Discard>,
+    /// A crash's autosave, until it's recovered or let go.
+    recovery: Option<Autosave>,
+    /// The MIDI mappings as last opened or saved. Undo history doesn't
+    /// cover them, but they're saved with the patch.
+    saved_midi_mappings: Vec<MidiMapping>,
+    /// Whether the window may close: set once unsaved changes are dealt with.
+    allow_close: bool,
+    /// The window title last sent, so it's only sent when it changes.
+    window_title: String,
 }
 
 /// What a module's right-click menu asked for, handled once the graph is drawn.
@@ -264,6 +280,12 @@ impl SynthApp {
             quick_add: None,
             editor_rect: egui::Rect::NOTHING,
             last_paste: None,
+            recent_files: RecentFiles::default(),
+            pending_discard: None,
+            recovery: None,
+            saved_midi_mappings: Vec::new(),
+            allow_close: false,
+            window_title: String::new(),
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -579,13 +601,37 @@ impl SynthApp {
             ui.label(RichText::new("File").color(theme::text::SECONDARY));
             ui.add_space(8.0);
 
-            if ui.button("📄 New").on_hover_text("Clear patch").clicked() {
+            if ui.button("📄 New").on_hover_text("Start an empty patch (Ctrl+N)").clicked() {
                 actions.new_patch = true;
             }
 
             if ui.button("📂 Open").on_hover_text("Ctrl+O").clicked() {
                 actions.load_patch = true;
             }
+
+            ui.menu_button("🕘 Recent", |ui| {
+                if self.recent_files.is_empty() {
+                    ui.label(RichText::new("No recent patches").color(theme::text::DISABLED).italics());
+                    return;
+                }
+                for path in self.recent_files.iter() {
+                    let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("?");
+                    let button = ui.add_enabled(path.exists(), egui::Button::new(name));
+                    let clicked = button
+                        .on_hover_text(path.display().to_string())
+                        .on_disabled_hover_text(format!("Missing: {}", path.display()))
+                        .clicked();
+                    if clicked {
+                        actions.open_recent = Some(path.to_path_buf());
+                        ui.close_menu();
+                    }
+                }
+                ui.separator();
+                if ui.button(RichText::new("Clear Recent").color(theme::text::SECONDARY)).clicked() {
+                    actions.clear_recent = true;
+                    ui.close_menu();
+                }
+            });
 
             ui.menu_button("📚 Examples", |ui| {
                 for example in EXAMPLES {
@@ -600,7 +646,7 @@ impl SynthApp {
                 actions.save_patch = true;
             }
 
-            if ui.button("💾 Save As").on_hover_text("Save to new file").clicked() {
+            if ui.button("💾 Save As").on_hover_text("Save to a new file (Ctrl+Shift+S)").clicked() {
                 actions.save_as_patch = true;
             }
 
@@ -851,6 +897,10 @@ impl SynthApp {
 
                 // Update zoom for widget scaling
                 self.user_state.zoom = self.graph_state.pan_zoom.zoom;
+
+                // The grid sits under the patch and moves with it
+                let grid_origin = editor_rect.min + self.graph_state.pan_zoom.pan + self.history.view_origin();
+                theme::draw_grid_background(ui.painter(), editor_rect, grid_origin, self.graph_state.pan_zoom.zoom);
 
                 // Draw the node graph editor
                 let (zoom_before, pan_before) = (self.graph_state.pan_zoom.zoom, self.graph_state.pan_zoom.pan);
@@ -1547,8 +1597,9 @@ impl SynthApp {
             self.send_command(EngineCommand::SetPlaying(true));
         }
 
-        // A loaded patch starts its own history
+        // A loaded patch starts its own history, with nothing unsaved
         self.history.reset(&self.graph_state, &self.user_state);
+        self.mark_saved();
 
         Ok(staged.warnings)
     }
@@ -1578,14 +1629,16 @@ impl SynthApp {
     fn new_patch(&mut self) {
         self.clear_graph();
         self.history.reset(&self.graph_state, &self.user_state);
+        self.mark_saved();
         self.load_warnings.clear();
         self.current_patch_path = None;
         self.current_example = None;
         self.status_message = Some("New patch created".to_string());
     }
 
-    /// Show a save file dialog and save the current patch.
-    fn show_save_dialog(&mut self) {
+    /// Show a save file dialog and save the current patch. Returns whether
+    /// it was saved, not cancelled or failed.
+    fn show_save_dialog(&mut self) -> bool {
         let default_name = self.current_patch_path
             .as_ref()
             .and_then(|p| p.file_name())
@@ -1609,12 +1662,15 @@ impl SynthApp {
                     self.current_patch_path = Some(path.clone());
                     self.current_example = None;
                     self.status_message = Some(format!("Saved: {}", path.display()));
+                    self.saved_as(&path);
+                    return true;
                 }
                 Err(e) => {
                     self.status_message = Some(format!("Save failed: {}", e));
                 }
             }
         }
+        false
     }
 
     /// Show a load file dialog and load the selected patch.
@@ -1635,9 +1691,14 @@ impl SynthApp {
                 self.current_example = None;
                 self.status_message = Some(format!("Loaded: {}", name));
                 self.show_load_warnings(warnings);
+                self.recent_files.push(path);
             }
             Err(e) => {
                 self.status_message = Some(format!("Load failed: {}", e));
+                // A file that's gone stops being offered
+                if !path.exists() {
+                    self.recent_files.remove(path);
+                }
             }
         }
     }
@@ -1676,7 +1737,8 @@ impl SynthApp {
     }
 
     /// Quick save to the current path, or show save dialog if no path.
-    fn quick_save(&mut self) {
+    /// Returns whether the patch was saved.
+    fn quick_save(&mut self) -> bool {
         if let Some(path) = self.current_patch_path.clone() {
             let name = path.file_stem()
                 .and_then(|s| s.to_str())
@@ -1686,14 +1748,130 @@ impl SynthApp {
             match save_to_file(&patch, &path) {
                 Ok(()) => {
                     self.status_message = Some(format!("Saved: {}", path.display()));
+                    self.saved_as(&path);
+                    true
                 }
                 Err(e) => {
                     self.status_message = Some(format!("Save failed: {}", e));
+                    false
                 }
             }
         } else {
-            self.show_save_dialog();
+            self.show_save_dialog()
         }
+    }
+
+    /// Notes a successful save to `path`.
+    fn saved_as(&mut self, path: &Path) {
+        // Edits made this frame are in the file, so they're in the history first
+        self.sync_history();
+        self.mark_saved();
+        self.recent_files.push(path);
+    }
+
+    /// Notes that the patch as it stands is what was last opened or saved.
+    fn mark_saved(&mut self) {
+        self.history.mark_saved();
+        self.saved_midi_mappings = self.midi_mappings.clone();
+    }
+
+    /// Records any edit not yet in the undo history, so it counts as a change.
+    fn sync_history(&mut self) {
+        self.history.record(&self.graph_state, &self.user_state, false, Instant::now());
+    }
+
+    /// Whether the patch has changes that aren't saved anywhere.
+    fn has_unsaved_changes(&self) -> bool {
+        self.history.has_unsaved_changes() || self.midi_mappings != self.saved_midi_mappings
+    }
+
+    /// The patch's name: its file's, its example's, or "Untitled".
+    fn patch_title(&self) -> String {
+        match (&self.current_patch_path, self.current_example) {
+            (Some(path), _) => path.file_stem().and_then(|s| s.to_str()).unwrap_or("Untitled").to_string(),
+            (None, Some(example)) => example.name.to_string(),
+            (None, None) => "Untitled".to_string(),
+        }
+    }
+
+    /// Does `action` now if nothing would be lost, or asks first.
+    fn request(&mut self, ctx: &egui::Context, action: Discard) {
+        self.sync_history();
+        if self.has_unsaved_changes() {
+            self.pending_discard = Some(action);
+        } else {
+            self.perform(ctx, action);
+        }
+    }
+
+    /// Does something that replaces or closes the patch, once its unsaved
+    /// changes are saved or let go.
+    fn perform(&mut self, ctx: &egui::Context, action: Discard) {
+        match action {
+            Discard::New => self.new_patch(),
+            Discard::Open => self.show_load_dialog(),
+            Discard::OpenFile(path) => self.open_file(&path),
+            Discard::OpenExample(example) => self.open_example(example),
+            Discard::Quit => {
+                self.allow_close = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+
+    /// Shows whichever prompt is waiting, and acts on its answer.
+    fn show_prompts(&mut self, ctx: &egui::Context) {
+        if let Some(action) = self.pending_discard.clone() {
+            if let Some(answer) = session::unsaved_changes_prompt(ctx, &self.patch_title(), &action) {
+                self.pending_discard = None;
+                match answer {
+                    // A cancelled save dialog cancels the whole thing
+                    Answer::Save => {
+                        if self.quick_save() {
+                            self.perform(ctx, action);
+                        }
+                    }
+                    Answer::Discard => self.perform(ctx, action),
+                    Answer::Cancel => {}
+                }
+            }
+        } else if let Some(autosave) = &self.recovery {
+            if let Some(recover) = session::recovery_prompt(ctx, autosave) {
+                let autosave = self.recovery.take().expect("shown above");
+                if recover {
+                    self.recover(&autosave);
+                }
+            }
+        }
+    }
+
+    /// Whether a prompt is up, so shortcuts wait.
+    fn prompt_open(&self) -> bool {
+        self.pending_discard.is_some() || self.recovery.is_some()
+    }
+
+    /// Brings back the patch an autosave holds. It's still unsaved.
+    fn recover(&mut self, autosave: &Autosave) {
+        match autosave.patch().and_then(|patch| self.load_patch(&patch)) {
+            Ok(warnings) => {
+                self.current_patch_path = autosave.path.clone();
+                self.current_example = autosave.example.as_deref()
+                    .and_then(|name| EXAMPLES.iter().find(|e| e.name == name));
+                self.history.mark_unsaved();
+                self.status_message = Some(format!("Recovered unsaved changes to {}", autosave.name));
+                self.show_load_warnings(warnings);
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Couldn't recover {}: {}", autosave.name, e));
+            }
+        }
+    }
+
+    /// Picks up the last session: its recent files, and any autosave a crash
+    /// left, which is offered back on the first frame.
+    pub fn restore_session(&mut self, storage: Option<&dyn eframe::Storage>) {
+        self.recent_files = RecentFiles::load(storage);
+        self.recovery = Autosave::load(storage);
     }
 
     /// Validate a connection and return an error message if invalid.
@@ -1820,9 +1998,14 @@ impl SynthApp {
                 let patch_name = match (&self.current_patch_path, self.current_example) {
                     (Some(path), _) => path.file_stem().and_then(|s| s.to_str()).map(str::to_string),
                     (None, Some(example)) => Some(format!("{} (example)", example.name)),
-                    (None, None) => None,
+                    (None, None) => self.has_unsaved_changes().then(|| "Untitled".to_string()),
                 };
                 if let Some(name) = patch_name {
+                    // Right to left: the dot sits after the name
+                    if self.has_unsaved_changes() {
+                        ui.label(RichText::new("●").color(theme::accent::WARNING).small())
+                            .on_hover_text("Unsaved changes (Ctrl+S to save)");
+                    }
                     ui.label(RichText::new(name)
                         .color(theme::text::SECONDARY)
                         .small());
@@ -2079,6 +2262,8 @@ struct ToolbarActions {
     save_as_patch: bool,
     load_patch: bool,
     open_example: Option<&'static Example>,
+    open_recent: Option<PathBuf>,
+    clear_recent: bool,
     new_patch: bool,
     undo: bool,
     redo: bool,
@@ -2119,12 +2304,20 @@ impl eframe::App for SynthApp {
 
         // Handle keyboard shortcuts
         let mut keyboard_save = false;
+        let mut keyboard_save_as = false;
         let mut keyboard_load = false;
         let mut keyboard_bypass = false;
 
+        // Closing the window with unsaved changes asks first
+        if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.request(ctx, Discard::Quit);
+        }
+
         // Undo and redo, unless a text field has the keys (it has its own undo).
         // Redo is checked first: Ctrl+Z alone would also match Ctrl+Shift+Z.
-        if !ctx.wants_keyboard_input() {
+        let prompt_open = self.prompt_open();
+        if !ctx.wants_keyboard_input() && !prompt_open {
             use egui::{Key, KeyboardShortcut, Modifiers};
             let (redo, undo) = ctx.input_mut(|i| {
                 let redo = i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z))
@@ -2138,10 +2331,22 @@ impl eframe::App for SynthApp {
             }
         }
 
+        let mut keyboard_new = false;
         ctx.input(|i| {
-            // Ctrl+S: Save
+            if prompt_open {
+                return;
+            }
+            // Ctrl+N: New
+            if i.modifiers.ctrl && i.key_pressed(egui::Key::N) {
+                keyboard_new = true;
+            }
+            // Ctrl+S: Save, Ctrl+Shift+S: Save As
             if i.modifiers.ctrl && i.key_pressed(egui::Key::S) {
-                keyboard_save = true;
+                if i.modifiers.shift {
+                    keyboard_save_as = true;
+                } else {
+                    keyboard_save = true;
+                }
             }
             // Ctrl+O: Open/Load
             if i.modifiers.ctrl && i.key_pressed(egui::Key::O) {
@@ -2161,7 +2366,7 @@ impl eframe::App for SynthApp {
 
         // Editing shortcuts act on the graph, so they wait while a text field
         // or the palette has the keys
-        if !ctx.wants_keyboard_input() && self.quick_add.is_none() {
+        if !ctx.wants_keyboard_input() && self.quick_add.is_none() && !prompt_open {
             self.handle_editing_shortcuts(ctx);
         }
 
@@ -2213,17 +2418,23 @@ impl eframe::App for SynthApp {
         if toolbar_actions.save_patch || keyboard_save {
             self.quick_save();
         }
-        if toolbar_actions.save_as_patch {
+        if toolbar_actions.save_as_patch || keyboard_save_as {
             self.show_save_dialog();
         }
         if toolbar_actions.load_patch || keyboard_load {
-            self.show_load_dialog();
+            self.request(ctx, Discard::Open);
         }
         if let Some(example) = toolbar_actions.open_example {
-            self.open_example(example);
+            self.request(ctx, Discard::OpenExample(example));
         }
-        if toolbar_actions.new_patch {
-            self.new_patch();
+        if let Some(path) = toolbar_actions.open_recent {
+            self.request(ctx, Discard::OpenFile(path));
+        }
+        if toolbar_actions.clear_recent {
+            self.recent_files.clear();
+        }
+        if toolbar_actions.new_patch || keyboard_new {
+            self.request(ctx, Discard::New);
         }
         if toolbar_actions.undo {
             self.undo();
@@ -2246,6 +2457,9 @@ impl eframe::App for SynthApp {
         // Process pending MIDI events
         self.process_midi_events();
 
+        // "Save changes?" and crash recovery, over everything else
+        self.show_prompts(ctx);
+
         // Whatever this frame changed becomes an undo step, once the mouse
         // button is up: a knob turn or a drag is one step, not one per frame
         let gesture_held = ctx.input(|i| i.pointer.any_down());
@@ -2260,11 +2474,50 @@ impl eframe::App for SynthApp {
             }
         }
 
+        // The title names the patch, with a dot while it has unsaved changes
+        let title = format!(
+            "{}{} · Modular Synth",
+            if self.has_unsaved_changes() { "● " } else { "" },
+            self.patch_title()
+        );
+        if title != self.window_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.window_title = title;
+        }
+
         // Clear status message after showing it for one frame
         // This gives user time to read it but doesn't persist forever
         if had_status_message {
             // Request one more repaint to clear the message
             ctx.request_repaint_after(std::time::Duration::from_secs(2));
         }
+    }
+
+    /// Stores recent files, and the patch while it has unsaved changes, so
+    /// a crash loses at most [`session::AUTOSAVE_INTERVAL`] of work.
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        self.recent_files.store(storage);
+        let autosave = if let Some(recovery) = &self.recovery {
+            // Not answered yet: keep it for next time
+            Some(recovery.clone())
+        } else if self.has_unsaved_changes() && !self.allow_close {
+            let patch = self.create_patch(&self.patch_title());
+            let example = self.current_example.map(|e| e.name.to_string());
+            Autosave::new(&patch, self.current_patch_path.clone(), example).ok()
+        } else {
+            // Saved, or let go on the way out
+            None
+        };
+        Autosave::store(storage, autosave.as_ref());
+    }
+
+    fn auto_save_interval(&self) -> std::time::Duration {
+        session::AUTOSAVE_INTERVAL
+    }
+
+    /// Only the app's own state is kept; egui's (open menus, scroll
+    /// positions) starts fresh each launch.
+    fn persist_egui_memory(&self) -> bool {
+        false
     }
 }

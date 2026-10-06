@@ -74,9 +74,9 @@ impl KeyboardInput {
             sample_rate: 44100.0,
             ports: vec![
                 // Output ports
-                PortDefinition::output("gate", "Gate", SignalType::Gate),
-                PortDefinition::output("pitch", "Pitch", SignalType::Control),
-                PortDefinition::output("velocity", "Velocity", SignalType::Control),
+                PortDefinition::output("gate", "Gate", SignalType::Gate).describe("High while a key is held; patch into an envelope's Gate"),
+                PortDefinition::output("pitch", "Pitch", SignalType::Control).describe("Pitch of the held note as V/Oct"),
+                PortDefinition::output("velocity", "Velocity", SignalType::Control).describe("Note strength, 0 to 1"),
             ],
             parameters: vec![
                 // Note: MIDI note number (0-127), set by UI
@@ -88,9 +88,9 @@ impl KeyboardInput {
                     127.0,
                     60.0, // Default to middle C
                     ParameterDisplay::Linear { unit: "" },
-                ),
+                ).describe("Held note as a MIDI number; set by the keys you play"),
                 // Gate: 0 or 1, set by UI when keys pressed/released
-                ParameterDefinition::toggle("gate", "Gate", false),
+                ParameterDefinition::toggle("gate", "Gate", false).describe("On while a key is down; set by the keys you play"),
                 // Octave: shift the keyboard up/down by octaves
                 ParameterDefinition::new(
                     "octave",
@@ -99,16 +99,16 @@ impl KeyboardInput {
                     2.0,
                     0.0,
                     ParameterDisplay::Linear { unit: "" },
-                ),
+                ).describe("Shifts the keyboard up or down by octaves"),
                 // Velocity: fixed velocity for all notes
-                ParameterDefinition::normalized("velocity", "Velocity", 1.0),
+                ParameterDefinition::normalized("velocity", "Velocity", 1.0).describe("Fixed strength sent for every note"),
                 // Priority: key priority mode
                 ParameterDefinition::choice(
                     "priority",
                     "Priority",
                     &["Last", "Lowest", "Highest"],
                     0,
-                ),
+                ).describe("Which key sounds when several are held"),
             ],
             current_pitch: 0.0,
             current_gate: 0.0,

@@ -52,10 +52,10 @@ impl Mixer {
         Self {
             ports: vec![
                 // Input ports
-                PortDefinition::input_with_default("ch1", "Ch 1", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("ch2", "Ch 2", SignalType::Audio, 0.0),
+                PortDefinition::input_with_default("ch1", "Ch 1", SignalType::Audio, 0.0).describe("First signal to mix"),
+                PortDefinition::input_with_default("ch2", "Ch 2", SignalType::Audio, 0.0).describe("Second signal to mix"),
                 // Output port
-                PortDefinition::output("out", "Out", SignalType::Audio),
+                PortDefinition::output("out", "Out", SignalType::Audio).describe("Sum of both channels at their levels"),
             ],
             parameters: vec![
                 // Level 1: 0 to 1
@@ -66,7 +66,7 @@ impl Mixer {
                     1.0,
                     1.0, // Default: unity gain
                     ParameterDisplay::linear(""),
-                ),
+                ).describe("Volume of channel 1"),
                 // Level 2: 0 to 1
                 ParameterDefinition::new(
                     "level2",
@@ -75,7 +75,7 @@ impl Mixer {
                     1.0,
                     1.0, // Default: unity gain
                     ParameterDisplay::linear(""),
-                ),
+                ).describe("Volume of channel 2"),
             ],
             sample_rate,
             // Initialize smoothed parameters

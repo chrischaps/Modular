@@ -91,9 +91,9 @@ impl Clock {
             sample_rate: 44100.0,
             ports: vec![
                 // Input port
-                PortDefinition::input_with_default("sync", "Sync", SignalType::Gate, 0.0),
+                PortDefinition::input_with_default("sync", "Sync", SignalType::Gate, 0.0).describe("A rising edge restarts the beat; patch another clock or trigger"),
                 // Output port
-                PortDefinition::output("gate", "Gate", SignalType::Gate),
+                PortDefinition::output("gate", "Gate", SignalType::Gate).describe("Pulse on every beat division; patch into a sequencer or envelope"),
             ],
             parameters: vec![
                 // Tempo in BPM
@@ -104,7 +104,7 @@ impl Clock {
                     300.0,
                     120.0,
                     ParameterDisplay::linear("BPM"),
-                ),
+                ).describe("Speed in beats per minute"),
                 // Gate length as percentage
                 ParameterDefinition::new(
                     "gate_length",
@@ -113,16 +113,16 @@ impl Clock {
                     99.0,
                     50.0,
                     ParameterDisplay::linear("%"),
-                ),
+                ).describe("How much of each pulse the gate stays high"),
                 // Division (discrete: whole, half, quarter, eighth, sixteenth)
                 ParameterDefinition::choice(
                     "division",
                     "Division",
                     &["1", "1/2", "1/4", "1/8", "1/16"],
                     2, // Default to quarter note
-                ),
+                ).describe("Pulse rate relative to the beat; 1/4 is one per beat"),
                 // Run toggle
-                ParameterDefinition::toggle("run", "Run", true),
+                ParameterDefinition::toggle("run", "Run", true).describe("Starts and stops the clock"),
             ],
         }
     }

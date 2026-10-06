@@ -107,10 +107,10 @@ impl MidiNote {
         let mut module = Self {
             ports: vec![
                 // Output ports
-                PortDefinition::output("pitch", "Pitch", SignalType::Control),
-                PortDefinition::output("gate", "Gate", SignalType::Gate),
-                PortDefinition::output("velocity", "Velocity", SignalType::Control),
-                PortDefinition::output("aftertouch", "Aftertouch", SignalType::Control),
+                PortDefinition::output("pitch", "Pitch", SignalType::Control).describe("Pitch of the played note as V/Oct, with pitch bend"),
+                PortDefinition::output("gate", "Gate", SignalType::Gate).describe("High while a key is held; patch into an envelope's Gate"),
+                PortDefinition::output("velocity", "Velocity", SignalType::Control).describe("How hard the key was struck, 0 to 1"),
+                PortDefinition::output("aftertouch", "Aftertouch", SignalType::Control).describe("Key pressure after the note starts, 0 to 1"),
             ],
             parameters: vec![
                 // Channel: MIDI channel filter (0=Omni, 1-16=specific)
@@ -119,15 +119,15 @@ impl MidiNote {
                     "Channel",
                     &["Omni", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"],
                     0,
-                ),
+                ).describe("Only respond to this MIDI channel; Omni hears all"),
                 // Octave: shift the notes up/down by octaves
-                ParameterDefinition::new("octave", "Octave", -4.0, 4.0, 0.0, ParameterDisplay::stepped("oct")),
+                ParameterDefinition::new("octave", "Octave", -4.0, 4.0, 0.0, ParameterDisplay::stepped("oct")).describe("Shifts incoming notes up or down by octaves"),
                 // Priority: which held key sounds
-                ParameterDefinition::choice("priority", "Priority", &["Last", "Low", "High"], 0),
+                ParameterDefinition::choice("priority", "Priority", &["Last", "Low", "High"], 0).describe("Which key sounds when several are held"),
                 // Retrigger: restart envelopes on legato notes
-                ParameterDefinition::toggle("retrigger", "Retrigger", false),
+                ParameterDefinition::toggle("retrigger", "Retrigger", false).describe("Restarts the gate on notes played legato"),
                 // Bend Range: semitones at full pitch bend
-                ParameterDefinition::new("bend_range", "Bend Range", 0.0, 12.0, 2.0, ParameterDisplay::stepped("st")),
+                ParameterDefinition::new("bend_range", "Bend Range", 0.0, 12.0, 2.0, ParameterDisplay::stepped("st")).describe("Semitones the pitch bend wheel moves at full travel"),
             ],
             held: Vec::with_capacity(128),
             note: 60,

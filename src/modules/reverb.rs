@@ -232,14 +232,14 @@ impl Reverb {
             mod_smooth: SmoothedValue::with_default_smoothing(0.25, sample_rate),
             ports: vec![
                 // Input ports
-                PortDefinition::input_with_default("in_l", "In L", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("in_r", "In R", SignalType::Audio, 0.0),
+                PortDefinition::input_with_default("in_l", "In L", SignalType::Audio, 0.0).describe("Left audio to put in the room"),
+                PortDefinition::input_with_default("in_r", "In R", SignalType::Audio, 0.0).describe("Right audio to put in the room; copies left when unpatched"),
                 // Output ports
-                PortDefinition::output("out_l", "Out L", SignalType::Audio),
-                PortDefinition::output("out_r", "Out R", SignalType::Audio),
+                PortDefinition::output("out_l", "Out L", SignalType::Audio).describe("Left reverb, mixed with the dry signal"),
+                PortDefinition::output("out_r", "Out R", SignalType::Audio).describe("Right reverb, mixed with the dry signal"),
             ],
             parameters: vec![
-                ParameterDefinition::normalized("size", "Size", 0.5),
+                ParameterDefinition::normalized("size", "Size", 0.5).describe("Room size; larger spaces sound deeper and more spread out"),
                 ParameterDefinition::new(
                     "decay",
                     "Decay",
@@ -247,8 +247,8 @@ impl Reverb {
                     30.0,
                     2.0,
                     ParameterDisplay::Logarithmic { unit: "s" },
-                ),
-                ParameterDefinition::normalized("damping", "Damping", 0.5),
+                ).describe("How long the tail rings out, as RT60 in seconds"),
+                ParameterDefinition::normalized("damping", "Damping", 0.5).describe("How fast highs die away in the tail; higher is darker"),
                 ParameterDefinition::new(
                     "predelay",
                     "Pre-Delay",
@@ -256,11 +256,11 @@ impl Reverb {
                     100.0,
                     0.0,
                     ParameterDisplay::Linear { unit: "ms" },
-                ),
-                ParameterDefinition::normalized("mix", "Mix", 0.3),
-                ParameterDefinition::normalized("width", "Width", 1.0),
+                ).describe("Silence before the reverb starts, in ms"),
+                ParameterDefinition::normalized("mix", "Mix", 0.3).describe("Blend from dry (0) to reverb only (1)"),
+                ParameterDefinition::normalized("width", "Width", 1.0).describe("Stereo spread of the tail; 0 is mono, 1 is full width"),
                 // Appended so positional (v1/v2) patches keep their mapping
-                ParameterDefinition::normalized("mod", "Mod", 0.25),
+                ParameterDefinition::normalized("mod", "Mod", 0.25).describe("Slow movement inside the tail that smooths out ringing"),
             ],
         };
         reverb.allocate();

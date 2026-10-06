@@ -149,10 +149,10 @@ impl PolyMidi {
     pub fn new() -> Self {
         let mut module = Self {
             ports: vec![
-                PortDefinition::output("pitch", "Pitch", SignalType::Control),
-                PortDefinition::output("gate", "Gate", SignalType::Gate),
-                PortDefinition::output("velocity", "Velocity", SignalType::Control),
-                PortDefinition::output("aftertouch", "Aftertouch", SignalType::Control),
+                PortDefinition::output("pitch", "Pitch", SignalType::Control).describe("Poly V/Oct, one pitch per voice, with pitch bend"),
+                PortDefinition::output("gate", "Gate", SignalType::Gate).describe("Poly gate, high for each voice while its key is held"),
+                PortDefinition::output("velocity", "Velocity", SignalType::Control).describe("Poly velocity, one strength per voice, 0 to 1"),
+                PortDefinition::output("aftertouch", "Aftertouch", SignalType::Control).describe("Key pressure after the note starts, 0 to 1"),
             ],
             parameters: vec![
                 ParameterDefinition::choice(
@@ -160,7 +160,7 @@ impl PolyMidi {
                     "Channel",
                     &["Omni", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"],
                     0,
-                ),
+                ).describe("Only respond to this MIDI channel; Omni hears all"),
                 ParameterDefinition::new(
                     "voices",
                     "Voices",
@@ -168,10 +168,10 @@ impl PolyMidi {
                     MAX_CHANNELS as f32,
                     MAX_CHANNELS as f32,
                     ParameterDisplay::stepped(""),
-                ),
-                ParameterDefinition::choice("allocation", "Allocation", &["Rotate", "Reuse"], 0),
-                ParameterDefinition::new("octave", "Octave", -4.0, 4.0, 0.0, ParameterDisplay::stepped("oct")),
-                ParameterDefinition::new("bend_range", "Bend Range", 0.0, 12.0, 2.0, ParameterDisplay::stepped("st")),
+                ).describe("How many notes can sound at once"),
+                ParameterDefinition::choice("allocation", "Allocation", &["Rotate", "Reuse"], 0).describe("Which voice a new note takes: next in turn, or the longest free"),
+                ParameterDefinition::new("octave", "Octave", -4.0, 4.0, 0.0, ParameterDisplay::stepped("oct")).describe("Shifts incoming notes up or down by octaves"),
+                ParameterDefinition::new("bend_range", "Bend Range", 0.0, 12.0, 2.0, ParameterDisplay::stepped("st")).describe("Semitones the pitch bend wheel moves at full travel"),
             ],
             voices: [Voice::IDLE; MAX_CHANNELS],
             next: 0,

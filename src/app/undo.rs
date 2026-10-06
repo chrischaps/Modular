@@ -448,6 +448,12 @@ pub struct History {
     anchor: ViewAnchor,
     /// A name for the next step, from the command that's making it.
     next_label: Option<String>,
+    /// The patch as it was last opened or saved, to tell whether it has
+    /// unsaved changes. Undoing back to it counts as no changes.
+    saved: Snapshot,
+    /// The patch has never been saved as it stands, e.g. one recovered
+    /// from an autosave, so it has unsaved changes whatever the history says.
+    never_saved: bool,
 }
 
 impl History {
@@ -459,12 +465,36 @@ impl History {
         self.open_since = None;
         self.next_label = None;
         self.baseline = Snapshot::capture(editor, user_state, &self.anchor);
+        self.mark_saved();
+    }
+
+    /// Notes that the patch, as of the last step, was just saved.
+    pub fn mark_saved(&mut self) {
+        self.saved = self.baseline.clone();
+        self.never_saved = false;
+    }
+
+    /// Notes that the patch isn't saved anywhere as it stands.
+    pub fn mark_unsaved(&mut self) {
+        self.never_saved = true;
+    }
+
+    /// Whether the patch, as of the last step, differs from what was last
+    /// opened or saved.
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.never_saved || Step::between(&self.saved, &self.baseline).is_some()
     }
 
     /// Starts tracking zoom afresh, for when the editor's pan and zoom are
     /// reset to their defaults.
     pub fn reset_view(&mut self) {
         self.anchor = ViewAnchor::default();
+    }
+
+    /// Where the patch's (0, 0) is, relative to the editor's pan, in the
+    /// same zoomed points as node positions. The background grid hangs off it.
+    pub fn view_origin(&self) -> Vec2 {
+        self.anchor.origin
     }
 
     /// Follows a zoom of the editor. See [`ViewAnchor::follow_zoom`].
@@ -707,6 +737,43 @@ mod tests {
 
     fn count(commands: &[EngineCommand], wanted: impl Fn(&EngineCommand) -> bool) -> usize {
         commands.iter().filter(|c| wanted(c)).count()
+    }
+
+    #[test]
+    fn test_unsaved_changes_follow_the_saved_patch() {
+        let mut rig = Rig::new();
+        let (_, filter, _) = voice(&mut rig);
+        rig.history.mark_saved();
+        assert!(!rig.history.has_unsaved_changes());
+
+        rig.set(filter, "Cutoff", 440.0);
+        rig.record();
+        assert!(rig.history.has_unsaved_changes());
+
+        // Undoing back to what was saved leaves nothing to save; redoing does
+        rig.undo();
+        assert!(!rig.history.has_unsaved_changes());
+        rig.redo();
+        assert!(rig.history.has_unsaved_changes());
+
+        rig.history.mark_saved();
+        assert!(!rig.history.has_unsaved_changes());
+        // Zooming moves every node on screen, but that isn't an edit
+        rig.zoom(1.7);
+        rig.record();
+        assert!(!rig.history.has_unsaved_changes());
+    }
+
+    #[test]
+    fn test_a_recovered_patch_is_unsaved_until_saved() {
+        let mut rig = Rig::new();
+        voice(&mut rig);
+        rig.history.reset(&rig.editor, &rig.user_state);
+        assert!(!rig.history.has_unsaved_changes());
+        rig.history.mark_unsaved();
+        assert!(rig.history.has_unsaved_changes());
+        rig.history.mark_saved();
+        assert!(!rig.history.has_unsaved_changes());
     }
 
     #[test]

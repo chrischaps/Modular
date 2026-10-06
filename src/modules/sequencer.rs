@@ -152,15 +152,15 @@ impl StepSequencer {
     pub fn new() -> Self {
         let ports = vec![
             // Input ports
-            PortDefinition::input_with_default("clock", "Clock", SignalType::Gate, 0.0),
-            PortDefinition::input_with_default("reset", "Reset", SignalType::Gate, 0.0),
-            PortDefinition::input_with_default("run", "Run", SignalType::Gate, 1.0),
+            PortDefinition::input_with_default("clock", "Clock", SignalType::Gate, 0.0).describe("Each rising edge advances to the next step; patch a Clock gate here"),
+            PortDefinition::input_with_default("reset", "Reset", SignalType::Gate, 0.0).describe("A rising edge jumps back to step 1"),
+            PortDefinition::input_with_default("run", "Run", SignalType::Gate, 1.0).describe("Steps only advance while high; runs when unpatched"),
             // Output ports
-            PortDefinition::output("pitch", "Pitch", SignalType::Control),
-            PortDefinition::output("gate", "Gate", SignalType::Gate),
-            PortDefinition::output("velocity", "Velocity", SignalType::Control),
-            PortDefinition::output("step_out", "Step", SignalType::Control),
-            PortDefinition::output("eoc", "EOC", SignalType::Gate),
+            PortDefinition::output("pitch", "Pitch", SignalType::Control).describe("Pitch of the current step as V/Oct; patch into an oscillator"),
+            PortDefinition::output("gate", "Gate", SignalType::Gate).describe("Pulses on each clock when the step's gate is on; patch into an envelope"),
+            PortDefinition::output("velocity", "Velocity", SignalType::Control).describe("Velocity of the current step, 0 to 1"),
+            PortDefinition::output("step_out", "Step", SignalType::Control).describe("Current step position as a 0 to 1 ramp"),
+            PortDefinition::output("eoc", "EOC", SignalType::Gate).describe("Short pulse when the sequence reaches its end"),
         ];
 
         let mut parameters = vec![
@@ -172,13 +172,13 @@ impl StepSequencer {
                 16.0,
                 8.0,
                 ParameterDisplay::linear(""),
-            ),
+            ).describe("How many steps play before the sequence loops"),
             ParameterDefinition::choice(
                 "direction",
                 "Direction",
                 &["Fwd", "Bwd", "P-P", "Rnd"],
                 0,
-            ),
+            ).describe("Playback order: forward, backward, ping-pong or random"),
             ParameterDefinition::new(
                 "gate_length",
                 "Gate Length",
@@ -186,7 +186,7 @@ impl StepSequencer {
                 99.0,
                 50.0,
                 ParameterDisplay::linear("%"),
-            ),
+            ).describe("How long each gate stays high, as a share of 100 ms"),
         ];
 
         // Add per-step parameters: pitch, gate, velocity for each of 16 steps
@@ -199,14 +199,14 @@ impl StepSequencer {
                 127.0,
                 60.0,
                 ParameterDisplay::linear(""),
-            ));
+            ).describe("Note for this step as a MIDI number; 60 is middle C"));
 
             // Gate: on/off toggle (default on)
             parameters.push(ParameterDefinition::toggle(
                 STEP_GATE_IDS[i],
                 STEP_GATE_NAMES[i],
                 true,
-            ));
+            ).describe("Plays this step when on; silent when off"));
 
             // Velocity: 0-127 (default 100)
             parameters.push(ParameterDefinition::new(
@@ -216,7 +216,7 @@ impl StepSequencer {
                 127.0,
                 100.0,
                 ParameterDisplay::linear(""),
-            ));
+            ).describe("Velocity for this step, 0 to 127"));
         }
 
         Self {

@@ -5,6 +5,7 @@
 
 pub mod catalog;
 mod data_types;
+pub mod hints;
 mod module_ui;
 mod node_data;
 pub mod port_mapping;

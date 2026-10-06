@@ -162,8 +162,8 @@ impl ParametricEq {
             high_gain_smooth: SmoothedValue::with_default_smoothing(0.0, sample_rate),
             output_gain_smooth: SmoothedValue::with_default_smoothing(0.0, sample_rate),
             ports: vec![
-                PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0),
-                PortDefinition::output("out", "Out", SignalType::Audio),
+                PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0).describe("Audio to equalize"),
+                PortDefinition::output("out", "Out", SignalType::Audio).describe("Equalized audio"),
             ],
             parameters: vec![
                 ParameterDefinition::new(
@@ -173,7 +173,7 @@ impl ParametricEq {
                     500.0,
                     100.0,
                     ParameterDisplay::Logarithmic { unit: "Hz" },
-                ),
+                ).describe("Corner frequency of the low shelf, in Hz"),
                 ParameterDefinition::new(
                     "low_gain",
                     "Low Gain",
@@ -181,7 +181,7 @@ impl ParametricEq {
                     15.0,
                     0.0,
                     ParameterDisplay::Linear { unit: "dB" },
-                ),
+                ).describe("Boost or cut for the lows, in dB"),
                 ParameterDefinition::new(
                     "mid_freq",
                     "Mid Freq",
@@ -189,7 +189,7 @@ impl ParametricEq {
                     10000.0,
                     1000.0,
                     ParameterDisplay::Logarithmic { unit: "Hz" },
-                ),
+                ).describe("Center frequency of the mid band, in Hz"),
                 ParameterDefinition::new(
                     "mid_gain",
                     "Mid Gain",
@@ -197,7 +197,7 @@ impl ParametricEq {
                     15.0,
                     0.0,
                     ParameterDisplay::Linear { unit: "dB" },
-                ),
+                ).describe("Boost or cut for the mids, in dB"),
                 ParameterDefinition::new(
                     "mid_q",
                     "Mid Q",
@@ -205,7 +205,7 @@ impl ParametricEq {
                     10.0,
                     1.0,
                     ParameterDisplay::Logarithmic { unit: "" },
-                ),
+                ).describe("Mid band width; higher is narrower"),
                 ParameterDefinition::new(
                     "high_freq",
                     "High Freq",
@@ -213,7 +213,7 @@ impl ParametricEq {
                     20000.0,
                     8000.0,
                     ParameterDisplay::Logarithmic { unit: "Hz" },
-                ),
+                ).describe("Corner frequency of the high shelf, in Hz"),
                 ParameterDefinition::new(
                     "high_gain",
                     "High Gain",
@@ -221,7 +221,7 @@ impl ParametricEq {
                     15.0,
                     0.0,
                     ParameterDisplay::Linear { unit: "dB" },
-                ),
+                ).describe("Boost or cut for the highs, in dB"),
                 ParameterDefinition::new(
                     "output_gain",
                     "Output",
@@ -229,7 +229,7 @@ impl ParametricEq {
                     12.0,
                     0.0,
                     ParameterDisplay::Linear { unit: "dB" },
-                ),
+                ).describe("Overall level after EQ, in dB"),
             ],
         }
     }

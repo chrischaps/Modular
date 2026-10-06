@@ -200,13 +200,13 @@ impl Chorus {
             shape_smooth: SmoothedValue::new(0.0, SHAPE_GLIDE_MS, sample_rate),
             ports: vec![
                 // Input ports
-                PortDefinition::input_with_default("in_l", "In L", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("in_r", "In R", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("rate_cv", "Rate CV", SignalType::Control, 0.0),
-                PortDefinition::input_with_default("depth_cv", "Depth CV", SignalType::Control, 0.0),
+                PortDefinition::input_with_default("in_l", "In L", SignalType::Audio, 0.0).describe("Left audio to thicken"),
+                PortDefinition::input_with_default("in_r", "In R", SignalType::Audio, 0.0).describe("Right audio to thicken; copies left when unpatched"),
+                PortDefinition::input_with_default("rate_cv", "Rate CV", SignalType::Control, 0.0).describe("CV that speeds up or slows down the sweep by up to 50%"),
+                PortDefinition::input_with_default("depth_cv", "Depth CV", SignalType::Control, 0.0).describe("CV that adds to the sweep depth"),
                 // Output ports
-                PortDefinition::output("out_l", "Out L", SignalType::Audio),
-                PortDefinition::output("out_r", "Out R", SignalType::Audio),
+                PortDefinition::output("out_l", "Out L", SignalType::Audio).describe("Left chorused audio, mixed with the dry signal"),
+                PortDefinition::output("out_r", "Out R", SignalType::Audio).describe("Right chorused audio, mixed with the dry signal"),
             ],
             parameters: vec![
                 ParameterDefinition::new(
@@ -216,8 +216,8 @@ impl Chorus {
                     10.0,
                     1.0,
                     ParameterDisplay::Logarithmic { unit: "Hz" },
-                ),
-                ParameterDefinition::normalized("depth", "Depth", 0.5),
+                ).describe("Speed of the sweeping delay, in Hz"),
+                ParameterDefinition::normalized("depth", "Depth", 0.5).describe("How far the delay sweeps; more gives a deeper wobble"),
                 ParameterDefinition::new(
                     "delay",
                     "Delay",
@@ -225,7 +225,7 @@ impl Chorus {
                     30.0,
                     10.0,
                     ParameterDisplay::Logarithmic { unit: "ms" },
-                ),
+                ).describe("Base delay time the sweep moves around, in ms"),
                 ParameterDefinition::new(
                     "feedback",
                     "Feedback",
@@ -233,16 +233,16 @@ impl Chorus {
                     0.5,
                     0.0,
                     ParameterDisplay::Linear { unit: "" },
-                ),
+                ).describe("Feeds output back in; negative values give a hollower sound"),
                 ParameterDefinition::choice(
                     "voices",
                     "Voices",
                     &["1", "2", "3", "4"],
                     1, // Default: 2 voices
-                ),
-                ParameterDefinition::normalized("mix", "Mix", 0.5),
+                ).describe("Number of delayed copies layered together, 1 to 4"),
+                ParameterDefinition::normalized("mix", "Mix", 0.5).describe("Blend from dry (0) to chorus only (1)"),
                 // Appended, so patches saved before it existed keep the sine
-                ParameterDefinition::choice("shape", "Shape", &["Sine", "Tri"], 0),
+                ParameterDefinition::choice("shape", "Shape", &["Sine", "Tri"], 0).describe("Sweep waveform; Sine is smooth, Tri is more even"),
             ],
         }
     }

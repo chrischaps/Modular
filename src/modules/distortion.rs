@@ -209,9 +209,9 @@ impl Distortion {
             output_gain_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
             symmetry_smooth: SmoothedValue::with_default_smoothing(0.0, sample_rate),
             ports: vec![
-                PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("drive_cv", "Drive CV", SignalType::Control, 0.0),
-                PortDefinition::output("out", "Out", SignalType::Audio),
+                PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0).describe("Audio to distort"),
+                PortDefinition::input_with_default("drive_cv", "Drive CV", SignalType::Control, 0.0).describe("CV that adds to the drive amount"),
+                PortDefinition::output("out", "Out", SignalType::Audio).describe("Distorted audio"),
             ],
             parameters: vec![
                 ParameterDefinition::new(
@@ -221,7 +221,7 @@ impl Distortion {
                     1.0,
                     0.5,
                     ParameterDisplay::Linear { unit: "%" },
-                ),
+                ).describe("How hard the signal is pushed into the distortion"),
                 ParameterDefinition::new(
                     "tone",
                     "Tone",
@@ -229,7 +229,7 @@ impl Distortion {
                     1.0,
                     0.5,
                     ParameterDisplay::Linear { unit: "%" },
-                ),
+                ).describe("Brightness after distortion; low is dark, high is bright"),
                 ParameterDefinition::new(
                     "type",
                     "Type",
@@ -239,7 +239,7 @@ impl Distortion {
                     ParameterDisplay::Discrete {
                         labels: &["Soft", "Hard", "Fold", "Bit", "Tube"],
                     },
-                ),
+                ).describe("Distortion flavor: Soft, Hard, Fold, Bit or Tube"),
                 ParameterDefinition::new(
                     "mix",
                     "Mix",
@@ -247,7 +247,7 @@ impl Distortion {
                     1.0,
                     1.0,
                     ParameterDisplay::Linear { unit: "%" },
-                ),
+                ).describe("Blend from dry (0) to distorted (1)"),
                 ParameterDefinition::new(
                     "output_gain",
                     "Output",
@@ -255,7 +255,7 @@ impl Distortion {
                     12.0,
                     0.0,
                     ParameterDisplay::Linear { unit: "dB" },
-                ),
+                ).describe("Level after distortion, in dB"),
                 ParameterDefinition::new(
                     "symmetry",
                     "Symmetry",
@@ -263,7 +263,7 @@ impl Distortion {
                     1.0,
                     0.0,
                     ParameterDisplay::Linear { unit: "%" },
-                ),
+                ).describe("Skews the waveform for added even harmonics"),
                 ParameterDefinition::new(
                     "rate",
                     "Rate",
@@ -271,7 +271,7 @@ impl Distortion {
                     Self::RATE_MAX_HZ,
                     Self::RATE_MAX_HZ,
                     ParameterDisplay::Logarithmic { unit: "Hz" },
-                ),
+                ).describe("Bit type only: crushed sample rate in Hz; top is no reduction"),
             ],
         };
         dist.tone_coeff_smooth.reset(dist.tone_to_coefficient(0.5));

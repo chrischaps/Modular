@@ -25,9 +25,10 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Modular Synth",
         options,
-        Box::new(move |_cc| {
+        Box::new(move |cc| {
             let mut app = SynthApp::new(test_tone);
             app.open_on_launch(patch_path.as_deref());
+            app.restore_session(cc.storage);
             Ok(Box::new(app))
         }),
     )

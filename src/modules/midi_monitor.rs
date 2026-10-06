@@ -44,11 +44,11 @@ impl MidiMonitor {
                     "Channel",
                     &["All", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"],
                     0, // Default to all channels
-                ),
+                ).describe("Only show events from this MIDI channel"),
                 // Toggle filters for event types
-                ParameterDefinition::toggle("show_notes", "Notes", true),
-                ParameterDefinition::toggle("show_cc", "CC", true),
-                ParameterDefinition::toggle("show_pitch_bend", "Pitch Bend", true),
+                ParameterDefinition::toggle("show_notes", "Notes", true).describe("Show note on and off events"),
+                ParameterDefinition::toggle("show_cc", "CC", true).describe("Show controller messages such as knobs and pedals"),
+                ParameterDefinition::toggle("show_pitch_bend", "Pitch Bend", true).describe("Show pitch bend wheel movements"),
             ],
         }
     }

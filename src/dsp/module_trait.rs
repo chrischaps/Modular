@@ -56,7 +56,9 @@ impl ModuleCategory {
     /// - Effect: Cyan (#4DD0E1) - delay, reverb
     /// - Utility: Gray (#9E9E9E) - mixers, VCAs
     /// - Output: Purple (#7E57C2) - master output
-    pub fn color(&self) -> Color32 {
+    ///
+    /// `theme::module` re-exports these, so there's one set of header colours.
+    pub const fn color(&self) -> Color32 {
         match self {
             ModuleCategory::Source => Color32::from_rgb(66, 165, 245),    // Blue #42A5F5
             ModuleCategory::Filter => Color32::from_rgb(38, 166, 154),    // Teal #26A69A

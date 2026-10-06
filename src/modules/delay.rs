@@ -284,13 +284,13 @@ impl StereoDelay {
             dc_pole: Self::dc_pole(sample_rate),
             ports: vec![
                 // Input ports
-                PortDefinition::input_with_default("in_l", "In L", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("in_r", "In R", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("time_cv", "Time CV", SignalType::Control, 0.0),
-                PortDefinition::input_with_default("feedback_cv", "Feedback CV", SignalType::Control, 0.0),
+                PortDefinition::input_with_default("in_l", "In L", SignalType::Audio, 0.0).describe("Left audio to echo"),
+                PortDefinition::input_with_default("in_r", "In R", SignalType::Audio, 0.0).describe("Right audio to echo; copies left when unpatched"),
+                PortDefinition::input_with_default("time_cv", "Time CV", SignalType::Control, 0.0).describe("CV that stretches the delay time by up to 50%"),
+                PortDefinition::input_with_default("feedback_cv", "Feedback CV", SignalType::Control, 0.0).describe("CV that adds to the feedback amount"),
                 // Output ports
-                PortDefinition::output("out_l", "Out L", SignalType::Audio),
-                PortDefinition::output("out_r", "Out R", SignalType::Audio),
+                PortDefinition::output("out_l", "Out L", SignalType::Audio).describe("Left echoes, mixed with the dry signal"),
+                PortDefinition::output("out_r", "Out R", SignalType::Audio).describe("Right echoes, mixed with the dry signal"),
             ],
             parameters: vec![
                 ParameterDefinition::new(
@@ -300,20 +300,20 @@ impl StereoDelay {
                     2000.0,
                     500.0,
                     ParameterDisplay::Logarithmic { unit: "ms" },
-                ),
-                ParameterDefinition::normalized("feedback", "Feedback", 0.5),
-                ParameterDefinition::normalized("mix", "Mix", 0.5),
-                ParameterDefinition::frequency("high_cut", "High Cut", 100.0, 20000.0, 10000.0),
-                ParameterDefinition::frequency("low_cut", "Low Cut", 20.0, 2000.0, 20.0),
-                ParameterDefinition::toggle("ping_pong", "Ping-Pong", false),
+                ).describe("Gap between echoes, 1 to 2000 ms"),
+                ParameterDefinition::normalized("feedback", "Feedback", 0.5).describe("How much of each echo is fed back; higher gives more repeats"),
+                ParameterDefinition::normalized("mix", "Mix", 0.5).describe("Blend from dry (0) to echoes only (1)"),
+                ParameterDefinition::frequency("high_cut", "High Cut", 100.0, 20000.0, 10000.0).describe("Darkens each repeat by rolling off highs above this, in Hz"),
+                ParameterDefinition::frequency("low_cut", "Low Cut", 20.0, 2000.0, 20.0).describe("Thins each repeat by rolling off lows below this, in Hz"),
+                ParameterDefinition::toggle("ping_pong", "Ping-Pong", false).describe("Bounces repeats between left and right"),
                 // Patches save the index, so new divisions go on the end
                 ParameterDefinition::choice(
                     "sync",
                     "Sync",
                     &["Off", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/4D", "1/8D"],
                     0,
-                ),
-                ParameterDefinition::toggle("tape", "Tape", false),
+                ).describe("Locks the delay time to a note length of the tempo; Off uses Time"),
+                ParameterDefinition::toggle("tape", "Tape", false).describe("Adds tape-style wobble, saturation and dulling to repeats"),
             ],
         }
     }

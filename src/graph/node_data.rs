@@ -17,6 +17,7 @@ use crate::dsp::ModuleCategory;
 use crate::engine::midi_engine::MidiEvent;
 use crate::modules::{LadderFilter, SvfFilter};
 use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, FrequencyPoint, SpectrumConfig, SpectrumStyle, piano, PianoConfig, PianoData};
+use super::hints::{self, Hint};
 use super::{SynthResponse, SynthValueType};
 
 /// MIDI event colors for the MIDI Monitor display.
@@ -1902,6 +1903,7 @@ impl NodeDataTrait for SynthNodeData {
                                 egui::Id::new(("knob_context", node_id, current_param_index)),
                                 egui::Sense::click(),
                             );
+                            let interact_response = hints::attach(interact_response, Hint::knob(self.module_id, &knob_param.param_name));
 
                             // Handle right-click context menu for MIDI Learn
                             if let Some(engine_id) = engine_node_id {
@@ -2009,7 +2011,8 @@ impl NodeDataTrait for SynthNodeData {
         });
         let Some((channels, color)) = poly else {
             // Allocate exactly the text size, not the full available width
-            let (rect, _) = ui.allocate_exact_size(text_size, egui::Sense::hover());
+            let (rect, response) = ui.allocate_exact_size(text_size, egui::Sense::hover());
+            hints::attach(response, Hint::output(self.module_id, param_name));
 
             // Draw text at the allocated position
             ui.painter().galley(rect.min, galley, text_color);
@@ -2027,7 +2030,8 @@ impl NodeDataTrait for SynthNodeData {
         let gap = font_id.size * 0.3;
 
         let size = egui::vec2(text_size.x + gap + badge_size.x, text_size.y.max(badge_size.y));
-        let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
+        hints::attach(response, Hint::output(self.module_id, param_name));
         let painter = ui.painter();
         painter.galley(egui::pos2(rect.min.x, rect.center().y - text_size.y / 2.0), galley, text_color);
 

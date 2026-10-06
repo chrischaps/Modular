@@ -57,10 +57,10 @@ impl Vca {
             sample_rate,
             ports: vec![
                 // Input ports
-                PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("cv", "CV", SignalType::Control, 1.0),
+                PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0).describe("Audio to be shaped"),
+                PortDefinition::input_with_default("cv", "CV", SignalType::Control, 1.0).describe("Level control from 0 to 1; unpatched means full level"),
                 // Output port
-                PortDefinition::output("out", "Out", SignalType::Audio),
+                PortDefinition::output("out", "Out", SignalType::Audio).describe("The input scaled by level and CV"),
             ],
             parameters: vec![
                 // Level - base amplitude
@@ -71,7 +71,7 @@ impl Vca {
                     1.0,
                     1.0, // Full level by default
                     ParameterDisplay::linear(""),
-                ),
+                ).describe("Overall output level"),
                 // CV Amount - how much CV affects amplitude
                 ParameterDefinition::new(
                     "cv_amount",
@@ -80,7 +80,7 @@ impl Vca {
                     1.0,
                     1.0, // Full CV control by default
                     ParameterDisplay::linear(""),
-                ),
+                ).describe("How much the CV input controls the level; 0 ignores it"),
             ],
             // Initialize smoothed parameters
             level_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),

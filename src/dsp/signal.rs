@@ -22,12 +22,13 @@ pub enum SignalType {
 impl SignalType {
     /// Returns the color associated with this signal type for UI visualization.
     ///
-    /// Colors follow the project specification:
+    /// This is the one signal palette: cables, jacks and the widgets that
+    /// draw a signal (`theme::signal`) all use it.
     /// - Audio: Blue
     /// - Control: Orange
     /// - Gate: Green
     /// - Midi: Purple
-    pub fn color(&self) -> Color32 {
+    pub const fn color(&self) -> Color32 {
         match self {
             SignalType::Audio => Color32::from_rgb(66, 135, 245),   // Blue
             SignalType::Control => Color32::from_rgb(245, 158, 66), // Orange

@@ -13,7 +13,10 @@ pub mod background {
     pub const MAIN: Color32 = Color32::from_rgb(26, 26, 46);
 
     /// Grid line color - subtle
-    pub const GRID: Color32 = Color32::from_rgb(40, 40, 60);
+    pub const GRID: Color32 = Color32::from_rgb(36, 36, 58);
+
+    /// Every fifth grid line, a little brighter, so distances read at a glance
+    pub const GRID_MAJOR: Color32 = Color32::from_rgb(46, 46, 74);
 
     /// Panel background - slightly lighter than main
     pub const PANEL: Color32 = Color32::from_rgb(35, 35, 55);
@@ -28,44 +31,47 @@ pub mod background {
     pub const WIDGET_ACTIVE: Color32 = Color32::from_rgb(65, 65, 100);
 }
 
-/// Signal type colors - used for cables and port indicators
+/// Signal type colors, used for cables, jacks and signal displays. These are
+/// [`SignalType::color`], so a waveform is drawn in its cable's colour.
 pub mod signal {
     use super::Color32;
+    use crate::dsp::SignalType;
 
-    /// Audio signal - blue (#42A5F5)
-    pub const AUDIO: Color32 = Color32::from_rgb(66, 165, 245);
+    /// Audio signal - blue
+    pub const AUDIO: Color32 = SignalType::Audio.color();
 
-    /// Control/CV signal - orange/red (#FF7043)
-    pub const CONTROL: Color32 = Color32::from_rgb(255, 112, 67);
+    /// Control/CV signal - orange
+    pub const CONTROL: Color32 = SignalType::Control.color();
 
-    /// Gate signal - green (#66BB6A)
-    pub const GATE: Color32 = Color32::from_rgb(102, 187, 106);
+    /// Gate signal - green
+    pub const GATE: Color32 = SignalType::Gate.color();
 
-    /// MIDI signal - purple (#AB47BC)
-    pub const MIDI: Color32 = Color32::from_rgb(171, 71, 188);
+    /// MIDI signal - purple
+    pub const MIDI: Color32 = SignalType::Midi.color();
 }
 
-/// Module header colors by category
+/// Module header colors by category. These are [`ModuleCategory::color`].
 pub mod module {
     use super::Color32;
+    use crate::dsp::ModuleCategory;
 
     /// Source modules (oscillators) - blue
-    pub const SOURCE: Color32 = Color32::from_rgb(66, 165, 245);
+    pub const SOURCE: Color32 = ModuleCategory::Source.color();
 
-    /// Filter modules - green/teal (matching concept image)
-    pub const FILTER: Color32 = Color32::from_rgb(38, 166, 154);
+    /// Filter modules - teal
+    pub const FILTER: Color32 = ModuleCategory::Filter.color();
 
     /// Modulation modules (envelopes, LFOs) - orange
-    pub const MODULATION: Color32 = Color32::from_rgb(255, 183, 77);
+    pub const MODULATION: Color32 = ModuleCategory::Modulation.color();
 
     /// Output modules - purple
-    pub const OUTPUT: Color32 = Color32::from_rgb(126, 87, 194);
+    pub const OUTPUT: Color32 = ModuleCategory::Output.color();
 
     /// Utility modules - gray
-    pub const UTILITY: Color32 = Color32::from_rgb(158, 158, 158);
+    pub const UTILITY: Color32 = ModuleCategory::Utility.color();
 
     /// Effect modules - cyan
-    pub const EFFECT: Color32 = Color32::from_rgb(77, 208, 225);
+    pub const EFFECT: Color32 = ModuleCategory::Effect.color();
 }
 
 /// Node styling constants
@@ -145,8 +151,11 @@ pub mod accent {
     pub const ERROR: Color32 = Color32::from_rgb(239, 83, 80);
 }
 
-/// Grid spacing for the background pattern
+/// Grid spacing for the background pattern, in unzoomed points
 pub const GRID_SPACING: f32 = 20.0;
+
+/// Every this many grid lines is a major line
+pub const GRID_MAJOR_EVERY: i64 = 5;
 
 /// Standard rounding for UI elements
 pub const ROUNDING: Rounding = Rounding {
@@ -226,29 +235,36 @@ pub fn apply_theme(ctx: &egui::Context) {
     ctx.set_style(style);
 }
 
-/// Draw a grid background pattern on a painter
-pub fn draw_grid_background(painter: &egui::Painter, rect: egui::Rect) {
-    // Fill with main background color
+/// Draws the editor background: the main fill and a grid that pans and
+/// zooms with the patch. `origin` is where the patch's (0, 0) is on screen.
+pub fn draw_grid_background(painter: &egui::Painter, rect: egui::Rect, origin: egui::Pos2, zoom: f32) {
     painter.rect_filled(rect, 0.0, background::MAIN);
 
-    // Draw vertical grid lines
-    let mut x = rect.left() - (rect.left() % GRID_SPACING);
-    while x <= rect.right() {
-        painter.line_segment(
-            [egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())],
-            Stroke::new(1.0, background::GRID),
-        );
-        x += GRID_SPACING;
+    let spacing = GRID_SPACING * zoom;
+    if spacing < 1.0 {
+        return;
     }
+    // Minor lines fade out as zooming out crowds them together
+    let minor = background::GRID.gamma_multiply(((spacing - 6.0) / 10.0).clamp(0.0, 1.0));
+    let pixel = 1.0 / painter.ctx().pixels_per_point();
+    // Centred on a pixel, so a 1px line stays crisp instead of smearing over two
+    let snap = |v: f32| (v / pixel).floor() * pixel + pixel * 0.5;
 
-    // Draw horizontal grid lines
-    let mut y = rect.top() - (rect.top() % GRID_SPACING);
-    while y <= rect.bottom() {
-        painter.line_segment(
-            [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-            Stroke::new(1.0, background::GRID),
-        );
-        y += GRID_SPACING;
+    // Positions of the lines across one axis, each with its colour
+    let lines = |from: f32, to: f32, origin: f32| {
+        let first = ((from - origin) / spacing).ceil() as i64;
+        let last = ((to - origin) / spacing).floor() as i64;
+        (first..=last).filter_map(move |k| {
+            let color = if k.rem_euclid(GRID_MAJOR_EVERY) == 0 { background::GRID_MAJOR } else { minor };
+            (color.a() > 0).then(|| (snap(origin + k as f32 * spacing), color))
+        })
+    };
+
+    for (x, color) in lines(rect.left(), rect.right(), origin.x) {
+        painter.line_segment([egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())], Stroke::new(pixel, color));
+    }
+    for (y, color) in lines(rect.top(), rect.bottom(), origin.y) {
+        painter.line_segment([egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)], Stroke::new(pixel, color));
     }
 }
 

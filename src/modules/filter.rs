@@ -88,17 +88,17 @@ impl SvfFilter {
             noise: NoiseFloor::default(),
             ports: vec![
                 // Input ports
-                PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("cutoff_cv", "Cutoff", SignalType::Control, 0.0),
-                PortDefinition::input_with_default("res_cv", "Resonance", SignalType::Control, 0.0),
+                PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0).describe("Audio to filter"),
+                PortDefinition::input_with_default("cutoff_cv", "Cutoff", SignalType::Control, 0.0).describe("CV that sweeps the cutoff, one octave per unit"),
+                PortDefinition::input_with_default("res_cv", "Resonance", SignalType::Control, 0.0).describe("CV that raises or lowers the resonance"),
                 // Output ports
-                PortDefinition::output("lowpass", "LowPass", SignalType::Audio),
-                PortDefinition::output("highpass", "HighPass", SignalType::Audio),
-                PortDefinition::output("bandpass", "BandPass", SignalType::Audio),
-                PortDefinition::output("notch", "Notch", SignalType::Audio),
+                PortDefinition::output("lowpass", "LowPass", SignalType::Audio).describe("Passes frequencies below the cutoff"),
+                PortDefinition::output("highpass", "HighPass", SignalType::Audio).describe("Passes frequencies above the cutoff"),
+                PortDefinition::output("bandpass", "BandPass", SignalType::Audio).describe("Passes a band of frequencies around the cutoff"),
+                PortDefinition::output("notch", "Notch", SignalType::Audio).describe("Removes a band around the cutoff and passes the rest"),
             ],
             parameters: vec![
-                ParameterDefinition::frequency("cutoff", "Cutoff", 20.0, 20000.0, 1000.0),
+                ParameterDefinition::frequency("cutoff", "Cutoff", 20.0, 20000.0, 1000.0).describe("Where the filter starts cutting, in Hz"),
                 ParameterDefinition::new(
                     "resonance",
                     "Resonance",
@@ -106,7 +106,7 @@ impl SvfFilter {
                     1.0,
                     0.5,
                     crate::dsp::ParameterDisplay::Linear { unit: "" },
-                ),
+                ).describe("Resonant peak at the cutoff; high values self-oscillate"),
                 ParameterDefinition::new(
                     "drive",
                     "Drive",
@@ -114,7 +114,7 @@ impl SvfFilter {
                     10.0,
                     1.0,
                     crate::dsp::ParameterDisplay::Linear { unit: "x" },
-                ),
+                ).describe("Input gain into the filter; higher adds saturation"),
             ],
             // Initialize smoothed parameters
             log_cutoff_smooth: SmoothedValue::with_default_smoothing(1000.0f32.log2(), sample_rate),

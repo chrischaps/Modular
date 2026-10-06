@@ -5,6 +5,7 @@
 mod editing;
 mod engine_sync;
 mod palette;
+mod session;
 pub mod synth_app;
 pub mod theme;
 pub mod undo;

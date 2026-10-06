@@ -8,7 +8,7 @@ license = "MIT"
 default-run = "modular_synth"
 
 [dependencies]
-eframe = "0.30"
+eframe = { version = "0.30", features = ["persistence"] }
 egui = "0.30"
 egui_node_graph2 = { git = "https://github.com/chrischaps/egui_node_graph2" }
 cpal = "0.15"

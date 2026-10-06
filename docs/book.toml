@@ -14,7 +14,7 @@ default-theme = "coal"
 preferred-dark-theme = "coal"
 site-url = "/modular/"
 git-repository-url = "https://github.com/chrischaps/Modular"
-edit-url-template = "https://github.com/chrischaps/Modular/edit/main/docs/{path}"
+edit-url-template = "https://github.com/chrischaps/Modular/edit/master/docs/{path}"
 no-section-label = false
 additional-css = ["theme/custom.css"]
 

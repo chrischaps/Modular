@@ -90,6 +90,8 @@ pub struct ParameterDefinition {
     pub default: f32,
     /// How to display and interpret the parameter value.
     pub display: ParameterDisplay,
+    /// What the parameter does, in one line, shown as its knob's tooltip.
+    pub description: &'static str,
 }
 
 impl ParameterDefinition {
@@ -109,6 +111,7 @@ impl ParameterDefinition {
             max,
             default,
             display,
+            description: "",
         }
     }
 
@@ -121,6 +124,7 @@ impl ParameterDefinition {
             max: 1.0,
             default,
             display: ParameterDisplay::linear("%"),
+            description: "",
         }
     }
 
@@ -139,6 +143,7 @@ impl ParameterDefinition {
             max,
             default,
             display: ParameterDisplay::logarithmic("Hz"),
+            description: "",
         }
     }
 
@@ -151,6 +156,7 @@ impl ParameterDefinition {
             max: 1.0,
             default: if default { 1.0 } else { 0.0 },
             display: ParameterDisplay::on_off(),
+            description: "",
         }
     }
 
@@ -168,7 +174,14 @@ impl ParameterDefinition {
             max: (labels.len().saturating_sub(1)) as f32,
             default: default_index as f32,
             display: ParameterDisplay::discrete(labels),
+            description: "",
         }
+    }
+
+    /// Sets what the parameter does, shown as its knob's tooltip.
+    pub fn describe(mut self, description: &'static str) -> Self {
+        self.description = description;
+        self
     }
 
     /// Clamps a value to this parameter's valid range.

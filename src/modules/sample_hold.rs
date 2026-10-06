@@ -64,10 +64,10 @@ impl SampleHold {
             sample_rate: 44100.0,
             ports: vec![
                 // Input ports
-                PortDefinition::input_with_default("in", "In", SignalType::Control, 0.0),
-                PortDefinition::input_with_default("trigger", "Trig", SignalType::Gate, 0.0),
+                PortDefinition::input_with_default("in", "In", SignalType::Control, 0.0).describe("Signal to sample, such as noise or an LFO"),
+                PortDefinition::input_with_default("trigger", "Trig", SignalType::Gate, 0.0).describe("Each rising edge captures the input value"),
                 // Output port
-                PortDefinition::output("out", "Out", SignalType::Control),
+                PortDefinition::output("out", "Out", SignalType::Control).describe("The held value, steady until the next trigger"),
             ],
             parameters: vec![
                 // Slew time in seconds (0-1s)
@@ -78,7 +78,7 @@ impl SampleHold {
                     1.0,
                     0.0, // Default: no slew (instant)
                     ParameterDisplay::linear("s"),
-                ),
+                ).describe("Glide time to each new value; 0 jumps instantly"),
             ],
         }
     }

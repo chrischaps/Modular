@@ -8,6 +8,7 @@ use eframe::egui;
 use egui_node_graph2::WidgetValueTrait;
 use crate::dsp::{ParameterDefinition, ParameterDisplay};
 use crate::widgets::ParamFormat;
+use super::hints::{self, Hint};
 use super::{SynthGraphState, SynthNodeData, SynthResponse};
 
 /// Range, default, unit and curve of a continuous parameter.
@@ -186,7 +187,7 @@ impl WidgetValueTrait for SynthValueType {
         _node_id: egui_node_graph2::NodeId,
         ui: &mut egui::Ui,
         _user_state: &mut Self::UserState,
-        _node_data: &Self::NodeData,
+        node_data: &Self::NodeData,
     ) -> Vec<Self::Response> {
         // Design Philosophy: Inputs vs Knobs
         // ==================================
@@ -199,14 +200,15 @@ impl WidgetValueTrait for SynthValueType {
         // Therefore, inline widgets for inputs should be minimal - just labels for
         // most types. Only Toggle and Select get inline widgets since they're not
         // suitable for knobs.
+        let hint = || Hint::input(node_data.module_id, param_name);
         match self {
             Self::Port | Self::Number { .. } => {
-                ui.label(param_name);
+                hints::attach(ui.label(param_name), hint());
             }
             Self::Toggle { value, label } => {
                 // Toggle gets an inline checkbox - not suitable for knob
                 ui.horizontal(|ui: &mut egui::Ui| {
-                    ui.label(if label.is_empty() { param_name } else { label });
+                    hints::attach(ui.label(if label.is_empty() { param_name } else { label }), hint());
                     ui.add_space(4.0);
                     ui.checkbox(value, "");
                 });
@@ -215,7 +217,7 @@ impl WidgetValueTrait for SynthValueType {
                 // Select gets an inline ComboBox - discrete choices need dropdown
                 let zoom = _user_state.zoom;
                 ui.horizontal(|ui: &mut egui::Ui| {
-                    ui.label(if label.is_empty() { param_name } else { label });
+                    hints::attach(ui.label(if label.is_empty() { param_name } else { label }), hint());
                     egui::ComboBox::from_id_salt(param_name)
                         .width(60.0 * zoom)
                         .selected_text(options.get(*value).map(|s| s.as_str()).unwrap_or(""))
@@ -228,6 +230,19 @@ impl WidgetValueTrait for SynthValueType {
             }
         }
 
+        Vec::new()
+    }
+
+    /// A patched input shows just its name, with the same tooltip.
+    fn value_widget_connected(
+        &mut self,
+        param_name: &str,
+        _node_id: egui_node_graph2::NodeId,
+        ui: &mut egui::Ui,
+        _user_state: &mut Self::UserState,
+        node_data: &Self::NodeData,
+    ) -> Vec<Self::Response> {
+        hints::attach(ui.label(param_name), Hint::input(node_data.module_id, param_name));
         Vec::new()
     }
 }

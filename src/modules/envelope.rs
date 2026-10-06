@@ -147,11 +147,11 @@ impl AdsrEnvelope {
             sample_rate: 44100.0,
             ports: vec![
                 // Input ports
-                PortDefinition::input_with_default("gate", "Gate", SignalType::Gate, 0.0),
-                PortDefinition::input_with_default("retrigger", "Retrig", SignalType::Gate, 0.0),
-                PortDefinition::input_with_default("velocity", "Velocity", SignalType::Control, 1.0),
+                PortDefinition::input_with_default("gate", "Gate", SignalType::Gate, 0.0).describe("Gate that starts the envelope when high and releases it when low"),
+                PortDefinition::input_with_default("retrigger", "Retrig", SignalType::Gate, 0.0).describe("A rising edge restarts the attack from the current level"),
+                PortDefinition::input_with_default("velocity", "Velocity", SignalType::Control, 1.0).describe("Scales the peak at each note on; unpatched means full peak"),
                 // Output port
-                PortDefinition::output("out", "Out", SignalType::Control),
+                PortDefinition::output("out", "Out", SignalType::Control).describe("Envelope level, 0 to 1"),
             ],
             // New parameters go at the end: v1/v2 patches name their
             // positional values against this list.
@@ -164,7 +164,7 @@ impl AdsrEnvelope {
                     10.0,
                     0.01, // 10ms default
                     ParameterDisplay::logarithmic("s"),
-                ),
+                ).describe("Time to rise to the peak after the gate goes high"),
                 // Decay time (1ms to 10s, logarithmic)
                 ParameterDefinition::new(
                     "decay",
@@ -173,7 +173,7 @@ impl AdsrEnvelope {
                     10.0,
                     0.1, // 100ms default
                     ParameterDisplay::logarithmic("s"),
-                ),
+                ).describe("Time to fall from the peak to the sustain level"),
                 // Sustain level (0 to 1, linear)
                 ParameterDefinition::new(
                     "sustain",
@@ -182,7 +182,7 @@ impl AdsrEnvelope {
                     1.0,
                     0.7, // 70% default
                     ParameterDisplay::linear(""),
-                ),
+                ).describe("Level held while the gate stays high, as a fraction of the peak"),
                 // Release time (1ms to 10s, logarithmic)
                 ParameterDefinition::new(
                     "release",
@@ -191,7 +191,7 @@ impl AdsrEnvelope {
                     10.0,
                     0.3, // 300ms default
                     ParameterDisplay::logarithmic("s"),
-                ),
+                ).describe("Time to fade to silence after the gate goes low"),
                 // Attack curve: nearly straight by default, so attacks are punchy
                 ParameterDefinition::new(
                     "attack_curve",
@@ -200,7 +200,7 @@ impl AdsrEnvelope {
                     1.0,
                     0.2,
                     ParameterDisplay::linear("%"),
-                ),
+                ).describe("Attack shape; 0 is a straight line, 100% a deep curve"),
                 // Decay and release curves: analog RC by default
                 ParameterDefinition::new(
                     "decay_curve",
@@ -209,7 +209,7 @@ impl AdsrEnvelope {
                     1.0,
                     0.5,
                     ParameterDisplay::linear("%"),
-                ),
+                ).describe("Decay shape; 0 is a straight line, 100% a deep curve"),
                 ParameterDefinition::new(
                     "release_curve",
                     "Release Curve",
@@ -217,7 +217,7 @@ impl AdsrEnvelope {
                     1.0,
                     0.5,
                     ParameterDisplay::linear("%"),
-                ),
+                ).describe("Release shape; 0 is a straight line, 100% a deep curve"),
                 // How much the Velocity input scales the peak
                 ParameterDefinition::new(
                     "velocity_amount",
@@ -226,7 +226,7 @@ impl AdsrEnvelope {
                     1.0,
                     0.5,
                     ParameterDisplay::linear("%"),
-                ),
+                ).describe("How much velocity scales the peak; 0 ignores velocity"),
             ],
         };
         env.prepare(44100.0, 0);

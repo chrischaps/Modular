@@ -170,17 +170,17 @@ impl LadderFilter {
             noise: NoiseFloor::default(),
             ports: vec![
                 // Input ports
-                PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("cutoff_cv", "Cutoff", SignalType::Control, 0.0),
-                PortDefinition::input_with_default("res_cv", "Resonance", SignalType::Control, 0.0),
+                PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0).describe("Audio to filter"),
+                PortDefinition::input_with_default("cutoff_cv", "Cutoff", SignalType::Control, 0.0).describe("CV that sweeps the cutoff, one octave per unit"),
+                PortDefinition::input_with_default("res_cv", "Resonance", SignalType::Control, 0.0).describe("CV that raises or lowers the resonance"),
                 // Output ports
-                PortDefinition::output("lp24", "LP24", SignalType::Audio),
-                PortDefinition::output("lp12", "LP12", SignalType::Audio),
+                PortDefinition::output("lp24", "LP24", SignalType::Audio).describe("Four-pole lowpass, 24 dB per octave"),
+                PortDefinition::output("lp12", "LP12", SignalType::Audio).describe("Two-pole lowpass from the same filter, 12 dB per octave"),
             ],
             parameters: vec![
-                ParameterDefinition::frequency("cutoff", "Cutoff", 20.0, 20000.0, 1000.0),
-                ParameterDefinition::new("resonance", "Resonance", 0.0, 1.0, 0.5, ParameterDisplay::Linear { unit: "" }),
-                ParameterDefinition::new("drive", "Drive", 1.0, 10.0, 1.0, ParameterDisplay::Linear { unit: "x" }),
+                ParameterDefinition::frequency("cutoff", "Cutoff", 20.0, 20000.0, 1000.0).describe("Where the filter starts cutting, in Hz"),
+                ParameterDefinition::new("resonance", "Resonance", 0.0, 1.0, 0.5, ParameterDisplay::Linear { unit: "" }).describe("Resonant peak at the cutoff; high values self-oscillate"),
+                ParameterDefinition::new("drive", "Drive", 1.0, 10.0, 1.0, ParameterDisplay::Linear { unit: "x" }).describe("Input gain into the saturating stages; higher is grittier"),
             ],
             log_cutoff_smooth: SmoothedValue::with_default_smoothing(1000.0f32.log2(), sample_rate),
             resonance_smooth: SmoothedValue::with_default_smoothing(0.5, sample_rate),

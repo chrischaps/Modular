@@ -56,9 +56,9 @@ impl Attenuverter {
         Self {
             ports: vec![
                 // Input port
-                PortDefinition::input_with_default("in", "In", SignalType::Control, 0.0),
+                PortDefinition::input_with_default("in", "In", SignalType::Control, 0.0).describe("Signal to scale, invert or shift"),
                 // Output port
-                PortDefinition::output("out", "Out", SignalType::Control),
+                PortDefinition::output("out", "Out", SignalType::Control).describe("Input times Amount, plus Offset"),
             ],
             parameters: vec![
                 // Amount: -1 to +1 (bipolar attenuverter)
@@ -69,7 +69,7 @@ impl Attenuverter {
                     1.0,
                     1.0, // Default: pass-through
                     ParameterDisplay::linear(""),
-                ),
+                ).describe("Scales the input; negative values flip it upside down"),
                 // Offset: -1 to +1 DC offset
                 ParameterDefinition::new(
                     "offset",
@@ -78,7 +78,7 @@ impl Attenuverter {
                     1.0,
                     0.0, // Default: no offset
                     ParameterDisplay::linear(""),
-                ),
+                ).describe("Constant value added after scaling"),
             ],
             sample_rate,
             // Initialize smoothed parameters

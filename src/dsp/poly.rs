@@ -196,6 +196,7 @@ mod tests {
                     signal_type: SignalType::Control,
                     direction: crate::dsp::PortDirection::Input,
                     default_value: 0.0,
+                    description: "",
                 },
                 PortDefinition {
                     id: "offset",
@@ -203,6 +204,7 @@ mod tests {
                     signal_type: SignalType::Control,
                     direction: crate::dsp::PortDirection::Input,
                     default_value: 0.0,
+                    description: "",
                 },
                 PortDefinition {
                     id: "out",
@@ -210,6 +212,7 @@ mod tests {
                     signal_type: SignalType::Control,
                     direction: crate::dsp::PortDirection::Output,
                     default_value: 0.0,
+                    description: "",
                 },
             ];
             PORTS

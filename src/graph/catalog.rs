@@ -71,3 +71,26 @@ pub fn modules() -> &'static [ModuleSpec] {
 pub fn module(module_id: &str) -> Option<&'static ModuleSpec> {
     modules().iter().find(|spec| spec.info.id == module_id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_port_and_parameter_has_a_tooltip() {
+        let mut missing = Vec::new();
+        for spec in modules() {
+            for port in &spec.ports {
+                if port.description.is_empty() {
+                    missing.push(format!("{} port {:?}", spec.info.id, port.name));
+                }
+            }
+            for param in &spec.parameters {
+                if param.description.is_empty() {
+                    missing.push(format!("{} parameter {:?}", spec.info.id, param.name));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "No description:\n{}", missing.join("\n"));
+    }
+}

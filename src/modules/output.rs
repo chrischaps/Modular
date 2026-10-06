@@ -76,15 +76,15 @@ impl AudioOutput {
             sample_rate,
             ports: vec![
                 // Input ports
-                PortDefinition::input_with_default("left", "Left", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("right", "Right", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("mono", "Mono", SignalType::Audio, 0.0),
+                PortDefinition::input_with_default("left", "Left", SignalType::Audio, 0.0).describe("Left speaker signal"),
+                PortDefinition::input_with_default("right", "Right", SignalType::Audio, 0.0).describe("Right speaker signal"),
+                PortDefinition::input_with_default("mono", "Mono", SignalType::Audio, 0.0).describe("Sent equally to both speakers; easiest way to hear a patch"),
             ],
             // New parameters go at the end: patches restore them by position
             parameters: vec![
-                ParameterDefinition::normalized("volume", "Volume", 0.8),
-                ParameterDefinition::toggle("limiter", "Limiter", true),
-                ParameterDefinition::toggle("character", "Character", false),
+                ParameterDefinition::normalized("volume", "Volume", 0.8).describe("Master volume"),
+                ParameterDefinition::toggle("limiter", "Limiter", true).describe("Squashes peaks transparently to prevent clipping"),
+                ParameterDefinition::toggle("character", "Character", false).describe("Adds gentle soft-clip saturation for warmth"),
             ],
             output_buffer: [Vec::new(), Vec::new()],
             volume_smooth: SmoothedValue::with_default_smoothing(0.8, sample_rate),

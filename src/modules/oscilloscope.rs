@@ -139,9 +139,9 @@ impl Oscilloscope {
             single_shot_done: false,
             ports: vec![
                 // Input ports
-                PortDefinition::input_with_default("in1", "In 1", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("in2", "In 2", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("trigger", "Trig", SignalType::Gate, 0.0),
+                PortDefinition::input_with_default("in1", "In 1", SignalType::Audio, 0.0).describe("Signal for the first trace; also what triggers the sweep"),
+                PortDefinition::input_with_default("in2", "In 2", SignalType::Audio, 0.0).describe("Signal for the second trace"),
+                PortDefinition::input_with_default("trigger", "Trig", SignalType::Gate, 0.0).describe("External trigger; a rising edge starts a sweep"),
                 // No output ports - display only
             ],
             parameters: vec![
@@ -153,7 +153,7 @@ impl Oscilloscope {
                     3.0,
                     0.0, // Default: Auto
                     ParameterDisplay::discrete(&["Auto", "Normal", "Single", "Free"]),
-                ),
+                ).describe("How sweeps start: Auto, Normal, Single capture or Free run"),
                 // Trigger Level: -1 to +1
                 ParameterDefinition::new(
                     "trigger_level",
@@ -162,7 +162,7 @@ impl Oscilloscope {
                     1.0,
                     0.0, // Default: 0.0 (center)
                     ParameterDisplay::linear(""),
-                ),
+                ).describe("Signal level that starts a sweep"),
             ],
         }
     }

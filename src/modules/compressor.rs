@@ -148,11 +148,11 @@ impl Compressor {
             mix_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
             ports: vec![
                 // Input ports
-                PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0),
-                PortDefinition::input_with_default("sidechain", "Sidechain", SignalType::Audio, 0.0),
+                PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0).describe("Audio to compress"),
+                PortDefinition::input_with_default("sidechain", "Sidechain", SignalType::Audio, 0.0).describe("Audio that triggers compression; uses In when unpatched"),
                 // Output ports
-                PortDefinition::output("out", "Out", SignalType::Audio),
-                PortDefinition::output("gr", "GR", SignalType::Control),
+                PortDefinition::output("out", "Out", SignalType::Audio).describe("Compressed audio"),
+                PortDefinition::output("gr", "GR", SignalType::Control).describe("Gain reduction as CV, for ducking other modules"),
             ],
             parameters: vec![
                 ParameterDefinition::new(
@@ -162,7 +162,7 @@ impl Compressor {
                     0.0,
                     -20.0,
                     ParameterDisplay::Linear { unit: "dB" },
-                ),
+                ).describe("Level above which compression starts, in dB"),
                 ParameterDefinition::new(
                     "ratio",
                     "Ratio",
@@ -170,7 +170,7 @@ impl Compressor {
                     20.0,
                     4.0,
                     ParameterDisplay::Logarithmic { unit: ":1" },
-                ),
+                ).describe("How strongly levels over the threshold are reduced"),
                 ParameterDefinition::new(
                     "attack",
                     "Attack",
@@ -178,7 +178,7 @@ impl Compressor {
                     100.0,
                     10.0,
                     ParameterDisplay::Logarithmic { unit: "ms" },
-                ),
+                ).describe("How fast compression clamps down, in ms"),
                 ParameterDefinition::new(
                     "release",
                     "Release",
@@ -186,7 +186,7 @@ impl Compressor {
                     1000.0,
                     100.0,
                     ParameterDisplay::Logarithmic { unit: "ms" },
-                ),
+                ).describe("How fast compression lets go, in ms"),
                 ParameterDefinition::new(
                     "knee",
                     "Knee",
@@ -194,7 +194,7 @@ impl Compressor {
                     12.0,
                     6.0,
                     ParameterDisplay::Linear { unit: "dB" },
-                ),
+                ).describe("Softens the onset of compression around the threshold, in dB"),
                 ParameterDefinition::new(
                     "makeup",
                     "Makeup",
@@ -202,11 +202,11 @@ impl Compressor {
                     24.0,
                     0.0,
                     ParameterDisplay::Linear { unit: "dB" },
-                ),
-                ParameterDefinition::normalized("mix", "Mix", 1.0),
+                ).describe("Gain added after compression to restore loudness, in dB"),
+                ParameterDefinition::normalized("mix", "Mix", 1.0).describe("Blend from dry (0) to compressed (1), for parallel compression"),
                 // Appended, so patches saved before it existed load as Peak,
                 // which is how they always sounded
-                ParameterDefinition::choice("detector", "Detector", &["Peak", "RMS"], 0),
+                ParameterDefinition::choice("detector", "Detector", &["Peak", "RMS"], 0).describe("Level sensing: Peak reacts to spikes, RMS follows average loudness"),
             ],
         }
     }

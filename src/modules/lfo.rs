@@ -83,11 +83,11 @@ impl Lfo {
             sample_rate,
             ports: vec![
                 // Input ports
-                PortDefinition::input_with_default("rate_cv", "Rate", SignalType::Control, 0.0),
-                PortDefinition::input_with_default("sync", "Sync", SignalType::Gate, 0.0),
+                PortDefinition::input_with_default("rate_cv", "Rate", SignalType::Control, 0.0).describe("CV that speeds up or slows down the LFO; 1 doubles the rate"),
+                PortDefinition::input_with_default("sync", "Sync", SignalType::Gate, 0.0).describe("A rising edge restarts the cycle"),
                 // Output ports
-                PortDefinition::output("out", "Out", SignalType::Control),
-                PortDefinition::output("phase", "Phase", SignalType::Control),
+                PortDefinition::output("out", "Out", SignalType::Control).describe("The modulation signal, -1 to 1 or 0 to 1"),
+                PortDefinition::output("phase", "Phase", SignalType::Control).describe("Position in the cycle as a 0 to 1 ramp"),
             ],
             parameters: vec![
                 // Rate parameter (logarithmic for musical response)
@@ -98,14 +98,14 @@ impl Lfo {
                     100.0,
                     1.0, // Default 1 Hz
                     ParameterDisplay::logarithmic("Hz"),
-                ),
+                ).describe("Speed of the cycle, in Hz"),
                 // Waveform selection
                 ParameterDefinition::choice(
                     "waveform",
                     "Waveform",
                     &["Sine", "Triangle", "Square", "Saw"],
                     0, // Default Sine
-                ),
+                ).describe("Shape of the cycle: smooth, linear, stepped or ramping"),
                 // Phase offset (0-360 degrees)
                 ParameterDefinition::new(
                     "phase",
@@ -114,9 +114,9 @@ impl Lfo {
                     360.0,
                     0.0,
                     ParameterDisplay::linear("°"),
-                ),
+                ).describe("None"),
                 // Bipolar toggle
-                ParameterDefinition::toggle("bipolar", "Bipolar", true),
+                ParameterDefinition::toggle("bipolar", "Bipolar", true).describe("On swings from -1 to 1; off stays between 0 and 1"),
             ],
             // Initialize smoothed parameters
             rate_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),

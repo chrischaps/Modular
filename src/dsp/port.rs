@@ -40,6 +40,8 @@ pub struct PortDefinition {
     /// Default value when no connection is made (for inputs only).
     /// For outputs, this is ignored.
     pub default_value: f32,
+    /// What the port is for, in one line, shown as its tooltip.
+    pub description: &'static str,
 }
 
 impl PortDefinition {
@@ -51,6 +53,7 @@ impl PortDefinition {
             direction: PortDirection::Input,
             signal_type,
             default_value: 0.0,
+            description: "",
         }
     }
 
@@ -67,6 +70,7 @@ impl PortDefinition {
             direction: PortDirection::Input,
             signal_type,
             default_value,
+            description: "",
         }
     }
 
@@ -78,7 +82,14 @@ impl PortDefinition {
             direction: PortDirection::Output,
             signal_type,
             default_value: 0.0,
+            description: "",
         }
+    }
+
+    /// Sets what the port is for, shown as its tooltip.
+    pub fn describe(mut self, description: &'static str) -> Self {
+        self.description = description;
+        self
     }
 
     /// Returns true if this is an input port.
