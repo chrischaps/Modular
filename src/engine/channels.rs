@@ -412,7 +412,7 @@ mod tests {
 
         ui.send_command(add(1, "osc.sine"));
         ui.send_command(add(2, "output.audio"));
-        ui.send_command(EngineCommand::Connect { from_node: 1, from_port: 4, to_node: 2, to_port: 2 });
+        ui.send_command(EngineCommand::Connect { from_node: 1, from_port: 5, to_node: 2, to_port: 2 });
         assert_eq!(engine.messages_pending(), 0, "nothing sent before flush");
 
         assert!(ui.flush());
@@ -555,7 +555,9 @@ mod tests {
             let module_id = if id % 2 == 0 { "osc.sine" } else { "fx.delay" };
             ui.send_command(add(id, module_id));
             if id > 1 {
-                ui.send_command(EngineCommand::Connect { from_node: id - 1, from_port: 4, to_node: id, to_port: 0 });
+                // Oscillator "Out" is port 5, delay "Out L" port 4
+                let from_port = if (id - 1) % 2 == 0 { 5 } else { 4 };
+                ui.send_command(EngineCommand::Connect { from_node: id - 1, from_port, to_node: id, to_port: 0 });
             }
             ui.send_command(EngineCommand::SetParameter { node_id: id, param_index: 0, value: id as f32 });
             ui.send_command(EngineCommand::SetPlaying(true));

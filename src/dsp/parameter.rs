@@ -9,6 +9,9 @@ pub enum ParameterDisplay {
     Linear { unit: &'static str },
     /// Logarithmic scaling, common for frequency and gain controls.
     Logarithmic { unit: &'static str },
+    /// Whole numbers only (octaves, voice counts): the knob clicks between
+    /// steps and the module rounds.
+    Stepped { unit: &'static str },
     /// Discrete steps with named values.
     Discrete { labels: &'static [&'static str] },
     /// On/off toggle switch.
@@ -27,6 +30,11 @@ impl ParameterDisplay {
     /// Creates a logarithmic display with the given unit.
     pub fn logarithmic(unit: &'static str) -> Self {
         Self::Logarithmic { unit }
+    }
+
+    /// Creates a whole-number display with the given unit.
+    pub fn stepped(unit: &'static str) -> Self {
+        Self::Stepped { unit }
     }
 
     /// Creates a discrete display with named steps.
@@ -53,7 +61,7 @@ impl ParameterDisplay {
     /// Returns the unit string, if applicable.
     pub fn unit(&self) -> Option<&'static str> {
         match self {
-            Self::Linear { unit } | Self::Logarithmic { unit } => Some(unit),
+            Self::Linear { unit } | Self::Logarithmic { unit } | Self::Stepped { unit } => Some(unit),
             _ => None,
         }
     }

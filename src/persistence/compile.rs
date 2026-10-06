@@ -93,8 +93,9 @@ mod tests {
         let mut patch = Patch::new("test");
         let mut osc = NodeData::new(10, "osc.sine", (0.0, 0.0));
         osc.parameters = vec![
-            NamedParameter::new("Frequency", ParameterValue::Frequency(110.0)),
-            NamedParameter::new("FM Depth", ParameterValue::LinearHz(0.0)),
+            NamedParameter::new("Octave", ParameterValue::Number(-2.0)),
+            NamedParameter::new("Semitone", ParameterValue::Number(9.0)),
+            NamedParameter::new("FM Depth", ParameterValue::Number(0.0)),
             NamedParameter::new("Waveform", ParameterValue::Select(1)),
             NamedParameter::new("Pulse Width", ParameterValue::LinearRange(0.5)),
         ];
@@ -115,14 +116,14 @@ mod tests {
         assert!(compiled.commands.iter().any(|c| matches!(c,
             EngineCommand::AddModule { node_id, module_id: "osc.sine" } if *node_id == osc)));
 
-        // Frequency is parameter 0 and keeps its saved value
+        // Semitone is parameter 1 and keeps its saved value
         assert!(compiled.commands.iter().any(|c| matches!(c,
-            EngineCommand::SetParameter { node_id, param_index: 0, value }
-                if *node_id == osc && (*value - 110.0).abs() < 1e-3)));
+            EngineCommand::SetParameter { node_id, param_index: 1, value }
+                if *node_id == osc && *value == 9.0)));
 
-        // Oscillator "Out" is port 4 (after 4 inputs); output "Mono" is input port 2
+        // Oscillator "Out" is port 5 (after 5 inputs); output "Mono" is input port 2
         assert!(compiled.commands.iter().any(|c| matches!(c,
-            EngineCommand::Connect { from_node, from_port: 4, to_node, to_port: 2 }
+            EngineCommand::Connect { from_node, from_port: 5, to_node, to_port: 2 }
                 if *from_node == osc && *to_node == out)));
     }
 

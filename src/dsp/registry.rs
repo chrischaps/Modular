@@ -21,7 +21,7 @@ pub type ModuleFactory = fn() -> Box<dyn DspModule>;
 ///
 /// ```ignore
 /// let mut registry = ModuleRegistry::new();
-/// registry.register::<SineOscillator>();
+/// registry.register::<Oscillator>();
 /// registry.register::<AudioOutput>();
 ///
 /// // Later, create instances by ID
@@ -62,7 +62,7 @@ impl ModuleRegistry {
     /// # Example
     ///
     /// ```ignore
-    /// registry.register::<SineOscillator>();
+    /// registry.register::<Oscillator>();
     /// ```
     pub fn register<M: DspModule + Default + 'static>(&mut self) {
         // Create a temporary instance to get module info

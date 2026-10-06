@@ -240,6 +240,8 @@ pub struct SynthNodeData {
     pub display: NodeDisplay,
     /// Knob parameters to display in the bottom section of the node.
     pub knob_params: Vec<KnobParam>,
+    /// Knobs per row before wrapping (0 keeps them all on one row).
+    pub knobs_per_row: usize,
     /// LED indicators to display in the bottom section of the node.
     pub led_indicators: Vec<LedIndicator>,
     /// Output ports to monitor for feedback without LED indicators.
@@ -274,6 +276,7 @@ impl SynthNodeData {
             description: "",
             display: NodeDisplay::None,
             knob_params: Vec::new(),
+            knobs_per_row: 0,
             led_indicators: Vec::new(),
             monitored_outputs: Vec::new(),
         }
@@ -294,6 +297,12 @@ impl SynthNodeData {
     /// Builder method to add knob parameters.
     pub fn with_knob_params(mut self, knob_params: Vec<KnobParam>) -> Self {
         self.knob_params = knob_params;
+        self
+    }
+
+    /// Builder method to wrap the knob section into rows.
+    pub fn with_knobs_per_row(mut self, knobs_per_row: usize) -> Self {
+        self.knobs_per_row = knobs_per_row;
         self
     }
 
@@ -486,6 +495,7 @@ impl SynthNodeData {
                     default: spec.default,
                     format: spec.format(),
                     logarithmic: spec.logarithmic,
+                    stepped: spec.stepped,
                     label: Some(label.to_string()),
                     show_value: true,
                     ..Default::default()
@@ -1588,8 +1598,13 @@ impl NodeDataTrait for SynthNodeData {
             // Centering would require knowing the final node width which we don't have yet
             let knob_size = 36.0 * zoom;
 
+            let per_row = match self.knobs_per_row {
+                0 => self.knob_params.len(),
+                n => n,
+            };
+            for row in self.knob_params.chunks(per_row) {
             ui.horizontal(|ui| {
-                for knob_param in &self.knob_params {
+                for knob_param in row {
                     // Find the corresponding input parameter by name
                     if let Some(node) = graph.nodes.get(node_id) {
                         if let Some((_name, input_id)) = node.inputs.iter().find(|(name, _)| *name == knob_param.param_name) {
@@ -1805,6 +1820,7 @@ impl NodeDataTrait for SynthNodeData {
                     }
                 }
                 });
+            }
         }
 
         // Render LED indicators if this node has any

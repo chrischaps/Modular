@@ -349,7 +349,10 @@ mod tests {
         assert_eq!(saved.nodes.len(), 4);
         assert_eq!(saved.connections.len(), 3);
 
-        assert_eq!(param(&saved, "osc.sine", "Frequency"), 110.0);
+        // 110 Hz before v5: A2, two octaves and nine semitones from C4
+        assert_eq!(param(&saved, "osc.sine", "Octave"), -2.0);
+        assert_eq!(param(&saved, "osc.sine", "Semitone"), 9.0);
+        assert!(param(&saved, "osc.sine", "Fine").abs() < 0.01);
         assert_eq!(param(&saved, "osc.sine", "Waveform"), 1.0);
         assert_eq!(param(&saved, "osc.sine", "Pulse Width"), 0.3);
         assert_eq!(param(&saved, "filter.svf", "Cutoff"), 640.0);

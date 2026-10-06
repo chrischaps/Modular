@@ -1,15 +1,32 @@
 == osc.sine "Oscillator" finder="Oscillator" Source
 in   V/Oct              Control  ConnectionOnly       inline=true  port
 in   FM                 Control  ConnectionOnly       inline=true  port
-in   Frequency          Control  ConnectionOrConstant inline=true  num 261.62558 [20..20000] Hz log
+in   Exp FM             Control  ConnectionOnly       inline=true  port
 in   PWM                Control  ConnectionOnly       inline=true  port
-in   FM Depth           Control  ConstantOnly         inline=false num 0 [0..1000] Hz
+in   Sync               Control  ConnectionOnly       inline=true  port
+in   Octave             Control  ConstantOnly         inline=false num 0 [-4..4] oct stepped
+in   Semitone           Control  ConstantOnly         inline=false num 0 [-12..12] st stepped
+in   Fine               Control  ConstantOnly         inline=false num 0 [-100..100] ct
+in   FM Depth           Control  ConstantOnly         inline=false num 0 [0..5]
+in   Exp FM Depth       Control  ConstantOnly         inline=false num 1 [0..4] oct
 in   Waveform           Control  ConstantOnly         inline=true  select 0 ["Sine", "Saw", "Square", "Tri"] "Wave"
 in   Pulse Width        Control  ConstantOnly         inline=false num 0.5 [0.1..0.9]
+in   Voices             Control  ConstantOnly         inline=false num 1 [1..7]  stepped
+in   Detune             Control  ConstantOnly         inline=false num 0.4 [0..1] %
+in   Spread             Control  ConstantOnly         inline=false num 0.5 [0..1] %
 out  Out                Audio
-knob Frequency          "Freq" Exposed
-knob FM Depth           "FM Dpth" KnobOnly
+out  Sub                Audio
+out  Out L              Audio
+out  Out R              Audio
+knob Octave             "Oct" KnobOnly
+knob Semitone           "Semi" KnobOnly
+knob Fine               "Fine" KnobOnly
+knob FM Depth           "FM" KnobOnly
+knob Exp FM Depth       "Exp FM" KnobOnly
 knob Pulse Width        "PW" KnobOnly
+knob Voices             "Voices" KnobOnly
+knob Detune             "Detune" KnobOnly
+knob Spread             "Spread" KnobOnly
 display OscillatorWave
 
 == input.keyboard "Keyboard" finder="Keyboard" Source

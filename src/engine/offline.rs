@@ -120,7 +120,7 @@ impl OfflineRenderer {
 mod tests {
     use super::*;
     use crate::dsp::analysis::{peak, rms, Spectrum};
-    use crate::modules::SineOscillator;
+    use crate::modules::Oscillator;
     use crate::persistence::{ConnectionData, NamedParameter, NodeData, ParameterValue};
 
     /// Oscillator (default C4, chosen waveform) into the output's Mono input.
@@ -128,8 +128,8 @@ mod tests {
         let mut patch = Patch::new("osc");
         let mut osc = NodeData::new(1, "osc.sine", (0.0, 0.0));
         osc.parameters = vec![
-            NamedParameter::new("Frequency", ParameterValue::Frequency(SineOscillator::C4_HZ)),
-            NamedParameter::new("FM Depth", ParameterValue::LinearHz(0.0)),
+            NamedParameter::new("Octave", ParameterValue::Number(0.0)),
+            NamedParameter::new("FM Depth", ParameterValue::Number(0.0)),
             NamedParameter::new("Waveform", ParameterValue::Select(waveform)),
             NamedParameter::new("Pulse Width", ParameterValue::LinearRange(0.5)),
         ];
@@ -163,7 +163,7 @@ mod tests {
         assert_eq!(out.left, out.right, "mono input feeds both channels");
 
         let f = Spectrum::of(&out.left, sr).dominant_frequency();
-        let cents = 1200.0 * (f / SineOscillator::C4_HZ as f64).log2();
+        let cents = 1200.0 * (f / Oscillator::C4_HZ as f64).log2();
         assert!(cents.abs() < 0.5, "expected C4, measured {:.3} Hz ({:+.2} cents)", f, cents);
     }
 

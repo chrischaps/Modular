@@ -135,7 +135,10 @@ impl SynthNodeTemplate {
 
 /// Whether a parameter is a continuous value (a knob), not a toggle or choice.
 fn is_continuous(def: &ParameterDefinition) -> bool {
-    matches!(def.display, ParameterDisplay::Linear { .. } | ParameterDisplay::Logarithmic { .. })
+    matches!(
+        def.display,
+        ParameterDisplay::Linear { .. } | ParameterDisplay::Logarithmic { .. } | ParameterDisplay::Stepped { .. }
+    )
 }
 
 /// Iterator over all available node templates.
@@ -213,6 +216,7 @@ impl NodeTemplateTrait for SynthNodeTemplate {
         SynthNodeData::new(self.module_id(), self.spec.info.name, self.category())
             .with_description(self.description())
             .with_knob_params(self.knob_params())
+            .with_knobs_per_row(ui.knobs_per_row)
             .with_monitored_outputs(monitored_outputs)
             .with_display(ui.display)
     }
@@ -323,11 +327,12 @@ mod tests {
                     format!("select {value} {options:?} \"{label}\"")
                 }
                 SynthValueType::Number { value, spec } => format!(
-                    "num {value} [{}..{}] {}{}",
+                    "num {value} [{}..{}] {}{}{}",
                     spec.min,
                     spec.max,
                     spec.unit,
-                    if spec.logarithmic { " log" } else { "" }
+                    if spec.logarithmic { " log" } else { "" },
+                    if spec.stepped { " stepped" } else { "" }
                 ),
             };
             writeln!(

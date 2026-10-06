@@ -42,7 +42,7 @@ pub use lfo::Lfo;
 pub use midi_monitor::MidiMonitor;
 pub use mixer::Mixer;
 pub use midi_note::MidiNote;
-pub use oscillator::SineOscillator;
+pub use oscillator::Oscillator;
 pub use oscilloscope::Oscilloscope;
 pub use output::AudioOutput;
 pub use reverb::Reverb;

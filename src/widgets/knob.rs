@@ -108,6 +108,8 @@ pub struct KnobConfig {
     pub drag_sensitivity: f32,
     /// Fine control multiplier when Shift is held.
     pub fine_multiplier: f32,
+    /// Click between whole numbers.
+    pub stepped: bool,
 }
 
 impl Default for KnobConfig {
@@ -122,6 +124,7 @@ impl Default for KnobConfig {
             show_value: true,
             drag_sensitivity: 200.0,
             fine_multiplier: 0.1,
+            stepped: false,
         }
     }
 }
@@ -220,6 +223,18 @@ pub fn knob(ui: &mut Ui, value: &mut f32, config: &KnobConfig) -> Response {
         // Vertical drag: up increases, down decreases
         let delta_normalized = -delta.y / sensitivity;
 
+        // A stepped knob drags an unrounded value kept for the length of the
+        // drag, so small movements add up to a step instead of rounding away
+        let drag_id = response.id.with("unrounded");
+        if config.stepped {
+            let unrounded = if response.drag_started() {
+                *value
+            } else {
+                ui.data(|d| d.get_temp::<f32>(drag_id)).unwrap_or(*value)
+            };
+            *value = unrounded;
+        }
+
         if config.logarithmic {
             // Logarithmic scaling
             let min = *config.range.start();
@@ -234,6 +249,11 @@ pub fn knob(ui: &mut Ui, value: &mut f32, config: &KnobConfig) -> Response {
             let range = config.range.end() - config.range.start();
             *value = (*value + delta_normalized * range)
                 .clamp(*config.range.start(), *config.range.end());
+        }
+
+        if config.stepped {
+            ui.data_mut(|d| d.insert_temp(drag_id, *value));
+            *value = value.round();
         }
     }
 

@@ -53,6 +53,8 @@ pub struct ModuleUi {
     pub monitor: &'static [&'static str],
     /// Custom visualization drawn above the knob row.
     pub display: NodeDisplay,
+    /// Knobs per row before wrapping (0 keeps them all on one row).
+    pub knobs_per_row: usize,
 }
 
 impl ModuleUi {
@@ -64,6 +66,7 @@ impl ModuleUi {
         live_params: 0,
         monitor: &[],
         display: NodeDisplay::None,
+        knobs_per_row: 0,
     };
 
     /// Short inline label for a toggle or dropdown.
@@ -88,9 +91,21 @@ pub fn module_ui(module_id: &str) -> Option<&'static ModuleUi> {
 static MODULE_UI: &[ModuleUi] = &[
     ModuleUi {
         module_id: "osc.sine",
-        knobs: &[knob_as("Frequency", "Freq"), knob_as("FM Depth", "FM Dpth"), knob_as("Pulse Width", "PW")],
+        // Three rows: tune, timbre, ensemble
+        knobs: &[
+            knob_as("Octave", "Oct"),
+            knob_as("Semitone", "Semi"),
+            knob("Fine"),
+            knob_as("FM Depth", "FM"),
+            knob_as("Exp FM Depth", "Exp FM"),
+            knob_as("Pulse Width", "PW"),
+            knob("Voices"),
+            knob("Detune"),
+            knob("Spread"),
+        ],
         labels: &[("Waveform", "Wave")],
         display: NodeDisplay::OscillatorWave,
+        knobs_per_row: 3,
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
@@ -110,6 +125,7 @@ static MODULE_UI: &[ModuleUi] = &[
         live_params: 4,
         monitor: &["Gate"],
         display: NodeDisplay::MidiPiano,
+        knobs_per_row: 0,
     },
     ModuleUi {
         module_id: "filter.svf",

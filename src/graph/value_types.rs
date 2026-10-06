@@ -21,6 +21,8 @@ pub struct NumberSpec {
     pub default: f32,
     pub unit: &'static str,
     pub logarithmic: bool,
+    /// Whole numbers only.
+    pub stepped: bool,
 }
 
 impl NumberSpec {
@@ -33,12 +35,20 @@ impl NumberSpec {
             unit: def.display.unit().unwrap_or(""),
             // A log curve needs a positive range
             logarithmic: def.display.is_logarithmic() && def.min > 0.0,
+            stepped: matches!(def.display, ParameterDisplay::Stepped { .. }),
         }
     }
 
     /// How a knob should print values of this parameter.
     pub fn format(&self) -> ParamFormat {
         let unit_interval = self.min == 0.0 && self.max == 1.0;
+        if self.stepped {
+            return match self.unit {
+                "st" => ParamFormat::Semitones,
+                "" => ParamFormat::Raw { decimals: 0 },
+                unit => ParamFormat::RawWithUnit { decimals: 0, unit },
+            };
+        }
         match self.unit {
             "Hz" => ParamFormat::Frequency,
             "s" => ParamFormat::Time,
@@ -94,7 +104,9 @@ impl SynthValueType {
                 options: labels.iter().map(|s| s.to_string()).collect(),
                 label: label.into(),
             },
-            ParameterDisplay::Linear { .. } | ParameterDisplay::Logarithmic { .. } => Self::Number {
+            ParameterDisplay::Linear { .. }
+            | ParameterDisplay::Logarithmic { .. }
+            | ParameterDisplay::Stepped { .. } => Self::Number {
                 value: def.default,
                 spec: NumberSpec::from_definition(def),
             },
@@ -232,7 +244,7 @@ mod tests {
             value,
             SynthValueType::Number {
                 value: 1000.0,
-                spec: NumberSpec { min: 20.0, max: 20000.0, default: 1000.0, unit: "Hz", logarithmic: true },
+                spec: NumberSpec { min: 20.0, max: 20000.0, default: 1000.0, unit: "Hz", logarithmic: true, stepped: false },
             }
         );
     }
@@ -267,7 +279,7 @@ mod tests {
 
     #[test]
     fn test_format_follows_unit() {
-        let spec = |min, max, unit| NumberSpec { min, max, default: min, unit, logarithmic: false };
+        let spec = |min, max, unit| NumberSpec { min, max, default: min, unit, logarithmic: false, stepped: false };
         assert_eq!(spec(1.0, 2000.0, "ms").format().format(500.0), "500 ms");
         assert_eq!(spec(0.001, 10.0, "s").format().format(0.25), "250 ms");
         assert_eq!(spec(0.0, 1.0, "").format().format(0.5), "50%");

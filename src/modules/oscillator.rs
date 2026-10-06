@@ -1,8 +1,10 @@
-//! Oscillator modules.
+//! The oscillator: a VCO with a tune section, hard sync, through-zero FM,
+//! a sub-oscillator and unison.
 //!
-//! This module contains sound source modules that generate audio waveforms.
-//! Includes sine, sawtooth, square (with PWM), and triangle waveforms with
-//! band-limited synthesis for alias-free sound at all frequencies.
+//! Every voice runs at twice the sample rate with polyBLEP steps and polyBLAMP
+//! corners, then a halfband filter brings it back down. The corrections clean
+//! up aliases that fold back near DC; the oversampling removes the ones that
+//! would otherwise fold back near Nyquist, which two-point BLEPs barely touch.
 
 use std::f32::consts::TAU;
 
@@ -11,6 +13,7 @@ use crate::dsp::{
     module_trait::{DspModule, ModuleCategory, ModuleInfo},
     parameter::ParameterDefinition,
     port::PortDefinition,
+    primitives::{BlepDelay, Downsampler2x},
     signal::SignalBuffer,
     smoothed_value::SmoothedValue,
     connected_input, ParameterDisplay, SignalType,
@@ -36,226 +39,424 @@ impl OscWaveform {
             _ => OscWaveform::Sine,
         }
     }
+
+    /// Naive value at phase `p` in 0..=1. Phase 1.0 means "just before the
+    /// wrap" and 0.0 "just after it", so both sides of the wrap are expressible.
+    #[inline]
+    fn value(self, p: f32, pulse_width: f32) -> f32 {
+        match self {
+            OscWaveform::Sine => (p * TAU).sin(),
+            OscWaveform::Saw => 2.0 * p - 1.0,
+            OscWaveform::Square => {
+                if p < pulse_width {
+                    1.0
+                } else {
+                    -1.0
+                }
+            }
+            OscWaveform::Triangle => {
+                if p < 0.5 {
+                    4.0 * p - 1.0
+                } else {
+                    3.0 - 4.0 * p
+                }
+            }
+        }
+    }
+
+    /// Slope at phase `p`, per unit of phase.
+    #[inline]
+    fn slope(self, p: f32) -> f32 {
+        match self {
+            OscWaveform::Sine => TAU * (p * TAU).cos(),
+            OscWaveform::Saw => 2.0,
+            OscWaveform::Square => 0.0,
+            OscWaveform::Triangle => {
+                if p < 0.5 {
+                    4.0
+                } else {
+                    -4.0
+                }
+            }
+        }
+    }
 }
 
-/// A multi-waveform oscillator with FM, V/Oct, and PWM support.
-///
-/// This is a full-featured VCO (Voltage-Controlled Oscillator) producing
-/// sine, sawtooth, square, and triangle waveforms. Band-limited synthesis
-/// using PolyBLEP ensures alias-free output at all frequencies.
+/// Largest phase step per oversampled sample (a little under its Nyquist).
+const MAX_DT: f32 = 0.45;
+
+/// Where the phase meets breakpoint `b` between `p0` and `p1`, as the
+/// unwrapped phase of the crossing. A phase of exactly 1.0 sits before the
+/// wrap and 0.0 after it, so leaving either of them across the wrap counts.
+#[inline]
+fn crossing(p0: f32, p1: f32, b: f32) -> Option<f32> {
+    if p1 > p0 {
+        let mut target = b + (p0 - b).ceil();
+        if target == p0 && p0 < 1.0 {
+            target += 1.0;
+        }
+        (target <= p1).then_some(target)
+    } else if p1 < p0 {
+        let mut target = b + (p0 - b).floor();
+        if target == p0 && p0 > 0.0 {
+            target -= 1.0;
+        }
+        (target >= p1).then_some(target)
+    } else {
+        None
+    }
+}
+
+/// Folds an advanced phase back into 0..=1. Landing exactly on the wrap
+/// counts as having crossed it.
+#[inline]
+fn wrap(p: f32, dt: f32) -> f32 {
+    if dt > 0.0 && p >= 1.0 {
+        p - 1.0
+    } else if dt < 0.0 && p <= 0.0 {
+        p + 1.0
+    } else {
+        p
+    }
+}
+
+/// Where a sync reset sends the phase: the start of the cycle in the
+/// direction the phase is running.
+#[inline]
+fn sync_target(dt: f32) -> f32 {
+    if dt < 0.0 {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+/// One unison voice: a phase and its band-limiting corrections.
+#[derive(Clone, Copy, Debug, Default)]
+struct Voice {
+    phase: f32,
+    blep: BlepDelay,
+}
+
+impl Voice {
+    /// Advances one oversampled sample and returns the finished previous
+    /// sample. `sync` is where in this sample a hard-sync reset falls.
+    #[inline]
+    fn tick(&mut self, wave: OscWaveform, pulse_width: f32, dt: f32, sync: Option<f32>) -> f32 {
+        match sync {
+            Some(d) => {
+                self.advance(wave, pulse_width, dt, 0.0, d);
+                let target = sync_target(dt);
+                let jump = wave.value(target, pulse_width) - wave.value(self.phase, pulse_width);
+                let kink = (wave.slope(target) - wave.slope(self.phase)) * dt;
+                self.blep.step(d, jump);
+                self.blep.corner(d, kink);
+                self.phase = target;
+                self.advance(wave, pulse_width, dt, d, 1.0);
+            }
+            None => self.advance(wave, pulse_width, dt, 0.0, 1.0),
+        }
+        self.blep.push(wave.value(self.phase, pulse_width))
+    }
+
+    /// Runs the phase from time `t0` to `t1` within the sample, correcting
+    /// every breakpoint it passes.
+    #[inline]
+    fn advance(&mut self, wave: OscWaveform, pulse_width: f32, dt: f32, t0: f32, t1: f32) {
+        let p0 = self.phase;
+        let p1 = p0 + dt * (t1 - t0);
+        match wave {
+            OscWaveform::Sine => {}
+            OscWaveform::Saw => self.breakpoint(p0, p1, dt, t0, 0.0, -2.0, 0.0),
+            OscWaveform::Square => {
+                self.breakpoint(p0, p1, dt, t0, 0.0, 2.0, 0.0);
+                self.breakpoint(p0, p1, dt, t0, pulse_width, -2.0, 0.0);
+            }
+            OscWaveform::Triangle => {
+                self.breakpoint(p0, p1, dt, t0, 0.0, 0.0, 8.0);
+                self.breakpoint(p0, p1, dt, t0, 0.5, 0.0, -8.0);
+            }
+        }
+        self.phase = wrap(p1, dt);
+    }
+
+    /// Corrects for breakpoint `b` if the phase crosses it. `jump` and `kink`
+    /// are the changes in value and in slope (per unit phase) crossing it
+    /// forwards.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    fn breakpoint(&mut self, p0: f32, p1: f32, dt: f32, t0: f32, b: f32, jump: f32, kink: f32) {
+        if let Some(target) = crossing(p0, p1, b) {
+            let d = t0 + (target - p0) / dt;
+            if jump != 0.0 {
+                // Crossing backwards undoes the jump
+                self.blep.step(d, jump * dt.signum());
+            }
+            if kink != 0.0 {
+                // A corner bends the same way in either direction
+                self.blep.corner(d, kink * dt.abs());
+            }
+        }
+    }
+}
+
+/// The sub-oscillator: a flip-flop that changes state every time the main
+/// pitch completes a cycle, giving a square one octave down.
+#[derive(Clone, Copy, Debug, Default)]
+struct SubOscillator {
+    phase: f32,
+    low: bool,
+    blep: BlepDelay,
+}
+
+impl SubOscillator {
+    #[inline]
+    fn tick(&mut self, dt: f32, sync: Option<f32>) -> f32 {
+        match sync {
+            Some(d) => {
+                self.advance(dt, 0.0, d);
+                // A reset only clocks the divider when it's a real fall: right
+                // after a natural wrap it would toggle twice in a row
+                let far = if dt < 0.0 { self.phase <= 0.5 } else { self.phase >= 0.5 };
+                if far {
+                    self.toggle(d);
+                }
+                self.phase = sync_target(dt);
+                self.advance(dt, d, 1.0);
+            }
+            None => self.advance(dt, 0.0, 1.0),
+        }
+        self.blep.push(self.level())
+    }
+
+    #[inline]
+    fn advance(&mut self, dt: f32, t0: f32, t1: f32) {
+        let p0 = self.phase;
+        let p1 = p0 + dt * (t1 - t0);
+        if let Some(target) = crossing(p0, p1, 0.0) {
+            self.toggle(t0 + (target - p0) / dt);
+        }
+        self.phase = wrap(p1, dt);
+    }
+
+    #[inline]
+    fn toggle(&mut self, d: f32) {
+        let before = self.level();
+        self.low = !self.low;
+        self.blep.step(d, self.level() - before);
+    }
+
+    #[inline]
+    fn level(&self) -> f32 {
+        if self.low {
+            -1.0
+        } else {
+            1.0
+        }
+    }
+}
+
+/// The most unison voices.
+pub const MAX_VOICES: usize = 7;
+
+/// Detune, in cents, of the outermost unison voice at full Detune.
+const MAX_DETUNE_CENTS: f32 = 100.0;
+
+/// A multi-waveform VCO.
 ///
 /// # Ports
 ///
 /// **Inputs:**
-/// - **V/Oct** (Control): 1V/Octave pitch CV input. Each unit of CV shifts
-///   the pitch by one octave (CV of +1 = double frequency, -1 = half frequency).
-/// - **FM** (Control): Linear frequency modulation input. The signal is scaled
-///   by the FM Depth parameter and added to the frequency in Hz.
-/// - **Frequency** (Control): When connected, overrides the Frequency parameter.
-/// - **PWM** (Control): Pulse width modulation input for square wave.
-///   Modulates around the Pulse Width parameter.
+/// - **V/Oct** (Control): 1 per octave pitch CV, added to the tune section.
+/// - **FM** (Control): through-zero linear FM. The pitch is multiplied by
+///   `1 + FM Depth × FM`, so past a depth of 1 the frequency swings through
+///   zero and the waveform runs backwards.
+/// - **Exp FM** (Control): exponential FM, `Exp FM Depth` octaves per unit.
+/// - **PWM** (Control): pulse width modulation around Pulse Width.
+/// - **Sync** (Control): hard sync. Each rising zero crossing restarts the cycle.
 ///
 /// **Outputs:**
-/// - **Out** (Audio): The generated waveform output.
+/// - **Out** (Audio): all voices, mono.
+/// - **Sub** (Audio): square one octave below the tuned pitch.
+/// - **Out L / Out R** (Audio): the voices spread across the stereo field.
 ///
 /// # Parameters
 ///
-/// - **Frequency** (20-20000 Hz): Base frequency of the oscillator.
-/// - **FM Depth** (0-1000 Hz): How much the FM input affects the frequency.
-/// - **Waveform** (Sine/Saw/Square/Tri): The waveform shape to generate.
-/// - **Pulse Width** (0.1-0.9): Duty cycle for square wave. 0.5 = 50% duty cycle.
-pub struct SineOscillator {
-    /// Current phase accumulator (0.0 to 1.0).
-    phase: f32,
-    /// Sample rate from last prepare() call.
+/// - **Octave / Semitone / Fine**: pitch relative to C4 (261.63 Hz).
+/// - **FM Depth** (0-5): linear FM index.
+/// - **Exp FM Depth** (0-4 octaves): exponential FM range.
+/// - **Waveform** (Sine/Saw/Square/Tri).
+/// - **Pulse Width** (0.1-0.9): duty cycle of the square.
+/// - **Voices** (1-7): unison voices. 7 saws is a supersaw.
+/// - **Detune**: spread of the unison voices' pitches, up to ±100 cents.
+/// - **Spread**: stereo width of the unison voices on Out L / Out R.
+pub struct Oscillator {
     sample_rate: f32,
-    /// Port definitions.
     ports: Vec<PortDefinition>,
-    /// Parameter definitions.
     parameters: Vec<ParameterDefinition>,
-    /// Smoothed frequency parameter.
-    freq_smooth: SmoothedValue,
-    /// Smoothed FM depth parameter.
+    /// Smoothed tune section, in octaves above C4.
+    pitch_smooth: SmoothedValue,
     fm_depth_smooth: SmoothedValue,
-    /// Smoothed pulse width parameter.
+    exp_depth_smooth: SmoothedValue,
     pulse_width_smooth: SmoothedValue,
+    voices: [Voice; MAX_VOICES],
+    sub: SubOscillator,
+    /// Per-voice frequency ratio and stereo gains, set once per block.
+    ratios: [f32; MAX_VOICES],
+    gains_left: [f32; MAX_VOICES],
+    gains_right: [f32; MAX_VOICES],
+    /// Last sync input sample, for edge detection.
+    prev_sync: f32,
+    /// Last phase step, for interpolating across the two oversampled samples.
+    prev_dt: f32,
+    down_mono: Downsampler2x,
+    down_sub: Downsampler2x,
+    down_left: Downsampler2x,
+    down_right: Downsampler2x,
 }
 
-impl SineOscillator {
-    /// Creates a new oscillator.
-    pub fn new() -> Self {
-        let sample_rate = 44100.0;
-        Self {
-            phase: 0.0,
-            sample_rate,
-            ports: vec![
-                // Input ports first (by convention)
-                // V/Oct: 1V/Octave pitch CV (exponential scaling)
-                PortDefinition::input_with_default("v_oct", "V/Oct", SignalType::Control, 0.0),
-                // FM: Linear frequency modulation (scaled by FM Depth)
-                PortDefinition::input_with_default("fm", "FM", SignalType::Control, 0.0),
-                // Direct frequency input - when connected, overrides the Frequency parameter
-                PortDefinition::input_with_default("freq_in", "Frequency", SignalType::Control, 0.0),
-                // PWM: Pulse width modulation for square wave
-                PortDefinition::input_with_default("pwm", "PWM", SignalType::Control, 0.0),
-                // Output port
-                PortDefinition::output("out", "Out", SignalType::Audio),
-            ],
-            parameters: vec![
-                // Default C4 so V/Oct 0.0 (C4 from MIDI/Keyboard) plays in tune
-                ParameterDefinition::frequency("frequency", "Frequency", 20.0, 20000.0, Self::C4_HZ),
-                ParameterDefinition::new(
-                    "fm_depth",
-                    "FM Depth",
-                    0.0,
-                    1000.0,
-                    0.0,
-                    ParameterDisplay::linear("Hz"),
-                ),
-                // Waveform selection
-                ParameterDefinition::choice(
-                    "waveform",
-                    "Waveform",
-                    &["Sine", "Saw", "Square", "Tri"],
-                    0, // Default Sine
-                ),
-                // Pulse Width for square wave
-                ParameterDefinition::new(
-                    "pulse_width",
-                    "Pulse Width",
-                    0.1,
-                    0.9,
-                    0.5, // Default 50% duty cycle
-                    ParameterDisplay::linear(""),
-                ),
-            ],
-            // Initialize smoothed parameters with defaults
-            freq_smooth: SmoothedValue::with_default_smoothing(Self::C4_HZ, sample_rate),
-            fm_depth_smooth: SmoothedValue::with_default_smoothing(0.0, sample_rate),
-            pulse_width_smooth: SmoothedValue::with_default_smoothing(0.5, sample_rate),
-        }
-    }
-
+impl Oscillator {
     /// Frequency of C4 (MIDI note 60), the pitch at V/Oct 0.0.
     pub const C4_HZ: f32 = 261.625_58;
 
-    /// Port index constants for clarity.
     const PORT_V_OCT: usize = 0;
     const PORT_FM: usize = 1;
-    const PORT_FREQ_IN: usize = 2;
+    const PORT_EXP_FM: usize = 2;
     const PORT_PWM: usize = 3;
-    const PORT_OUT: usize = 0; // First (only) output
+    const PORT_SYNC: usize = 4;
 
-    /// Parameter index constants.
-    const PARAM_FREQUENCY: usize = 0;
-    const PARAM_FM_DEPTH: usize = 1;
-    const PARAM_WAVEFORM: usize = 2;
-    const PARAM_PULSE_WIDTH: usize = 3;
+    const OUT_MONO: usize = 0;
+    const OUT_SUB: usize = 1;
+    const OUT_LEFT: usize = 2;
+    const OUT_RIGHT: usize = 3;
 
-    /// PolyBLEP (Polynomial Band-Limited Step) correction.
-    ///
-    /// This smooths out discontinuities in waveforms to reduce aliasing.
-    /// `t` is the position relative to the discontinuity (0.0-1.0 phase)
-    /// `dt` is the phase increment per sample (frequency / sample_rate)
-    ///
-    /// Returns a correction value to add to the naive waveform.
-    #[inline]
-    fn poly_blep(t: f32, dt: f32) -> f32 {
-        if dt <= 0.0 {
-            return 0.0;
-        }
+    const PARAM_OCTAVE: usize = 0;
+    const PARAM_SEMITONE: usize = 1;
+    const PARAM_FINE: usize = 2;
+    const PARAM_FM_DEPTH: usize = 3;
+    const PARAM_EXP_DEPTH: usize = 4;
+    const PARAM_WAVEFORM: usize = 5;
+    const PARAM_PULSE_WIDTH: usize = 6;
+    const PARAM_VOICES: usize = 7;
+    const PARAM_DETUNE: usize = 8;
+    const PARAM_SPREAD: usize = 9;
 
-        if t < dt {
-            // Just after discontinuity (0)
-            let t_normalized = t / dt;
-            // 2*t - t^2 - 1 = -(1-t)^2 + something... let's use standard formula
-            2.0 * t_normalized - t_normalized * t_normalized - 1.0
-        } else if t > 1.0 - dt {
-            // Just before discontinuity (1)
-            let t_normalized = (t - 1.0) / dt;
-            t_normalized * t_normalized + 2.0 * t_normalized + 1.0
-        } else {
+    pub fn new() -> Self {
+        let sample_rate = 44100.0;
+        let mut osc = Self {
+            sample_rate,
+            ports: vec![
+                PortDefinition::input_with_default("v_oct", "V/Oct", SignalType::Control, 0.0),
+                PortDefinition::input_with_default("fm", "FM", SignalType::Control, 0.0),
+                PortDefinition::input_with_default("exp_fm", "Exp FM", SignalType::Control, 0.0),
+                PortDefinition::input_with_default("pwm", "PWM", SignalType::Control, 0.0),
+                PortDefinition::input_with_default("sync", "Sync", SignalType::Control, 0.0),
+                PortDefinition::output("out", "Out", SignalType::Audio),
+                PortDefinition::output("sub", "Sub", SignalType::Audio),
+                PortDefinition::output("out_l", "Out L", SignalType::Audio),
+                PortDefinition::output("out_r", "Out R", SignalType::Audio),
+            ],
+            parameters: vec![
+                ParameterDefinition::new("octave", "Octave", -4.0, 4.0, 0.0, ParameterDisplay::stepped("oct")),
+                ParameterDefinition::new("semitone", "Semitone", -12.0, 12.0, 0.0, ParameterDisplay::stepped("st")),
+                ParameterDefinition::new("fine", "Fine", -100.0, 100.0, 0.0, ParameterDisplay::linear("ct")),
+                ParameterDefinition::new("fm_depth", "FM Depth", 0.0, 5.0, 0.0, ParameterDisplay::linear("")),
+                ParameterDefinition::new("exp_fm_depth", "Exp FM Depth", 0.0, 4.0, 1.0, ParameterDisplay::linear("oct")),
+                ParameterDefinition::choice("waveform", "Waveform", &["Sine", "Saw", "Square", "Tri"], 0),
+                ParameterDefinition::new("pulse_width", "Pulse Width", 0.1, 0.9, 0.5, ParameterDisplay::linear("")),
+                ParameterDefinition::new("voices", "Voices", 1.0, MAX_VOICES as f32, 1.0, ParameterDisplay::stepped("")),
+                ParameterDefinition::normalized("detune", "Detune", 0.4),
+                ParameterDefinition::normalized("spread", "Spread", 0.5),
+            ],
+            pitch_smooth: SmoothedValue::with_default_smoothing(0.0, sample_rate),
+            fm_depth_smooth: SmoothedValue::with_default_smoothing(0.0, sample_rate),
+            exp_depth_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
+            pulse_width_smooth: SmoothedValue::with_default_smoothing(0.5, sample_rate),
+            voices: [Voice::default(); MAX_VOICES],
+            sub: SubOscillator::default(),
+            ratios: [1.0; MAX_VOICES],
+            gains_left: [1.0; MAX_VOICES],
+            gains_right: [1.0; MAX_VOICES],
+            prev_sync: 0.0,
+            prev_dt: 0.0,
+            down_mono: Downsampler2x::new(),
+            down_sub: Downsampler2x::new(),
+            down_left: Downsampler2x::new(),
+            down_right: Downsampler2x::new(),
+        };
+        osc.reset_phases();
+        osc
+    }
+
+    /// The tune section as octaves above C4. Octave and Semitone click to
+    /// whole steps.
+    pub fn tune_octaves(octave: f32, semitone: f32, fine_cents: f32) -> f32 {
+        octave.round() + semitone.round() / 12.0 + fine_cents / 1200.0
+    }
+
+    /// Splits a frequency into the nearest Octave and Semitone, with the
+    /// remainder in Fine (cents). Pitches beyond the tune section's reach
+    /// (about 7.7 Hz to 8.9 kHz) are clamped to its ends.
+    pub fn tune_from_hz(hz: f32) -> (f32, f32, f32) {
+        let semis = 12.0 * (hz.max(1e-3) as f64 / Self::C4_HZ as f64).log2();
+        let nearest = semis.round();
+        let octave = (nearest / 12.0).floor().clamp(-4.0, 4.0);
+        let semitone = (nearest - 12.0 * octave).clamp(-12.0, 12.0);
+        let fine = ((semis - 12.0 * octave - semitone) * 100.0).clamp(-100.0, 100.0);
+        (octave as f32, semitone as f32, fine as f32)
+    }
+
+    /// Position of unison voice `i` of `n`, from -1 to 1.
+    fn voice_position(i: usize, n: usize) -> f32 {
+        if n <= 1 {
             0.0
+        } else {
+            -1.0 + 2.0 * i as f32 / (n - 1) as f32
         }
     }
 
-    /// Generate a naive (non-band-limited) sawtooth sample.
-    /// Returns value from -1 to +1.
-    #[inline]
-    fn naive_saw(phase: f32) -> f32 {
-        2.0 * phase - 1.0
-    }
-
-    /// Generate a band-limited sawtooth sample using PolyBLEP.
-    #[inline]
-    fn blep_saw(phase: f32, dt: f32) -> f32 {
-        let mut sample = Self::naive_saw(phase);
-        // Apply PolyBLEP correction at the discontinuity (phase wrap at 1->0)
-        sample -= Self::poly_blep(phase, dt);
-        sample
-    }
-
-    /// Generate a naive (non-band-limited) square sample.
-    /// Returns +1 for phase < pulse_width, -1 otherwise.
-    #[inline]
-    fn naive_square(phase: f32, pulse_width: f32) -> f32 {
-        if phase < pulse_width {
-            1.0
-        } else {
-            -1.0
+    /// Lays out the unison voices: pitch ratios and stereo gains.
+    ///
+    /// Voices sit evenly across the stereo field, but their detune bends
+    /// toward the centre (|x|^1.5), close to the JP-8000 supersaw's offsets.
+    /// Uneven spacing also keeps the voices from beating in lockstep.
+    fn layout_voices(&mut self, n: usize, detune: f32, spread: f32) {
+        let outer_cents = MAX_DETUNE_CENTS * detune * detune;
+        for i in 0..n {
+            let x = Self::voice_position(i, n);
+            let cents = x.signum() * x.abs().powf(1.5) * outer_cents;
+            self.ratios[i] = (cents / 1200.0).exp2();
+            let pan = x * spread;
+            self.gains_left[i] = (1.0 - pan).min(1.0);
+            self.gains_right[i] = (1.0 + pan).min(1.0);
         }
     }
 
-    /// Generate a band-limited square sample using PolyBLEP.
-    #[inline]
-    fn blep_square(phase: f32, dt: f32, pulse_width: f32) -> f32 {
-        let mut sample = Self::naive_square(phase, pulse_width);
-
-        // Apply PolyBLEP at both discontinuities:
-        // 1. Rising edge at phase = 0 (wrap from 1)
-        sample += Self::poly_blep(phase, dt);
-        // 2. Falling edge at phase = pulse_width
-        let phase_from_pw = phase - pulse_width;
-        let adjusted_phase = if phase_from_pw < 0.0 {
-            phase_from_pw + 1.0
-        } else {
-            phase_from_pw
-        };
-        sample -= Self::poly_blep(adjusted_phase, dt);
-
-        sample
-    }
-
-    /// Generate a triangle sample.
-    /// Triangle doesn't have sharp discontinuities, so no anti-aliasing needed.
-    /// However, for quality at high frequencies, we integrate a band-limited square.
-    /// For simplicity, we use the naive triangle which is smooth enough.
-    #[inline]
-    fn naive_triangle(phase: f32) -> f32 {
-        // Triangle: rises from -1 to 1 in first half, falls from 1 to -1 in second half
-        // At phase 0: -1, phase 0.25: 0, phase 0.5: 1, phase 0.75: 0, phase 1: -1
-        let value = if phase < 0.5 {
-            4.0 * phase - 1.0
-        } else {
-            3.0 - 4.0 * phase
-        };
-        value
+    /// Starts each voice somewhere different along its cycle (golden-ratio
+    /// steps), so a unison doesn't start as one loud spike. A single voice
+    /// starts at phase 0.
+    fn reset_phases(&mut self) {
+        const GOLDEN: f32 = 0.618_034;
+        for (i, voice) in self.voices.iter_mut().enumerate() {
+            *voice = Voice { phase: (i as f32 * GOLDEN).fract(), blep: BlepDelay::new() };
+        }
+        self.sub = SubOscillator::default();
     }
 }
 
-impl Default for SineOscillator {
+impl Default for Oscillator {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl DspModule for SineOscillator {
+impl DspModule for Oscillator {
     fn info(&self) -> &ModuleInfo {
         static INFO: ModuleInfo = ModuleInfo {
             id: "osc.sine",
             name: "Oscillator",
             category: ModuleCategory::Source,
-            description: "Multi-waveform oscillator with FM and PWM support",
+            description: "Band-limited VCO with hard sync, through-zero FM, sub-oscillator and unison",
         };
         &INFO
     }
@@ -270,9 +471,9 @@ impl DspModule for SineOscillator {
 
     fn prepare(&mut self, sample_rate: f32, _max_block_size: usize) {
         self.sample_rate = sample_rate;
-        // Update sample rate for smoothed parameters
-        self.freq_smooth.set_sample_rate(sample_rate);
+        self.pitch_smooth.set_sample_rate(sample_rate);
         self.fm_depth_smooth.set_sample_rate(sample_rate);
+        self.exp_depth_smooth.set_sample_rate(sample_rate);
         self.pulse_width_smooth.set_sample_rate(sample_rate);
     }
 
@@ -283,103 +484,84 @@ impl DspModule for SineOscillator {
         params: &[f32],
         context: &ProcessContext,
     ) {
-        // Set smoothing targets from parameters
-        self.freq_smooth.set_target(params[Self::PARAM_FREQUENCY]);
+        self.pitch_smooth.set_target(Self::tune_octaves(
+            params[Self::PARAM_OCTAVE],
+            params[Self::PARAM_SEMITONE],
+            params[Self::PARAM_FINE],
+        ));
         self.fm_depth_smooth.set_target(params[Self::PARAM_FM_DEPTH]);
+        self.exp_depth_smooth.set_target(params[Self::PARAM_EXP_DEPTH]);
         self.pulse_width_smooth.set_target(params[Self::PARAM_PULSE_WIDTH]);
 
-        // Waveform is discrete, no smoothing needed
-        let waveform = OscWaveform::from_param(params[Self::PARAM_WAVEFORM]);
+        let wave = OscWaveform::from_param(params[Self::PARAM_WAVEFORM]);
+        let n = (params[Self::PARAM_VOICES].round() as usize).clamp(1, MAX_VOICES);
+        self.layout_voices(n, params[Self::PARAM_DETUNE], params[Self::PARAM_SPREAD]);
+        // Unison voices are mostly uncorrelated, so they add in power
+        let norm = 1.0 / (n as f32).sqrt();
 
-        // Get input buffers (may be empty if not connected, use defaults)
-        let v_oct_input = inputs.get(Self::PORT_V_OCT);
-        let fm_input = inputs.get(Self::PORT_FM);
-        // When a cable is plugged into Frequency it overrides the parameter
-        let freq_in = connected_input(inputs, Self::PORT_FREQ_IN);
-        let freq_in_connected = freq_in.is_some();
-        let pwm_input = inputs.get(Self::PORT_PWM);
+        let input = |port: usize, i: usize| {
+            inputs.get(port).and_then(|buf| buf.samples.get(i)).copied().unwrap_or(0.0)
+        };
+        let sync_in = connected_input(inputs, Self::PORT_SYNC);
+        let inv_rate = 1.0 / (2.0 * self.sample_rate);
 
-        // Get output buffer
-        let output = &mut outputs[Self::PORT_OUT];
-
-        // Process each sample
         for i in 0..context.block_size {
-            // Get smoothed parameter values (per-sample for click-free changes)
-            let base_freq = self.freq_smooth.next();
+            let pitch = self.pitch_smooth.next();
             let fm_depth = self.fm_depth_smooth.next();
-            let base_pulse_width = self.pulse_width_smooth.next();
+            let exp_depth = self.exp_depth_smooth.next();
+            let pulse_width = (self.pulse_width_smooth.next() + input(Self::PORT_PWM, i) * 0.4).clamp(0.1, 0.9);
 
-            // Determine base frequency: either from freq_in (if connected) or parameter
-            let effective_base_freq = if freq_in_connected {
-                // freq_in is a Control signal (-1 to 1), map to frequency range (20-20000 Hz)
-                // Using logarithmic mapping for musical response
-                let control_val = freq_in
-                    .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
-                    .unwrap_or(0.0);
-                // Map -1..1 to 0..1, then to log frequency range
-                let normalized = (control_val + 1.0) * 0.5; // 0..1
-                let min_freq = 20.0_f32;
-                let max_freq = 20000.0_f32;
-                // Logarithmic interpolation for musical scaling
-                min_freq * (max_freq / min_freq).powf(normalized)
-            } else {
-                base_freq
-            };
+            let octaves = pitch + input(Self::PORT_V_OCT, i) + input(Self::PORT_EXP_FM, i) * exp_depth;
+            // Through-zero: the frequency may go negative and the phase run backwards
+            let hz = Self::C4_HZ * octaves.exp2() * (1.0 + fm_depth * input(Self::PORT_FM, i));
+            let dt = (hz * inv_rate).clamp(-MAX_DT, MAX_DT);
 
-            // Get V/Oct modulation (1V/Octave: each unit = one octave)
-            let v_oct_value = v_oct_input
-                .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
-                .unwrap_or(0.0);
+            // A rising zero crossing between the last input sample and this one
+            let sync = sync_in.and_then(|buf| {
+                let s = buf.samples.get(i).copied().unwrap_or(0.0);
+                let prev = std::mem::replace(&mut self.prev_sync, s);
+                (prev <= 0.0 && s > 0.0).then(|| prev / (prev - s))
+            });
 
-            // Get FM modulation (linear Hz offset)
-            let fm_value = fm_input
-                .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
-                .unwrap_or(0.0);
+            // Two oversampled steps; the first one halfway between the old pitch and the new
+            let steps = [0.5 * (self.prev_dt + dt), dt];
+            self.prev_dt = dt;
 
-            // Calculate final frequency:
-            // - Base frequency (from param or freq_in)
-            // - V/Oct: exponential scaling (2^cv), so cv=1 doubles freq, cv=-1 halves it
-            // - FM: linear Hz offset scaled by FM depth
-            let pitched_freq = effective_base_freq * 2.0_f32.powf(v_oct_value);
-            let fm_hz = fm_value * fm_depth;
-            let final_freq = (pitched_freq + fm_hz).clamp(0.0, 20000.0);
-
-            // Calculate phase increment (dt for PolyBLEP)
-            let dt = final_freq / self.sample_rate;
-
-            // Get PWM modulation for square wave
-            let pwm_value = pwm_input
-                .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
-                .unwrap_or(0.0);
-            // PWM input is -1 to +1, scale to +-0.4 and add to base pulse width
-            let pulse_width = (base_pulse_width + pwm_value * 0.4).clamp(0.1, 0.9);
-
-            // Generate waveform sample
-            let sample = match waveform {
-                OscWaveform::Sine => (self.phase * TAU).sin(),
-                OscWaveform::Saw => Self::blep_saw(self.phase, dt),
-                OscWaveform::Square => Self::blep_square(self.phase, dt, pulse_width),
-                OscWaveform::Triangle => Self::naive_triangle(self.phase),
-            };
-
-            output.samples[i] = sample;
-
-            // Advance phase
-            self.phase += dt;
-
-            // Wrap phase to [0, 1) to prevent floating point precision issues
-            self.phase = self.phase.fract();
-            if self.phase < 0.0 {
-                self.phase += 1.0;
+            let mut mono = [0.0; 2];
+            let mut left = [0.0; 2];
+            let mut right = [0.0; 2];
+            let mut sub = [0.0; 2];
+            // The reset lands in whichever oversampled step contains it
+            let sync_step = sync.map(|d| if d < 0.5 { (0, 2.0 * d) } else { (1, 2.0 * d - 1.0) });
+            for (k, &step) in steps.iter().enumerate() {
+                let sync_here = sync_step.filter(|&(at, _)| at == k).map(|(_, d)| d);
+                for v in 0..n {
+                    let s = self.voices[v].tick(wave, pulse_width, step * self.ratios[v], sync_here);
+                    mono[k] += s;
+                    left[k] += s * self.gains_left[v];
+                    right[k] += s * self.gains_right[v];
+                }
+                sub[k] = self.sub.tick(step, sync_here);
             }
+
+            outputs[Self::OUT_MONO].samples[i] = self.down_mono.process(mono) * norm;
+            outputs[Self::OUT_SUB].samples[i] = self.down_sub.process(sub);
+            outputs[Self::OUT_LEFT].samples[i] = self.down_left.process(left) * norm;
+            outputs[Self::OUT_RIGHT].samples[i] = self.down_right.process(right) * norm;
         }
     }
 
     fn reset(&mut self) {
-        self.phase = 0.0;
-        // Reset smoothed parameters to their current targets (no smoothing on restart)
-        self.freq_smooth.reset(self.freq_smooth.target());
+        self.reset_phases();
+        self.prev_sync = 0.0;
+        self.prev_dt = 0.0;
+        self.down_mono.reset();
+        self.down_sub.reset();
+        self.down_left.reset();
+        self.down_right.reset();
+        self.pitch_smooth.reset(self.pitch_smooth.target());
         self.fm_depth_smooth.reset(self.fm_depth_smooth.target());
+        self.exp_depth_smooth.reset(self.exp_depth_smooth.target());
         self.pulse_width_smooth.reset(self.pulse_width_smooth.target());
     }
 }
@@ -387,490 +569,418 @@ impl DspModule for SineOscillator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dsp::analysis::{rms, Spectrum};
+
+    const SR: f32 = 48000.0;
+
+    /// Default parameters, in definition order.
+    fn defaults() -> Vec<f32> {
+        Oscillator::new().parameters().iter().map(|p| p.default).collect()
+    }
+
+    fn with(mut params: Vec<f32>, index: usize, value: f32) -> Vec<f32> {
+        params[index] = value;
+        params
+    }
+
+    fn outputs(len: usize) -> Vec<SignalBuffer> {
+        (0..4).map(|_| SignalBuffer::audio(len)).collect()
+    }
+
+    /// Runs `osc` for `len` samples with the given inputs, in blocks of 256.
+    fn run(osc: &mut Oscillator, params: &[f32], inputs: &[SignalBuffer], len: usize) -> Vec<Vec<f32>> {
+        const BLOCK: usize = 256;
+        let mut result = vec![Vec::with_capacity(len); 4];
+        let mut done = 0;
+        while done < len {
+            let block = BLOCK.min(len - done);
+            let slices: Vec<SignalBuffer> = inputs
+                .iter()
+                .map(|buf| {
+                    let mut b = if buf.is_connected() {
+                        SignalBuffer::control(block)
+                    } else {
+                        SignalBuffer::unconnected(block, SignalType::Control)
+                    };
+                    b.samples.copy_from_slice(&buf.samples[done..done + block]);
+                    b
+                })
+                .collect();
+            let refs: Vec<&SignalBuffer> = slices.iter().collect();
+            let mut outs = outputs(block);
+            osc.process(&refs, &mut outs, params, &ProcessContext::new(SR, block));
+            for (r, o) in result.iter_mut().zip(&outs) {
+                r.extend_from_slice(&o.samples);
+            }
+            done += block;
+        }
+        result
+    }
+
+    fn render(params: &[f32], len: usize) -> Vec<Vec<f32>> {
+        let mut osc = Oscillator::new();
+        osc.prepare(SR, 256);
+        osc.reset();
+        run(&mut osc, params, &[], len)
+    }
+
+    /// Input buffers with only `port` connected, holding `samples`.
+    fn patched(port: usize, samples: Vec<f32>) -> Vec<SignalBuffer> {
+        let len = samples.len();
+        (0..=port)
+            .map(|p| {
+                if p == port {
+                    let mut b = SignalBuffer::control(len);
+                    b.samples.copy_from_slice(&samples);
+                    b
+                } else {
+                    SignalBuffer::unconnected(len, SignalType::Control)
+                }
+            })
+            .collect()
+    }
+
+    /// Frequency from upward zero crossings, interpolated, over the whole signal.
+    fn measured_hz(samples: &[f32]) -> f64 {
+        let mut crossings = Vec::new();
+        for i in 1..samples.len() {
+            let (a, b) = (samples[i - 1] as f64, samples[i] as f64);
+            if a <= 0.0 && b > 0.0 {
+                crossings.push(i as f64 - 1.0 + a / (a - b));
+            }
+        }
+        let (first, last) = (crossings[0], crossings[crossings.len() - 1]);
+        (crossings.len() - 1) as f64 * SR as f64 / (last - first)
+    }
+
+    fn cents(f: f64, reference: f64) -> f64 {
+        1200.0 * (f / reference).log2()
+    }
 
     #[test]
-    fn test_oscillator_info() {
-        let osc = SineOscillator::new();
+    fn test_info_and_ports() {
+        let osc = Oscillator::new();
         assert_eq!(osc.info().id, "osc.sine");
         assert_eq!(osc.info().name, "Oscillator");
         assert_eq!(osc.info().category, ModuleCategory::Source);
+        let ids: Vec<_> = osc.ports().iter().map(|p| p.id).collect();
+        assert_eq!(ids, ["v_oct", "fm", "exp_fm", "pwm", "sync", "out", "sub", "out_l", "out_r"]);
+        let names: Vec<_> = osc.parameters().iter().map(|p| p.name).collect();
+        assert_eq!(
+            names,
+            ["Octave", "Semitone", "Fine", "FM Depth", "Exp FM Depth", "Waveform", "Pulse Width", "Voices", "Detune", "Spread"]
+        );
     }
 
     #[test]
-    fn test_oscillator_ports() {
-        let osc = SineOscillator::new();
-        let ports = osc.ports();
-
-        assert_eq!(ports.len(), 5); // V/Oct, FM, Frequency, PWM, Out
-
-        // First four are inputs
-        assert!(ports[0].is_input());
-        assert_eq!(ports[0].id, "v_oct");
-        assert_eq!(ports[0].signal_type, SignalType::Control);
-
-        assert!(ports[1].is_input());
-        assert_eq!(ports[1].id, "fm");
-        assert_eq!(ports[1].signal_type, SignalType::Control);
-
-        assert!(ports[2].is_input());
-        assert_eq!(ports[2].id, "freq_in");
-        assert_eq!(ports[2].signal_type, SignalType::Control);
-
-        assert!(ports[3].is_input());
-        assert_eq!(ports[3].id, "pwm");
-        assert_eq!(ports[3].signal_type, SignalType::Control);
-
-        // Fifth is output
-        assert!(ports[4].is_output());
-        assert_eq!(ports[4].id, "out");
-        assert_eq!(ports[4].signal_type, SignalType::Audio);
+    fn test_default_is_c4() {
+        let out = render(&defaults(), 48000);
+        let c = cents(measured_hz(&out[0][4800..]), Oscillator::C4_HZ as f64);
+        assert!(c.abs() < 0.1, "{c:+.3} cents");
     }
 
     #[test]
-    fn test_oscillator_parameters() {
-        let osc = SineOscillator::new();
-        let params = osc.parameters();
-
-        assert_eq!(params.len(), 4);
-
-        // Frequency parameter
-        assert_eq!(params[0].id, "frequency");
-        assert_eq!(params[0].min, 20.0);
-        assert_eq!(params[0].max, 20000.0);
-        assert_eq!(params[0].default, SineOscillator::C4_HZ);
-
-        // FM Depth parameter
-        assert_eq!(params[1].id, "fm_depth");
-        assert_eq!(params[1].min, 0.0);
-        assert_eq!(params[1].max, 1000.0);
-        assert_eq!(params[1].default, 0.0);
-
-        // Waveform parameter
-        assert_eq!(params[2].id, "waveform");
-        assert_eq!(params[2].min, 0.0);
-        assert_eq!(params[2].max, 3.0);
-        assert_eq!(params[2].default, 0.0);
-
-        // Pulse Width parameter
-        assert_eq!(params[3].id, "pulse_width");
-        assert_eq!(params[3].min, 0.1);
-        assert_eq!(params[3].max, 0.9);
-        assert_eq!(params[3].default, 0.5);
+    fn test_midi_note_69_is_440_hz() {
+        // MIDI note 69 arrives as V/Oct (69 - 60) / 12
+        let len = 96000;
+        let mut osc = Oscillator::new();
+        osc.prepare(SR, 256);
+        let inputs = patched(Oscillator::PORT_V_OCT, vec![crate::modules::MidiNote::midi_to_voct(69.0); len]);
+        let out = run(&mut osc, &defaults(), &inputs, len);
+        let c = cents(measured_hz(&out[0][4800..]), 440.0);
+        assert!(c.abs() < 0.1, "MIDI 69 measured {c:+.4} cents from 440 Hz");
     }
 
     #[test]
-    fn test_waveform_conversion() {
-        assert_eq!(OscWaveform::from_param(0.0), OscWaveform::Sine);
-        assert_eq!(OscWaveform::from_param(1.0), OscWaveform::Saw);
-        assert_eq!(OscWaveform::from_param(2.0), OscWaveform::Square);
-        assert_eq!(OscWaveform::from_param(3.0), OscWaveform::Triangle);
-        assert_eq!(OscWaveform::from_param(99.0), OscWaveform::Sine); // Out of range defaults to Sine
+    fn test_tune_section() {
+        assert_eq!(Oscillator::tune_octaves(1.0, 0.0, 0.0), 1.0);
+        assert_eq!(Oscillator::tune_octaves(0.0, 12.0, 0.0), 1.0);
+        assert!((Oscillator::tune_octaves(0.0, 0.0, 1200.0) - 1.0).abs() < 1e-6);
+        // Octave and Semitone snap to whole steps
+        assert_eq!(Oscillator::tune_octaves(0.8, 2.6, 0.0), 1.0 + 3.0 / 12.0);
+
+        // A4 from the knobs: octave 0, +9 semitones
+        let params = with(defaults(), Oscillator::PARAM_SEMITONE, 9.0);
+        let out = render(&params, 48000);
+        let c = cents(measured_hz(&out[0][4800..]), 440.0);
+        assert!(c.abs() < 0.1, "{c:+.3} cents");
     }
 
     #[test]
-    fn test_oscillator_generates_output() {
-        let mut osc = SineOscillator::new();
-        osc.prepare(44100.0, 256);
+    fn test_pitch_glides_evenly_in_octaves() {
+        // Smoothed in log2(Hz): a jump up and the same jump down cross the
+        // midpoint at the same time
+        let mut up = Oscillator::new();
+        up.prepare(SR, 1);
+        up.pitch_smooth.reset(-2.0);
+        up.pitch_smooth.set_target(2.0);
+        let mut down = Oscillator::new();
+        down.prepare(SR, 1);
+        down.pitch_smooth.reset(2.0);
+        down.pitch_smooth.set_target(-2.0);
+        let up_mid = (0..2000).position(|_| up.pitch_smooth.next() >= 0.0).unwrap();
+        let down_mid = (0..2000).position(|_| down.pitch_smooth.next() <= 0.0).unwrap();
+        assert!(up_mid.abs_diff(down_mid) <= 1, "{up_mid} vs {down_mid}");
+    }
 
-        let mut outputs = vec![SignalBuffer::audio(256)];
-        let ctx = ProcessContext::new(44100.0, 256);
+    /// Length of the leak-free analysis window.
+    const N: usize = 16384;
 
-        // Empty inputs (no CV, no FM), default waveform (sine)
-        let inputs: Vec<&SignalBuffer> = vec![];
-        osc.process(&inputs, &mut outputs, &[440.0, 0.0, 0.0, 0.5], &ctx);
+    /// Aliasing below 20 kHz, in dB relative to everything below 20 kHz, of
+    /// the last N samples. `fundamental` must fit a whole number of times in
+    /// N samples: then no window is needed, nothing leaks, and every bin
+    /// between harmonics is genuine alias.
+    fn alias_db(out: &[f32], fundamental: f64) -> f64 {
+        Spectrum::of_periodic(&out[out.len() - N..], SR).alias_energy_db(fundamental, 0.5, 20000.0)
+    }
 
-        // Output should not be all zeros
-        let has_nonzero = outputs[0].samples.iter().any(|&s| s.abs() > 0.001);
-        assert!(has_nonzero, "Oscillator should produce non-zero output");
+    /// V/Oct that plays exactly `cycles` periods per N samples.
+    fn bin_exact_voct(cycles: usize) -> (f64, f32) {
+        let hz = cycles as f64 * SR as f64 / N as f64;
+        (hz, (hz / Oscillator::C4_HZ as f64).log2() as f32)
+    }
 
-        // Output should be within valid audio range
-        for &sample in &outputs[0].samples {
-            assert!(
-                sample >= -1.0 && sample <= 1.0,
-                "Sample {} out of range",
-                sample
-            );
+    #[test]
+    fn test_saw_and_triangle_alias_below_minus_60_db_at_5_khz() {
+        // 1707 cycles per 16384 samples at 48 kHz = 5000.98 Hz
+        let (hz, voct) = bin_exact_voct(1707);
+        for wave in [OscWaveform::Saw, OscWaveform::Triangle, OscWaveform::Square] {
+            let params = with(defaults(), Oscillator::PARAM_WAVEFORM, wave as usize as f32);
+            let mut osc = Oscillator::new();
+            osc.prepare(SR, 256);
+            let len = 3 * N;
+            let out = run(&mut osc, &params, &patched(Oscillator::PORT_V_OCT, vec![voct; len]), len);
+            let db = alias_db(&out[0], hz);
+            eprintln!("{wave:?} at {hz:.1} Hz: alias {db:.1} dB");
+            assert!(db < -60.0, "{wave:?} alias energy {db:.1} dB");
         }
     }
 
+    /// A sine at exactly `cycles` periods per N samples.
+    fn bin_exact_sine(cycles: usize, len: usize) -> Vec<f32> {
+        (0..len)
+            .map(|i| (std::f64::consts::TAU * cycles as f64 * i as f64 / N as f64).sin() as f32)
+            .collect()
+    }
+
     #[test]
-    fn test_sine_waveform_correct_frequency() {
-        let mut osc = SineOscillator::new();
-        let sample_rate = 44100.0;
-        osc.prepare(sample_rate, 4410);
+    fn test_hard_sync_locks_to_master() {
+        // A 187.5 Hz master (period exactly 256 samples) resets a saw tuned
+        // well above it; the result repeats at the master's period
+        let master_hz = 64.0 * SR as f64 / N as f64;
+        let len = 3 * N;
+        let mut params = with(defaults(), Oscillator::PARAM_WAVEFORM, 1.0);
+        params[Oscillator::PARAM_OCTAVE] = 1.0;
+        params[Oscillator::PARAM_FINE] = 37.0;
+        let mut osc = Oscillator::new();
+        osc.prepare(SR, 256);
+        let out = run(&mut osc, &params, &patched(Oscillator::PORT_SYNC, bin_exact_sine(64, len)), len);
 
-        // Generate 0.1 second of audio at 440 Hz
-        let num_samples = (sample_rate * 0.1) as usize; // 0.1 second = 4410 samples
+        let spectrum = Spectrum::of_periodic(&out[0][len - N..], SR);
+        assert!(spectrum.magnitudes[64] > 0.05, "synced saw should have the master's fundamental");
+        // Periodic at the master's period, so everything sits on its harmonics
+        let db = alias_db(&out[0], master_hz);
+        assert!(db < -100.0, "synced saw should repeat every master cycle: {db:.1} dB");
+    }
 
-        let mut outputs = vec![SignalBuffer::audio(num_samples)];
-        let ctx = ProcessContext::new(sample_rate, num_samples);
+    #[test]
+    fn test_sync_reset_is_band_limited() {
+        // 61 master cycles per N: a period of 268.59 samples, so each reset
+        // falls at a different point between samples and any alias lands
+        // between the harmonics. The master is a rising ramp through zero, so
+        // the interpolated crossing time is exact.
+        let cycles = 61;
+        let master_hz = cycles as f64 * SR as f64 / N as f64;
+        let len = 3 * N;
+        let master: Vec<f32> = (0..len)
+            .map(|i| ((cycles as f64 * i as f64 / N as f64).fract() - 0.5) as f32)
+            .collect();
+        let mut params = with(defaults(), Oscillator::PARAM_WAVEFORM, 1.0);
+        params[Oscillator::PARAM_OCTAVE] = 1.0;
+        params[Oscillator::PARAM_FINE] = 37.0;
+        let mut osc = Oscillator::new();
+        osc.prepare(SR, 256);
+        let out = run(&mut osc, &params, &patched(Oscillator::PORT_SYNC, master), len);
+        let db = alias_db(&out[0], master_hz);
+        eprintln!("synced saw at {master_hz:.2} Hz: alias {db:.1} dB");
+        assert!(db < -60.0, "synced saw alias energy {db:.1} dB");
+    }
 
-        // Sine waveform (0)
-        osc.process(&[], &mut outputs, &[440.0, 0.0, 0.0, 0.5], &ctx);
+    #[test]
+    fn test_sync_tracks_master_through_sub() {
+        // The sub divides the synced slave, so it lands on half the master
+        let len = 3 * N;
+        let params = with(defaults(), Oscillator::PARAM_OCTAVE, 1.0);
+        let mut osc = Oscillator::new();
+        osc.prepare(SR, 256);
+        let out = run(&mut osc, &params, &patched(Oscillator::PORT_SYNC, bin_exact_sine(64, len)), len);
+        let master_hz = 64.0 * SR as f64 / N as f64;
+        let db = alias_db(&out[1], master_hz / 2.0);
+        assert!(db < -50.0, "sub should repeat every two master cycles: {db:.1} dB");
+    }
 
-        // Count zero crossings (going positive)
-        let mut zero_crossings = 0;
-        for i in 1..num_samples {
-            if outputs[0].samples[i - 1] <= 0.0 && outputs[0].samples[i] > 0.0 {
-                zero_crossings += 1;
+    #[test]
+    fn test_outputs_stay_in_range() {
+        for wave in 0..4 {
+            let params = with(defaults(), Oscillator::PARAM_WAVEFORM, wave as f32);
+            let out = render(&params, 9600);
+            for (port, samples) in out.iter().enumerate() {
+                // Band-limited edges overshoot: the halfband's steep cut
+                // rings near 24 kHz for a few samples after each edge
+                // (inaudible, about +2.6 dB of peak). Skip the start, where
+                // the output leaps from silence.
+                let peak = samples[200..].iter().fold(0.0f32, |m, s| m.max(s.abs()));
+                assert!(peak <= 1.4, "wave {wave} port {port}: peak {peak}");
             }
         }
-
-        // At 440 Hz for 0.1 seconds, we expect ~44 cycles
-        let expected_cycles = 440.0 * 0.1;
-        let tolerance = 2; // Allow some tolerance for phase
-        assert!(
-            (zero_crossings as f32 - expected_cycles).abs() < tolerance as f32,
-            "Expected ~{} zero crossings, got {}",
-            expected_cycles,
-            zero_crossings
-        );
     }
 
     #[test]
-    fn test_sawtooth_waveform() {
-        let mut osc = SineOscillator::new();
-        osc.prepare(44100.0, 4410);
-
-        let num_samples = 4410;
-        let mut outputs = vec![SignalBuffer::audio(num_samples)];
-        let ctx = ProcessContext::new(44100.0, num_samples);
-
-        // Saw waveform (1)
-        osc.process(&[], &mut outputs, &[440.0, 0.0, 1.0, 0.5], &ctx);
-
-        // Output should be within valid audio range
-        for &sample in &outputs[0].samples {
-            assert!(
-                sample >= -1.1 && sample <= 1.1, // Small tolerance for PolyBLEP overshoot
-                "Saw sample {} out of range",
-                sample
-            );
-        }
-
-        // Saw should have non-zero output
-        let has_nonzero = outputs[0].samples.iter().any(|&s| s.abs() > 0.001);
-        assert!(has_nonzero, "Sawtooth should produce non-zero output");
+    fn test_sub_is_an_octave_down() {
+        let params = with(defaults(), Oscillator::PARAM_WAVEFORM, 1.0);
+        let out = render(&params, 96000);
+        let main = measured_hz(&out[0][4800..]);
+        let sub = measured_hz(&out[1][4800..]);
+        assert!(cents(sub, main / 2.0).abs() < 0.1, "main {main:.3} Hz, sub {sub:.3} Hz");
+        assert!(rms(&out[1][4800..]) > 0.9, "sub is a full-scale square");
     }
 
     #[test]
-    fn test_square_waveform() {
-        let mut osc = SineOscillator::new();
-        osc.prepare(44100.0, 4410);
-
-        let num_samples = 4410;
-        let mut outputs = vec![SignalBuffer::audio(num_samples)];
-        let ctx = ProcessContext::new(44100.0, num_samples);
-
-        // Square waveform (2) with 50% duty cycle
-        osc.process(&[], &mut outputs, &[440.0, 0.0, 2.0, 0.5], &ctx);
-
-        // Most samples should be near +1 or -1 (with some transition samples from PolyBLEP)
-        let near_one_count = outputs[0]
-            .samples
-            .iter()
-            .filter(|&&s| s.abs() > 0.9)
-            .count();
-        assert!(
-            near_one_count > num_samples / 2,
-            "Square wave should have most samples near +/-1, got {} of {}",
-            near_one_count,
-            num_samples
-        );
+    fn test_through_zero_fm_runs_backwards() {
+        // FM input of -2 at depth 1: the frequency is -C4, so the saw falls
+        let len = 9600;
+        let params = with(with(defaults(), Oscillator::PARAM_WAVEFORM, 1.0), Oscillator::PARAM_FM_DEPTH, 1.0);
+        let mut osc = Oscillator::new();
+        osc.prepare(SR, 256);
+        let out = run(&mut osc, &params, &patched(Oscillator::PORT_FM, vec![-2.0; len]), len);
+        let ramp = &out[0][4800..];
+        let falling = ramp.windows(2).filter(|w| w[1] < w[0]).count();
+        // Most samples fall; the rest are the ringing either side of each edge
+        assert!(falling > ramp.len() * 3 / 4, "saw should ramp down: {falling} of {}", ramp.len());
+        let f = measured_hz(&out[0][4800..]);
+        assert!(cents(f, Oscillator::C4_HZ as f64).abs() < 1.0, "{f:.2} Hz");
     }
 
     #[test]
-    fn test_triangle_waveform() {
-        let mut osc = SineOscillator::new();
-        osc.prepare(44100.0, 4410);
-
-        let num_samples = 4410;
-        let mut outputs = vec![SignalBuffer::audio(num_samples)];
-        let ctx = ProcessContext::new(44100.0, num_samples);
-
-        // Triangle waveform (3)
-        osc.process(&[], &mut outputs, &[440.0, 0.0, 3.0, 0.5], &ctx);
-
-        // Output should be within valid audio range
-        for &sample in &outputs[0].samples {
-            assert!(
-                sample >= -1.0 && sample <= 1.0,
-                "Triangle sample {} out of range",
-                sample
-            );
-        }
-
-        // Triangle should reach near +1 and -1
-        let max = outputs[0].samples.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        let min = outputs[0].samples.iter().cloned().fold(f32::INFINITY, f32::min);
-        assert!(max > 0.9, "Triangle should reach near +1");
-        assert!(min < -0.9, "Triangle should reach near -1");
+    fn test_through_zero_fm_is_symmetric() {
+        // Sine carrier, sine modulator at the carrier frequency, index 2:
+        // through-zero FM keeps the carrier's average pitch where linear FM
+        // that clamps at 0 Hz would pull it sharp
+        let len = 96000;
+        let modulator: Vec<f32> = (0..len)
+            .map(|i| (TAU as f64 * 50.0 * i as f64 / SR as f64).sin() as f32)
+            .collect();
+        let params = with(defaults(), Oscillator::PARAM_FM_DEPTH, 2.0);
+        let mut osc = Oscillator::new();
+        osc.prepare(SR, 256);
+        let out = run(&mut osc, &params, &patched(Oscillator::PORT_FM, modulator), len);
+        let spectrum = Spectrum::of(&out[0][4800..], SR);
+        let carrier_bin = (Oscillator::C4_HZ as f64 / spectrum.bin_hz).round() as usize;
+        let peak = spectrum.magnitudes[carrier_bin - 3..=carrier_bin + 3].iter().cloned().fold(0.0, f64::max);
+        assert!(peak > 0.01, "carrier line should survive: {peak}");
+        assert!(out[0].iter().all(|s| s.is_finite()));
     }
 
     #[test]
-    fn test_pwm_modulation() {
-        let mut osc = SineOscillator::new();
-        osc.prepare(44100.0, 4410);
+    fn test_exp_fm_is_octaves() {
+        let len = 48000;
+        let params = with(defaults(), Oscillator::PARAM_EXP_DEPTH, 2.0);
+        let mut osc = Oscillator::new();
+        osc.prepare(SR, 256);
+        let out = run(&mut osc, &params, &patched(Oscillator::PORT_EXP_FM, vec![0.5; len]), len);
+        let c = cents(measured_hz(&out[0][4800..]), 2.0 * Oscillator::C4_HZ as f64);
+        assert!(c.abs() < 0.1, "{c:+.3} cents");
+    }
 
-        let num_samples = 4410;
-        let ctx = ProcessContext::new(44100.0, num_samples);
+    #[test]
+    fn test_unison_detunes_and_spreads() {
+        let mut params = with(defaults(), Oscillator::PARAM_WAVEFORM, 1.0);
+        params[Oscillator::PARAM_VOICES] = 7.0;
+        params[Oscillator::PARAM_DETUNE] = 0.5;
+        params[Oscillator::PARAM_SPREAD] = 1.0;
+        let out = render(&params, 48000);
+        let (mono, left, right) = (&out[0][4800..], &out[2][4800..], &out[3][4800..]);
 
-        // Test with narrow pulse width (0.2)
-        let mut outputs_narrow = vec![SignalBuffer::audio(num_samples)];
+        // Seven voices spread over ±25 cents smear each harmonic
+        let spectrum = Spectrum::of(mono, SR);
+        let harmonic_bin = (8.0 * Oscillator::C4_HZ as f64 / spectrum.bin_hz).round() as usize;
+        let near = spectrum.magnitudes[harmonic_bin - 2..=harmonic_bin + 2].iter().map(|m| m * m).sum::<f64>();
+        let wide = spectrum.magnitudes[harmonic_bin - 40..=harmonic_bin + 40].iter().map(|m| m * m).sum::<f64>();
+        assert!(near < 0.5 * wide, "8th harmonic should be smeared by the detune");
+
+        // Left and right differ, and neither is louder than mono
+        let diff: Vec<f32> = left.iter().zip(right).map(|(l, r)| l - r).collect();
+        assert!(rms(&diff) > 0.1, "spread should decorrelate left and right");
+        assert!(rms(left) <= rms(mono) * 1.01 && rms(right) <= rms(mono) * 1.01);
+        // Loudness stays near a single voice's
+        let single = render(&with(defaults(), Oscillator::PARAM_WAVEFORM, 1.0), 48000);
+        let ratio = rms(mono) / rms(&single[0][4800..]);
+        assert!((0.8..1.25).contains(&ratio), "unison level ratio {ratio}");
+    }
+
+    #[test]
+    fn test_unison_with_no_spread_is_centred() {
+        let mut params = with(defaults(), Oscillator::PARAM_VOICES, 5.0);
+        params[Oscillator::PARAM_SPREAD] = 0.0;
+        let out = render(&params, 4800);
+        assert_eq!(out[2], out[3]);
+        assert_eq!(out[0], out[2]);
+    }
+
+    #[test]
+    fn test_reset_restarts_a_single_voice_at_zero() {
+        let mut osc = Oscillator::new();
+        osc.prepare(SR, 256);
+        run(&mut osc, &defaults(), &[], 1000);
         osc.reset();
-        osc.process(&[], &mut outputs_narrow, &[440.0, 0.0, 2.0, 0.2], &ctx);
-
-        // Test with wide pulse width (0.8)
-        let mut outputs_wide = vec![SignalBuffer::audio(num_samples)];
+        let a = run(&mut osc, &defaults(), &[], 512);
         osc.reset();
-        osc.process(&[], &mut outputs_wide, &[440.0, 0.0, 2.0, 0.8], &ctx);
-
-        // Count high samples (+0.5 threshold)
-        let narrow_highs = outputs_narrow[0].samples.iter().filter(|&&s| s > 0.5).count();
-        let wide_highs = outputs_wide[0].samples.iter().filter(|&&s| s > 0.5).count();
-
-        // Wide pulse width should have more high samples
-        assert!(
-            wide_highs > narrow_highs,
-            "Wide pulse should have more high samples: {} vs {}",
-            wide_highs,
-            narrow_highs
-        );
+        let b = run(&mut osc, &defaults(), &[], 512);
+        assert_eq!(a, b, "reset should make the output repeatable");
     }
 
     #[test]
-    fn test_pwm_input() {
-        let mut osc = SineOscillator::new();
-        osc.prepare(44100.0, 256);
-
-        let mut outputs = vec![SignalBuffer::audio(256)];
-        let ctx = ProcessContext::new(44100.0, 256);
-
-        // Create PWM modulation input
-        let v_oct = SignalBuffer::control(256);
-        let fm = SignalBuffer::control(256);
-        let freq = SignalBuffer::control(256);
-        let mut pwm = SignalBuffer::control(256);
-        pwm.fill(0.5); // Modulate pulse width by +0.5 * 0.4 = +0.2
-
-        // Square wave with base pulse width 0.5, modulated to ~0.7
-        osc.process(
-            &[&v_oct, &fm, &freq, &pwm],
-            &mut outputs,
-            &[440.0, 0.0, 2.0, 0.5],
-            &ctx,
-        );
-
-        // Should produce valid output
-        for &sample in &outputs[0].samples {
-            assert!(sample >= -1.1 && sample <= 1.1, "Sample out of range");
-        }
+    fn test_pwm_changes_duty_cycle() {
+        let mut params = with(defaults(), Oscillator::PARAM_WAVEFORM, 2.0);
+        params[Oscillator::PARAM_PULSE_WIDTH] = 0.2;
+        let narrow = render(&params, 9600);
+        params[Oscillator::PARAM_PULSE_WIDTH] = 0.8;
+        let wide = render(&params, 9600);
+        let highs = |s: &[f32]| s.iter().filter(|&&x| x > 0.5).count();
+        assert!(highs(&wide[0]) > 3 * highs(&narrow[0]));
     }
 
     #[test]
-    fn test_oscillator_reset() {
-        let mut osc = SineOscillator::new();
-        osc.prepare(44100.0, 256);
-
-        // Generate some samples to advance phase
-        let mut outputs = vec![SignalBuffer::audio(256)];
-        let ctx = ProcessContext::new(44100.0, 256);
-        osc.process(&[], &mut outputs, &[440.0, 0.0, 0.0, 0.5], &ctx);
-
-        // Reset should bring phase back to 0
-        osc.reset();
-
-        // Generate first sample after reset - should start at sin(0) = 0
-        let mut outputs2 = vec![SignalBuffer::audio(1)];
-        let ctx2 = ProcessContext::new(44100.0, 1);
-        osc.process(&[], &mut outputs2, &[440.0, 0.0, 0.0, 0.5], &ctx2);
-
-        assert!(
-            outputs2[0].samples[0].abs() < 0.01,
-            "First sample after reset should be near 0, got {}",
-            outputs2[0].samples[0]
-        );
+    fn test_crossing_rules() {
+        // Forward across the wrap
+        assert_eq!(crossing(0.9, 1.1, 0.0), Some(1.0));
+        // Leaving "just before the wrap" forwards crosses it immediately
+        assert_eq!(crossing(1.0, 1.05, 0.0), Some(1.0));
+        // Leaving "just after the wrap" backwards crosses it immediately
+        assert_eq!(crossing(0.0, -0.05, 0.0), Some(0.0));
+        // ...but not the other way
+        assert_eq!(crossing(0.0, 0.05, 0.0), None);
+        assert_eq!(crossing(1.0, 0.95, 0.0), None);
+        // Interior breakpoints
+        assert_eq!(crossing(0.4, 0.6, 0.5), Some(0.5));
+        assert_eq!(crossing(0.6, 0.4, 0.5), Some(0.5));
+        assert_eq!(crossing(0.1, 0.3, 0.5), None);
     }
 
     #[test]
-    fn test_fm_modulation() {
-        let mut osc = SineOscillator::new();
-        let sample_rate = 44100.0;
-        osc.prepare(sample_rate, 256);
-
-        // Create dummy V/Oct input (first input)
-        let v_oct_input = SignalBuffer::control(256);
-
-        // Create FM input with constant value (second input)
-        let mut fm_input = SignalBuffer::control(256);
-        fm_input.fill(1.0); // Max FM
-
-        let mut outputs = vec![SignalBuffer::audio(256)];
-        let ctx = ProcessContext::new(sample_rate, 256);
-
-        // With FM depth of 100 Hz and FM input of 1.0, frequency should be 440 + 100 = 540 Hz
-        osc.process(
-            &[&v_oct_input, &fm_input],
-            &mut outputs,
-            &[440.0, 100.0, 0.0, 0.5],
-            &ctx,
-        );
-
-        // Output should be valid
-        for &sample in &outputs[0].samples {
-            assert!(
-                sample >= -1.0 && sample <= 1.0,
-                "FM modulated sample out of range"
-            );
-        }
-
-        // Output should not be all zeros
-        let has_nonzero = outputs[0].samples.iter().any(|&s| s.abs() > 0.001);
-        assert!(
-            has_nonzero,
-            "FM modulated oscillator should produce non-zero output"
-        );
-    }
-
-    #[test]
-    fn test_v_oct_scaling() {
-        let sample_rate = 44100.0;
-        let num_samples = 44100; // 1 second
-
-        // Test with V/Oct = +1 (should double frequency, one octave up)
-        let mut osc = SineOscillator::new();
-        osc.prepare(sample_rate, num_samples);
-
-        let mut v_oct_input = SignalBuffer::control(num_samples);
-        v_oct_input.fill(1.0); // +1 octave
-
-        let mut outputs = vec![SignalBuffer::audio(num_samples)];
-        let ctx = ProcessContext::new(sample_rate, num_samples);
-
-        // Base frequency 440 Hz with V/Oct = +1 should give 880 Hz
-        osc.process(&[&v_oct_input], &mut outputs, &[440.0, 0.0, 0.0, 0.5], &ctx);
-
-        // Count zero crossings
-        let mut zero_crossings = 0;
-        for i in 1..num_samples {
-            if outputs[0].samples[i - 1] <= 0.0 && outputs[0].samples[i] > 0.0 {
-                zero_crossings += 1;
-            }
-        }
-
-        // At 880 Hz for 1 second, expect ~880 cycles
-        assert!(
-            (zero_crossings as f32 - 880.0).abs() < 10.0,
-            "Expected ~880 cycles with +1 octave, got {}",
-            zero_crossings
-        );
-    }
-
-    #[test]
-    fn test_v_oct_negative() {
-        let sample_rate = 44100.0;
-        let num_samples = 44100; // 1 second
-
-        // Test with V/Oct = -1 (should halve frequency, one octave down)
-        let mut osc = SineOscillator::new();
-        osc.prepare(sample_rate, num_samples);
-
-        let mut v_oct_input = SignalBuffer::control(num_samples);
-        v_oct_input.fill(-1.0); // -1 octave
-
-        let mut outputs = vec![SignalBuffer::audio(num_samples)];
-        let ctx = ProcessContext::new(sample_rate, num_samples);
-
-        // Base frequency 440 Hz with V/Oct = -1 should give 220 Hz
-        osc.process(&[&v_oct_input], &mut outputs, &[440.0, 0.0, 0.0, 0.5], &ctx);
-
-        // Count zero crossings
-        let mut zero_crossings = 0;
-        for i in 1..num_samples {
-            if outputs[0].samples[i - 1] <= 0.0 && outputs[0].samples[i] > 0.0 {
-                zero_crossings += 1;
-            }
-        }
-
-        // At 220 Hz for 1 second, expect ~220 cycles
-        assert!(
-            (zero_crossings as f32 - 220.0).abs() < 5.0,
-            "Expected ~220 cycles with -1 octave, got {}",
-            zero_crossings
-        );
-    }
-
-    #[test]
-    fn test_poly_blep() {
-        // Test PolyBLEP at discontinuity
-        let dt = 0.01; // 1% of phase per sample
-
-        // Just after discontinuity (near 0)
-        let blep_after = SineOscillator::poly_blep(0.005, dt);
-        assert!(blep_after.abs() > 0.0, "PolyBLEP should be non-zero near discontinuity");
-
-        // Just before discontinuity (near 1)
-        let blep_before = SineOscillator::poly_blep(0.995, dt);
-        assert!(blep_before.abs() > 0.0, "PolyBLEP should be non-zero near discontinuity");
-
-        // Away from discontinuity
-        let blep_away = SineOscillator::poly_blep(0.5, dt);
-        assert_eq!(blep_away, 0.0, "PolyBLEP should be zero away from discontinuity");
-    }
-
-    #[test]
-    fn test_all_waveforms_produce_output() {
-        let mut osc = SineOscillator::new();
-        osc.prepare(44100.0, 4410);
-        let ctx = ProcessContext::new(44100.0, 4410);
-
-        for waveform_idx in 0..4 {
-            osc.reset();
-            let mut outputs = vec![SignalBuffer::audio(4410)];
-            osc.process(
-                &[],
-                &mut outputs,
-                &[440.0, 0.0, waveform_idx as f32, 0.5],
-                &ctx,
-            );
-
-            let has_nonzero = outputs[0].samples.iter().any(|&s| s.abs() > 0.001);
-            assert!(
-                has_nonzero,
-                "Waveform {} should produce non-zero output",
-                waveform_idx
-            );
-        }
+    fn test_registry_instantiation() {
+        use crate::dsp::ModuleRegistry;
+        let mut registry = ModuleRegistry::new();
+        registry.register::<Oscillator>();
+        let module = registry.create("osc.sine").unwrap();
+        assert_eq!(module.info().name, "Oscillator");
+        assert_eq!(module.ports().len(), 9);
+        assert_eq!(module.parameters().len(), 10);
     }
 
     #[test]
     fn test_oscillator_is_send() {
         fn assert_send<T: Send>() {}
-        assert_send::<SineOscillator>();
-    }
-
-    #[test]
-    fn test_oscillator_default() {
-        let osc = SineOscillator::default();
-        assert_eq!(osc.info().id, "osc.sine");
-    }
-
-    #[test]
-    fn test_oscillator_registry_instantiation() {
-        use crate::dsp::ModuleRegistry;
-
-        let mut registry = ModuleRegistry::new();
-        registry.register::<SineOscillator>();
-
-        assert!(registry.contains("osc.sine"));
-
-        let module = registry.create("osc.sine");
-        assert!(module.is_some());
-
-        let module = module.unwrap();
-        assert_eq!(module.info().id, "osc.sine");
-        assert_eq!(module.info().name, "Oscillator");
-        assert_eq!(module.ports().len(), 5);
-        assert_eq!(module.parameters().len(), 4);
+        assert_send::<Oscillator>();
     }
 }

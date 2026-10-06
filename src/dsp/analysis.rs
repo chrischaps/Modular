@@ -74,6 +74,49 @@ impl Spectrum {
         }
     }
 
+    /// Unwindowed magnitude spectrum of a power-of-two length buffer that
+    /// holds a whole number of periods. Every partial then lands exactly on
+    /// a bin with no leakage, so energy between harmonics is genuinely there
+    /// (aliasing, jitter) rather than the window's skirt.
+    pub fn of_periodic(samples: &[f32], sample_rate: f32) -> Self {
+        let n = samples.len();
+        assert!(n.is_power_of_two(), "of_periodic needs a power-of-two length");
+        let mut re: Vec<f64> = samples.iter().map(|&s| s as f64).collect();
+        let mut im = vec![0.0f64; n];
+        fft(&mut re, &mut im);
+        let scale = 2.0 / n as f64;
+        let magnitudes = (0..=n / 2)
+            .map(|k| (re[k] * re[k] + im[k] * im[k]).sqrt() * scale)
+            .collect();
+        Self {
+            magnitudes,
+            bin_hz: sample_rate as f64 / n as f64,
+        }
+    }
+
+    /// Energy more than `tolerance_bins` from every harmonic of `fundamental`,
+    /// below `max_hz`, in dB relative to all energy below `max_hz`.
+    pub fn alias_energy_db(&self, fundamental: f64, tolerance_bins: f64, max_hz: f64) -> f64 {
+        let mut total = 0.0;
+        let mut alias = 0.0;
+        for (k, &mag) in self.magnitudes.iter().enumerate().skip(1) {
+            let freq = k as f64 * self.bin_hz;
+            if freq > max_hz {
+                break;
+            }
+            let energy = mag * mag;
+            total += energy;
+            let harmonic = (freq / fundamental).round().max(1.0) * fundamental;
+            if (freq - harmonic).abs() > tolerance_bins * self.bin_hz {
+                alias += energy;
+            }
+        }
+        if total <= 0.0 {
+            return f64::NEG_INFINITY;
+        }
+        10.0 * (alias.max(1e-30) / total).log10()
+    }
+
     /// Frequency of the strongest non-DC component, refined between bins by
     /// fitting a parabola to the log magnitudes around the peak.
     pub fn dominant_frequency(&self) -> f64 {

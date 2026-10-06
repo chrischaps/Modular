@@ -10,7 +10,7 @@ Sound generators that create audio signals from scratch.
 
 | Module | ID | Description |
 |--------|-----|-------------|
-| [Oscillator](./sources/oscillator.md) | `osc.sine` | Multi-waveform VCO with FM and PWM |
+| [Oscillator](./sources/oscillator.md) | `osc.sine` | Band-limited VCO: tune section, sync, through-zero FM, sub, unison |
 
 ### Filters (Green Header)
 

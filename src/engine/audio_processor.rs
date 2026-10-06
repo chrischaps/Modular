@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use crate::dsp::denormal::DenormalGuard;
 use crate::dsp::{ModuleRegistry, ProcessContext};
-use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Chorus, Clock, Compressor, Distortion, KeyboardInput, LadderFilter, Lfo, MidiMonitor, MidiNote, Mixer, Oscilloscope, ParametricEq, Reverb, SampleHold, SineOscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
+use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Chorus, Clock, Compressor, Distortion, KeyboardInput, LadderFilter, Lfo, MidiMonitor, MidiNote, Mixer, Oscilloscope, ParametricEq, Reverb, SampleHold, Oscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
 
 use super::channels::EngineHandle;
 use super::commands::{AudioMessage, EngineEvent, ScopeFrame};
@@ -20,7 +20,7 @@ use super::graph_plan::GraphPlan;
 /// order is the order modules appear in the add-node menu.
 pub fn create_module_registry() -> ModuleRegistry {
     let mut registry = ModuleRegistry::new();
-    registry.register::<SineOscillator>();
+    registry.register::<Oscillator>();
     registry.register::<KeyboardInput>();
     registry.register::<MidiNote>();
     registry.register::<SvfFilter>();
@@ -279,7 +279,7 @@ mod tests {
     fn playing_patch(ui: &mut UiHandle) {
         ui.send_command(EngineCommand::AddModule { node_id: 1, module_id: "osc.sine" });
         ui.send_command(EngineCommand::AddModule { node_id: 2, module_id: "output.audio" });
-        ui.send_command(EngineCommand::Connect { from_node: 1, from_port: 4, to_node: 2, to_port: 2 });
+        ui.send_command(EngineCommand::Connect { from_node: 1, from_port: 5, to_node: 2, to_port: 2 });
         ui.send_command(EngineCommand::SetPlaying(true));
         ui.flush();
     }
