@@ -16,7 +16,7 @@ pub enum SynthResponse {
         param_name: String,
         value: f32,
     },
-    /// A node was selected.
+    /// A node was selected by right-clicking it, so its menu acts on it.
     NodeSelected(egui_node_graph2::NodeId),
     /// A node was deselected.
     NodeDeselected(egui_node_graph2::NodeId),
@@ -24,6 +24,11 @@ pub enum SynthResponse {
     DeleteNode(egui_node_graph2::NodeId),
     /// Request to reset a node's parameters to defaults.
     ResetNode(egui_node_graph2::NodeId),
+    /// Request to duplicate a node, with the cables between it and any
+    /// other selected nodes.
+    DuplicateNode(egui_node_graph2::NodeId),
+    /// Request to copy a node to the clipboard.
+    CopyNode(egui_node_graph2::NodeId),
     /// Request to bypass a node, or bring it back.
     ToggleBypass(egui_node_graph2::NodeId),
     /// Request to start MIDI Learn mode for a parameter.

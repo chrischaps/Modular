@@ -16,11 +16,11 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
 use egui::{Pos2, Vec2};
-use egui_node_graph2::{NodeId, NodeTemplateTrait, PanZoom};
+use egui_node_graph2::{NodeId, PanZoom};
 
 use crate::engine::{EngineCommand, NodeId as EngineNodeId};
 use crate::graph::{port_mapping, SynthGraphEditorState, SynthGraphState, SynthNodeTemplate};
-use super::engine_sync;
+use super::{editing, engine_sync};
 
 /// Most steps kept. The oldest are dropped first.
 const MAX_STEPS: usize = 256;
@@ -289,29 +289,15 @@ impl Step {
         // Modules that go
         for diff in self.nodes.iter().filter(|d| d.after.is_none()) {
             let Some(node_id) = graph_ids.remove(&diff.key) else { continue };
-            let (_, cut) = editor.graph.remove_node(node_id);
-            for (input, output) in cut {
-                commands.extend(engine_sync::cable_disconnected(&editor.graph, user_state, output, input));
-            }
-            editor.node_positions.remove(node_id);
-            editor.node_order.retain(|id| *id != node_id);
-            editor.selected_nodes.retain(|id| *id != node_id);
-            user_state.remove_node(node_id);
-            commands.push(EngineCommand::RemoveModule { node_id: diff.key });
+            commands.extend(editing::remove_module(editor, user_state, node_id));
         }
 
         // Modules that come (back), under the engine ID they had
         for diff in self.nodes.iter().filter(|d| d.before.is_none()) {
             let Some(state) = &diff.after else { continue };
-            let template = state.template;
-            let node_id = editor.graph.add_node(
-                template.node_graph_label(user_state),
-                template.user_data(user_state),
-                |graph, node_id| template.build_node(graph, user_state, node_id),
-            );
+            let position = anchor.zoomed(state.position, zoom);
+            let node_id = editing::place_node(editor, user_state, state.template, position);
             editor.graph[node_id].user_data.bypassed = state.bypassed;
-            editor.node_positions.insert(node_id, anchor.zoomed(state.position, zoom));
-            editor.node_order.push(node_id);
             user_state.assign_engine_node_id(node_id, diff.key);
             graph_ids.insert(diff.key, node_id);
             commands.extend(engine_sync::add_module(&editor.graph, node_id, diff.key));
@@ -460,6 +446,8 @@ pub struct History {
     /// changes. Undo and redo close it.
     open_since: Option<Instant>,
     anchor: ViewAnchor,
+    /// A name for the next step, from the command that's making it.
+    next_label: Option<String>,
 }
 
 impl History {
@@ -469,6 +457,7 @@ impl History {
         self.undo.clear();
         self.redo.clear();
         self.open_since = None;
+        self.next_label = None;
         self.baseline = Snapshot::capture(editor, user_state, &self.anchor);
     }
 
@@ -490,21 +479,39 @@ impl History {
         if gesture_held {
             return;
         }
+        let label = self.next_label.take();
         let current = Snapshot::capture(editor, user_state, &self.anchor);
-        let Some(step) = Step::between(&self.baseline, &current) else {
+        let Some(mut step) = Step::between(&self.baseline, &current) else {
             return;
         };
         self.baseline = current;
         self.redo.clear();
 
+        // A named command is a step of its own: nothing merges into or out of it
+        if let Some(label) = label {
+            step.label = label;
+            self.push(step);
+            self.open_since = None;
+            return;
+        }
         let merges = self.open_since.is_some_and(|since| now.duration_since(since) < MERGE_WINDOW);
         if !(merges && self.undo.last_mut().is_some_and(|last| last.absorb(&step))) {
-            self.undo.push(step);
-            if self.undo.len() > MAX_STEPS {
-                self.undo.remove(0);
-            }
+            self.push(step);
         }
         self.open_since = Some(now);
+    }
+
+    fn push(&mut self, step: Step) {
+        self.undo.push(step);
+        if self.undo.len() > MAX_STEPS {
+            self.undo.remove(0);
+        }
+    }
+
+    /// Names the step the current frame's edits will make, e.g. "Paste 3
+    /// modules", in place of the name it would get from what changed.
+    pub fn name_next(&mut self, label: impl Into<String>) {
+        self.next_label = Some(label.into());
     }
 
     /// Notes a value set by MIDI CC: playing a controller isn't an edit.
@@ -580,16 +587,7 @@ mod tests {
         /// Adds a module, as the add-module menu does.
         fn add(&mut self, module_id: &str, at: Pos2) -> NodeId {
             let template = SynthNodeTemplate::from_module_id(module_id).unwrap();
-            let user_state = &mut self.user_state;
-            let node_id = self.editor.graph.add_node(
-                template.node_graph_label(user_state),
-                template.user_data(user_state),
-                |graph, node_id| template.build_node(graph, user_state, node_id),
-            );
-            self.editor.node_positions.insert(node_id, at);
-            self.editor.node_order.push(node_id);
-            self.user_state.allocate_engine_node_id(node_id);
-            node_id
+            editing::add_module(&mut self.editor, &mut self.user_state, template, at).0
         }
 
         /// Deletes a module, as its close button does.
@@ -932,5 +930,29 @@ mod tests {
 
         while rig.history.redo(&mut rig.editor, &mut rig.user_state).is_some() {}
         assert!(same(&rig.snapshot(), &full));
+    }
+
+    #[test]
+    fn test_duplicate_is_one_named_step() {
+        let mut rig = Rig::new();
+        let (osc, filter, _) = voice(&mut rig);
+        rig.record();
+        let before = rig.snapshot();
+
+        let pasted = editing::duplicate(&mut rig.editor, &mut rig.user_state, &[osc, filter]).unwrap();
+        rig.history.name_next("Duplicate 2 modules");
+        rig.record();
+        assert_eq!(rig.history.undo_label(), Some("Duplicate 2 modules"));
+
+        // A knob turned straight after isn't folded into the duplicate
+        rig.set(pasted.nodes[1], "Cutoff", 300.0);
+        rig.record();
+        assert_eq!(rig.history.undo_label(), Some("Set SVF Filter Cutoff"));
+
+        rig.undo();
+        let undone = rig.undo();
+        assert_eq!(undone.label, "Duplicate 2 modules");
+        assert!(same(&rig.snapshot(), &before));
+        assert!(pasted.nodes.iter().all(|id| !rig.editor.graph.nodes.contains_key(*id)));
     }
 }

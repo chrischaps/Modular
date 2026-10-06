@@ -73,6 +73,11 @@ impl SynthNodeTemplate {
         self.spec.parameters.iter().map(|p| p.name.to_string()).collect()
     }
 
+    /// Default values of this module's parameters, in parameter-index order.
+    pub fn parameter_defaults(&self) -> Vec<f32> {
+        self.spec.parameters.iter().map(|p| p.default).collect()
+    }
+
     /// Number of leading parameters driven by live input (computer keyboard,
     /// MIDI) rather than by the graph.
     pub fn live_parameter_count(&self) -> usize {

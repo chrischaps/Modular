@@ -614,6 +614,34 @@ impl SynthNodeData {
     }
 }
 
+impl SynthNodeData {
+    /// A module's right-click menu. Each action applies to the whole
+    /// selection when the module is part of it.
+    fn node_menu(
+        &self,
+        ui: &mut egui::Ui,
+        node_id: egui_node_graph2::NodeId,
+        responses: &mut Vec<NodeResponse<SynthResponse, Self>>,
+    ) {
+        ui.set_min_width(170.0);
+        let mut item = |ui: &mut egui::Ui, label: &str, shortcut: &str, response: SynthResponse| {
+            if ui.add(egui::Button::new(label).shortcut_text(shortcut)).clicked() {
+                responses.push(NodeResponse::User(response));
+                ui.close_menu();
+            }
+        };
+        item(ui, "Duplicate", "Ctrl+D", SynthResponse::DuplicateNode(node_id));
+        item(ui, "Copy", "Ctrl+C", SynthResponse::CopyNode(node_id));
+        if self.bypassable {
+            let label = if self.bypassed { "Switch on" } else { "Bypass" };
+            item(ui, label, "Ctrl+B", SynthResponse::ToggleBypass(node_id));
+        }
+        item(ui, "Reset to defaults", "", SynthResponse::ResetNode(node_id));
+        ui.separator();
+        item(ui, "Delete", "Del", SynthResponse::DeleteNode(node_id));
+    }
+}
+
 impl NodeDataTrait for SynthNodeData {
     type Response = SynthResponse;
     type UserState = super::SynthGraphState;
@@ -625,13 +653,25 @@ impl NodeDataTrait for SynthNodeData {
         ui: &mut egui::Ui,
         node_id: egui_node_graph2::NodeId,
         _graph: &egui_node_graph2::Graph<Self, Self::DataType, Self::ValueType>,
-        _user_state: &mut Self::UserState,
+        user_state: &mut Self::UserState,
         zoom: f32,
     ) -> Vec<NodeResponse<Self::Response, Self>>
     where
         Self::Response: UserResponseTrait,
     {
         let mut responses = Vec::new();
+
+        // Right-clicking the module opens its menu. The editor senses clicks
+        // on the whole node under this id, before drawing what's inside it
+        if let Some(window) = ui.ctx().read_response(egui::Id::new((node_id, "window"))) {
+            if window.secondary_clicked() {
+                responses.push(NodeResponse::User(SynthResponse::NodeSelected(node_id)));
+            }
+            let menu = window.context_menu(|ui| self.node_menu(ui, node_id, &mut responses));
+            if menu.is_some() {
+                user_state.widget_context_menu_open = true;
+            }
+        }
 
         // The bypass switch leads the header, like a footswitch
         if self.bypassable {

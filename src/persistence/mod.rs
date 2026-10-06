@@ -9,7 +9,7 @@ pub mod patch;
 
 pub use compile::{compile_patch, CompiledPatch};
 pub use examples::{Example, EXAMPLES};
-pub use graph_io::{capture_patch, stage_patch, StagedNode, StagedPatch};
+pub use graph_io::{capture_patch, merge_patch, stage_patch, StagedNode, StagedPatch};
 
 pub use patch::{
     ConnectionData, MidiMapping, NamedParameter, NodeData, ParameterValue, Patch, PatchError,

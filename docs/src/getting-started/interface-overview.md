@@ -23,7 +23,7 @@ The main area of the interface is the **node graph canvas**. This is where you c
 
 ### Canvas Tips
 
-- Double-click empty space to quickly add a module
+- Press `Space` or `Tab` over the canvas to add a module by name
 - Use the scroll wheel to zoom in for detailed work or out for an overview
 - Modules can be freely positioned anywhere on the canvas
 
@@ -51,7 +51,24 @@ Click a module name to add it at the cursor position.
 
 ### Quick Add
 
-**Double-click** on empty canvas space to open a quick search box where you can type to filter modules by name.
+Press **Space** or **Tab** with the mouse over the canvas. A search box opens at the cursor, listing every module by category. Type a few letters to narrow it down, then press **Enter**, and the module appears where the box opened.
+
+The search is forgiving. Letters only need to appear in order, so `lfo`, `svf`, `dly` and `s&h` all find what you'd expect. Typing a category name (`effect`, `mod`) lists that category. Use the arrow keys or `Tab` to move through the list, and `Escape` to close it.
+
+## Editing Modules
+
+### The Module Menu
+
+**Right-click** a module's header or body (anywhere but a knob) to open its menu: **Duplicate**, **Copy**, **Bypass** (filters and effects), **Reset to defaults** and **Delete**. If the module is part of a selection, the action applies to the whole selection.
+
+### Copy, Paste and Duplicate
+
+- **Duplicate** (`Ctrl + D`) copies the selected modules a little down and to the right. Cables between them are copied too; cables to the rest of the patch aren't. The copies are selected, so pressing `Ctrl + D` again makes a row of them.
+- **Copy** (`Ctrl + C`) and **Cut** (`Ctrl + X`) put the selected modules on the clipboard. **Paste** (`Ctrl + V`) puts them at the mouse cursor with their layout, settings and the cables between them. Pasting again without moving the mouse fans the copies out.
+- The clipboard holds them as patch JSON. You can paste modules into another Modular window, or paste the text of a whole `.json` patch file to add its modules to the current patch.
+- MIDI mappings stay with the original modules.
+
+Each of these is one undo step, named after what it did, e.g. *Duplicate 3 modules*.
 
 ## Module Anatomy
 
@@ -217,8 +234,6 @@ The **Keyboard** module allows playing notes using your computer keyboard:
 | `Ctrl + Shift + S` | Save patch as |
 | `Ctrl + Z` | Undo |
 | `Ctrl + Shift + Z` or `Ctrl + Y` | Redo |
-| `Delete` | Delete selected |
-| `Ctrl + A` | Select all |
 | `Escape` | Deselect / Cancel |
 
 ### Navigation
@@ -233,9 +248,13 @@ The **Keyboard** module allows playing notes using your computer keyboard:
 
 | Shortcut | Action |
 |----------|--------|
+| `Space` or `Tab` | Quick add a module at the cursor |
+| `Delete` or `Backspace` | Delete selected |
 | `Ctrl + D` | Duplicate selected |
 | `Ctrl + C` | Copy selected |
-| `Ctrl + V` | Paste |
+| `Ctrl + X` | Cut selected |
+| `Ctrl + V` | Paste at the cursor |
+| `Ctrl + B` | Bypass selected |
 
 ## Next Steps
 

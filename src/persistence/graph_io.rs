@@ -84,14 +84,35 @@ impl StagedPatch {
 /// - connections to skipped nodes, missing ports, or of incompatible types
 /// - MIDI mappings to skipped nodes or unknown parameters
 pub fn stage_patch(patch: &Patch) -> Result<StagedPatch, PatchError> {
-    if !patch.is_compatible() {
-        return Err(PatchError::IncompatibleVersion {
-            found: patch.version,
-            expected: PATCH_VERSION,
-        });
-    }
-
+    check_version(patch)?;
     let mut graph = SynthGraph::default();
+    let (nodes, midi_mappings, warnings) = build_into(&mut graph, patch);
+    Ok(StagedPatch { graph, nodes, midi_mappings, warnings })
+}
+
+/// Adds a patch's nodes and the connections between them to a graph that
+/// already has nodes, e.g. to paste copied modules. Returns the nodes that
+/// were added and anything that was skipped, as [`stage_patch`] does.
+///
+/// MIDI mappings are left behind: one controller turning both the original
+/// and the copy is rarely what anyone wants.
+pub fn merge_patch(graph: &mut SynthGraph, patch: &Patch) -> Result<(Vec<StagedNode>, Vec<String>), PatchError> {
+    check_version(patch)?;
+    let (nodes, _, warnings) = build_into(graph, patch);
+    Ok((nodes, warnings))
+}
+
+fn check_version(patch: &Patch) -> Result<(), PatchError> {
+    if patch.is_compatible() {
+        Ok(())
+    } else {
+        Err(PatchError::IncompatibleVersion { found: patch.version, expected: PATCH_VERSION })
+    }
+}
+
+/// Builds a patch's nodes, connections and MIDI mappings into `graph`.
+/// Connections only join nodes built here, never ones already in the graph.
+fn build_into(graph: &mut SynthGraph, patch: &Patch) -> (Vec<StagedNode>, Vec<MidiMapping>, Vec<String>) {
     // Templates don't keep anything in the user state while building
     let mut user_state = SynthGraphState::new();
     let mut nodes = Vec::with_capacity(patch.nodes.len());
@@ -111,7 +132,7 @@ pub fn stage_patch(patch: &Patch) -> Result<StagedPatch, PatchError> {
             template.user_data(&mut user_state),
             |graph, node_id| template.build_node(graph, &mut user_state, node_id),
         );
-        restore_parameters(&mut graph, graph_id, node_data, &mut warnings);
+        restore_parameters(graph, graph_id, node_data, &mut warnings);
         let user_data = &mut graph[graph_id].user_data;
         user_data.bypassed = node_data.bypassed && user_data.bypassable;
 
@@ -173,7 +194,7 @@ pub fn stage_patch(patch: &Patch) -> Result<StagedPatch, PatchError> {
             ));
             continue;
         };
-        let Some(param_index) = parameter_index(&graph, graph_id, &mapping.param_name) else {
+        let Some(param_index) = parameter_index(graph, graph_id, &mapping.param_name) else {
             warnings.push(format!(
                 "Dropped MIDI CC {} mapping: no parameter '{}'",
                 mapping.cc_number, mapping.param_name
@@ -183,7 +204,7 @@ pub fn stage_patch(patch: &Patch) -> Result<StagedPatch, PatchError> {
         midi_mappings.push(MidiMapping { param_index, ..mapping.clone() });
     }
 
-    Ok(StagedPatch { graph, nodes, midi_mappings, warnings })
+    (nodes, midi_mappings, warnings)
 }
 
 /// Parameters modules no longer have, which older patches still carry.

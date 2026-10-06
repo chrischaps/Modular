@@ -1,0 +1,348 @@
+//! Edits made from the keyboard and menus: adding, deleting, resetting,
+//! copying, pasting and duplicating modules.
+//!
+//! Each edit changes the editor graph and returns the engine commands that
+//! make the same change to the audio graph. None of them records an undo
+//! step: [`super::undo::History`] notices whatever changed once the frame is
+//! over, the same way it notices edits made with the mouse.
+//!
+//! Positions here are editor node positions, which are in zoomed points:
+//! a node is drawn at `position + pan + editor_rect.min`.
+
+use std::collections::HashSet;
+
+use egui::{Pos2, Vec2};
+use egui_node_graph2::{NodeId, NodeTemplateTrait};
+
+use crate::engine::EngineCommand;
+use crate::graph::{port_mapping, SynthGraphEditorState, SynthGraphState, SynthNodeTemplate};
+use crate::persistence::{capture_patch, merge_patch, Patch, PatchError};
+use super::engine_sync;
+
+/// How far a duplicate lands from its original, in unzoomed points.
+pub const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
+
+/// The name copied modules travel under on the clipboard.
+const CLIPBOARD_NAME: &str = "Copied modules";
+
+/// Builds a node from a template and puts it at `position`, on top of the
+/// others. It has no engine ID yet.
+pub fn place_node(
+    editor: &mut SynthGraphEditorState,
+    user_state: &mut SynthGraphState,
+    template: SynthNodeTemplate,
+    position: Pos2,
+) -> NodeId {
+    let node_id = editor.graph.add_node(
+        template.node_graph_label(user_state),
+        template.user_data(user_state),
+        |graph, node_id| template.build_node(graph, user_state, node_id),
+    );
+    editor.node_positions.insert(node_id, position);
+    editor.node_order.push(node_id);
+    node_id
+}
+
+/// Adds a new module at `position`.
+pub fn add_module(
+    editor: &mut SynthGraphEditorState,
+    user_state: &mut SynthGraphState,
+    template: SynthNodeTemplate,
+    position: Pos2,
+) -> (NodeId, Vec<EngineCommand>) {
+    let node_id = place_node(editor, user_state, template, position);
+    let engine_node_id = user_state.allocate_engine_node_id(node_id);
+    (node_id, engine_sync::add_module(&editor.graph, node_id, engine_node_id))
+}
+
+/// Removes a node, its cables and its module.
+pub fn remove_module(
+    editor: &mut SynthGraphEditorState,
+    user_state: &mut SynthGraphState,
+    node_id: NodeId,
+) -> Vec<EngineCommand> {
+    if !editor.graph.nodes.contains_key(node_id) {
+        return Vec::new();
+    }
+    let (_, cut) = editor.graph.remove_node(node_id);
+    let mut commands: Vec<EngineCommand> = cut
+        .into_iter()
+        .flat_map(|(input, output)| engine_sync::cable_disconnected(&editor.graph, user_state, output, input))
+        .collect();
+    editor.node_positions.remove(node_id);
+    editor.node_order.retain(|id| *id != node_id);
+    editor.selected_nodes.retain(|id| *id != node_id);
+    if let Some(engine_node_id) = user_state.remove_node(node_id) {
+        commands.push(EngineCommand::RemoveModule { node_id: engine_node_id });
+    }
+    commands
+}
+
+/// Removes several nodes, with their cables and modules.
+pub fn delete_modules(
+    editor: &mut SynthGraphEditorState,
+    user_state: &mut SynthGraphState,
+    nodes: &[NodeId],
+) -> Vec<EngineCommand> {
+    nodes.iter().flat_map(|&node_id| remove_module(editor, user_state, node_id)).collect()
+}
+
+/// Sets a node's parameters back to their defaults, and says whether any
+/// changed. Live parameters (a Keyboard's Note and Gate) are the player's,
+/// so they stay. The engine hears the new values with the next parameter sync.
+pub fn reset_parameters(editor: &mut SynthGraphEditorState, node_id: NodeId) -> bool {
+    let Some(template) = editor.graph.nodes.get(node_id)
+        .and_then(|node| SynthNodeTemplate::from_module_id(node.user_data.module_id))
+    else {
+        return false;
+    };
+    let live = template.live_parameter_count();
+    let inputs = port_mapping::parameter_inputs(&editor.graph, node_id);
+    let mut changed = false;
+    for (input, default) in inputs.into_iter().zip(template.parameter_defaults()).skip(live) {
+        let value = &mut editor.graph.inputs[input].value;
+        let before = value.actual_value();
+        value.set_actual_value(default);
+        changed |= value.actual_value() != before;
+    }
+    changed
+}
+
+/// The top-left corner of some nodes' positions.
+pub fn top_left(editor: &SynthGraphEditorState, nodes: &[NodeId]) -> Option<Pos2> {
+    nodes
+        .iter()
+        .filter_map(|&node_id| editor.node_positions.get(node_id).copied())
+        .reduce(|a, b| a.min(b))
+}
+
+/// Captures some modules and the cables between them as a patch, ready to
+/// paste. Positions are in unzoomed points from the nodes' top-left corner,
+/// so the copies keep their layout at any zoom. MIDI mappings stay behind.
+pub fn copy_modules(editor: &SynthGraphEditorState, user_state: &SynthGraphState, nodes: &[NodeId]) -> Option<Patch> {
+    let origin = top_left(editor, nodes)?;
+    let zoom = editor.pan_zoom.zoom;
+    let position = |node_id| {
+        let offset = (editor.node_positions.get(node_id).copied().unwrap_or(origin) - origin) / zoom;
+        (offset.x, offset.y)
+    };
+    let engine_id = |node_id| nodes.contains(&node_id).then(|| user_state.get_engine_node_id(node_id)).flatten();
+    let patch = capture_patch(CLIPBOARD_NAME, &editor.graph, engine_id, position, &[]);
+    (!patch.nodes.is_empty()).then_some(patch)
+}
+
+/// What a paste or duplicate added.
+pub struct Pasted {
+    /// The new nodes, in patch order.
+    pub nodes: Vec<NodeId>,
+    /// Engine commands for the new modules and their cables.
+    pub commands: Vec<EngineCommand>,
+    /// Anything in the patch that couldn't be added.
+    pub warnings: Vec<String>,
+}
+
+/// Adds a patch's modules, and the cables between them, with their
+/// top-left corner at `at`. Any patch works, not only copied modules: its
+/// layout is kept, scaled to the current zoom.
+pub fn paste(
+    editor: &mut SynthGraphEditorState,
+    user_state: &mut SynthGraphState,
+    patch: &Patch,
+    at: Pos2,
+) -> Result<Pasted, PatchError> {
+    let (staged, warnings) = merge_patch(&mut editor.graph, patch)?;
+    let zoom = editor.pan_zoom.zoom;
+    let corner = staged
+        .iter()
+        .map(|node| Vec2::new(node.position.0, node.position.1))
+        .reduce(|a, b| a.min(b))
+        .unwrap_or_default();
+
+    let mut commands = Vec::new();
+    let mut nodes = Vec::with_capacity(staged.len());
+    for node in &staged {
+        let offset = Vec2::new(node.position.0, node.position.1) - corner;
+        editor.node_positions.insert(node.graph_id, at + offset * zoom);
+        editor.node_order.push(node.graph_id);
+        let engine_node_id = user_state.allocate_engine_node_id(node.graph_id);
+        commands.extend(engine_sync::add_module(&editor.graph, node.graph_id, engine_node_id));
+        nodes.push(node.graph_id);
+    }
+
+    // The patch's cables only join its own nodes, so any cable into a new
+    // node is one of them
+    let new: HashSet<NodeId> = nodes.iter().copied().collect();
+    let cables: Vec<_> = editor.graph.iter_connections()
+        .filter(|(input, _)| new.contains(&editor.graph.get_input(*input).node))
+        .collect();
+    for (input, output) in cables {
+        commands.extend(engine_sync::cable_connected(&editor.graph, user_state, output, input));
+    }
+    Ok(Pasted { nodes, commands, warnings })
+}
+
+/// Copies some modules and pastes them a little down and to the right, with
+/// the cables between them. The clipboard is left alone.
+pub fn duplicate(
+    editor: &mut SynthGraphEditorState,
+    user_state: &mut SynthGraphState,
+    nodes: &[NodeId],
+) -> Option<Pasted> {
+    let patch = copy_modules(editor, user_state, nodes)?;
+    let at = top_left(editor, nodes)? + DUPLICATE_OFFSET * editor.pan_zoom.zoom;
+    paste(editor, user_state, &patch, at).ok()
+}
+
+/// "Oscillator" for one module, "3 modules" for several.
+pub fn describe_modules(editor: &SynthGraphEditorState, nodes: &[NodeId]) -> String {
+    match nodes {
+        [one] => editor.graph.nodes.get(*one)
+            .and_then(|node| SynthNodeTemplate::from_module_id(node.user_data.module_id))
+            .map_or_else(|| "module".to_string(), |t| t.name().to_string()),
+        many => format!("{} modules", many.len()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{pos2, vec2};
+    use crate::graph::create_editor_state;
+    use crate::persistence::patch_from_json;
+
+    struct Rig {
+        editor: SynthGraphEditorState,
+        user_state: SynthGraphState,
+    }
+
+    impl Rig {
+        fn new() -> Self {
+            Self { editor: create_editor_state(), user_state: SynthGraphState::new() }
+        }
+
+        fn add(&mut self, module_id: &str, at: Pos2) -> NodeId {
+            let template = SynthNodeTemplate::from_module_id(module_id).unwrap();
+            add_module(&mut self.editor, &mut self.user_state, template, at).0
+        }
+
+        fn connect(&mut self, from: NodeId, output: &str, to: NodeId, input: &str) {
+            let graph = &mut self.editor.graph;
+            let (output, input) = (graph[from].get_output(output).unwrap(), graph[to].get_input(input).unwrap());
+            graph.add_connection(output, input, 0);
+        }
+
+        fn param(&self, node_id: NodeId, name: &str) -> f32 {
+            let graph = &self.editor.graph;
+            graph.get_input(graph[node_id].get_input(name).unwrap()).value.actual_value()
+        }
+
+        fn set(&mut self, node_id: NodeId, name: &str, value: f32) {
+            let input = self.editor.graph[node_id].get_input(name).unwrap();
+            self.editor.graph.inputs[input].value.set_actual_value(value);
+        }
+
+        fn module(&self, node_id: NodeId) -> &'static str {
+            self.editor.graph[node_id].user_data.module_id
+        }
+
+        /// Cables as (from module, to module) pairs.
+        fn cables(&self) -> Vec<(NodeId, NodeId)> {
+            let graph = &self.editor.graph;
+            graph.iter_connections()
+                .map(|(input, output)| (graph.get_output(output).node, graph.get_input(input).node))
+                .collect()
+        }
+    }
+
+    /// Oscillator → SVF Filter → Output, with the filter's cutoff turned.
+    fn chain(rig: &mut Rig) -> (NodeId, NodeId, NodeId) {
+        let osc = rig.add("osc.sine", pos2(100.0, 100.0));
+        let filter = rig.add("filter.svf", pos2(300.0, 140.0));
+        let out = rig.add("output.audio", pos2(500.0, 100.0));
+        rig.connect(osc, "Out", filter, "In");
+        rig.connect(filter, "LowPass", out, "Left");
+        rig.set(filter, "Cutoff", 2400.0);
+        (osc, filter, out)
+    }
+
+    #[test]
+    fn delete_takes_the_cables_with_it() {
+        let mut rig = Rig::new();
+        let (osc, filter, out) = chain(&mut rig);
+        let commands = delete_modules(&mut rig.editor, &mut rig.user_state, &[filter]);
+
+        assert!(!rig.editor.graph.nodes.contains_key(filter));
+        assert!(rig.cables().is_empty());
+        assert_eq!(rig.editor.node_order, vec![osc, out]);
+        assert!(rig.user_state.get_engine_node_id(filter).is_none());
+        let removes = commands.iter().filter(|c| matches!(c, EngineCommand::RemoveModule { .. })).count();
+        let disconnects = commands.iter().filter(|c| matches!(c, EngineCommand::Disconnect { .. })).count();
+        // The cable into the filter goes with its module; the one out of it
+        // leaves Output's input, which has to be told
+        assert_eq!((removes, disconnects), (1, 1));
+    }
+
+    #[test]
+    fn duplicate_copies_values_and_inner_cables_only() {
+        let mut rig = Rig::new();
+        let (osc, filter, out) = chain(&mut rig);
+        let pasted = duplicate(&mut rig.editor, &mut rig.user_state, &[osc, filter]).unwrap();
+
+        let [osc2, filter2] = pasted.nodes[..] else { panic!("expected two copies") };
+        assert_eq!((rig.module(osc2), rig.module(filter2)), ("osc.sine", "filter.svf"));
+        assert_eq!(rig.param(filter2, "Cutoff"), 2400.0);
+
+        // The cable between the copies came too; the one to Output didn't
+        let cables = rig.cables();
+        assert!(cables.contains(&(osc2, filter2)));
+        assert!(!cables.contains(&(filter2, out)));
+        assert_eq!(cables.len(), 3);
+
+        // Layout kept, down and to the right
+        let pos = |id| rig.editor.node_positions[id];
+        assert_eq!(pos(osc2), pos(osc) + DUPLICATE_OFFSET);
+        assert_eq!(pos(filter2) - pos(osc2), pos(filter) - pos(osc));
+
+        // Each copy is a new module with its own engine ID, and its cable goes to the engine
+        let adds = pasted.commands.iter().filter(|c| matches!(c, EngineCommand::AddModule { .. })).count();
+        let connects = pasted.commands.iter().filter(|c| matches!(c, EngineCommand::Connect { .. })).count();
+        assert_eq!((adds, connects), (2, 1));
+        assert_ne!(rig.user_state.get_engine_node_id(osc2), rig.user_state.get_engine_node_id(osc));
+    }
+
+    #[test]
+    fn copies_paste_through_json_at_any_zoom() {
+        let mut rig = Rig::new();
+        let (osc, filter, _) = chain(&mut rig);
+        let patch = copy_modules(&rig.editor, &rig.user_state, &[osc, filter]).unwrap();
+        // The clipboard carries text
+        let patch = patch_from_json(&serde_json::to_string(&patch).unwrap()).unwrap();
+
+        rig.editor.pan_zoom.zoom = 2.0;
+        let pasted = paste(&mut rig.editor, &mut rig.user_state, &patch, pos2(10.0, 20.0)).unwrap();
+        let [osc2, filter2] = pasted.nodes[..] else { panic!("expected two copies") };
+        let pos = |id| rig.editor.node_positions[id];
+        assert_eq!(pos(osc2), pos2(10.0, 20.0));
+        // Twice as far apart at twice the zoom
+        assert_eq!(pos(filter2) - pos(osc2), vec2(400.0, 80.0));
+        assert!(pasted.warnings.is_empty());
+    }
+
+    #[test]
+    fn reset_restores_defaults() {
+        let mut rig = Rig::new();
+        let (_, filter, _) = chain(&mut rig);
+        let fresh = rig.add("filter.svf", pos2(0.0, 0.0));
+        assert_ne!(rig.param(filter, "Cutoff"), rig.param(fresh, "Cutoff"));
+
+        assert!(reset_parameters(&mut rig.editor, filter));
+        assert_eq!(rig.param(filter, "Cutoff"), rig.param(fresh, "Cutoff"));
+        assert!(!reset_parameters(&mut rig.editor, filter), "nothing left to reset");
+    }
+
+    #[test]
+    fn nothing_to_copy_is_none() {
+        let rig = Rig::new();
+        assert!(copy_modules(&rig.editor, &rig.user_state, &[]).is_none());
+    }
+}

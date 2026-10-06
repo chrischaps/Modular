@@ -25,7 +25,9 @@ use crate::persistence::{
     EXAMPLES,
 };
 use crate::widgets::{cpu_meter, CpuMeterConfig};
+use super::editing;
 use super::engine_sync;
+use super::palette::{PaletteAction, QuickAdd};
 use super::theme;
 use super::undo::{Applied, History};
 
@@ -143,6 +145,25 @@ pub struct SynthApp {
 
     /// Undo and redo for edits to the patch.
     history: History,
+
+    /// The quick-add palette, while it's open.
+    quick_add: Option<QuickAdd>,
+
+    /// Where the graph editor was drawn last frame, in screen points.
+    editor_rect: egui::Rect,
+
+    /// Where the last paste was aimed and where it landed, so pasting again
+    /// without moving the mouse fans the copies out instead of stacking them.
+    last_paste: Option<(egui::Pos2, egui::Pos2)>,
+}
+
+/// What a module's right-click menu asked for, handled once the graph is drawn.
+enum NodeMenuAction {
+    Select(egui_node_graph2::NodeId),
+    Duplicate(egui_node_graph2::NodeId),
+    Copy(egui_node_graph2::NodeId),
+    Reset(egui_node_graph2::NodeId),
+    Delete(egui_node_graph2::NodeId),
 }
 
 impl SynthApp {
@@ -240,6 +261,9 @@ impl SynthApp {
             midi_mappings: Vec::new(),
             midi_learn_target: None,
             history: History::default(),
+            quick_add: None,
+            editor_rect: egui::Rect::NOTHING,
+            last_paste: None,
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -808,6 +832,8 @@ impl SynthApp {
         let mut commands_to_send: Vec<EngineCommand> = Vec::new();
         // Nodes whose bypass switch was clicked
         let mut bypass_toggles: Vec<egui_node_graph2::NodeId> = Vec::new();
+        // What modules' right-click menus asked for
+        let mut node_menu_actions: Vec<NodeMenuAction> = Vec::new();
         // Track if we clicked in the editor area
         let mut cursor_in_editor = false;
         // Store editor rect for coordinate conversion
@@ -818,6 +844,7 @@ impl SynthApp {
             .show(ctx, |ui| {
                 // Store editor rect for coordinate conversion
                 editor_rect = ui.available_rect_before_wrap();
+                self.editor_rect = editor_rect;
 
                 // Reset widget context menu flag before drawing
                 self.user_state.widget_context_menu_open = false;
@@ -931,6 +958,21 @@ impl SynthApp {
                         }
                         NodeResponse::User(crate::graph::SynthResponse::ToggleBypass(node_id)) => {
                             bypass_toggles.push(node_id);
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::NodeSelected(node_id)) => {
+                            node_menu_actions.push(NodeMenuAction::Select(node_id));
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::DuplicateNode(node_id)) => {
+                            node_menu_actions.push(NodeMenuAction::Duplicate(node_id));
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::CopyNode(node_id)) => {
+                            node_menu_actions.push(NodeMenuAction::Copy(node_id));
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::ResetNode(node_id)) => {
+                            node_menu_actions.push(NodeMenuAction::Reset(node_id));
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::DeleteNode(node_id)) => {
+                            node_menu_actions.push(NodeMenuAction::Delete(node_id));
                         }
                         _ => {
                             // Other responses not yet handled
@@ -1069,26 +1111,7 @@ impl SynthApp {
 
             // Create node if a template was selected
             if let Some(template) = template_to_create {
-                // Convert screen position to graph coordinates
-                let pan = self.graph_state.pan_zoom.pan;
-                let zoom = self.graph_state.pan_zoom.zoom;
-                let graph_pos = (menu_pos - editor_rect.min.to_vec2() - pan) / zoom;
-
-                // Add the node to the graph
-                let node_id = self.graph_state.graph.add_node(
-                    template.node_graph_label(&mut self.user_state),
-                    template.user_data(&mut self.user_state),
-                    |graph, node_id| template.build_node(graph, &mut self.user_state, node_id),
-                );
-
-                // Set the node position and add to node_order
-                self.graph_state.node_positions.insert(node_id, graph_pos);
-                self.graph_state.node_order.push(node_id);
-
-                // Allocate engine node ID and send command
-                let engine_node_id = self.user_state.allocate_engine_node_id(node_id);
-                commands_to_send.extend(engine_sync::add_module(&self.graph_state.graph, node_id, engine_node_id));
-
+                self.add_module_at(template, menu_pos);
                 close_menu = true;
             }
 
@@ -1099,12 +1122,28 @@ impl SynthApp {
             }
         }
 
+        // The quick-add palette
+        if let Some(palette) = &mut self.quick_add {
+            match palette.show(ctx) {
+                PaletteAction::None => {}
+                PaletteAction::Close => self.quick_add = None,
+                PaletteAction::Add(template) => {
+                    let anchor = palette.anchor();
+                    self.quick_add = None;
+                    self.add_module_at(template, anchor);
+                }
+            }
+        }
+
         // Send collected commands
         for cmd in commands_to_send {
             self.send_command(cmd);
         }
         for node_id in bypass_toggles {
             self.toggle_bypass(node_id);
+        }
+        for action in node_menu_actions {
+            self.handle_node_menu(ctx, action);
         }
 
         // Remove invalid connections outside the UI closure
@@ -1154,6 +1193,154 @@ impl SynthApp {
         if let Some(engine_node_id) = self.user_state.get_engine_node_id(node_id) {
             self.send_command(EngineCommand::SetBypass { node_id: engine_node_id, bypassed });
         }
+    }
+
+    /// The editor node position under a point on screen.
+    fn screen_to_node(&self, screen: egui::Pos2) -> egui::Pos2 {
+        screen - self.editor_rect.min.to_vec2() - self.graph_state.pan_zoom.pan
+    }
+
+    /// Where something placed "at the cursor" goes: the pointer if it's over
+    /// the graph, otherwise near the middle of the view. In screen points.
+    fn cursor_or_center(&self, ctx: &egui::Context) -> egui::Pos2 {
+        ctx.input(|i| i.pointer.hover_pos())
+            .filter(|pos| self.editor_rect.contains(*pos))
+            .unwrap_or_else(|| self.editor_rect.center() - egui::vec2(150.0, 120.0))
+    }
+
+    /// Adds a module with its top-left corner at a point on screen, and selects it.
+    fn add_module_at(&mut self, template: SynthNodeTemplate, screen: egui::Pos2) {
+        let position = self.screen_to_node(screen);
+        let (node_id, commands) = editing::add_module(&mut self.graph_state, &mut self.user_state, template, position);
+        for cmd in commands {
+            self.send_command(cmd);
+        }
+        self.graph_state.selected_nodes = vec![node_id];
+    }
+
+    /// Opens the quick-add palette at the cursor.
+    fn open_quick_add(&mut self, ctx: &egui::Context) {
+        let anchor = self.cursor_or_center(ctx);
+        self.user_state.context_menu_pos = None;
+        self.quick_add = Some(QuickAdd::new(anchor));
+    }
+
+    /// The nodes a right-click menu action applies to: the whole selection
+    /// if the node is part of it, otherwise just the node.
+    fn menu_targets(&self, node_id: egui_node_graph2::NodeId) -> Vec<egui_node_graph2::NodeId> {
+        if self.graph_state.selected_nodes.contains(&node_id) {
+            self.graph_state.selected_nodes.clone()
+        } else {
+            vec![node_id]
+        }
+    }
+
+    fn handle_node_menu(&mut self, ctx: &egui::Context, action: NodeMenuAction) {
+        match action {
+            NodeMenuAction::Select(node_id) => {
+                if !self.graph_state.selected_nodes.contains(&node_id) {
+                    self.graph_state.selected_nodes = vec![node_id];
+                }
+            }
+            NodeMenuAction::Duplicate(node_id) => self.duplicate_modules(&self.menu_targets(node_id)),
+            NodeMenuAction::Copy(node_id) => self.copy_modules(ctx, &self.menu_targets(node_id)),
+            NodeMenuAction::Reset(node_id) => self.reset_modules(&self.menu_targets(node_id)),
+            NodeMenuAction::Delete(node_id) => self.delete_modules(&self.menu_targets(node_id), "Delete", "Deleted"),
+        }
+    }
+
+    /// Deletes modules with their cables. `verb` names the undo step and
+    /// `done` the status message: "Delete" and "Deleted", or "Cut" and "Cut".
+    fn delete_modules(&mut self, nodes: &[egui_node_graph2::NodeId], verb: &str, done: &str) {
+        if nodes.is_empty() {
+            return;
+        }
+        let what = editing::describe_modules(&self.graph_state, nodes);
+        for cmd in editing::delete_modules(&mut self.graph_state, &mut self.user_state, nodes) {
+            self.send_command(cmd);
+        }
+        self.history.name_next(format!("{verb} {what}"));
+        self.status_message = Some(format!("{done} {what}"));
+    }
+
+    /// Duplicates modules, with the cables between them, and selects the copies.
+    fn duplicate_modules(&mut self, nodes: &[egui_node_graph2::NodeId]) {
+        let what = editing::describe_modules(&self.graph_state, nodes);
+        let Some(pasted) = editing::duplicate(&mut self.graph_state, &mut self.user_state, nodes) else {
+            return;
+        };
+        self.finish_paste(pasted, &format!("Duplicate {what}"));
+        self.status_message = Some(format!("Duplicated {what}"));
+    }
+
+    /// Puts modules' knobs back to their defaults.
+    fn reset_modules(&mut self, nodes: &[egui_node_graph2::NodeId]) {
+        let mut changed = false;
+        for &node_id in nodes {
+            changed |= editing::reset_parameters(&mut self.graph_state, node_id);
+        }
+        let what = editing::describe_modules(&self.graph_state, nodes);
+        if changed {
+            self.history.name_next(format!("Reset {what}"));
+            self.status_message = Some(format!("Reset {what} to defaults"));
+        } else {
+            self.status_message = Some(format!("{what} already at defaults"));
+        }
+    }
+
+    /// Puts modules and the cables between them on the clipboard, as patch
+    /// JSON. They paste back into this window or another one.
+    fn copy_modules(&mut self, ctx: &egui::Context, nodes: &[egui_node_graph2::NodeId]) {
+        let Some(patch) = editing::copy_modules(&self.graph_state, &self.user_state, nodes) else {
+            return;
+        };
+        match serde_json::to_string_pretty(&patch) {
+            Ok(json) => {
+                ctx.copy_text(json);
+                self.last_paste = None;
+                let what = editing::describe_modules(&self.graph_state, nodes);
+                self.status_message = Some(format!("Copied {what}"));
+            }
+            Err(e) => self.status_message = Some(format!("Couldn't copy: {e}")),
+        }
+    }
+
+    /// Pastes modules from clipboard text at the cursor.
+    fn paste_modules(&mut self, ctx: &egui::Context, text: &str) {
+        let Ok(patch) = crate::persistence::patch_from_json(text) else {
+            self.status_message = Some("Nothing to paste: the clipboard doesn't hold modules".to_string());
+            return;
+        };
+        let aim = self.screen_to_node(self.cursor_or_center(ctx));
+        // Pasting again at the same spot fans out, like duplicating
+        let at = match self.last_paste {
+            Some((last_aim, landed)) if (last_aim - aim).length() < 1.0 => {
+                landed + editing::DUPLICATE_OFFSET * self.graph_state.pan_zoom.zoom
+            }
+            _ => aim,
+        };
+        match editing::paste(&mut self.graph_state, &mut self.user_state, &patch, at) {
+            Ok(pasted) if !pasted.nodes.is_empty() => {
+                self.last_paste = Some((aim, at));
+                let what = editing::describe_modules(&self.graph_state, &pasted.nodes);
+                if !pasted.warnings.is_empty() {
+                    self.load_warnings = pasted.warnings.clone();
+                }
+                self.finish_paste(pasted, &format!("Paste {what}"));
+                self.status_message = Some(format!("Pasted {what}"));
+            }
+            Ok(_) => self.status_message = Some("Nothing to paste: no modules this version knows".to_string()),
+            Err(e) => self.status_message = Some(format!("Couldn't paste: {e}")),
+        }
+    }
+
+    /// Sends a paste's commands, selects what it added, and names the undo step.
+    fn finish_paste(&mut self, pasted: editing::Pasted, label: &str) {
+        for cmd in pasted.commands {
+            self.send_command(cmd);
+        }
+        self.graph_state.selected_nodes = pasted.nodes;
+        self.history.name_next(label);
     }
 
     /// Sync parameter values from the graph UI to the audio engine.
@@ -1639,6 +1826,49 @@ impl SynthApp {
         });
     }
 
+    /// Delete, duplicate, copy, cut, paste, and Space or Tab for the
+    /// quick-add palette.
+    fn handle_editing_shortcuts(&mut self, ctx: &egui::Context) {
+        use egui::{Event, Key, KeyboardShortcut, Modifiers};
+        let mut copy = false;
+        let mut cut = false;
+        let mut paste = None;
+        let (delete, duplicate, palette) = ctx.input_mut(|i| {
+            let delete = i.consume_key(Modifiers::NONE, Key::Delete) || i.consume_key(Modifiers::NONE, Key::Backspace);
+            let duplicate = i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::D));
+            let palette = i.consume_key(Modifiers::NONE, Key::Space) || i.consume_key(Modifiers::NONE, Key::Tab);
+            // The window turns Ctrl+C, Ctrl+X and Ctrl+V into these, not key presses
+            i.events.retain(|event| match event {
+                Event::Copy => { copy = true; false }
+                Event::Cut => { cut = true; false }
+                Event::Paste(text) => { paste = Some(text.clone()); false }
+                // The Space that opens the palette isn't typed into it
+                Event::Text(text) if palette && text == " " => false,
+                _ => true,
+            });
+            (delete, duplicate, palette)
+        });
+
+        let selected = self.graph_state.selected_nodes.clone();
+        if copy || cut {
+            self.copy_modules(ctx, &selected);
+        }
+        if cut {
+            self.delete_modules(&selected, "Cut", "Cut");
+        } else if delete {
+            self.delete_modules(&selected, "Delete", "Deleted");
+        }
+        if duplicate {
+            self.duplicate_modules(&selected);
+        }
+        if let Some(text) = paste {
+            self.paste_modules(ctx, &text);
+        }
+        if palette {
+            self.open_quick_add(ctx);
+        }
+    }
+
     /// Check if there are any Keyboard modules in the graph.
     fn has_keyboard_modules(&self) -> bool {
         self.graph_state.graph.nodes.iter()
@@ -1657,6 +1887,10 @@ impl SynthApp {
             return;
         }
 
+        // Letters typed into a text field (the palette, say) aren't notes.
+        // Releases still count, so a key held while it opened doesn't stick
+        let typing = ctx.wants_keyboard_input() || self.quick_add.is_some();
+
         // Process raw keyboard events - these haven't been consumed yet
         let mut keys_changed = false;
         // With a Poly MIDI module to hear them, the keys also play as MIDI,
@@ -1674,6 +1908,9 @@ impl SynthApp {
                     }
 
                     if let Some(relative_note) = key_to_note(*key) {
+                        if *pressed && typing {
+                            continue;
+                        }
                         if *pressed {
                             // Add key if not already in list
                             if !self.pressed_keys.iter().any(|(_, k)| k == key) {
@@ -1909,6 +2146,12 @@ impl eframe::App for SynthApp {
             for node_id in self.graph_state.selected_nodes.clone() {
                 self.toggle_bypass(node_id);
             }
+        }
+
+        // Editing shortcuts act on the graph, so they wait while a text field
+        // or the palette has the keys
+        if !ctx.wants_keyboard_input() && self.quick_add.is_none() {
+            self.handle_editing_shortcuts(ctx);
         }
 
         // Handle musical keyboard input (QWERTY to notes)
