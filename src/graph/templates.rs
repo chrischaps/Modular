@@ -53,6 +53,11 @@ impl SynthNodeTemplate {
         self.spec.info.id
     }
 
+    /// The module's display name, e.g. "Oscillator".
+    pub fn name(&self) -> &'static str {
+        self.spec.info.name
+    }
+
     /// The module's category, for menus and header colour.
     pub fn category(&self) -> ModuleCategory {
         self.spec.info.category

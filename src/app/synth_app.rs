@@ -25,7 +25,9 @@ use crate::persistence::{
     EXAMPLES,
 };
 use crate::widgets::{cpu_meter, CpuMeterConfig};
+use super::engine_sync;
 use super::theme;
+use super::undo::{Applied, History};
 
 /// Type alias for our graph editor state
 type SynthGraphEditorState = GraphEditorState<SynthNodeData, SynthDataType, SynthValueType, SynthNodeTemplate, SynthGraphState>;
@@ -138,6 +140,9 @@ pub struct SynthApp {
 
     /// Target for MIDI Learn mode (None = not learning).
     midi_learn_target: Option<MidiLearnTarget>,
+
+    /// Undo and redo for edits to the patch.
+    history: History,
 }
 
 impl SynthApp {
@@ -234,6 +239,7 @@ impl SynthApp {
             // MIDI CC Mapping state
             midi_mappings: Vec::new(),
             midi_learn_target: None,
+            history: History::default(),
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -416,6 +422,8 @@ impl SynthApp {
                             InputParamKind::ConstantOnly | InputParamKind::ConnectionOrConstant => {
                                 if current_param_index == param_index {
                                     input.value.set_actual_value(value);
+                                    // Playing a controller isn't an edit to undo
+                                    self.history.absorb_param(engine_node_id, param_index, input.value.actual_value());
                                     return;
                                 }
                                 current_param_index += 1;
@@ -570,6 +578,25 @@ impl SynthApp {
 
             if ui.button("💾 Save As").on_hover_text("Save to new file").clicked() {
                 actions.save_as_patch = true;
+            }
+
+            ui.add_space(20.0);
+            ui.separator();
+            ui.add_space(20.0);
+
+            // Edit history
+            ui.label(RichText::new("Edit").color(theme::text::SECONDARY));
+            ui.add_space(8.0);
+
+            let undo_label = self.history.undo_label();
+            let undo = ui.add_enabled(undo_label.is_some(), egui::Button::new("↩ Undo"));
+            if undo.on_hover_text(history_hint("Undo", undo_label, "Ctrl+Z")).clicked() {
+                actions.undo = true;
+            }
+            let redo_label = self.history.redo_label();
+            let redo = ui.add_enabled(redo_label.is_some(), egui::Button::new("↪ Redo"));
+            if redo.on_hover_text(history_hint("Redo", redo_label, "Ctrl+Shift+Z")).clicked() {
+                actions.redo = true;
             }
 
             ui.add_space(20.0);
@@ -799,12 +826,15 @@ impl SynthApp {
                 self.user_state.zoom = self.graph_state.pan_zoom.zoom;
 
                 // Draw the node graph editor
+                let (zoom_before, pan_before) = (self.graph_state.pan_zoom.zoom, self.graph_state.pan_zoom.pan);
                 let graph_response = self.graph_state.draw_graph_editor(
                     ui,
                     AllNodeTemplates,
                     &mut self.user_state,
                     Vec::default(),
                 );
+                // Zooming moves every node; undo keeps positions that don't
+                self.history.follow_zoom(zoom_before, pan_before, &self.graph_state.pan_zoom);
 
                 cursor_in_editor = graph_response.cursor_in_editor;
 
@@ -817,31 +847,11 @@ impl SynthApp {
                         NodeResponse::CreatedNode(node_id) => {
                             // Allocate engine node ID for the new node
                             let engine_node_id = self.user_state.allocate_engine_node_id(node_id);
-
-                            // Get the module ID from the node's user data
-                            if let Some(node) = self.graph_state.graph.nodes.get(node_id) {
-                                let module_id = node.user_data.module_id;
-                                commands_to_send.push(EngineCommand::AddModule {
-                                    node_id: engine_node_id,
-                                    module_id,
-                                });
-
-                                // Set up output monitoring for any LED indicators
-                                for led_indicator in &node.user_data.led_indicators {
-                                    commands_to_send.push(EngineCommand::MonitorOutput {
-                                        node_id: engine_node_id,
-                                        output_index: led_indicator.output_index,
-                                    });
-                                }
-
-                                // Set up output monitoring for additional monitored outputs (e.g., phase)
-                                for &output_index in &node.user_data.monitored_outputs {
-                                    commands_to_send.push(EngineCommand::MonitorOutput {
-                                        node_id: engine_node_id,
-                                        output_index,
-                                    });
-                                }
-                            }
+                            commands_to_send.extend(engine_sync::add_module(
+                                &self.graph_state.graph,
+                                node_id,
+                                engine_node_id,
+                            ));
                         }
                         NodeResponse::DeleteNodeFull { node_id, .. } => {
                             // Get engine node ID before removing from mapping
@@ -859,57 +869,21 @@ impl SynthApp {
                                 // Show error message
                                 self.user_state.set_validation_error(error_msg);
                             } else {
-                                // Always send a disconnect command first to clear any existing connection
-                                // The graph library auto-disconnects old connections visually when a new
-                                // connection is made to an input, but doesn't emit a DisconnectEvent.
-                                // The engine's disconnect gracefully handles the case where nothing is connected.
-                                if let Some(disconnect_cmd) = self.build_disconnect_command(input) {
-                                    commands_to_send.push(disconnect_cmd);
-                                }
-
-                                // Connection is valid - send to engine
-                                if let Some(cmd) = self.build_connect_command(output, input) {
-                                    commands_to_send.push(cmd);
-                                    // If this input is an exposed param, start monitoring it
-                                    if let Some(monitor_cmd) = self.build_monitor_input_command(input) {
-                                        commands_to_send.push(monitor_cmd);
-                                    }
-                                    // Monitor the output for cable animation signal feedback
-                                    if let Some(monitor_cmd) = self.build_monitor_output_command(output) {
-                                        commands_to_send.push(monitor_cmd);
-                                    }
-                                }
+                                commands_to_send.extend(engine_sync::cable_connected(
+                                    &self.graph_state.graph,
+                                    &self.user_state,
+                                    output,
+                                    input,
+                                ));
                             }
                         }
                         NodeResponse::DisconnectEvent { output, input } => {
-                            // Send disconnect command to engine
-                            if let Some(cmd) = self.build_disconnect_command(input) {
-                                commands_to_send.push(cmd);
-                                // Stop monitoring this input
-                                if let Some(unmonitor_cmd) = self.build_unmonitor_input_command(input) {
-                                    commands_to_send.push(unmonitor_cmd);
-                                }
-                            }
-                            // Check if output has any remaining connections
-                            // If not, stop monitoring it for cable animation (unless it's always monitored)
-                            let has_other_connections = self.graph_state.graph.iter_connections()
-                                .any(|(_, o)| o == output);
-                            if !has_other_connections {
-                                // Check if this output should stay monitored (e.g., for lit port visualization)
-                                let should_stay_monitored = self.graph_state.graph.try_get_output(output)
-                                    .and_then(|out_param| {
-                                        let node = self.graph_state.graph.nodes.get(out_param.node)?;
-                                        let output_index = self.graph_state.graph.get_output_index(output)?;
-                                        Some(node.user_data.monitored_outputs.contains(&output_index))
-                                    })
-                                    .unwrap_or(false);
-
-                                if !should_stay_monitored {
-                                    if let Some(unmonitor_cmd) = self.build_unmonitor_output_command(output) {
-                                        commands_to_send.push(unmonitor_cmd);
-                                    }
-                                }
-                            }
+                            commands_to_send.extend(engine_sync::cable_disconnected(
+                                &self.graph_state.graph,
+                                &self.user_state,
+                                output,
+                                input,
+                            ));
                         }
                         NodeResponse::User(crate::graph::SynthResponse::ParameterChanged {
                             node_id: response_node_id,
@@ -1113,26 +1087,7 @@ impl SynthApp {
 
                 // Allocate engine node ID and send command
                 let engine_node_id = self.user_state.allocate_engine_node_id(node_id);
-                commands_to_send.push(EngineCommand::AddModule {
-                    node_id: engine_node_id,
-                    module_id: template.module_id(),
-                });
-
-                // Set up output monitoring for any LED indicators and monitored outputs
-                if let Some(node) = self.graph_state.graph.nodes.get(node_id) {
-                    for led_indicator in &node.user_data.led_indicators {
-                        commands_to_send.push(EngineCommand::MonitorOutput {
-                            node_id: engine_node_id,
-                            output_index: led_indicator.output_index,
-                        });
-                    }
-                    for &output_index in &node.user_data.monitored_outputs {
-                        commands_to_send.push(EngineCommand::MonitorOutput {
-                            node_id: engine_node_id,
-                            output_index,
-                        });
-                    }
-                }
+                commands_to_send.extend(engine_sync::add_module(&self.graph_state.graph, node_id, engine_node_id));
 
                 close_menu = true;
             }
@@ -1158,6 +1113,34 @@ impl SynthApp {
         }
     }
 
+    /// Undoes the last edit to the patch.
+    fn undo(&mut self) {
+        let applied = self.history.undo(&mut self.graph_state, &mut self.user_state);
+        self.finish_history_move(applied, "Undo", "Nothing to undo");
+    }
+
+    /// Redoes the last undone edit.
+    fn redo(&mut self) {
+        let applied = self.history.redo(&mut self.graph_state, &mut self.user_state);
+        self.finish_history_move(applied, "Redo", "Nothing to redo");
+    }
+
+    /// Sends the engine what undo or redo changed, and says what it was.
+    fn finish_history_move(&mut self, applied: Option<Applied>, verb: &str, nothing: &str) {
+        let Some(applied) = applied else {
+            self.status_message = Some(nothing.to_string());
+            return;
+        };
+        for cmd in applied.commands {
+            // The engine now has these values, so parameter sync needn't resend them
+            if let EngineCommand::SetParameter { node_id, param_index, value } = cmd {
+                self.cached_params.insert((node_id, param_index), value);
+            }
+            self.send_command(cmd);
+        }
+        self.status_message = Some(format!("{}: {}", verb, applied.label));
+    }
+
     /// Bypasses a filter or effect, or switches it back in.
     fn toggle_bypass(&mut self, node_id: egui_node_graph2::NodeId) {
         let Some(node) = self.graph_state.graph.nodes.get_mut(node_id) else {
@@ -1171,184 +1154,6 @@ impl SynthApp {
         if let Some(engine_node_id) = self.user_state.get_engine_node_id(node_id) {
             self.send_command(EngineCommand::SetBypass { node_id: engine_node_id, bypassed });
         }
-    }
-
-    /// Build a Connect command from graph port IDs.
-    fn build_connect_command(
-        &self,
-        output: egui_node_graph2::OutputId,
-        input: egui_node_graph2::InputId,
-    ) -> Option<EngineCommand> {
-        let output_data = self.graph_state.graph.get_output(output);
-        let input_data = self.graph_state.graph.get_input(input);
-
-        let from_node = self.user_state.get_engine_node_id(output_data.node)?;
-        let to_node = self.user_state.get_engine_node_id(input_data.node)?;
-
-        // Get port indices
-        // For output ports, we count only output ports up to this one
-        let from_port = self.get_output_port_index(output_data.node, output)?;
-
-        // For input ports, we count only input ports up to this one
-        let to_port = self.get_input_port_index(input_data.node, input)?;
-
-        Some(EngineCommand::Connect {
-            from_node,
-            from_port,
-            to_node,
-            to_port,
-        })
-    }
-
-    /// Build a Disconnect command from a graph input port ID.
-    fn build_disconnect_command(
-        &self,
-        input: egui_node_graph2::InputId,
-    ) -> Option<EngineCommand> {
-        // Use get() to safely check if the input exists (avoid panic on stale IDs)
-        let input_data = self.graph_state.graph.inputs.get(input)?;
-        let node_id = self.user_state.get_engine_node_id(input_data.node)?;
-        let port = self.get_input_port_index(input_data.node, input)?;
-
-        Some(EngineCommand::Disconnect {
-            node_id,
-            port,
-            is_input: true,
-        })
-    }
-
-    /// Build a MonitorInput command if this input is an exposed parameter.
-    /// Exposed parameters have both an input port and a knob at the bottom.
-    fn build_monitor_input_command(
-        &self,
-        input: egui_node_graph2::InputId,
-    ) -> Option<EngineCommand> {
-        // Use get() to safely check if the input exists (avoid panic on stale IDs)
-        let input_data = self.graph_state.graph.inputs.get(input)?;
-        let node = self.graph_state.graph.nodes.get(input_data.node)?;
-
-        // Get the input name
-        let input_name = node.inputs.iter()
-            .find(|(_, id)| *id == input)
-            .map(|(name, _)| name)?;
-
-        // Check if this input name corresponds to an exposed knob parameter
-        let is_exposed_param = node.user_data.knob_params.iter()
-            .any(|kp| kp.param_name == *input_name && kp.has_input_port());
-
-        if !is_exposed_param {
-            return None;
-        }
-
-        // Get engine node ID and input port index
-        let engine_node_id = self.user_state.get_engine_node_id(input_data.node)?;
-        let input_index = self.get_input_port_index(input_data.node, input)?;
-
-        Some(EngineCommand::MonitorInput {
-            node_id: engine_node_id,
-            input_index,
-        })
-    }
-
-    /// Build an UnmonitorInput command for a given input.
-    fn build_unmonitor_input_command(
-        &self,
-        input: egui_node_graph2::InputId,
-    ) -> Option<EngineCommand> {
-        // Use get() to safely check if the input exists (avoid panic on stale IDs)
-        let input_data = self.graph_state.graph.inputs.get(input)?;
-        let node = self.graph_state.graph.nodes.get(input_data.node)?;
-
-        // Get the input name
-        let input_name = node.inputs.iter()
-            .find(|(_, id)| *id == input)
-            .map(|(name, _)| name)?;
-
-        // Check if this input name corresponds to an exposed knob parameter
-        let is_exposed_param = node.user_data.knob_params.iter()
-            .any(|kp| kp.param_name == *input_name && kp.has_input_port());
-
-        if !is_exposed_param {
-            return None;
-        }
-
-        // Get engine node ID and input port index
-        let engine_node_id = self.user_state.get_engine_node_id(input_data.node)?;
-        let input_index = self.get_input_port_index(input_data.node, input)?;
-
-        Some(EngineCommand::UnmonitorInput {
-            node_id: engine_node_id,
-            input_index,
-        })
-    }
-
-    /// Build a MonitorOutput command for cable animation.
-    /// This enables signal-level feedback for the cable connecting from this output.
-    fn build_monitor_output_command(
-        &self,
-        output: egui_node_graph2::OutputId,
-    ) -> Option<EngineCommand> {
-        let output_data = self.graph_state.graph.outputs.get(output)?;
-        let node = self.graph_state.graph.nodes.get(output_data.node)?;
-
-        // Get engine node ID
-        let engine_node_id = self.user_state.get_engine_node_id(output_data.node)?;
-
-        // Find the output index (position in node.outputs)
-        let output_index = node.outputs
-            .iter()
-            .position(|(_, id)| *id == output)?;
-
-        Some(EngineCommand::MonitorOutput {
-            node_id: engine_node_id,
-            output_index,
-        })
-    }
-
-    /// Build an UnmonitorOutput command for a given output.
-    fn build_unmonitor_output_command(
-        &self,
-        output: egui_node_graph2::OutputId,
-    ) -> Option<EngineCommand> {
-        let output_data = self.graph_state.graph.outputs.get(output)?;
-        let node = self.graph_state.graph.nodes.get(output_data.node)?;
-
-        // Get engine node ID
-        let engine_node_id = self.user_state.get_engine_node_id(output_data.node)?;
-
-        // Find the output index (position in node.outputs)
-        let output_index = node.outputs
-            .iter()
-            .position(|(_, id)| *id == output)?;
-
-        Some(EngineCommand::UnmonitorOutput {
-            node_id: engine_node_id,
-            output_index,
-        })
-    }
-
-    /// Get the DspModule port index for a given egui output ID.
-    ///
-    /// In egui_node_graph2, outputs are numbered separately from inputs.
-    /// In DspModule, all ports are in a single array with inputs first.
-    fn get_output_port_index(
-        &self,
-        node_id: egui_node_graph2::NodeId,
-        output_id: egui_node_graph2::OutputId,
-    ) -> Option<usize> {
-        port_mapping::output_port_index(&self.graph_state.graph, node_id, output_id)
-    }
-
-    /// Get the DspModule port index for a given egui input ID.
-    ///
-    /// Both ConnectionOnly and ConnectionOrConstant inputs map to DspModule input ports.
-    /// ConstantOnly inputs do NOT have ports (they are parameter-only).
-    fn get_input_port_index(
-        &self,
-        node_id: egui_node_graph2::NodeId,
-        input_id: egui_node_graph2::InputId,
-    ) -> Option<usize> {
-        port_mapping::input_port_index(&self.graph_state.graph, node_id, input_id)
     }
 
     /// Sync parameter values from the graph UI to the audio engine.
@@ -1496,6 +1301,7 @@ impl SynthApp {
         // mutates node_positions based on the current zoom level. Loading positions
         // at a different zoom than they were saved at would cause layout drift.
         self.graph_state.pan_zoom = egui_node_graph2::PanZoom::default();
+        self.history.reset_view();
 
         // Swap in the staged graph. Its node IDs stay valid.
         self.graph_state.graph = std::mem::take(&mut staged.graph);
@@ -1509,50 +1315,18 @@ impl SynthApp {
             // IDs in the patch file. MIDI mappings are remapped below.
             let engine_node_id = self.user_state.allocate_engine_node_id(node.graph_id);
 
-            // Send command to create the module in the audio engine.
-            // Parameter values follow with the next parameter sync.
-            self.send_command(EngineCommand::AddModule {
-                node_id: engine_node_id,
-                module_id: node.template.module_id(),
-            });
-            if self.graph_state.graph[node.graph_id].user_data.bypassed {
-                self.send_command(EngineCommand::SetBypass { node_id: engine_node_id, bypassed: true });
-            }
-
-            // Set up output monitoring for LED indicators and monitored outputs
-            let output_indices: Vec<usize> = self.graph_state.graph.nodes
-                .get(node.graph_id)
-                .map(|n| {
-                    n.user_data.led_indicators.iter()
-                        .map(|led| led.output_index)
-                        .chain(n.user_data.monitored_outputs.iter().copied())
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            for output_index in output_indices {
-                self.send_command(EngineCommand::MonitorOutput {
-                    node_id: engine_node_id,
-                    output_index,
-                });
+            // Create the module in the audio engine. Parameter values follow
+            // with the next parameter sync.
+            for cmd in engine_sync::add_module(&self.graph_state.graph, node.graph_id, engine_node_id) {
+                self.send_command(cmd);
             }
         }
 
         // Send the staged connections to the engine
         let connections: Vec<_> = self.graph_state.graph.iter_connections().collect();
         for (input_id, output_id) in connections {
-            if let Some(cmd) = self.build_connect_command(output_id, input_id) {
+            for cmd in engine_sync::cable_connected(&self.graph_state.graph, &self.user_state, output_id, input_id) {
                 self.send_command(cmd);
-            }
-
-            // Set up input monitoring if this is an exposed parameter
-            if let Some(monitor_cmd) = self.build_monitor_input_command(input_id) {
-                self.send_command(monitor_cmd);
-            }
-
-            // Set up output monitoring for cable animation
-            if let Some(monitor_cmd) = self.build_monitor_output_command(output_id) {
-                self.send_command(monitor_cmd);
             }
         }
 
@@ -1574,6 +1348,9 @@ impl SynthApp {
             self.user_state.is_playing = true;
             self.send_command(EngineCommand::SetPlaying(true));
         }
+
+        // A loaded patch starts its own history
+        self.history.reset(&self.graph_state, &self.user_state);
 
         Ok(staged.warnings)
     }
@@ -1602,6 +1379,7 @@ impl SynthApp {
     /// Start a new patch - clears the graph and resets the current file path.
     fn new_patch(&mut self) {
         self.clear_graph();
+        self.history.reset(&self.graph_state, &self.user_state);
         self.load_warnings.clear();
         self.current_patch_path = None;
         self.current_example = None;
@@ -2035,6 +1813,14 @@ impl SynthApp {
     }
 }
 
+/// Tooltip for the Undo and Redo buttons, e.g. "Undo Move Oscillator (Ctrl+Z)".
+fn history_hint(verb: &str, label: Option<&str>, shortcut: &str) -> String {
+    match label {
+        Some(label) => format!("{verb} {label} ({shortcut})"),
+        None => format!("Nothing to {} ({shortcut})", verb.to_lowercase()),
+    }
+}
+
 /// Actions collected from the toolbar for deferred execution
 #[derive(Default)]
 struct ToolbarActions {
@@ -2046,6 +1832,8 @@ struct ToolbarActions {
     load_patch: bool,
     open_example: Option<&'static Example>,
     new_patch: bool,
+    undo: bool,
+    redo: bool,
     // MIDI actions
     connect_midi_device: Option<usize>,
     disconnect_midi: bool,
@@ -2085,6 +1873,22 @@ impl eframe::App for SynthApp {
         let mut keyboard_save = false;
         let mut keyboard_load = false;
         let mut keyboard_bypass = false;
+
+        // Undo and redo, unless a text field has the keys (it has its own undo).
+        // Redo is checked first: Ctrl+Z alone would also match Ctrl+Shift+Z.
+        if !ctx.wants_keyboard_input() {
+            use egui::{Key, KeyboardShortcut, Modifiers};
+            let (redo, undo) = ctx.input_mut(|i| {
+                let redo = i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z))
+                    || i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::Y));
+                (redo, i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::Z)))
+            });
+            if redo {
+                self.redo();
+            } else if undo {
+                self.undo();
+            }
+        }
 
         ctx.input(|i| {
             // Ctrl+S: Save
@@ -2167,6 +1971,12 @@ impl eframe::App for SynthApp {
         if toolbar_actions.new_patch {
             self.new_patch();
         }
+        if toolbar_actions.undo {
+            self.undo();
+        }
+        if toolbar_actions.redo {
+            self.redo();
+        }
 
         // Handle MIDI actions
         if toolbar_actions.refresh_midi_devices {
@@ -2181,6 +1991,11 @@ impl eframe::App for SynthApp {
 
         // Process pending MIDI events
         self.process_midi_events();
+
+        // Whatever this frame changed becomes an undo step, once the mouse
+        // button is up: a knob turn or a drag is one step, not one per frame
+        let gesture_held = ctx.input(|i| i.pointer.any_down());
+        self.history.record(&self.graph_state, &self.user_state, gesture_held, Instant::now());
 
         // Ship this frame's graph edits to the audio thread as one compiled plan
         if let Some(ref mut handle) = self.ui_handle {

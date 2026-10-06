@@ -185,6 +185,13 @@ impl SynthGraphState {
         id
     }
 
+    /// Map a graph node to an engine node ID it had before, when undo
+    /// brings a deleted node back. Its MIDI mappings follow it back.
+    pub fn assign_engine_node_id(&mut self, graph_node_id: NodeId, engine_node_id: EngineNodeId) {
+        self.next_engine_node_id = self.next_engine_node_id.max(engine_node_id + 1);
+        self.node_id_map.insert(graph_node_id, engine_node_id);
+    }
+
     /// Get the engine node ID for a graph node.
     pub fn get_engine_node_id(&self, graph_node_id: NodeId) -> Option<EngineNodeId> {
         self.node_id_map.get(&graph_node_id).copied()

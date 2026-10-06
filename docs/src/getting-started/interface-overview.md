@@ -171,6 +171,12 @@ Patches are saved as `.json` files containing all module settings and connection
 | **Open** | `Ctrl + O` |
 | **New** | `Ctrl + N` |
 
+### Undo and Redo
+
+**Undo** (`Ctrl + Z`) and **Redo** (`Ctrl + Shift + Z` or `Ctrl + Y`) are in the toolbar's **Edit** group. Hover either button to see which edit it will undo or redo, such as *Move Oscillator* or *Set SVF Filter Cutoff*.
+
+Undo covers adding, deleting, moving and bypassing modules, patching and unpatching cables, and turning knobs. A whole drag is one step: turning a knob from 200 Hz to 2 kHz and back undoes in one go. A deleted module comes back with its settings, its cables and its MIDI mappings. Knobs moved by a MIDI controller aren't recorded, and opening a patch starts a fresh history.
+
 ### Recent Patches
 
 Access recently opened patches from the **File** menu.
@@ -210,7 +216,7 @@ The **Keyboard** module allows playing notes using your computer keyboard:
 | `Ctrl + S` | Save patch |
 | `Ctrl + Shift + S` | Save patch as |
 | `Ctrl + Z` | Undo |
-| `Ctrl + Y` | Redo |
+| `Ctrl + Shift + Z` or `Ctrl + Y` | Redo |
 | `Delete` | Delete selected |
 | `Ctrl + A` | Select all |
 | `Escape` | Deselect / Cancel |
