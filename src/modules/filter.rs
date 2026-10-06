@@ -37,7 +37,7 @@ use crate::dsp::{
 /// # Ports
 ///
 /// - **In** (Audio, Input): The audio signal to filter.
-/// - **Cutoff** (Control, Input): Cutoff CV, ±1 = ±2 octaves.
+/// - **Cutoff** (Control, Input): Cutoff CV, 1 per octave (the V/Oct scale).
 /// - **Resonance** (Control, Input): CV modulation for resonance.
 /// - **LowPass** (Audio, Output): Lowpass filtered output.
 /// - **HighPass** (Audio, Output): Highpass filtered output.
@@ -133,8 +133,6 @@ impl SvfFilter {
     const PARAM_RESONANCE: usize = 1;
     const PARAM_DRIVE: usize = 2;
 
-    /// Octaves of cutoff movement per unit of cutoff CV.
-    const CUTOFF_CV_OCTAVES: f32 = 2.0;
     /// Lowest cutoff the filter will run at, after CV.
     const MIN_CUTOFF_HZ: f32 = 20.0;
     /// Damping of the fixed path (k = 2 is a Q of 0.5: no peak, -6 dB at cutoff).
@@ -245,7 +243,7 @@ impl DspModule for SvfFilter {
             let cutoff_mod = cutoff_cv
                 .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
                 .unwrap_or(0.0);
-            let cutoff = (log_cutoff + cutoff_mod * Self::CUTOFF_CV_OCTAVES)
+            let cutoff = (log_cutoff + cutoff_mod)
                 .exp2()
                 .clamp(Self::MIN_CUTOFF_HZ, max_cutoff);
 
@@ -627,11 +625,11 @@ mod tests {
 
     #[test]
     fn test_cutoff_cv_is_in_octaves() {
-        // +0.5 CV is +1 octave: a 500 Hz cutoff behaves like 1 kHz...
-        let up = gain(0, 500.0, 0.0, 1000.0, 0.5);
+        // +1 CV is +1 octave, the V/Oct scale: a 500 Hz cutoff behaves like 1 kHz...
+        let up = gain(0, 500.0, 0.0, 1000.0, 1.0);
         assert!((up - 0.5).abs() < 0.05, "gain at the modulated cutoff = {}", up);
-        // ...and -0.5 CV is -1 octave, the same distance down
-        let down = gain(0, 2000.0, 0.0, 1000.0, -0.5);
+        // ...and -1 CV is -1 octave, the same distance down
+        let down = gain(0, 2000.0, 0.0, 1000.0, -1.0);
         assert!((down - 0.5).abs() < 0.05, "gain at the modulated cutoff = {}", down);
     }
 

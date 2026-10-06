@@ -40,7 +40,7 @@ What gives it its character:
 
 ## Ladder vs SVF
 
-Both filters cover the musical range, self-oscillate, and move their cutoff in octaves. They differ in character:
+Both filters cover the musical range, self-oscillate, and take cutoff CV at 1 per octave. They differ in character:
 
 | | Ladder | SVF |
 |---|---|---|
@@ -48,7 +48,6 @@ Both filters cover the musical range, self-oscillate, and move their cutoff in o
 | Modes | Lowpass only | LP, HP, BP, Notch |
 | Saturation | At every stage: thick, rounded | At the input and in the resonance |
 | Self-oscillation | Top fifth of the knob, about -20 dBFS | Top few percent, about -12 dBFS |
-| Cutoff CV | 1 per octave | 2 octaves per unit |
 
 Reach for the ladder for basses, leads and anything that should sound fat. Reach for the SVF when you want the other modes, or a lighter, more transparent touch.
 

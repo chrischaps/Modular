@@ -23,7 +23,7 @@ The SVF design offers:
 | Port | Signal Type | Description |
 |------|-------------|-------------|
 | **Input** | Audio (Blue) | Main audio input to be filtered |
-| **Cutoff** | Control (Orange) | Cutoff modulation in octaves: +1 raises the cutoff 2 octaves, -1 lowers it 2 |
+| **Cutoff** | Control (Orange) | Cutoff CV, 1 per octave: +1 doubles the cutoff, -1 halves it. The same scale as V/Oct, so a keyboard's pitch tracks directly |
 | **Resonance** | Control (Orange) | Adds to the Resonance knob (+1 adds 0.5) |
 
 ## Outputs
@@ -126,7 +126,7 @@ Create dynamic filter sweeps with an envelope:
 ```
 
 - Set base cutoff low (200-500 Hz)
-- The envelope's 0-1 output raises the cutoff by up to 2 octaves
+- The envelope's 0-1 output raises the cutoff by up to one octave. For a wider sweep, scale it up with an Attenuverter or Mixer first
 - Short attack/decay creates "plucky" sounds
 - Long attack creates "swelling" sounds
 
@@ -149,7 +149,7 @@ At the top of the Resonance range the filter self-oscillates, producing a sine w
 - Turn Resonance all the way up (it starts to sing above about 0.97)
 - No input signal needed. The oscillation grows out of a tiny noise floor, like circuit noise in an analog filter
 - The tone lands within a few cents of the Cutoff knob, so the knob reads as a pitch
-- Control pitch via Cutoff CV (2 octaves per unit)
+- Play it from a keyboard: patch Pitch into Cutoff and it tracks in tune (1 per octave)
 - A saturator in the resonance path holds the level steady (around -12 dBFS), so it won't run away
 
 Feed audio in while it oscillates and the two interact, with the resonance pushing back against loud input.
@@ -163,7 +163,7 @@ Make filter cutoff follow the keyboard:
            ──V/Oct──> [Filter Cutoff CV]
 ```
 
-This keeps the filter's relative brightness consistent across different pitches. The Cutoff input moves 2 octaves per unit, so scale the pitch CV with an Attenuverter to get 1:1 tracking.
+This keeps the filter's relative brightness consistent across different pitches. The Cutoff input is 1 per octave, the same scale as V/Oct, so the pitch CV tracks 1:1 with no scaling.
 
 ### Parallel Filter Modes
 
