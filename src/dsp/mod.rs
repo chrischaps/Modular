@@ -10,6 +10,7 @@ pub mod dynamics;
 pub mod module_trait;
 pub mod parameter;
 pub mod port;
+pub mod primitives;
 pub mod registry;
 pub mod signal;
 pub mod smoothed_value;

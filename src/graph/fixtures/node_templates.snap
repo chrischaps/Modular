@@ -51,6 +51,7 @@ in   Drive              Control  ConstantOnly         inline=false num 1 [1..10]
 out  LowPass            Audio
 out  HighPass           Audio
 out  BandPass           Audio
+out  Notch              Audio
 knob Cutoff             "Cutoff" Modulatable
 knob Resonance          "Res" Modulatable
 knob Drive              "Drive" KnobOnly

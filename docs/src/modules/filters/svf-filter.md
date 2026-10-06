@@ -9,12 +9,13 @@
 
 ## Description
 
-The State Variable Filter (SVF) is a versatile multi-mode filter that provides simultaneous lowpass, highpass, and bandpass outputs from a single input signal. This architecture allows you to blend different filter responses or switch between them without repatching.
+The State Variable Filter (SVF) is a versatile multi-mode filter that provides simultaneous lowpass, highpass, bandpass and notch outputs from a single input signal. This architecture allows you to blend different filter responses or switch between them without repatching.
 
 The SVF design offers:
-- Self-oscillation at high resonance (can be used as a sine oscillator)
-- Smooth cutoff sweeps without artifacts
-- Stable operation across all settings
+- Self-oscillation at full resonance: a clean, self-limiting sine at the cutoff frequency
+- Cutoff that moves in octaves, so sweeps sound even from bass to treble
+- Analog-style resonance that saturates instead of getting louder without limit
+- Stable operation across all settings, right up to 20 kHz
 - Simultaneous multi-mode outputs
 
 ## Inputs
@@ -22,8 +23,8 @@ The SVF design offers:
 | Port | Signal Type | Description |
 |------|-------------|-------------|
 | **Input** | Audio (Blue) | Main audio input to be filtered |
-| **Cutoff** | Control (Orange) | Modulation input for cutoff frequency |
-| **Resonance** | Control (Orange) | Modulation input for resonance/Q |
+| **Cutoff** | Control (Orange) | Cutoff modulation in octaves: +1 raises the cutoff 2 octaves, -1 lowers it 2 |
+| **Resonance** | Control (Orange) | Adds to the Resonance knob (+1 adds 0.5) |
 
 ## Outputs
 
@@ -32,14 +33,15 @@ The SVF design offers:
 | **Lowpass** | Audio (Blue) | Lowpass output - passes frequencies below cutoff |
 | **Highpass** | Audio (Blue) | Highpass output - passes frequencies above cutoff |
 | **Bandpass** | Audio (Blue) | Bandpass output - passes frequencies around cutoff |
+| **Notch** | Audio (Blue) | Notch output - passes everything except the cutoff |
 
 ## Parameters
 
 | Knob | Range | Default | Description |
 |------|-------|---------|-------------|
 | **Cutoff** | 20 Hz - 20 kHz | 1000 Hz | Filter cutoff frequency |
-| **Resonance** | 0.0 - 1.0 | 0.0 | Resonance/Q - emphasis at cutoff frequency |
-| **CV Amount** | -1.0 - +1.0 | 0.0 | How much the Cutoff CV input affects the cutoff |
+| **Resonance** | 0.0 - 1.0 | 0.5 | Emphasis at the cutoff frequency. Self-oscillates above about 0.97 |
+| **Drive** | 1x - 10x | 1x | Input gain into a soft saturator, for warmth and grit |
 
 ## Filter Modes
 
@@ -89,6 +91,17 @@ The SVF design offers:
 - Isolating specific frequency ranges
 - Wah-wah effects
 
+### Notch
+
+- Removes a narrow band **around** the cutoff and passes everything else
+- The notch is deepest exactly at the cutoff, and narrower at higher resonance
+- Equal to the lowpass and highpass outputs added together
+
+**Use cases:**
+- Phaser-like sweeps (modulate the cutoff with a slow LFO)
+- Hollowing out a sound without darkening it
+- Removing a single resonant frequency or hum
+
 ## Usage Tips
 
 ### Basic Filtering
@@ -113,7 +126,7 @@ Create dynamic filter sweeps with an envelope:
 ```
 
 - Set base cutoff low (200-500 Hz)
-- Use positive CV Amount
+- The envelope's 0-1 output raises the cutoff by up to 2 octaves
 - Short attack/decay creates "plucky" sounds
 - Long attack creates "swelling" sounds
 
@@ -127,18 +140,19 @@ Create rhythmic filter movement:
 
 - Square LFO creates choppy, rhythmic effect
 - Triangle/Sine LFO creates smooth wobble
-- Adjust LFO rate and CV Amount for intensity
+- Adjust the LFO rate, and its level (through an Attenuverter) for intensity
 
 ### Self-Oscillation
 
-At high resonance (near 1.0), the filter will self-oscillate, producing a sine wave at the cutoff frequency:
+At the top of the Resonance range the filter self-oscillates, producing a sine wave at the cutoff frequency:
 
-- Set resonance to ~0.95 or higher
-- No input signal needed
-- Control pitch via Cutoff CV
-- Useful for pure sine tones and sound effects
+- Turn Resonance all the way up (it starts to sing above about 0.97)
+- No input signal needed. The oscillation grows out of a tiny noise floor, like circuit noise in an analog filter
+- The tone lands within a few cents of the Cutoff knob, so the knob reads as a pitch
+- Control pitch via Cutoff CV (2 octaves per unit)
+- A saturator in the resonance path holds the level steady (around -12 dBFS), so it won't run away
 
-**Note:** Self-oscillation can be loud - reduce output level first.
+Feed audio in while it oscillates and the two interact, with the resonance pushing back against loud input.
 
 ### Tracking Keyboard
 
@@ -149,7 +163,7 @@ Make filter cutoff follow the keyboard:
            ──V/Oct──> [Filter Cutoff CV]
 ```
 
-This keeps the filter's relative brightness consistent across different pitches. Set CV Amount to achieve 1:1 tracking.
+This keeps the filter's relative brightness consistent across different pitches. The Cutoff input moves 2 octaves per unit, so scale the pitch CV with an Attenuverter to get 1:1 tracking.
 
 ### Parallel Filter Modes
 
@@ -171,16 +185,15 @@ High resonance emphasizes the cutoff frequency:
 - Useful for acid bass lines (TB-303 style)
 - Combine with filter envelope for accent effects
 
-### Notch Filter (Advanced)
+### Moving Notch
 
-Combine highpass and lowpass outputs to create a notch:
+Patch the **Notch** output and sweep the cutoff slowly with an LFO for a phaser-like movement:
 
 ```
-[Filter LP] ──> [Mixer] (inverted) ──┐
-[Filter HP] ──> [Mixer] ─────────────┴──> [Output]
+[Oscillator (Saw)] ──> [Filter Input]
+[LFO (slow)] ──> [Filter Cutoff CV]
+                 [Filter Notch] ──> [Output]
 ```
-
-The phase relationship creates a notch at the cutoff frequency.
 
 ## Connection Examples
 

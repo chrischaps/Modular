@@ -15,7 +15,8 @@ use egui_node_graph2::{NodeDataTrait, NodeResponse, UserResponseTrait};
 
 use crate::dsp::ModuleCategory;
 use crate::engine::midi_engine::MidiEvent;
-use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, SpectrumConfig, SpectrumStyle, generate_filter_response, FilterResponseType, piano, PianoConfig, PianoData};
+use crate::modules::SvfFilter;
+use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, FrequencyPoint, SpectrumConfig, SpectrumStyle, piano, PianoConfig, PianoData};
 use super::{SynthResponse, SynthValueType};
 
 /// MIDI event colors for the MIDI Monitor display.
@@ -1292,13 +1293,16 @@ impl NodeDataTrait for SynthNodeData {
                 (1000.0, 0.5)
             };
 
-            // Generate filter response curve for lowpass (primary output)
-            let response_points = generate_filter_response(
-                FilterResponseType::LowPass,
-                cutoff_hz,
-                resonance,
-                128, // More points for smoother curve
-            );
+            // Lowpass response (the primary output), computed from the
+            // filter's own transfer function so the curve matches the sound
+            let (log_min, log_max) = (20.0f32.ln(), 20000.0f32.ln());
+            let response_points: Vec<FrequencyPoint> = (0..128)
+                .map(|i| {
+                    let freq = (log_min + (log_max - log_min) * i as f32 / 127.0).exp();
+                    let db = SvfFilter::lowpass_response_db(cutoff_hz, resonance, freq);
+                    FrequencyPoint::new(freq, db.clamp(-60.0, 24.0))
+                })
+                .collect();
 
             // Display filter response with custom config optimized for seeing resonance
             // Range: -24dB to +12dB shows both rolloff and resonance peak clearly
