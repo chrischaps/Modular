@@ -168,6 +168,10 @@ pub const ROUNDING_SMALL: Rounding = Rounding {
 pub fn apply_theme(ctx: &egui::Context) {
     let mut style = (*ctx.style()).clone();
 
+    // Labels are names, not text to select. Selectable labels also take
+    // clicks, so right-clicking a port's name wouldn't reach its module
+    style.interaction.selectable_labels = false;
+
     // Visuals
     let visuals = &mut style.visuals;
     visuals.dark_mode = true;

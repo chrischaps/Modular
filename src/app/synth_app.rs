@@ -986,7 +986,10 @@ impl SynthApp {
         if ctx.input(|i| i.pointer.secondary_clicked()) && cursor_in_editor {
             // Only open if not already showing a menu and no widget context menu is open
             if self.user_state.context_menu_pos.is_none() && !self.user_state.widget_context_menu_open {
-                if let Some(click_pos) = ctx.input(|i| i.pointer.interact_pos()) {
+                let click_pos = ctx.input(|i| i.pointer.interact_pos());
+                // A module has its own menu, and its knobs theirs. Neither says
+                // so on the frame of the click, so go by where the click was
+                if let Some(click_pos) = click_pos.filter(|pos| !self.is_over_module(ctx, *pos)) {
                     self.user_state.context_menu_pos = Some(click_pos);
                 }
             }
@@ -1193,6 +1196,14 @@ impl SynthApp {
         if let Some(engine_node_id) = self.user_state.get_engine_node_id(node_id) {
             self.send_command(EngineCommand::SetBypass { node_id: engine_node_id, bypassed });
         }
+    }
+
+    /// Whether a point on screen is over a module, anywhere on it.
+    fn is_over_module(&self, ctx: &egui::Context, screen: egui::Pos2) -> bool {
+        // The editor senses clicks on each whole node under this id
+        self.graph_state.node_order.iter().any(|&node_id| {
+            ctx.read_response(egui::Id::new((node_id, "window"))).is_some_and(|r| r.rect.contains(screen))
+        })
     }
 
     /// The editor node position under a point on screen.
