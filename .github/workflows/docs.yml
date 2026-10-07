@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: chrischaps/docs.chaps.dev
-          token: ${{ secrets.DOCS_DEPLOY_TOKEN }}
+          ssh-key: ${{ secrets.DOCS_DEPLOY_KEY }}
           path: docs-site
 
       - name: Copy built docs
