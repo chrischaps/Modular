@@ -338,8 +338,8 @@ impl GraphPlan {
 
     /// The values at monitored outputs after the last block: the peak of each
     /// channel, and across all of them, as the sample with the largest
-    /// magnitude, sign preserved, so bipolar signals such as LFOs can animate
-    /// cables in reverse.
+    /// magnitude, sign preserved, so cables can draw bipolar signals such as
+    /// LFOs swinging either side of zero.
     pub fn output_values(&self) -> impl Iterator<Item = (NodeId, PortIndex, f32, ChannelPeaks)> + '_ {
         self.output_taps.iter().map(|tap| {
             let peaks = ChannelPeaks::of(&self.outputs[tap.buffer]);

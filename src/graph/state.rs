@@ -3,14 +3,15 @@
 //! Contains the user state passed to egui_node_graph2 callbacks.
 
 use egui::{Color32, Pos2};
-use egui_node_graph2::{ConnectionSignalTrait, GraphEditorState, NodeId};
+use egui_node_graph2::{ConnectionSignalTrait, FlowGlyph, GraphEditorState, NodeId, SignalTrace};
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
 use crate::engine::{ChannelPeaks, NodeId as EngineNodeId};
 use crate::engine::midi_engine::MidiEvent;
 use crate::widgets::LevelMeter;
-use super::{SynthDataType, SynthNodeData, SynthValueType};
+use super::signal_history::{OutputHistory, TraceShape};
+use super::{SynthDataType, SynthGraph, SynthNodeData, SynthValueType};
 use super::templates::SynthNodeTemplate;
 
 /// Duration to show validation messages before auto-clearing.
@@ -96,6 +97,13 @@ pub struct SynthGraphState {
     /// while the transport is stopped, so poly cables stay drawn as bundles.
     pub output_channels: HashMap<(EngineNodeId, usize), ChannelPeaks>,
 
+    /// The last few seconds of each monitored output, which cables draw as
+    /// the signal flowing through them. Key: (engine_node_id, output_port_index).
+    pub signal_history: HashMap<(EngineNodeId, usize), OutputHistory>,
+
+    /// The mark that rides the signal along every cable.
+    pub flow_glyph: FlowGlyph,
+
     /// Recent MIDI events for display in MIDI Monitor modules.
     pub midi_events: VecDeque<DisplayMidiEvent>,
 
@@ -155,6 +163,8 @@ impl Default for SynthGraphState {
             input_values: HashMap::new(),
             output_values: HashMap::new(),
             output_channels: HashMap::new(),
+            signal_history: HashMap::new(),
+            flow_glyph: FlowGlyph::default(),
             midi_events: VecDeque::new(),
             midi_first_event_time: None,
             midi_mappings: HashMap::new(),
@@ -214,6 +224,7 @@ impl SynthGraphState {
         self.input_values.clear();
         self.output_values.clear();
         self.output_channels.clear();
+        self.signal_history.clear();
         self.midi_events.clear();
         self.midi_first_event_time = None;
         self.midi_mappings.clear();
@@ -303,11 +314,28 @@ impl SynthGraphState {
     pub fn clear_output_values_for_node(&mut self, engine_node_id: EngineNodeId) {
         self.output_values.retain(|(node_id, _), _| *node_id != engine_node_id);
         self.output_channels.retain(|(node_id, _), _| *node_id != engine_node_id);
+        self.signal_history.retain(|(node_id, _), _| *node_id != engine_node_id);
     }
 
     /// Update an output's per-channel reading from the audio engine feedback.
     pub fn set_output_channels(&mut self, engine_node_id: EngineNodeId, output_index: usize, channels: ChannelPeaks) {
         self.output_channels.insert((engine_node_id, output_index), channels);
+        self.signal_history.entry((engine_node_id, output_index)).or_default().observe(channels);
+    }
+
+    /// Brings every output's signal history up to `now` (seconds on the UI
+    /// clock), shaped by the type of signal it carries.
+    pub fn tick_signal_history(&mut self, now: f64, graph: &SynthGraph) {
+        for (output_id, output) in graph.outputs.iter() {
+            let Some(engine_node_id) = self.get_engine_node_id(output.node) else { continue };
+            let Some(output_index) = graph.get_output_index(output_id) else { continue };
+            if let Some(history) = self.signal_history.get_mut(&(engine_node_id, output_index)) {
+                history.set_shape(TraceShape::of(output.typ.signal_type()));
+            }
+        }
+        for history in self.signal_history.values_mut() {
+            history.tick(now, self.is_playing);
+        }
     }
 
     /// The last per-channel reading of a graph node's output, if any.
@@ -425,6 +453,15 @@ impl ConnectionSignalTrait for SynthGraphState {
             return Some(0.0);
         }
         self.output_peaks(graph_node_id, output_index).map(|peaks| peaks.peak(channel))
+    }
+
+    fn output_trace(&self, graph_node_id: NodeId, output_index: usize, channel: usize) -> Option<SignalTrace<'_>> {
+        let engine_node_id = self.get_engine_node_id(graph_node_id)?;
+        self.signal_history.get(&(engine_node_id, output_index))?.trace(channel)
+    }
+
+    fn flow_glyph(&self) -> FlowGlyph {
+        self.flow_glyph
     }
 
     fn output_port_color(

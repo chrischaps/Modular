@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use eframe::egui::{self, RichText, Layout, Align};
-use egui_node_graph2::{GraphEditorState, NodeResponse, NodeTemplateTrait, InputParamKind};
+use egui_node_graph2::{FlowGlyph, GraphEditorState, NodeResponse, NodeTemplateTrait, InputParamKind};
 
 use crate::engine::{
     AudioEngine, AudioError, AudioProcessor, DeviceInfo, EngineChannels, EngineCommand, UiHandle,
@@ -38,6 +38,9 @@ type SynthGraphEditorState = GraphEditorState<SynthNodeData, SynthDataType, Synt
 /// Max popup height for the toolbar device dropdowns. egui's default (200px)
 /// fits only ~3 rows at the theme's padding; egui still clamps to the window.
 const DEVICE_MENU_HEIGHT: f32 = 480.0;
+
+/// Storage key for the mark drawn along cables (Cables menu)
+const FLOW_GLYPH_KEY: &str = "cable_flow_glyph";
 
 /// Target parameter for MIDI Learn mode.
 ///
@@ -668,6 +671,20 @@ impl SynthApp {
             if redo.on_hover_text(history_hint("Redo", redo_label, "Ctrl+Shift+Z")).clicked() {
                 actions.redo = true;
             }
+
+            ui.add_space(20.0);
+            ui.separator();
+            ui.add_space(20.0);
+
+            // How the signal is drawn flowing along the cables
+            ui.menu_button("〰 Cables", |ui| {
+                ui.label(RichText::new("Signal flow marks").color(theme::text::SECONDARY));
+                for glyph in FlowGlyph::ALL {
+                    ui.radio_value(&mut self.user_state.flow_glyph, glyph, glyph.name());
+                }
+            })
+            .response
+            .on_hover_text("How signal flow is drawn along cables");
 
             ui.add_space(20.0);
             ui.separator();
@@ -1872,6 +1889,12 @@ impl SynthApp {
     pub fn restore_session(&mut self, storage: Option<&dyn eframe::Storage>) {
         self.recent_files = RecentFiles::load(storage);
         self.recovery = Autosave::load(storage);
+        if let Some(glyph) = storage.and_then(|s| s.get_string(FLOW_GLYPH_KEY)) {
+            self.user_state.flow_glyph = FlowGlyph::ALL
+                .into_iter()
+                .find(|g| g.name() == glyph)
+                .unwrap_or_default();
+        }
     }
 
     /// Validate a connection and return an error message if invalid.
@@ -2283,6 +2306,8 @@ impl eframe::App for SynthApp {
 
         // Process events from the audio engine
         self.process_engine_events();
+        let now = ctx.input(|i| i.time);
+        self.user_state.tick_signal_history(now, &self.graph_state.graph);
 
         // Advance meter ballistics; keep repainting until it has settled
         let dt = ctx.input(|i| i.stable_dt).min(0.1);
@@ -2497,6 +2522,7 @@ impl eframe::App for SynthApp {
     /// a crash loses at most [`session::AUTOSAVE_INTERVAL`] of work.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.recent_files.store(storage);
+        storage.set_string(FLOW_GLYPH_KEY, self.user_state.flow_glyph.name().to_string());
         let autosave = if let Some(recovery) = &self.recovery {
             // Not answered yet: keep it for next time
             Some(recovery.clone())

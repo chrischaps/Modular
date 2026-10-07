@@ -236,8 +236,8 @@ pub enum EngineEvent {
 }
 
 /// The peak of each channel of an output over one block: the sample with the
-/// largest magnitude, sign preserved, so bipolar signals such as LFOs can
-/// animate cables in reverse.
+/// largest magnitude, sign preserved, so a cable can draw a bipolar signal
+/// such as an LFO swinging either side of zero.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ChannelPeaks {
     count: u8,
@@ -282,6 +282,16 @@ impl ChannelPeaks {
     /// The peak across every channel.
     pub fn overall(&self) -> f32 {
         largest_magnitude(self.peaks[..self.count()].iter().copied())
+    }
+
+    /// Each channel's larger peak of this reading and `other`, over the
+    /// channels of the later one, `other`.
+    pub fn louder(&self, other: &Self) -> Self {
+        let mut peaks = other.peaks;
+        for (channel, peak) in peaks[..other.count()].iter_mut().enumerate() {
+            *peak = largest_magnitude([self.peak(channel), *peak].into_iter());
+        }
+        Self { count: other.count, peaks }
     }
 }
 

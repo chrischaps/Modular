@@ -28,7 +28,7 @@ Their outputs carry as many channels as their widest input. The knobs are shared
 
 A polyphonic cable is drawn as a **bundle of strands**, one per channel, in a dark sheath that narrows where it plugs into a jack. The more channels, the wider the bundle, so you can tell mono from poly at a glance at any zoom.
 
-Each strand's flowing dots follow its own voice. Hold a chord and dots run along the strands of the notes you're playing while the rest stay still. Each note's release shows on its strand as the dots slow and fade. The glow around the cable follows the loudest voice.
+Each strand lights with its own voice. Hold a chord and light runs along the strands of the notes you're playing while the rest stay dark. Each note's release shows on its strand as its light fades down the wire. The glow around the cable follows the loudest voice. See [Reading the Signal in a Cable](connections.md#reading-the-signal-in-a-cable).
 
 Output labels show the count too: **Out ×8** means that output carries eight channels. The count comes from the running patch, so press **Play** to see it. It stays drawn while the transport is stopped.
 

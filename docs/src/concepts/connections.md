@@ -118,6 +118,19 @@ This coloring helps you:
 - Identify signal types at a glance
 - Debug routing issues
 
+## Reading the Signal in a Cable
+
+While the patch plays, each cable shows what its signal has been doing over the last few seconds. The signal travels from the output to the input at a steady pace, so the end of the cable nearest the output is *now* and points further along are moments ago.
+
+- **Brightness is strength.** A cable lights up with its signal and goes dark when it's silent. A note becomes a packet of light that runs down the wire. Its length is how long the note lasted, and an audio cable's light fades out as the note releases.
+- **Chevrons point the way.** Marks ride the light from output to input, so you can read a patch's direction even in a still frame. Each mark keeps the brightness of the moment it left the output.
+- **Control cables draw their shape.** On orange cables the light swings to one side of the cable or the other with the signal's value. An LFO shows its waveform travelling down the wire, an envelope its rise and fall, and a sequencer its steps.
+- **Gates are on or off.** A green cable shows bright packets with hard edges, one per gate.
+
+When you press **Stop**, the last of the signal drains out of the cables.
+
+Prefer a different look? **Cables** in the toolbar switches the marks between **Chevrons**, **Dots** and **Comets**.
+
 ---
 
 ## Connection Tips
