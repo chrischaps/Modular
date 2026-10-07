@@ -65,6 +65,12 @@ pub const EXAMPLES: &[Example] = &[
         description: "Plays itself: a 16-step acid bassline with a resonant filter, drive and delay",
         json: include_str!("../../patches/rhythmic-sequence.json"),
     },
+    Example {
+        name: "Afterglow",
+        file_name: "afterglow.json",
+        description: "Plays itself: one sequencer transposes another's arpeggio through a chord progression, over a warm pad and dotted-eighth tape echoes",
+        json: include_str!("../../patches/afterglow.json"),
+    },
 ];
 
 /// The example opened when the app starts with nothing else to open.

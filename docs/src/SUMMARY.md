@@ -48,3 +48,4 @@
 - [Lush Pad](./recipes/lush-pad.md)
 - [Generative Ambient](./recipes/generative-ambient.md)
 - [Rhythmic Sequence](./recipes/rhythmic-sequence.md)
+- [Afterglow](./recipes/afterglow.md)
