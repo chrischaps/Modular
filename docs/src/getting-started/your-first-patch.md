@@ -1,213 +1,127 @@
 # Your First Patch
 
-Let's build a simple synthesizer patch from scratch. By the end of this tutorial, you'll have a playable synthesizer with an oscillator, filter, envelope, and output.
+In this tutorial you build a playable synthesizer voice from an empty canvas: an oscillator for the tone, a keyboard to play it, an envelope and a VCA to shape each note, and a filter to color it. It takes about fifteen minutes, and each step adds one idea you'll use in every patch after this one.
 
-![Completed First Patch](../images/tutorial-first-patch.png)
-*The completed first patch*
+![The finished patch: Keyboard, Oscillator, SVF Filter, VCA, ADSR Envelope and Audio Output](../images/tutorial-complete-patch.png)
+*Where you'll end up.*
 
-> **Already have sound?** The app opens on the **First Sound** example: an Oscillator, an ADSR Envelope and a VCA,
-> played from the Keyboard. Press **Play** and play the Z to M keys. Every recipe in this guide is also in
-> **📚 Examples** in the toolbar. To build your own patch from scratch, click **📄 New** and follow along.
+## Before you start: First Sound
 
-## Step 1: Add an Oscillator
+When Modular Synth opens, it loads the **First Sound** example: a Keyboard, an Oscillator, an ADSR Envelope and a VCA, already patched to the Audio Output. Press **▶ Play** in the toolbar and play the `Z` to `M` keys on your computer keyboard. That patch is a smaller version of the one you're about to build, so it's worth a minute of listening first.
 
-Every synthesizer needs a sound source. Let's start with an oscillator.
+To start from scratch, click **📄 New** (`Ctrl + N`). The canvas empties; the status bar says *Right-click to add nodes*. Make sure **▶ Play** is still on (the button reads **⏹ Stop** while the patch plays).
 
-1. **Right-click** on the canvas to open the module browser
-2. Navigate to **Sources > Oscillator**
-3. Click to add the oscillator
+## Step 1: An oscillator you can hear
 
-![Adding an Oscillator](../images/tutorial-add-oscillator.png)
-*Adding an oscillator from the context menu*
+Every patch needs a sound source and a way out.
 
-The oscillator generates a continuous tone. By default, it produces a **sine wave** at **440 Hz** (the note A4).
+1. Right-click empty canvas and choose **Source › Oscillator**.
+2. Right-click to the right of it and choose **Output › Audio Output**.
+3. Drag from the Oscillator's **Out** jack (right edge, blue) to the Audio Output's **Mono** jack. **Mono** sends the signal to both speakers.
 
-### Oscillator Settings
+You should hear a steady tone. The Oscillator starts on a sine wave at C4 (261.63 Hz), and its display draws the wave.
 
-- **Waveform**: Select between Sine, Saw, Square, or Triangle
-- **Frequency**: The pitch in Hz (or controlled by V/Oct input)
-- **Detune**: Fine-tune adjustment in cents
+If you hear nothing, check that the patch is playing, that the toolbar's **Output** menu names the device you're listening on, and that the Audio Output's **Vol** knob isn't at zero.
 
-Try changing the waveform to **Saw** for a brighter, more harmonically rich sound.
+Now change the Oscillator's **Wave** menu from **Sine** to **Saw**. The tone turns bright and buzzy: a sawtooth contains every harmonic, which gives the filter in Step 5 plenty to work with.
 
-## Step 2: Add Audio Output
+> **Tip:** You can also add modules by pressing `Space` over the canvas and typing a few letters, such as `osc` or `out`, then `Enter`.
 
-To hear the oscillator, we need to connect it to the audio output.
+## Step 2: Play it from the keyboard
 
-1. **Right-click** on the canvas
-2. Navigate to **Output > Audio Output**
-3. Click to add the output module
+A tone that never changes isn't much of an instrument.
 
-Position it to the right of the oscillator.
+1. Add a **Source › Keyboard** to the left of the Oscillator.
+2. Patch the Keyboard's **Pitch** output into the Oscillator's **V/Oct** input.
 
-### Connect the Oscillator to Output
+Play the bottom row of your computer keyboard: `Z` is C, `X` is D, and so on up to `M` for B, with the sharps on `S`, `D`, `G`, `H` and `J`. The Keyboard's piano lights up the notes you hold, and the Oscillator follows.
 
-1. Click on the oscillator's **Audio Out** port (right side, blue)
-2. Drag to the output's **Left** input port
-3. Release to create the connection
+**Pitch** is an orange control cable carrying *volts per octave*: each step of 1.0 is one octave, so the Oscillator stays in tune at every note. But the tone still never stops. For that, you need to shape each note.
 
-![First Connection](../images/tutorial-first-connection.png)
-*Connecting the oscillator to the output*
+## Step 3: A VCA to control the level
 
-You should now hear a continuous tone! If not, check that:
-- Your audio device is working
-- The output module's **Level** knob is turned up
-- Your system volume is audible
+A **VCA** (voltage-controlled amplifier) sets the level of whatever passes through it, under the control of another signal.
 
-### Stereo Output
+1. Add a **Utility › VCA** between the Oscillator and the Audio Output.
+2. Patch the Oscillator's **Out** into the VCA's **In**.
+3. Patch the VCA's **Out** into the Audio Output's **Mono**. This replaces the cable that was there, because each input takes one cable.
 
-For stereo sound, also connect the oscillator to the **Right** input, or use the **Mono** input which sends to both channels.
+Nothing changes yet: with nothing patched into its **CV** input, the VCA lets the sound through at full level. The next step gives it something to listen to.
 
-## Step 3: Control the Pitch
+## Step 4: An envelope to shape each note
 
-A synthesizer that plays only one note isn't very useful. Let's add keyboard control.
+An **envelope** draws a shape every time a note is played: it rises when the key goes down and falls when the key comes up.
 
-1. **Right-click** > **MIDI > Keyboard Input**
-2. Position it to the left of the oscillator
+1. Add a **Modulation › ADSR Envelope** below the VCA.
+2. Patch the Keyboard's **Gate** output into the envelope's **Gate** input. Gate is green: it's on while a key is held and off when it's released.
+3. Patch the envelope's **Out** into the VCA's **CV** input.
 
-### Connect Keyboard to Oscillator
+Now each key plays a note that starts and stops. The envelope runs through four stages, each with a knob:
 
-1. Connect the keyboard's **V/Oct** output to the oscillator's **V/Oct** input
-2. Connect the keyboard's **Gate** output (we'll use this later)
+- **Atk** (attack): how long the note takes to reach full level. The default is 10 ms.
+- **Dec** (decay): how long it then takes to fall to the sustain level.
+- **Sus** (sustain): the level held for as long as the key is down.
+- **Rel** (release): how long the note takes to fade after you let go.
 
-![Keyboard Connected](../images/tutorial-keyboard-connected.png)
-*Keyboard controlling the oscillator pitch*
+Try a pluck: turn **Sus** all the way down and **Dec** to about 300 ms, so each note dies away even while you hold the key. Then try a swell: **Atk** around 1 s, **Sus** up, **Rel** around 2 s. The display on the envelope draws each shape as you turn the knobs.
 
-Now press keys on your computer keyboard:
-- **Z, X, C, V, B, N, M** play notes C through B
-- **A, S, D, F, G, H, J** play sharps/flats
-- **Q-P** row plays an octave higher
+## Step 5: A filter to color the tone
 
-The oscillator pitch follows your keyboard input!
+A **filter** removes part of a sound's spectrum. A *lowpass* filter lets the low frequencies through and cuts the high ones, darkening the tone. This is the heart of *subtractive* synthesis: start with a bright waveform, then carve it.
 
-## Step 4: Add an Envelope
+1. Add a **Filter › SVF Filter** between the Oscillator and the VCA.
+2. Patch the filter's **LowPass** output into the VCA's **In**, replacing the cable from the Oscillator.
+3. Patch the Oscillator's **Out** into the filter's **In**.
 
-Right now, the sound plays continuously. An **envelope** shapes the sound over time, giving it a beginning and end.
+Play a few notes and turn the filter's knobs:
 
-1. **Right-click** > **Modulation > ADSR Envelope**
-2. Position it between the keyboard and output
+- **Cutoff** sets where the filter starts cutting. Turn it down and the saw goes dark and muffled; turn it up and the brightness returns. The display draws the filter's response as you turn it.
+- **Res** (resonance) adds a peak at the cutoff, giving the sound a vocal, nasal edge. The default is 0.5. Near the top of its range the filter starts to ring on its own.
 
-### Envelope Parameters
+## Step 6: Let the envelope open the filter
 
-The ADSR envelope has four stages:
+Real instruments are brightest at the start of a note. You can do the same by letting the envelope move the filter's cutoff.
 
-- **Attack**: How quickly the sound rises (0 = instant, higher = gradual fade in)
-- **Decay**: How quickly it falls to the sustain level
-- **Sustain**: The level held while the key is pressed
-- **Release**: How quickly the sound fades after key release
+1. Patch the envelope's **Out** into the filter's **Cutoff** input. One output can feed any number of inputs, so the envelope keeps driving the VCA too.
+2. Turn the **Cutoff** knob down to about 400 Hz.
 
-Set these initial values:
-- Attack: **10ms** (quick start)
-- Decay: **200ms** (moderate decay)
-- Sustain: **0.5** (half volume while held)
-- Release: **300ms** (gentle fade out)
+Each note now opens the filter and closes it again as the envelope decays. The **Cutoff** knob stays live and sets where the sweep starts; the envelope adds up to one octave on top. A small dot above the knob shows that a cable is moving it.
 
-### Connect the Envelope
+For a plucky, percussive bass, set **Atk** to its minimum, **Dec** to about 200 ms and **Sus** low. For a slow, brightening pad, lengthen **Atk**.
 
-1. Connect the keyboard's **Gate** output to the envelope's **Gate** input
-2. Connect the envelope's **Env** output to... we need a VCA!
+## The finished patch
 
-## Step 5: Add a VCA
-
-A **VCA** (Voltage Controlled Amplifier) controls the volume of a signal. We'll use it to apply the envelope to our oscillator.
-
-1. **Right-click** > **Utilities > VCA**
-2. Position it between the oscillator and output
-
-### Connect Everything
-
-1. Disconnect the oscillator from the output (right-click the cable)
-2. Connect the oscillator's **Audio Out** to the VCA's **Input**
-3. Connect the envelope's **Env** output to the VCA's **CV** input
-4. Connect the VCA's **Output** to the audio output's **Mono** input
-
-![VCA Added](../images/tutorial-vca-added.png)
-*The patch with VCA and envelope*
-
-Now when you press a key:
-- The **keyboard** sends Gate and V/Oct
-- The **envelope** responds to the Gate
-- The **VCA** shapes the oscillator volume based on the envelope
-
-Try adjusting the envelope parameters to change the character of the sound!
-
-## Step 6: Add a Filter
-
-Filters shape the harmonic content of a sound by removing frequencies. Let's add a **low-pass filter** to warm up our tone.
-
-1. **Right-click** > **Filters > SVF Filter**
-2. Position it between the oscillator and VCA
-
-### Connect the Filter
-
-1. Disconnect the oscillator from the VCA
-2. Connect oscillator **Audio Out** to filter **Input**
-3. Connect filter **Lowpass** output to VCA **Input**
-
-### Filter Settings
-
-- **Cutoff**: The frequency where filtering begins (lower = darker sound)
-- **Resonance**: Emphasizes frequencies at the cutoff (creates a peak)
-
-Set cutoff to around **1000 Hz** and resonance to **0.3** for a warm, slightly vocal quality.
-
-![Filter Added](../images/tutorial-filter-added.png)
-*Adding the SVF filter to the signal chain*
-
-## Step 7: Modulate the Filter (Optional)
-
-For a more dynamic sound, let's make the filter open and close with each note using the envelope.
-
-### Add Filter Envelope Control
-
-You can use the same envelope or add a second one:
-
-1. Connect the envelope's **Env** output to the filter's **Cutoff** input
-
-Now the filter cutoff follows the envelope shape:
-- Filter opens during attack
-- Closes during decay
-- Stays partially open during sustain
-- Closes during release
-
-Adjust the **Cutoff** knob to set the baseline, and the envelope adds movement on top.
-
-## Complete Patch Overview
-
-Here's the final signal flow:
-
-```
-[Keyboard] ──V/Oct──> [Oscillator] ──Audio──> [Filter] ──Audio──> [VCA] ──Audio──> [Output]
-    │                                            ↑                   ↑
-    └───────Gate────> [ADSR Envelope] ───────────┴───────────────────┘
+```text
+[Keyboard Pitch] ──> [Oscillator V/Oct]
+[Keyboard Gate]  ──> [ADSR Envelope Gate]
+[Oscillator Out] ──> [SVF Filter In]
+[SVF Filter LowPass] ──> [VCA In]
+[ADSR Envelope Out]  ──> [VCA CV]
+[ADSR Envelope Out]  ──> [SVF Filter Cutoff]
+[VCA Out] ──> [Audio Output Mono]
 ```
 
-![Complete Patch](../images/tutorial-complete-patch.png)
-*The complete first patch*
+Save it with **💾 Save** (`Ctrl + S`).
 
-## What You've Learned
+The signal path runs left to right: the oscillator makes the tone, the filter colors it, and the VCA shapes its level. The keyboard and envelope sit off to the side, controlling the others. Nearly every subtractive synthesizer, hardware or software, is built this way.
 
-- **Adding modules** from the context menu
-- **Connecting modules** by dragging between ports
-- **Signal flow**: Oscillator → Filter → VCA → Output
-- **Control signals**: Gate triggers the envelope, V/Oct controls pitch
-- **Modulation**: Using the envelope to control both VCA and filter
+## What you've learned
 
-## Experimentation Ideas
+- Modules are added from the right-click menu or with `Space`, and connected by dragging from an output to an input.
+- **Audio** (blue) is the sound itself; **control** (orange) moves things, like pitch and cutoff; **gates** (green) say when a note is on.
+- An envelope through a VCA turns a constant tone into notes.
+- One output can drive several inputs, and a cable into a knob's jack moves that knob.
 
-Try these modifications:
+## Things to try
 
-1. **Change the waveform** - Saw and Square have more harmonics for the filter to work with
-2. **Add an LFO** - Connect it to the filter cutoff for a wobbling effect
-3. **Increase resonance** - Higher resonance creates a more dramatic filter sweep
-4. **Adjust envelope** - Long attack creates pad sounds, short attack creates plucks
-5. **Add reverb** - Insert a reverb effect between VCA and output
+- **Use separate envelopes.** Add a second ADSR Envelope for the filter, also gated by the Keyboard, so brightness and loudness can have different shapes.
+- **Add velocity.** Patch the Keyboard's **Velocity** into the envelope's **Velocity** input, then lower the Keyboard's **Vel** knob for quieter notes.
+- **Add movement.** Patch a **Modulation › LFO** into the filter's **Cutoff** for a slow sweep. Its **Out** swings the cutoff an octave either way.
+- **Add space.** Put an **Effect › Reverb** between the VCA and the Audio Output: VCA **Out** into Reverb **In L**, then the Reverb's **Out L** and **Out R** into the output's **Left** and **Right**.
+- **Watch it.** Patch the VCA's **Out** into a **Utility › Oscilloscope** as well as the output to see the envelope shape the wave.
 
-## Next Steps
+## Next
 
-Now that you've built your first patch:
-
-- **[Signal Types](../concepts/signal-types.md)** - Understand the different signal types in depth
-- **[Module Reference](../modules/README.md)** - Explore all available modules
-- **[Basic Subtractive Synth](../recipes/basic-subtractive.md)** - A more complete subtractive synthesizer recipe
-- **[FM Synthesis](../recipes/fm-synthesis.md)** - Try a different synthesis technique
+- [Signal Types](../concepts/signal-types.md) explains what each cable color carries and what can connect to what.
+- [Basic Subtractive Synth](../recipes/basic-subtractive.md) takes this patch further, with separate envelopes for brightness and volume. It's in **📚 Examples** too.
+- The [module reference](../modules/index.md) has a page for every module.

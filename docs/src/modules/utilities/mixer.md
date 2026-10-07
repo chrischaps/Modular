@@ -1,209 +1,99 @@
 # Mixer
 
-**Module ID**: `util.mixer`
-**Category**: Utilities
-**Header Color**: Yellow
+**Module ID** `util.mixer` · **Category** Utility
 
 ![Mixer Module](../../images/module-mixer.png)
-*The Mixer module*
+*Two channels, two levels, one sum.*
 
-## Description
+The Mixer adds two signals together, each at its own level. Use it to layer two oscillators, blend a dry signal with an effect, or combine two modulation sources into one CV.
 
-The Mixer combines multiple audio or control signals into a single output. This 2-channel mixer allows you to blend signals with independent level control for each channel, plus a master output level.
-
-Mixers are essential for:
-- Combining multiple oscillators
-- Blending modulation sources
-- Creating submixes before effects
-- Layering sounds
+It works on any signal that isn't MIDI. Audio and control signals both patch straight in, so the same module mixes sound or modulation.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Ch 1** | Audio/Control (Blue/Orange) | First input channel |
-| **Ch 2** | Audio/Control (Blue/Orange) | Second input channel |
+| **Ch 1** | Audio (Blue) | First signal to mix |
+| **Ch 2** | Audio (Blue) | Second signal to mix |
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Mix** | Audio/Control (Blue/Orange) | Combined output of both channels |
+| **Out** | Audio (Blue) | Both channels, each at its level, added together |
 
 ## Parameters
 
 | Knob | Range | Default | Description |
 |------|-------|---------|-------------|
-| **Ch 1 Level** | 0.0 - 1.0 | 1.0 | Level of channel 1 in the mix |
-| **Ch 2 Level** | 0.0 - 1.0 | 1.0 | Level of channel 2 in the mix |
-| **Master** | 0.0 - 1.0 | 1.0 | Overall output level |
+| **Lv 1** (Level 1) | 0 – 100% | 100% | Level of channel 1 |
+| **Lv 2** (Level 2) | 0 – 100% | 100% | Level of channel 2 |
 
-## How It Works
+Both levels are smoothed, so you can ride them while the patch plays without clicks.
 
-The mixer sums the inputs after applying their respective levels:
+## How it works
 
-```
-Mix = (Ch1 × Ch1Level + Ch2 × Ch2Level) × Master
-```
-
-**Important**: Summing two full-scale signals can exceed the -1 to +1 range. Use the channel levels to prevent clipping, or rely on the output module's limiter.
-
-## Usage Tips
-
-### Combining Oscillators
-
-Create a richer sound by mixing multiple oscillators:
-
-```
-[Oscillator 1 (Saw)] ──> [Mixer Ch 1]
-[Oscillator 2 (Square)] ──> [Mixer Ch 2]
-[Mixer] ──> [Filter] ──> [VCA] ──> [Output]
+```text
+Out = Ch 1 × Level 1 + Ch 2 × Level 2
 ```
 
-- Detune oscillators slightly for thickness
-- Use different waveforms for complexity
-- Adjust levels to taste
+At the default levels, two full-scale signals add up to twice full scale. Anything past ±1 is clipped hard, so when you mix two loud sources, bring the levels down to around 50–70% each.
 
-### Detuned Unison
+### Polyphonic cables
 
-Classic "supersaw" technique:
+The Mixer isn't polyphonic: it mixes down. A polyphonic cable into **Ch 1** or **Ch 2** is summed to one channel, so a whole polyphonic voice goes straight in. Each note adds to the total, so leave more headroom the more voices you play.
 
-```
-[Osc 1 (Detune: 0)] ──> [Mixer Ch 1]
-[Osc 2 (Detune: +7 cents)] ──> [Mixer Ch 2]
-```
+## Patches
 
-The slight pitch difference creates a chorusing effect.
+### Two oscillators
 
-### Octave Layering
+Two oscillators a few cents apart beat slowly against each other and sound thicker than either alone:
 
-Add harmonic richness:
-
-```
-[Osc 1 (C3)] ──> [Mixer Ch 1]
-[Osc 2 (C4, octave up)] ──> [Mixer Ch 2] (Level: 0.5)
+```text
+[Keyboard Pitch] ──> [Oscillator 1 V/Oct]
+[Keyboard Pitch] ──> [Oscillator 2 V/Oct]      (Fine +7 cents)
+[Oscillator 1 Out] ──> [Mixer Ch 1]
+[Oscillator 2 Out] ──> [Mixer Ch 2]
+[Mixer Out] ──> [SVF Filter In]
 ```
 
-Lower the higher octave to keep the fundamental prominent.
+Set the second oscillator's **Oct** to +1 and its level to about 50% to add brightness without losing the fundamental. For a thick stack from one module, try the Oscillator's own **Voices** and **Sub** instead (see [Oscillator](../sources/oscillator.md)).
 
-### Blending Modulation
+### Two modulation sources
 
-Combine modulation sources:
+A slow LFO and an envelope together: the filter follows each note and drifts as well.
 
-```
-[LFO (slow)] ──> [Mixer Ch 1]
-[Envelope] ──> [Mixer Ch 2]
-[Mixer] ──> [Filter Cutoff CV]
-```
-
-The filter responds to both the cyclic LFO and the triggered envelope.
-
-### Wet/Dry Effect Blend
-
-Mix processed and original signals:
-
-```
-[Audio] ──> [Effect Input]
-        ──> [Mixer Ch 1] (Dry)
-[Effect Output] ──> [Mixer Ch 2] (Wet)
-[Mixer] ──> [Output]
+```text
+[LFO Out] ──> [Mixer Ch 1]          (Lv 1 around 30%)
+[ADSR Out] ──> [Mixer Ch 2]
+[Mixer Out] ──> [SVF Filter Cutoff]
 ```
 
-Adjust channel levels to control effect intensity.
+### Wet and dry
 
-### Audio + Sub-Oscillator
+Most effects have their own **Mix** knob, but the Mixer keeps the dry and wet signals on separate channels, so you can set their balance by hand or process one without the other:
 
-Add weight with a sub-bass:
-
-```
-[Main Osc (Saw)] ──> [Mixer Ch 1]
-[Sub Osc (Sine, -1 octave)] ──> [Mixer Ch 2] (Level: 0.6)
-```
-
-### Chaining Mixers
-
-Need more than 2 channels? Chain mixers:
-
-```
-[Osc 1] ──> [Mixer A Ch 1]
-[Osc 2] ──> [Mixer A Ch 2]
-[Mixer A] ──> [Mixer B Ch 1]
-[Osc 3] ──> [Mixer B Ch 2]
-[Mixer B] ──> [Output]
+```text
+[VCA Out] ──> [Mixer Ch 1]          (dry)
+[VCA Out] ──> [Reverb In L]
+[Reverb Out L] ──> [Mixer Ch 2]     (wet, Reverb Mix at 100%)
+[Mixer Out] ──> [Audio Output Mono]
 ```
 
-Or use multiple mixers into a final mixer.
+### More than two channels
 
-### Level Staging
+Chain Mixers: the output of one feeds a channel of the next.
 
-Manage levels to avoid clipping:
-
-1. Set individual channel levels to ~0.7 each
-2. Adjust Master to compensate
-3. Watch output levels (use Oscilloscope if needed)
-
-### Crossfading
-
-Create a crossfade with complementary levels:
-
-```
-Ch 1 Level: 1.0 → 0.0
-Ch 2 Level: 0.0 → 1.0
+```text
+[Oscillator 1 Out] ──> [Mixer A Ch 1]
+[Oscillator 2 Out] ──> [Mixer A Ch 2]
+[Mixer A Out] ──> [Mixer B Ch 1]
+[Oscillator 3 Out] ──> [Mixer B Ch 2]
+[Mixer B Out] ──> [Audio Output Mono]
 ```
 
-As one fades out, the other fades in. Automate with an LFO or envelope.
+## Related modules
 
-## Connection Examples
-
-### Dual Oscillator Synth
-```
-[Keyboard V/Oct] ──> [Osc 1 V/Oct]
-                 ──> [Osc 2 V/Oct]
-[Osc 1] ──> [Mixer Ch 1]
-[Osc 2] ──> [Mixer Ch 2]
-[Mixer] ──> [Filter] ──> [VCA] ──> [Output]
-```
-
-### Parallel Modulation
-```
-[LFO] ──> [Mixer Ch 1]
-[Random/S&H] ──> [Mixer Ch 2]
-[Mixer] ──> [Parameter CV]
-```
-
-### Submix for Effects
-```
-[Lead Synth] ──> [Mixer Ch 1]
-[Pad Synth] ──> [Mixer Ch 2]
-[Mixer] ──> [Reverb] ──> [Output]
-```
-
-## Gain Staging Tips
-
-| Scenario | Ch 1 | Ch 2 | Master |
-|----------|------|------|--------|
-| Equal blend | 0.7 | 0.7 | 1.0 |
-| Ch 1 dominant | 0.9 | 0.4 | 1.0 |
-| Subtle layer | 1.0 | 0.2 | 1.0 |
-| Quiet mix | 1.0 | 1.0 | 0.5 |
-
-## Audio vs Control Signals
-
-The mixer works with both audio and control signals:
-
-**Audio Mixing**:
-- Combines waveforms
-- Creates complex timbres
-- Watch for clipping
-
-**Control Mixing**:
-- Combines modulation sources
-- Creates complex modulation shapes
-- No clipping concerns (but consider destination range)
-
-## Related Modules
-
-- [Oscillator](../sources/oscillator.md) - Primary signals to mix
-- [VCA](./vca.md) - Level control for individual sources
-- [Attenuverter](./attenuverter.md) - Scale signals before mixing
-- [Audio Output](../output/audio-output.md) - Final destination with metering
+- [VCA](./vca.md): level control from a CV
+- [Attenuverter](./attenuverter.md): scale, invert or offset a signal before mixing
+- [Audio Output](../output/audio-output.md): the final mix, with metering and a limiter

@@ -1,221 +1,112 @@
 # Clock
 
-**Module ID**: `mod.clock`
-**Category**: Modulation
-**Header Color**: Orange
+**Module ID** `util.clock` · **Category** Utility
 
 ![Clock Module](../../images/module-clock.png)
-*The Clock module*
+*The Gate jack lights with every pulse.*
 
-## Description
+The Clock is the patch's metronome. It sends a steady stream of gate pulses at a tempo you set, for stepping a [Sequencer](../utilities/sequencer.md), firing envelopes on the beat, or triggering a [Sample & Hold](../utilities/sample-hold.md).
 
-The Clock module generates rhythmic pulse signals at a specified tempo. It's the heartbeat of sequenced and rhythmic patches, providing timing signals to sequencers, envelopes, sample & hold circuits, and any module that needs regular triggers.
-
-The clock outputs multiple synchronized divisions of the main tempo, allowing complex polyrhythmic patterns from a single clock source.
+It also sets the **patch tempo**. Tempo-synced modules, such as the [Delay](../effects/delay.md) with its **Sync** set to a note length, follow the Clock's **BPM**, and keep following it as you turn the knob.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Ext Clock** | Gate (Green) | External clock input. When connected, overrides internal tempo |
-| **Reset** | Gate (Green) | Reset all divisions to beat 1 on rising edge |
-| **Run** | Gate (Green) | Gate high = running, gate low = stopped |
+| **Sync** | Gate (Green) | A rising edge restarts the beat, so the next pulse starts right away |
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **1/1** | Gate (Green) | Whole note (1 pulse per bar in 4/4) |
-| **1/2** | Gate (Green) | Half note (2 pulses per bar) |
-| **1/4** | Gate (Green) | Quarter note (4 pulses per bar, main beat) |
-| **1/8** | Gate (Green) | Eighth note (8 pulses per bar) |
-| **1/16** | Gate (Green) | Sixteenth note (16 pulses per bar) |
-| **1/32** | Gate (Green) | Thirty-second note (32 pulses per bar) |
+| **Gate** | Gate (Green) | One pulse per division. The jack lights while the gate is high |
 
 ## Parameters
 
-| Knob | Range | Default | Description |
-|------|-------|---------|-------------|
-| **BPM** | 20 - 300 | 120 | Tempo in beats per minute |
-| **Swing** | 0% - 75% | 0% | Swing amount for odd-numbered pulses |
-| **Pulse Width** | 1% - 99% | 50% | Gate duration as percentage of beat |
-| **Run** | On/Off | On | Start/stop the clock |
+| Control | Range | Default | Description |
+|---------|-------|---------|-------------|
+| **BPM** | 20 – 300 BPM | 120 | Tempo in beats (quarter notes) per minute |
+| **Gate** | 1 – 99% | 50% | How much of each pulse the gate stays high |
+| **Div** | 1, 1/2, 1/4, 1/8, 1/16 | 1/4 | Dropdown on the node. Pulse rate relative to the beat |
+| **Run** | On / Off | On | Checkbox on the node. Off holds the gate low and pauses the clock |
 
-## Understanding Divisions
+## Divisions
 
-Clock divisions relate to musical note values:
+**BPM** counts quarter notes, and **Div** sets how many pulses that makes:
 
-| Output | Name | Pulses per Bar (4/4) | Use Case |
-|--------|------|----------------------|----------|
-| 1/1 | Whole | 1 | Downbeat, once per bar |
-| 1/2 | Half | 2 | Half-time feel |
-| 1/4 | Quarter | 4 | Main beat, typical tempo |
-| 1/8 | Eighth | 8 | Double-time, hi-hat patterns |
-| 1/16 | Sixteenth | 16 | Fast sequencing, rolls |
-| 1/32 | Thirty-second | 32 | Very fast, trills |
+| Div | One pulse every | At 120 BPM |
+|-----|-----------------|------------|
+| **1** | 4 beats (a bar of 4/4) | 2 s |
+| **1/2** | 2 beats | 1 s |
+| **1/4** | Beat | 500 ms |
+| **1/8** | Half beat | 250 ms |
+| **1/16** | Quarter beat | 125 ms |
 
-At 120 BPM:
-- 1/4 note = 2 pulses per second (500ms apart)
-- 1/8 note = 4 pulses per second (250ms apart)
-- 1/16 note = 8 pulses per second (125ms apart)
+A Clock has one output, so for two rhythms at once, use two Clocks at the same BPM, each with its own division.
 
-## Usage Tips
+## Gate length
 
-### Basic Sequencer Clocking
+**Gate** sets how long each pulse stays high, as a share of the time between pulses. At 50% the gate is high for half of each pulse. Short gates (5 to 20%) suit drums and plucks: the envelope gets its attack and goes straight to release. Long gates (80 to 99%) hold an envelope in its sustain, so notes run nearly into one another.
 
-Drive a sequencer at eighth-note speed:
+## Sync and Run
 
-```
-[Clock 1/8] ──> [Sequencer Clock In]
-```
+A rising edge at **Sync** restarts the beat from the top. Use it to line the Clock up with another Clock, a sequencer's **EOC**, or any trigger. The Clock keeps its own tempo; Sync only moves where the beat falls.
 
-### Multiple Rhythmic Elements
+Unticking **Run** holds the gate low and freezes the clock where it is. Ticking it again carries on from the same point in the beat.
 
-Use different divisions for different parts:
+## The patch tempo
 
-```
-[Clock 1/4] ──> [Kick Envelope Gate]
-[Clock 1/8] ──> [Hi-Hat Envelope Gate]
-[Clock 1/16] ──> [Sequencer Clock]
-```
+The Clock's **BPM** is the tempo for the whole patch. A Delay set to sync to 1/8 echoes on the eighth note of whatever the Clock is playing, and if you change the BPM the echoes move with it. Without a Clock in the patch, synced modules assume 120 BPM.
 
-### Adding Swing
+If a patch has more than one Clock, synced modules follow just one of them, so give them all the same BPM.
 
-Swing shifts every other pulse slightly late, creating a "groove" feel:
+## Patch examples
 
-- **0%**: Straight, mechanical timing
-- **25%**: Light swing, subtle groove
-- **50%**: Medium swing, jazzy feel
-- **67%**: Heavy swing, triplet-like
-- **75%**: Maximum swing, very loose
+### Stepping a sequencer
 
-Swing is applied to the even-numbered pulses of each division.
-
-### Syncing LFOs
-
-Reset LFO phase on each beat:
-
-```
-[Clock 1/4] ──> [LFO Sync]
+```text
+[Clock Gate] ──> [Sequencer Clock]
+[Sequencer Pitch] ──> [Oscillator V/Oct]
+[Sequencer Gate] ──> [ADSR Gate]
 ```
 
-This ensures the LFO always starts at the same point on each beat.
+Set **Div** to 1/8 or 1/16 for a running bassline.
 
-### Reset for Song Start
+### Notes on the beat
 
-Use reset to synchronize everything:
-
-```
-[Start Button] ──> [Clock Reset]
-                   [Clock Run]
-```
-
-Reset brings all divisions back to beat 1, ensuring everything starts together.
-
-### External Clock Sync
-
-Sync to external gear or DAW:
-
-```
-[MIDI Clock In] ──> [Clock Ext Clock]
+```text
+[Clock Gate] ──> [ADSR Gate]
+[ADSR Out] ──> [VCA CV]
+[Oscillator Out] ──> [VCA In] ──> [Audio Output]
 ```
 
-When Ext Clock is connected, the internal BPM is ignored and the clock follows the external tempo.
+A drone that sounds once per pulse. Lower the **BPM** to 40 to 60 and lengthen the envelope's release for slow, ambient swells.
 
-### Creating Polyrhythms
+### Restarting an LFO on the beat
 
-Combine divisions for polyrhythmic patterns:
-
-```
-[Clock 1/4] ──> [Sequencer A Clock] (4 steps)
-[Clock 1/8] ──> [Sequencer B Clock] (6 steps)
+```text
+[Clock Gate] ──> [LFO Sync]
 ```
 
-The different cycle lengths create evolving patterns.
+With **Div** at 1 and the LFO at a matching rate, every bar starts the LFO's sweep from the top.
 
-### Gate Length (Pulse Width)
+### Echoes in time
 
-Pulse Width controls how long each gate stays high:
-
-- **Short (10-25%)**: Staccato, percussive triggers
-- **Medium (50%)**: Standard gate length
-- **Long (75-99%)**: Legato, overlapping notes
-
-```
-[Clock] (Pulse Width: 75%) ──> [ADSR Gate]
+```text
+[Clock] (BPM 100)
+[Synth voice] ──> [Delay In L]   (Delay Sync: 1/8D)
 ```
 
-Longer gates give envelopes more time in the sustain phase.
+The Delay needs no cable from the Clock to follow its tempo.
 
-### Run/Stop Control
+## Notes
 
-Use the Run input or button to start/stop:
+- The Clock is monophonic. It sends the same gate to every voice of a polyphonic module.
+- The Clock runs with the transport. **Stop** halts it with the rest of the patch, and **Play** starts it again from the top of the beat.
 
-```
-[Toggle Button] ──> [Clock Run]
-```
+## Related modules
 
-When stopped, clock outputs go low. When restarted, timing resumes (use Reset for consistent restart position).
-
-## Building Patterns
-
-### 4-on-the-Floor
-```
-[Clock 1/4] ──> [Kick Trigger]
-```
-
-### Basic Rock Beat
-```
-[Clock 1/4] ──> [Kick] (beats 1, 3)
-[Clock 1/4] ──> [Snare] (beats 2, 4 - offset)
-[Clock 1/8] ──> [Hi-Hat]
-```
-
-### Driving Sequence
-```
-[Clock 1/16] ──> [Sequencer Clock]
-[Clock 1/1] ──> [Sequencer Reset]
-```
-
-### Ambient Pulses
-```
-[Clock 1/2] ──> [Envelope Gate]
-(BPM: 40-60)
-```
-
-## Connection Examples
-
-### Complete Rhythm Section
-```
-[Clock] ──1/4──> [Kick ADSR]
-        ──1/8──> [Sequencer] ──> [Bass Oscillator]
-        ──1/16──> [Hi-Hat ADSR]
-        ──1/1──> [Sequencer Reset]
-```
-
-### Synced Modulation
-```
-[Clock] ──1/4──> [LFO Sync]
-        ──1/8──> [Sample & Hold Trigger]
-```
-
-### Polymetric Setup
-```
-[Clock 1/8] ──> [Sequencer A (8 steps)]
-            ──> [Sequencer B (6 steps)]
-            ──> [Sequencer C (5 steps)]
-```
-
-## Tips for Tight Timing
-
-1. **Use Reset**: Always reset when starting to ensure all modules are synchronized
-2. **Match Pulse Widths**: If modules expect specific gate lengths, adjust Pulse Width
-3. **Consider Latency**: Audio processing has some latency; very fast divisions may drift
-4. **External Sync**: For critical timing with other gear, use external clock from your DAW
-
-## Related Modules
-
-- [Sequencer](../utilities/sequencer.md) - Primary clock destination
-- [ADSR Envelope](./adsr.md) - Gate inputs for rhythmic envelopes
-- [LFO](./lfo.md) - Sync input for tempo-locked modulation
-- [Sample & Hold](../utilities/sample-hold.md) - Clock-triggered sampling
+- [Sequencer](../utilities/sequencer.md), the Clock's most common partner
+- [ADSR Envelope](./adsr.md) to turn pulses into notes
+- [LFO](./lfo.md) to restart modulation on the beat
+- [Delay](../effects/delay.md), which follows the Clock's tempo when synced

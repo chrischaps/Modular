@@ -1,219 +1,118 @@
 # VCA
 
-**Module ID**: `util.vca`
-**Category**: Utilities
-**Header Color**: Yellow
+**Module ID** `util.vca` · **Category** Utility
 
 ![VCA Module](../../images/module-vca.png)
-*The VCA module*
+*Level sets the ceiling; whatever arrives at CV opens the gate up to it.*
 
-## Description
+A VCA (voltage-controlled amplifier) sets how loud a signal is, moment to moment, from a control signal. Patch an envelope into **CV** and a droning oscillator becomes a note that starts when you press a key and fades when you let go. Patch an LFO in instead and you have tremolo.
 
-The **Voltage Controlled Amplifier** (VCA) controls the amplitude (volume) of a signal based on a control voltage input. It's an essential building block that allows envelopes, LFOs, and other control signals to shape the dynamics of your sound.
+The VCA doesn't care what it's amplifying. Run an LFO through it instead of audio and the CV now sets how much modulation gets through, which is how you make vibrato that fades in or a filter wobble that follows an envelope.
 
-Despite the name suggesting audio use only, VCAs can process any signal type—they're equally useful for controlling the amount of modulation in a patch.
+The VCA is polyphonic. Patch a polyphonic voice through it and every voice gets its own gain, set by its own channel of the CV cable.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Input** | Audio (Blue) | Signal to be amplitude controlled |
-| **CV** | Control (Orange) | Control voltage input. 0 = silence, 1 = full volume |
+| **In** | Audio (Blue) | The signal to shape |
+| **CV** | Control (Orange) | Gain, from 0 to 1. Values outside that range are clamped. With nothing patched, CV sits at 1 (fully open) |
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Output** | Audio (Blue) | Amplitude-controlled signal |
+| **Out** | Audio (Blue) | The input, scaled by Level and CV |
 
 ## Parameters
 
 | Knob | Range | Default | Description |
 |------|-------|---------|-------------|
-| **Level** | 0.0 - 1.0 | 1.0 | Base output level (multiplied with CV) |
-| **Response** | Linear/Exponential | Exponential | How CV affects amplitude |
+| **Level** | 0 – 100% | 100% | Overall output level |
+| **CV Amt** (CV Amount) | 0 – 100% | 100% | How much CV controls the level. At 0% the CV is ignored |
 
-## How It Works
+## How it works
 
-The VCA multiplies the input signal by the CV value:
+The VCA multiplies the input by a gain:
 
-```
-Output = Input × CV × Level
-```
-
-- **CV = 0**: Output is silent (signal × 0)
-- **CV = 0.5**: Output at half amplitude
-- **CV = 1**: Output at full amplitude (determined by Level knob)
-
-### Linear vs Exponential Response
-
-**Linear**:
-- Direct relationship: double the CV, double the volume
-- Best for tremolo and amplitude modulation
-- Used for CV processing
-
-**Exponential**:
-- Matches human perception of loudness
-- Small CV changes are subtle, large changes are dramatic
-- Best for envelope-controlled volume (most common use)
-
-## Usage Tips
-
-### Basic Envelope Control
-
-The most common VCA use—shaping volume with an envelope:
-
-```
-[Keyboard] ──Gate──> [ADSR] ──> [VCA CV]
-[Oscillator] ──> [VCA Input] ──> [Output]
+```text
+gain = Level × (1 - CV Amount + CV × CV Amount)
+Out  = In × gain
 ```
 
-When you press a key:
-1. Gate triggers the envelope
-2. Envelope shapes the CV
-3. VCA lets sound through based on envelope level
+With **CV Amt** at 100% (the default), the gain is **Level** times the CV: silent at CV 0, full Level at CV 1. Lower **CV Amt** and the VCA never closes completely. At 50%, a CV of 0 leaves the signal at half Level, so the envelope or LFO only takes away half the volume. That's a quick way to get a gentle tremolo, or a note that dips rather than stops.
 
-Without a VCA (or with CV always at 1), the oscillator would drone continuously.
+The response is linear: a CV of 0.5 gives half the amplitude. Envelopes with curved stages (see [ADSR Envelope](../modulation/adsr.md)) give the fade its shape.
+
+Both knobs are smoothed, so turning them while a note plays doesn't click.
+
+### Bipolar signals into CV
+
+CV is clamped to 0–1, so the negative half of a bipolar signal shuts the VCA. A bipolar LFO into CV gives a tremolo that's silent half the time. For an even tremolo, switch the LFO's **Bipolar** off so it swings from 0 to 1.
+
+For the same reason, an audio-rate oscillator into CV doesn't give true ring modulation. The VCA passes the top half of the modulator's wave and blocks the bottom half: a rougher amplitude modulation with the carrier still audible.
+
+## Patches
+
+### Envelope-shaped note
+
+The VCA's main job. The envelope opens it on each key press and closes it on release:
+
+```text
+[Keyboard Pitch] ──> [Oscillator V/Oct]
+[Keyboard Gate] ──> [ADSR Gate]
+[Oscillator Out] ──> [VCA In]
+[ADSR Out] ──> [VCA CV]
+[VCA Out] ──> [Audio Output Mono]
+```
+
+Without the VCA, the oscillator drones forever.
 
 ### Tremolo
 
-Use an LFO for rhythmic volume variation:
-
-```
-[LFO] ──> [VCA CV]
-[Oscillator] ──> [VCA Input] ──> [Output]
+```text
+[LFO Out] ──> [VCA CV]          (LFO Bipolar off, Rate 4–8 Hz)
+[Oscillator Out] ──> [VCA In] ──> [Audio Output Mono]
 ```
 
-- **Rate**: 4-8 Hz for classic tremolo
-- **Response**: Linear for more pronounced effect
-- The sound pulses in volume with the LFO rhythm
+Turn **CV Amt** down to make the tremolo shallower.
 
-### Modulation Amount Control
+### Modulation that follows a note
 
-Use a VCA to control how much modulation reaches a destination:
+Put an LFO through the VCA and let an envelope set how much of it reaches the filter. The wobble swells as the note develops:
 
-```
-[LFO] ──> [VCA Input]
-[Envelope] ──> [VCA CV]
-[VCA Output] ──> [Filter Cutoff]
+```text
+[LFO Out] ──> [VCA In]
+[ADSR Out] ──> [VCA CV]          (slow Attack)
+[VCA Out] ──> [SVF Filter Cutoff]
 ```
 
-This creates modulation that fades in/out with the envelope—the filter wobble increases as the note develops.
+### A polyphonic voice
 
-### Manual Level Control
+With [Poly MIDI](../midi/poly-midi.md) feeding a polyphonic oscillator and envelope, one VCA handles every voice. Each voice's envelope opens its own channel:
 
-Without CV connected, the Level knob acts as a simple volume control:
-
-```
-[Signal] ──> [VCA] ──> [Mixer]
-             (Level: 0.7)
-```
-
-### Ducking/Sidechain
-
-Create pumping effects by using an inverted envelope:
-
-```
-[Kick Trigger] ──> [ADSR] ──> [Attenuverter (inverted)] ──> [VCA CV]
-[Pad] ──> [VCA Input] ──> [Output]
+```text
+[Poly MIDI Gate] ──> [ADSR Gate]
+[Oscillator Out] ──> [VCA In]
+[ADSR Out] ──> [VCA CV]
+[VCA Out] ──> [Audio Output Mono]
 ```
 
-When the kick hits, the pad ducks down, then rises back up.
+Voices add up at the output, so a four-note chord is about four times as loud as one note. Pull **Level** down to leave headroom. A mono cable into **CV** (a single LFO, say) is shared by every voice.
 
-### Ring Modulation
+## Placement
 
-At audio-rate CV, VCA becomes a ring modulator:
+The VCA usually sits after the filter and before the effects:
 
-```
-[Oscillator 1] ──> [VCA Input]
-[Oscillator 2] ──> [VCA CV]
-[VCA Output] ──> [Output]
+```text
+[Oscillator] ──> [Filter] ──> [VCA] ──> [Delay] ──> [Reverb] ──> [Audio Output]
 ```
 
-This creates sum and difference frequencies—metallic, bell-like tones.
+That way the delay and reverb hear each note's release and carry its tail on after the VCA has closed.
 
-### CV Crossfading
+## Related modules
 
-Use a VCA to fade between two signals:
-
-```
-[Signal A] ──> [VCA 1 Input]
-[Signal B] ──> [VCA 2 Input]
-[Crossfade CV] ──> [VCA 1 CV]
-[Inverted Crossfade CV] ──> [VCA 2 CV]
-[VCA 1 + VCA 2] ──> [Mixer] ──> [Output]
-```
-
-### Velocity Sensitivity
-
-Scale envelope output by MIDI velocity:
-
-```
-[MIDI Note Velocity] ──> [VCA CV]
-[ADSR Output] ──> [VCA Input]
-[VCA Output] ──> [Final VCA CV]
-```
-
-Harder key presses result in louder notes.
-
-## VCA Placement in Signal Chain
-
-VCAs typically go near the end of the audio chain:
-
-```
-[Oscillator] ──> [Filter] ──> [VCA] ──> [Effects] ──> [Output]
-                              ↑
-                         [Envelope]
-```
-
-**Why this order?**
-- Oscillator generates sound
-- Filter shapes tone
-- VCA controls volume
-- Effects process the shaped sound
-
-## Connection Examples
-
-### Standard Synth Voice
-```
-[Oscillator] ──> [Filter] ──> [VCA] ──> [Output]
-                    ↑            ↑
-              [Envelope 1]  [Envelope 2]
-```
-
-### Tremolo Effect
-```
-[Oscillator] ──> [Filter] ──> [VCA] ──> [Output]
-                                 ↑
-                              [LFO]
-```
-
-### Modulation Depth Control
-```
-[LFO] ──> [VCA] ──> [Filter Cutoff CV]
-            ↑
-      [Mod Wheel]
-```
-
-### Velocity-Sensitive Patch
-```
-[MIDI Velocity] ──> [VCA 1 CV]
-[Envelope] ──> [VCA 1 Input]
-[VCA 1 Output] ──> [VCA 2 CV]
-[Oscillator] ──> [Filter] ──> [VCA 2] ──> [Output]
-```
-
-## Tips
-
-1. **Always use a VCA** for envelope-controlled sounds—it's what turns a drone into a playable note
-2. **Exponential response** sounds more natural for volume changes
-3. **Linear response** is better for AM/tremolo effects
-4. **Chain VCAs** for complex amplitude control
-5. **Use the Level knob** to balance signals in your patch
-
-## Related Modules
-
-- [ADSR Envelope](../modulation/adsr.md) - Primary CV source for VCA
-- [LFO](../modulation/lfo.md) - Tremolo modulation source
-- [Mixer](./mixer.md) - Combine multiple VCA outputs
-- [Attenuverter](./attenuverter.md) - Scale CV before VCA
+- [ADSR Envelope](../modulation/adsr.md): the usual CV source
+- [LFO](../modulation/lfo.md): tremolo and modulation depth
+- [Attenuverter](./attenuverter.md): scale or invert a CV before it reaches the VCA
+- [Mixer](./mixer.md): combine several VCA outputs

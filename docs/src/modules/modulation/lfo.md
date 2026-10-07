@@ -1,262 +1,123 @@
 # LFO
 
-**Module ID**: `mod.lfo`
-**Category**: Modulation
-**Header Color**: Orange
+**Module ID** `mod.lfo` · **Category** Modulation
 
 ![LFO Module](../../images/module-lfo.png)
-*The LFO module*
+*A dot rides the waveform display, in step with the LFO's real phase.*
 
-## Description
+The LFO (low-frequency oscillator) makes slow, repeating shapes for moving other modules: a filter that breathes, a vibrato, a tremolo, a pulse width that drifts. It runs from one cycle every 100 seconds up to 100 Hz, so it can also be pushed into the audio range for rough, buzzy modulation.
 
-The **Low Frequency Oscillator** (LFO) generates slow, cyclic waveforms used for modulation rather than audio. LFOs add movement and animation to your patches by continuously varying parameters like filter cutoff, oscillator pitch, or amplitude.
-
-While structurally similar to audio oscillators, LFOs typically operate at sub-audio frequencies (0.01 Hz to ~20 Hz), creating effects like vibrato, tremolo, and filter sweeps.
+The display on the node draws one cycle of the selected waveform, with a dot that travels along it at the LFO's actual phase. What you see is where the modulation is right now.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Rate CV** | Control (Orange) | Modulation input for LFO rate |
-| **Sync** | Gate (Green) | Reset phase on rising edge |
+| **Rate** | Control (Orange) | Rate CV, 1 per octave: +1 doubles the rate, -1 halves it |
+| **Sync** | Gate (Green) | A rising edge restarts the cycle |
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Main** | Control (Orange) | Primary output (unipolar 0-1 or bipolar -1 to +1) |
-| **Inv** | Control (Orange) | Inverted output |
-| **Square** | Control (Orange) | Square wave output (regardless of waveform setting) |
+| **Out** | Control (Orange) | The modulation signal: -1 to 1 when **Bipolar** is on, 0 to 1 when it's off |
+| **Phase** | Control (Orange) | Position in the cycle, as a ramp from 0 to 1 |
 
 ## Parameters
 
-| Knob | Range | Default | Description |
-|------|-------|---------|-------------|
-| **Waveform** | Sine/Triangle/Square/Saw | Sine | Shape of the LFO wave |
-| **Rate** | 0.01 Hz - 20 Hz | 1 Hz | Speed of oscillation |
-| **Bipolar** | On/Off | Off | Off = 0 to 1, On = -1 to +1 |
-| **Phase** | 0° - 360° | 0° | Starting phase of waveform |
+| Control | Range | Default | Description |
+|---------|-------|---------|-------------|
+| **Rate** | 0.01 – 100 Hz | 1 Hz | Speed of the cycle. The knob is logarithmic |
+| **Phase** | 0 – 360° | 0° | Shifts where in the cycle the waveform starts |
+| **Wave** | Sine / Triangle / Square / Saw | Sine | Dropdown on the node |
+| **Bipolar** | On / Off | On | Checkbox on the node. On swings -1 to 1; off stays between 0 and 1 |
 
 ## Waveforms
 
-### Sine
+- **Sine** moves smoothly with no corners. The natural choice for vibrato, tremolo and slow sweeps.
+- **Triangle** rises and falls in straight lines. It sounds steadier than a sine at the turnarounds.
+- **Square** jumps between its two extremes, half the cycle at each. Use it for trills, choppy tremolo and two-step filter jumps.
+- **Saw** ramps steadily up, then drops back. A rising sweep that resets each cycle.
 
-![LFO Sine](../../images/lfo-sine.png)
+At the start of a cycle the sine and triangle sit at the midpoint, heading up, the square is high, and the saw is at its lowest.
 
-Smooth, continuous modulation with no sharp edges.
+## Bipolar and unipolar
 
-**Best for:**
-- Vibrato (pitch modulation)
-- Gentle filter sweeps
-- Smooth tremolo
-- Natural-sounding movement
+With **Bipolar** on (the default), **Out** swings evenly around zero. Into a filter's **Cutoff** or an oscillator's **V/Oct**, that sweeps both above and below the knob's setting, which is what you want for vibrato.
 
-### Triangle
+With **Bipolar** off, **Out** stays between 0 and 1: the same shape, lifted and halved. Use it where modulation should only add, as with a VCA's **CV**, where a bipolar LFO would spend half its cycle silent.
 
-![LFO Triangle](../../images/lfo-triangle.png)
+## Rate CV
 
-Linear up/down movement with turnaround points.
+The **Rate** input works in octaves, like V/Oct. +1 doubles the rate, +2 quadruples it, -1 halves it. Patching it dims the knob, but the rate you set stays the base the CV works from.
 
-**Best for:**
-- Similar to sine but with more "edge"
-- Classic synthesizer modulation
-- Steady back-and-forth motion
+```text
+[LFO 2 (slow)] ──Out──> [LFO 1 Rate]
+```
 
-### Square
+A slow LFO into another's Rate makes modulation that speeds up and slows down on its own.
 
-![LFO Square](../../images/lfo-square.png)
+## Sync and phase
 
-Instant switching between minimum and maximum.
+Each rising edge at **Sync** restarts the cycle from the **Phase** setting. Patch a [Clock](./clock.md) into it and the LFO starts over on every pulse, so its movement lines up with the beat.
 
-**Best for:**
-- Rhythmic on/off effects
-- Hard tremolo/chopping
-- Sample & Hold-like stepping
-- Gate-like modulation
+**Phase** shifts the starting point. Two LFOs at the same rate, one at 0° and one at 180°, move in opposite directions; at 90° they chase each other.
 
-### Sawtooth
+The **Phase** output is the LFO's position in its cycle, a 0-to-1 ramp whatever waveform is selected. Use it as an extra rising sawtooth, unipolar, alongside **Out**.
 
-![LFO Saw](../../images/lfo-saw.png)
-
-Gradual rise followed by instant reset.
-
-**Best for:**
-- Rising filter sweeps
-- Rhythmic builds
-- Asymmetric modulation
-
-## Usage Tips
+## Patch examples
 
 ### Vibrato
 
-Classic pitch wobble effect:
-
-```
-[LFO] ──> [Oscillator FM]
+```text
+[LFO Out] ──> [Oscillator Exp FM]
 ```
 
-- **Rate**: 5-7 Hz for natural vibrato
-- **Waveform**: Sine or Triangle
-- **Depth**: Low FM Amount on oscillator
-- **Bipolar**: On (pitch goes up AND down)
+Rate around 5 to 6 Hz, Sine, Bipolar on. Turn the oscillator's **Exp FM** knob down to about 0.02 octaves (Shift-drag for fine steps) for a gentle ±24 cents.
 
 ### Tremolo
 
-Volume modulation effect:
-
-```
-[LFO] ──> [VCA CV]
-```
-
-- **Rate**: 4-8 Hz for classic tremolo
-- **Waveform**: Sine (smooth) or Triangle
-- **Bipolar**: Off (volume only goes down from max)
-
-### Filter Sweep (Wobble)
-
-Rhythmic filter movement:
-
-```
-[LFO] ──> [Filter Cutoff CV]
+```text
+[Oscillator Out] ──> [VCA In]
+[LFO Out] ──> [VCA CV]
 ```
 
-- **Rate**: Sync to tempo for rhythmic effect
-- **Waveform**:
-  - Sine/Triangle = smooth wobble
-  - Square = choppy rhythm
-  - Saw = rising sweeps
-- **Bipolar**: Usually Off
+Rate 4 to 8 Hz, Sine or Triangle, **Bipolar off**, so the level dips and returns rather than cutting out for half of each cycle.
 
-### PWM (Pulse Width Modulation)
+### Filter sweep
 
-Animate square wave timbre:
-
-```
-[LFO] ──> [Oscillator PWM]
+```text
+[LFO Out] ──> [SVF Filter Cutoff]
 ```
 
-- **Rate**: 0.5-3 Hz for subtle animation
-- **Waveform**: Triangle or Sine
-- Creates chorus-like thickening
+The Cutoff input works in octaves, so a bipolar LFO at full level sweeps one octave either side of the knob. A slow Triangle gives a smooth wah; a Square jumps between two brightnesses. To sweep less, pass the LFO through an [Attenuverter](../utilities/attenuverter.md).
 
-### Tempo Sync
+### Pulse-width modulation
 
-Lock LFO to musical time by triggering sync from a clock:
-
-```
-[Clock] ──> [LFO Sync]
+```text
+[LFO Out] ──> [Oscillator PWM]
 ```
 
-The LFO resets its phase on each clock pulse, synchronizing to the tempo.
+With the oscillator on Square, a slow LFO (0.3 to 2 Hz) makes the tone shimmer and thicken like a chorus.
 
-### Phase Offset
+### Stepped random
 
-Use the Phase parameter when running multiple LFOs:
-
-```
-[LFO 1 (Phase: 0°)] ──> [Osc 1 FM]
-[LFO 2 (Phase: 180°)] ──> [Osc 2 FM]
+```text
+[LFO Out (fast Triangle)] ──> [Sample & Hold In]
+[Clock Gate]              ──> [Sample & Hold Trig]
 ```
 
-This creates movement that's related but not identical.
+Each Clock pulse freezes wherever the LFO happens to be, and [Sample & Hold](../utilities/sample-hold.md) holds that value until the next one. Set the LFO's rate so it isn't a simple multiple of the Clock's and the steps take a long time to repeat. (The trigger has to be a gate: an LFO can't patch into **Trig**.)
 
-### Using the Square Output
+## Notes
 
-The dedicated Square output is useful for:
-- Triggering envelopes rhythmically
-- Creating rhythmic gates
-- Sample & Hold clock
+- The LFO is monophonic. One LFO patched into a polyphonic module moves every voice together. See [Polyphony](../../concepts/polyphony.md).
+- The Rate and Phase knobs are smoothed, so turning them while the LFO runs doesn't click or jump.
+- Pressing **Play** starts every LFO from the beginning of its cycle.
 
-```
-[LFO Square] ──> [ADSR Gate]
-```
+## Related modules
 
-### Unipolar vs Bipolar
-
-**Unipolar (0 to 1)**:
-- Filter cutoff (always positive)
-- Volume (can't go negative)
-- Most parameters
-
-**Bipolar (-1 to +1)**:
-- Pitch modulation (up AND down)
-- Pan modulation (left AND right)
-- Any parameter where negative makes sense
-
-### Modulating the Rate
-
-Create evolving modulation by controlling LFO speed:
-
-```
-[LFO 2 (slow)] ──> [LFO 1 Rate CV]
-```
-
-The modulation speed itself varies over time.
-
-## Common Settings
-
-### Subtle Vibrato
-| Rate | Waveform | Bipolar |
-|------|----------|---------|
-| 6 Hz | Sine | On |
-
-### Dramatic Wobble
-| Rate | Waveform | Bipolar |
-|------|----------|---------|
-| 2 Hz | Triangle | Off |
-
-### Rhythmic Chop
-| Rate | Waveform | Bipolar |
-|------|----------|---------|
-| Synced | Square | Off |
-
-### Slow Evolution
-| Rate | Waveform | Bipolar |
-|------|----------|---------|
-| 0.1 Hz | Sine | On |
-
-### PWM Animation
-| Rate | Waveform | Bipolar |
-|------|----------|---------|
-| 0.5 Hz | Triangle | Off |
-
-## Connection Examples
-
-### Multi-Destination Modulation
-```
-[LFO] ──> [Filter Cutoff CV]
-      ──> [Oscillator PWM]
-      ──> [VCA CV] (via Attenuverter)
-```
-
-### Stereo Movement
-```
-[LFO (Phase: 0°)] ──> [Left Channel Parameter]
-[LFO (Phase: 90°)] ──> [Right Channel Parameter]
-```
-
-### Stepped Random (with S&H)
-```
-[LFO] ──> [Sample & Hold Input]
-[LFO Square] ──> [Sample & Hold Trigger]
-[S&H Output] ──> [Modulation Destination]
-```
-
-## LFO vs Envelope
-
-| LFO | Envelope |
-|-----|----------|
-| Continuous, cyclic | One-shot, triggered |
-| Constant motion | Responds to events |
-| Same shape always | ADSR shape |
-| Time-based | Event-based |
-
-Use LFO for ongoing animation, envelopes for note-shaped modulation.
-
-## Related Modules
-
-- [ADSR Envelope](./adsr.md) - Event-triggered modulation
-- [Clock](./clock.md) - For LFO sync
-- [VCA](../utilities/vca.md) - Tremolo destination
-- [SVF Filter](../filters/svf-filter.md) - Filter modulation destination
-- [Oscillator](../sources/oscillator.md) - Vibrato/FM destination
+- [ADSR Envelope](./adsr.md) for modulation that follows each note instead of repeating
+- [Clock](./clock.md) to restart the LFO on the beat
+- [Attenuverter](../utilities/attenuverter.md) to scale, invert or offset the LFO
+- [Sample & Hold](../utilities/sample-hold.md) for stepped patterns

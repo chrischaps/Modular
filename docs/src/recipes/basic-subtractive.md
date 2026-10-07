@@ -1,221 +1,74 @@
 # Basic Subtractive Synth
 
-A classic subtractive synthesizer with oscillators, filter, envelope, and modulation.
+A saw wave through a lowpass filter, with one envelope shaping its brightness and another its volume. Every note opens bright and settles darker as you hold it. This is the architecture behind most classic monosynths, and the patch to learn first: once you understand it, most other patches are variations on it.
 
-![Basic Subtractive Patch](../images/recipe-basic-subtractive.png)
-*The basic subtractive synth patch*
+> **Load it:** choose **📚 Examples → Basic Subtractive** in the toolbar. Press **▶ Play**, then play the Z to M keys.
+> The patch file is [`patches/basic-subtractive.json`](https://github.com/chrischaps/Modular/blob/master/patches/basic-subtractive.json).
 
-> **Play it now:** this recipe ships with the app. Choose **📚 Examples → Basic Subtractive** in the toolbar,
-> or download [`patches/basic-subtractive.json`](https://github.com/chrischaps/Modular/blob/master/patches/basic-subtractive.json) and open it.
->
-> - Press **Play**, then play the Z to M keys.
-> - There is no CV Amount knob: the filter's **Cutoff** input is 1 per octave, so the envelope's 0 to 1 opens the filter by up to one octave above the **Cutoff** knob, which is set to 700 Hz.
+![The Basic Subtractive patch](../images/recipe-basic-subtractive.png)
+*Two envelopes from one gate: one for the filter, one for the VCA.*
 
-## Overview
+## What it teaches
 
-Subtractive synthesis starts with a harmonically rich waveform (saw or square) and uses a filter to "subtract" frequencies, shaping the tone. Combined with envelopes for dynamic control, this creates expressive, versatile sounds.
+- **Subtractive synthesis.** Start with a waveform rich in harmonics and take some away with a filter.
+- **Separate envelopes for tone and volume.** Brightness and loudness can move on different schedules.
+- **Filter CV in octaves.** The envelope opens the filter by a musical interval, not a number of hertz.
 
-**Character**: Warm, punchy, expressive
-**Good for**: Bass, leads, pads, keys
+## Modules
 
-## Modules Used
+| Module | Settings |
+|--------|----------|
+| [Keyboard](../modules/midi/keyboard.md) | Defaults |
+| [Oscillator](../modules/sources/oscillator.md) | **Wave** Saw |
+| [SVF Filter](../modules/filters/svf-filter.md) | **Cutoff** 700 Hz, **Res** 30% |
+| [ADSR Envelope](../modules/modulation/adsr.md) (filter) | **Atk** 1 ms, **Dec** 300 ms, **Sus** 30%, **Rel** 200 ms |
+| [ADSR Envelope](../modules/modulation/adsr.md) (amp) | **Atk** 5 ms, **Dec** 200 ms, **Sus** 70%, **Rel** 300 ms |
+| [VCA](../modules/utilities/vca.md) | Defaults |
+| [Audio Output](../modules/output/audio-output.md) | **Vol** 60% |
 
-- 1x [Oscillator](../modules/sources/oscillator.md)
-- 1x [SVF Filter](../modules/filters/svf-filter.md)
-- 1x [VCA](../modules/utilities/vca.md)
-- 2x [ADSR Envelope](../modules/modulation/adsr.md)
-- 1x [Keyboard Input](../modules/midi/keyboard.md)
-- 1x [Audio Output](../modules/output/audio-output.md)
+## How it's built
 
-## Patch Diagram
+### The audio path
 
-```
-┌──────────┐      ┌──────────┐      ┌─────┐      ┌────────┐
-│ Keyboard │─V/Oct─▶│Oscillator│─Audio─▶│Filter│─Audio─▶│  VCA   │─▶ Output
-│          │      │  (Saw)   │      │(SVF) │      │        │
-└────┬─────┘      └──────────┘      └───▲──┘      └───▲────┘
-     │                                  │             │
-     │ Gate                             │             │
-     │         ┌──────────┐             │      ┌──────┴──────┐
-     └────────▶│  ADSR 1  │─────────────┘      │   ADSR 2    │
-               │ (Filter) │                    │ (Amplitude) │
-               └──────────┘                    └─────────────┘
-                                                      ▲
-                                                      │ Gate
-               ┌──────────────────────────────────────┘
-               │
-        [From Keyboard Gate]
+```text
+[Keyboard Pitch] ──> [Oscillator V/Oct]
+[Oscillator Out] ──> [SVF Filter In]
+[SVF Filter LowPass] ──> [VCA In]
+[VCA Out] ──> [Audio Output Mono]
 ```
 
-## Step-by-Step Setup
+The saw wave contains every harmonic, so it's the richest raw material for a filter. The SVF's lowpass output keeps what's below the cutoff. At 700 Hz with a little resonance, the tone is warm, with a slight edge at the cutoff.
 
-### 1. Add Core Modules
+### Two envelopes from one gate
 
-Add and position:
-1. **Keyboard Input** (left side)
-2. **Oscillator** (center-left)
-3. **SVF Filter** (center)
-4. **VCA** (center-right)
-5. **Audio Output** (right)
-
-### 2. Create the Audio Path
-
-Connect the main audio signal:
-
-```
-[Oscillator Audio Out] ──▶ [Filter Input]
-[Filter Lowpass Out] ──▶ [VCA Input]
-[VCA Output] ──▶ [Audio Output Mono]
+```text
+[Keyboard Gate] ──> [ADSR (filter) Gate]
+                ──> [ADSR (amp) Gate]
+[ADSR (filter) Out] ──> [SVF Filter Cutoff]
+[ADSR (amp) Out] ──> [VCA CV]
 ```
 
-### 3. Add Pitch Control
+One output can feed any number of inputs, so the Keyboard's gate starts both envelopes at once.
 
-```
-[Keyboard V/Oct] ──▶ [Oscillator V/Oct]
-```
+The **amp envelope** shapes the volume through the VCA. It rises in 5 ms, which is quick but not a click, falls to 70% over 200 ms, and fades out over 300 ms after you let go.
 
-### 4. Add Amplitude Envelope
-
-Add **ADSR 1** for volume control:
-
-```
-[Keyboard Gate] ──▶ [ADSR 1 Gate]
-[ADSR 1 Env] ──▶ [VCA CV]
-```
-
-**ADSR 1 Settings (Amplitude)**:
-| Parameter | Value | Reason |
-|-----------|-------|--------|
-| Attack | 5 ms | Quick start |
-| Decay | 200 ms | Initial drop |
-| Sustain | 0.7 | Held level |
-| Release | 300 ms | Smooth fade |
-
-### 5. Add Filter Envelope
-
-Add **ADSR 2** for filter movement:
-
-```
-[Keyboard Gate] ──▶ [ADSR 2 Gate]
-[ADSR 2 Env] ──▶ [Filter Cutoff CV]
-```
-
-**ADSR 2 Settings (Filter)**:
-| Parameter | Value | Reason |
-|-----------|-------|--------|
-| Attack | 1 ms | Immediate brightness |
-| Decay | 300 ms | Gradual close |
-| Sustain | 0.3 | Darker sustained tone |
-| Release | 200 ms | Follow amp |
-
-### 6. Set Module Parameters
-
-**Oscillator**:
-- Waveform: **Saw** (harmonically rich)
-- Frequency: 440 Hz (controlled by keyboard)
-
-**Filter**:
-- Cutoff: **800 Hz** (base cutoff)
-- Resonance: **0.3** (slight emphasis)
-- CV Amount: **0.6** (envelope range)
-
-**VCA**:
-- Level: **1.0**
-- Response: **Exponential**
-
-## Playing the Patch
-
-1. Press keys on your computer keyboard
-2. Adjust filter **Cutoff** for brightness
-3. Adjust filter **Resonance** for character
-4. Modify envelopes for different articulation
+The **filter envelope** shapes the brightness. The SVF's **Cutoff** input works in octaves: +1 doubles the cutoff. So as the envelope jumps to its peak of 1.0, the filter opens one octave above the knob, to 1.4 kHz. Over the next 300 ms it settles to its 30% sustain, about 860 Hz. That fall in brightness, faster than the fall in volume, is what makes each note sound plucked rather than switched on.
 
 ## Variations
 
-### Punchy Bass
+**Fatter bass.** Replace the SVF with a [Ladder Filter](../modules/filters/ladder-filter.md) and use its **LP24** output. Turn **Oct** on the Keyboard down to −1, set the Ladder's **Drive** to about 2x, and lower its **Cutoff** to 300 Hz.
 
-```
-Oscillator: Square wave
-Filter Cutoff: 400 Hz
-Filter Resonance: 0.1
-ADSR 1: A:1ms D:100ms S:0.5 R:50ms
-ADSR 2: A:1ms D:200ms S:0.1 R:50ms
-```
+**Acid squelch.** Raise **Res** to 70% and lower **Cutoff** to 400 Hz. The filter envelope now sweeps a sharp resonant peak across each note.
 
-### Smooth Lead
+**Pluck.** Set the amp envelope's **Sus** to 0% and **Dec** to 400 ms, so every note dies away even while held.
 
-```
-Oscillator: Saw wave
-Filter Cutoff: 2000 Hz
-Filter Resonance: 0.2
-ADSR 1: A:50ms D:100ms S:0.8 R:500ms
-ADSR 2: A:20ms D:500ms S:0.5 R:300ms
-Keyboard Glide: 100ms
-```
+**Supersaw.** On the Oscillator, set **Voices** to 7 and **Detune** to about 40%. Seven detuned saws through the same filter make a wide, shimmering lead.
 
-### Plucky Keys
+**More sweep.** To open the filter by more than an octave, double the envelope by patching it into both inputs of a [Mixer](../modules/utilities/mixer.md), as the [Rhythmic Sequence](./rhythmic-sequence.md) example does.
 
-```
-Oscillator: Saw wave
-Filter Cutoff: 1500 Hz
-Filter Resonance: 0.4
-ADSR 1: A:1ms D:200ms S:0.0 R:100ms
-ADSR 2: A:1ms D:150ms S:0.0 R:100ms
-```
+**Space.** Add a [Stereo Delay](../modules/effects/delay.md) and a [Reverb](../modules/effects/reverb.md) between the VCA and the Audio Output.
 
-### Soft Pad
+## Related
 
-```
-Oscillator: Triangle wave
-Filter Cutoff: 3000 Hz
-Filter Resonance: 0.1
-ADSR 1: A:500ms D:200ms S:0.8 R:1000ms
-ADSR 2: A:200ms D:500ms S:0.6 R:800ms
-```
-
-## Enhancements
-
-### Add a Second Oscillator
-
-For thicker sound:
-
-```
-[Oscillator 2 (Saw, +7 cents detune)] ──▶ [Mixer]
-[Oscillator 1] ──▶ [Mixer]
-[Mixer] ──▶ [Filter]
-```
-
-### Add Vibrato
-
-For expressiveness:
-
-```
-[LFO (5 Hz, low depth)] ──▶ [Oscillator FM]
-```
-
-### Add Effects
-
-For space:
-
-```
-[VCA] ──▶ [Delay] ──▶ [Reverb] ──▶ [Output]
-```
-
-## Troubleshooting
-
-**No sound**: Check all connections, ensure keyboard is focused
-
-**Always sounds**: Check envelope gate connections
-
-**Too quiet**: Increase VCA level or Output level
-
-**Too bright**: Lower filter cutoff or envelope CV amount
-
-**Too dull**: Raise filter cutoff or use Saw waveform
-
-## What You've Learned
-
-- Basic subtractive synthesis signal flow
-- Using separate envelopes for amplitude and timbre
-- How filter cutoff and resonance affect tone
-- Creating variations with envelope settings
+- [Your First Patch](../getting-started/your-first-patch.md) – build a similar voice step by step
+- [FM Synthesis](./fm-synthesis.md) – a different way to make harmonics

@@ -2,18 +2,19 @@
 
 /* Signal type colors (matching the application) */
 :root {
-    --signal-audio: #4a90d9;      /* Blue */
-    --signal-control: #d98b4a;    /* Orange */
-    --signal-gate: #4ad97a;       /* Green */
-    --signal-midi: #9b4ad9;       /* Purple */
+    /* Signal colors, from SignalType::color() in src/dsp/signal.rs */
+    --signal-audio: #4287f5;      /* Blue */
+    --signal-control: #f59e42;    /* Orange */
+    --signal-gate: #42f587;       /* Green */
+    --signal-midi: #b266ff;       /* Purple */
 
-    --category-sources: #4a90d9;   /* Blue */
-    --category-filters: #4ad97a;   /* Green */
-    --category-modulation: #d98b4a; /* Orange */
-    --category-utilities: #d9d94a; /* Yellow */
-    --category-effects: #9b4ad9;   /* Purple */
-    --category-midi: #d94a9b;      /* Magenta */
-    --category-output: #d94a4a;    /* Red */
+    /* Header colors, from ModuleCategory::color() in src/dsp/module_trait.rs */
+    --category-source: #42a5f5;     /* Blue */
+    --category-filter: #26a69a;     /* Teal */
+    --category-modulation: #ffb74d; /* Orange */
+    --category-effect: #4dd0e1;     /* Cyan */
+    --category-utility: #9e9e9e;    /* Gray */
+    --category-output: #7e57c2;     /* Purple */
 }
 
 /* Module documentation styling */
@@ -67,7 +68,7 @@ blockquote {
     color: var(--quote-color);
 }
 
-/* Image placeholders */
+/* Screenshots */
 img {
     max-width: 100%;
     height: auto;
@@ -95,6 +96,35 @@ table th:first-child {
 .signal-control { color: var(--signal-control); font-weight: 500; }
 .signal-gate { color: var(--signal-gate); font-weight: 500; }
 .signal-midi { color: var(--signal-midi); font-weight: 500; }
+
+/* Color swatches: a glowing jack for signal types, a header bar for categories */
+.swatch {
+    display: inline-block;
+    width: 0.75em;
+    height: 0.75em;
+    margin-right: 0.45em;
+    border-radius: 50%;
+    vertical-align: -0.05em;
+    background-color: currentColor;
+    box-shadow: 0 0 6px currentColor;
+}
+.swatch.bar {
+    width: 1.4em;
+    height: 0.55em;
+    border-radius: 3px;
+    vertical-align: 0.05em;
+    box-shadow: none;
+}
+.swatch.audio { color: var(--signal-audio); }
+.swatch.control { color: var(--signal-control); }
+.swatch.gate { color: var(--signal-gate); }
+.swatch.midi { color: var(--signal-midi); }
+.swatch.source { color: var(--category-source); }
+.swatch.filter { color: var(--category-filter); }
+.swatch.modulation { color: var(--category-modulation); }
+.swatch.effect { color: var(--category-effect); }
+.swatch.utility { color: var(--category-utility); }
+.swatch.output { color: var(--category-output); }
 
 /* Category headers */
 h2 code {
@@ -149,14 +179,6 @@ h3 + pre {
 .waveform {
     font-family: monospace;
     letter-spacing: -1px;
-}
-
-/* Tips sections */
-h2:contains("Tips") + ul,
-h3:contains("Tips") + ul {
-    background-color: var(--quote-bg);
-    padding: 12px 12px 12px 32px;
-    border-radius: 8px;
 }
 
 /* Print styles */

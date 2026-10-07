@@ -1,235 +1,117 @@
-# EQ
+# 3-Band EQ
 
-**Module ID**: `fx.eq`
-**Category**: Effects
-**Header Color**: Purple
+**Module ID** `fx.eq` · **Category** Effect
 
-![EQ Module](../../images/module-eq.png)
-*The EQ module*
+![3-Band EQ module](../../images/module-eq.png)
+*Low shelf, mid band and high shelf, left to right, with the output level last*
 
-## Description
+The 3-Band EQ boosts or cuts three regions of the spectrum: a **low shelf** for the bass, a fully parametric **mid band**, and a **high shelf** for the treble. Use it to fit a sound into a patch, take the mud out of a pad, put an edge on a lead, or darken a reverb tail.
 
-The 3-Band Parametric EQ allows precise control over the frequency content of your signal. Each band can boost or cut a specific frequency range with adjustable center frequency and bandwidth (Q).
-
-EQ is essential for:
-- Shaping tone and timbre
-- Fixing frequency problems
-- Making sounds fit in a mix
-- Creative sound design
+Where a filter removes whole parts of the spectrum, an EQ leans on them, up to 15 dB either way. Every knob glides, so you can sweep the mid band while a note plays without zipper noise.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Input** | Audio (Blue) | Signal to be equalized |
+| **In** | Audio (Blue) | Signal to equalize |
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Output** | Audio (Blue) | Equalized signal |
+| **Out** | Audio (Blue) | Equalized signal |
 
 ## Parameters
 
-### Low Band
 | Knob | Range | Default | Description |
 |------|-------|---------|-------------|
-| **Low Freq** | 20 Hz - 500 Hz | 100 Hz | Center frequency |
-| **Low Gain** | -12 dB to +12 dB | 0 dB | Boost or cut amount |
-| **Low Q** | 0.5 - 10.0 | 1.0 | Bandwidth (higher = narrower) |
+| **LoFrq** (Low Freq) | 20 Hz – 500 Hz | 100 Hz | Low shelf frequency |
+| **LoGn** (Low Gain) | −15 dB – +15 dB | 0 dB | Boost or cut below the low shelf frequency |
+| **MdFrq** (Mid Freq) | 100 Hz – 10 kHz | 1 kHz | Center of the mid band |
+| **MdGn** (Mid Gain) | −15 dB – +15 dB | 0 dB | Boost or cut at the mid frequency |
+| **MdQ** (Mid Q) | 0.1 – 10 | 1.0 | Width of the mid band. Higher is narrower |
+| **HiFrq** (High Freq) | 2 kHz – 20 kHz | 8 kHz | High shelf frequency |
+| **HiGn** (High Gain) | −15 dB – +15 dB | 0 dB | Boost or cut above the high shelf frequency |
+| **Out** (Output) | −12 dB – +12 dB | 0 dB | Level after the EQ |
 
-### Mid Band
-| Knob | Range | Default | Description |
-|------|-------|---------|-------------|
-| **Mid Freq** | 200 Hz - 5 kHz | 1 kHz | Center frequency |
-| **Mid Gain** | -12 dB to +12 dB | 0 dB | Boost or cut amount |
-| **Mid Q** | 0.5 - 10.0 | 1.0 | Bandwidth (higher = narrower) |
+With every gain at 0 dB the EQ is transparent.
 
-### High Band
-| Knob | Range | Default | Description |
-|------|-------|---------|-------------|
-| **High Freq** | 1 kHz - 20 kHz | 8 kHz | Center frequency |
-| **High Gain** | -12 dB to +12 dB | 0 dB | Boost or cut amount |
-| **High Q** | 0.5 - 10.0 | 1.0 | Bandwidth (higher = narrower) |
+## The bands
 
-## Understanding EQ
+The three bands run in series: low shelf, then mid, then high shelf.
 
-### Frequency Ranges
+### Low and high shelves
 
-| Range | Frequency | Character |
-|-------|-----------|-----------|
-| Sub | 20-60 Hz | Felt more than heard, rumble |
-| Bass | 60-250 Hz | Weight, warmth, punch |
-| Low Mid | 250-500 Hz | Body, muddiness |
-| Mid | 500 Hz - 2 kHz | Presence, boxiness, clarity |
-| Upper Mid | 2-5 kHz | Definition, attack, harshness |
-| High | 5-10 kHz | Brightness, sibilance, air |
-| Air | 10-20 kHz | Sparkle, air, presence |
+A shelf raises or lowers everything beyond its frequency by the same amount, like a bass or treble knob on a stereo. The **LoFrq** and **HiFrq** knobs set the shelf's midpoint: the frequency where it has reached half its gain. The shelves are as steep as they can be without overshooting, so a boost rises cleanly to its level with no bump at the corner.
 
-### Q (Bandwidth)
+The shelves have no Q of their own. To affect a narrower region at the bottom or top, use the mid band.
 
-Q controls how wide or narrow the affected frequency range is:
+### Mid band
 
-- **Low Q (0.5-1.5)**: Wide, gentle curves, affects many frequencies
-- **Medium Q (2-4)**: Focused but still musical
-- **High Q (5-10)**: Surgical, narrow cuts, affects specific frequencies
+The mid band is a bell-shaped peak or dip centered on **MdFrq**. **MdQ** sets its width:
 
-### Boost vs Cut
+- **0.1 to 1**: broad and gentle, spanning several octaves. Good for tonal shaping.
+- **1 to 4**: focused but still musical.
+- **4 to 10**: narrow and surgical, for picking out a single resonance.
 
-General rule: **Cut narrow, boost wide**
+A good rule is to cut narrow and boost wide: narrow boosts sound unnatural, while narrow cuts can remove a problem without anyone hearing that it's gone.
 
-- Cuts are good for removing problem frequencies (use higher Q)
-- Boosts add character but can sound unnatural (use lower Q)
+## Bypass
 
-## Usage Tips
+Click the power switch in the node header, press **Ctrl+B** with the module selected, or choose **Bypass** from its right-click menu. In passes straight to Out. The switch crossfades over 20 ms, so you can compare the EQ'd and original sound mid-note.
 
-### Removing Mud
+## Finding a problem frequency
 
-Clean up muddy sounds:
+1. Set **MdQ** high, around 5 to 8.
+2. Boost **MdGn** to +10 dB or so.
+3. Sweep **MdFrq** slowly until the ringing or boominess jumps out.
+4. Turn **MdGn** down below 0 dB to cut it.
 
-```
-Mid Freq: 300 Hz
-Mid Gain: -3 to -6 dB
-Mid Q: 2.0
-```
+## Where things live
 
-This is the common "mud" frequency range.
+| Region | Frequency | Character |
+|--------|-----------|-----------|
+| Sub | 20 – 60 Hz | Felt more than heard |
+| Bass | 60 – 250 Hz | Weight, warmth, punch |
+| Low mids | 250 – 500 Hz | Body; too much is muddy |
+| Mids | 500 Hz – 2 kHz | Presence; too much is boxy or nasal |
+| Upper mids | 2 – 5 kHz | Definition and attack; too much is harsh |
+| Highs | 5 – 10 kHz | Brightness |
+| Air | 10 – 20 kHz | Sparkle and openness |
 
-### Adding Warmth
+## Starting points
 
-Add body and warmth:
+| Goal | Settings |
+|------|----------|
+| Take out mud | MdFrq 300 Hz, MdGn −4 dB, MdQ 2 |
+| Remove boxiness | MdFrq 500 Hz, MdGn −3 dB, MdQ 2.5 |
+| Add warmth | LoFrq 100 Hz, LoGn +3 dB |
+| Add presence | MdFrq 3 kHz, MdGn +3 dB, MdQ 0.8 |
+| Add air | HiFrq 12 kHz, HiGn +3 dB |
+| Thin, telephone-like | LoFrq 400 Hz, LoGn −15 dB; HiFrq 3 kHz, HiGn −15 dB; MdFrq 1.5 kHz, MdGn +6 dB |
 
-```
-Low Freq: 100 Hz
-Low Gain: +3 dB
-Low Q: 1.0
-```
+Boosts raise the overall level. Pull **Out** down to match the bypassed level before deciding whether the EQ is helping.
 
-### Adding Presence
+## Patch ideas
 
-Make sounds cut through:
+**After distortion.** Distortion's harshness usually sits in the upper mids. A broad mid cut around 3 kHz after it smooths the edge without dulling the sound the way a lowpass would:
 
-```
-High Freq: 3 kHz
-High Gain: +3 dB
-High Q: 1.5
+```text
+[Distortion Out] ──> [EQ In] ──> [Audio Output Mono]
 ```
 
-### Telephone Effect
+**Darker reverb.** The EQ is mono, so to shape a stereo reverb use one EQ per side, each cutting the lows (LoGn −6 dB) to keep the tail from clouding the bass.
 
-Dramatic filtering for effect:
+**Channel strip.** EQ, then compress: the compressor then responds to the tone you chose rather than to the frequencies you were about to cut.
 
-```
-Low Freq: 300 Hz, Gain: -12 dB
-High Freq: 3 kHz, Gain: -12 dB
-```
-
-Cuts lows and highs, leaving only mids.
-
-### De-Boxing
-
-Remove boxy sound from recordings:
-
-```
-Mid Freq: 400-600 Hz
-Mid Gain: -3 dB
-Mid Q: 2.5
+```text
+[VCA Out] ──> [EQ In]
+[EQ Out] ──> [Compressor In]
 ```
 
-### Air and Sparkle
+## Related modules
 
-Add high-end shine:
-
-```
-High Freq: 12 kHz
-High Gain: +2 dB
-High Q: 0.7
-```
-
-Wide boost adds open, airy quality.
-
-### Finding Problem Frequencies
-
-1. Set one band's Q to high (5.0+)
-2. Boost the gain to +6 dB
-3. Sweep the frequency while listening
-4. When you hear the problem clearly, reduce gain to cut
-
-### Subtractive EQ
-
-Start by cutting problem frequencies rather than boosting:
-
-- Often sounds more natural
-- Less likely to cause clipping
-- Maintains headroom
-
-### Frequency Slot Carving
-
-Give each sound its own space:
-
-```
-Bass: Boost 80 Hz, cut 300 Hz
-Synth: Cut 80 Hz, boost 500 Hz
-Lead: Cut 500 Hz, boost 2 kHz
-```
-
-Each element has its own frequency territory.
-
-## Frequency Cheat Sheet
-
-### Problem Frequencies
-| Problem | Frequency | Solution |
-|---------|-----------|----------|
-| Rumble | < 40 Hz | Cut |
-| Boomy | 100-200 Hz | Cut narrow |
-| Muddy | 250-400 Hz | Cut |
-| Boxy | 400-600 Hz | Cut |
-| Nasal | 800 Hz - 1 kHz | Cut |
-| Harsh | 2-4 kHz | Cut narrow |
-| Sibilant | 5-8 kHz | Cut narrow |
-
-### Enhancement Frequencies
-| Quality | Frequency | Action |
-|---------|-----------|--------|
-| Weight | 80-100 Hz | Boost |
-| Warmth | 200 Hz | Boost wide |
-| Body | 300-500 Hz | Boost carefully |
-| Presence | 2-4 kHz | Boost |
-| Clarity | 5-7 kHz | Boost |
-| Air | 10-15 kHz | Boost |
-
-## Connection Examples
-
-### Channel Strip
-```
-[Sound] ──> [EQ] ──> [Compressor] ──> [Output]
-```
-
-### Post-Effect Processing
-```
-[Synth] ──> [Distortion] ──> [EQ] ──> [Output]
-```
-
-EQ after distortion can tame harsh frequencies.
-
-### Reverb Shaping
-```
-[Sound] ──> [Reverb] ──> [EQ] ──> [Output]
-```
-
-Cut lows from reverb to prevent mud.
-
-## Tips
-
-1. **Cut before boost**: Try cutting unwanted frequencies first
-2. **Less is more**: Small EQ moves often sound best
-3. **Use your ears**: Trust what sounds good, not what looks right
-4. **A/B test**: Bypass the EQ to compare processed and original
-5. **Watch levels**: Boosting increases overall level
-
-## Related Modules
-
-- [SVF Filter](../filters/svf-filter.md) - Dramatic filtering
-- [Compressor](./compressor.md) - Dynamics after EQ
-- [Distortion](./distortion.md) - Harmonics to then EQ
-- [Reverb](./reverb.md) - Shape reverb tone with EQ
+- [SVF Filter](../filters/svf-filter.md): for removing whole ranges, or sweeping dramatically
+- [Compressor](./compressor.md): often follows the EQ
+- [Distortion](./distortion.md): creates harmonics worth shaping
+- [Reverb](./reverb.md): an EQ after it shapes the tail

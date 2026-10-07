@@ -1,242 +1,111 @@
 # Audio Output
 
-**Module ID**: `output.audio`
-**Category**: Output
-**Header Color**: Red
+**Module ID** `output.audio` · **Category** Output
 
 ![Audio Output Module](../../images/module-audio-output.png)
-*The Audio Output module*
+*The meter shows what reaches your speakers, and in orange, what the limiter caught.*
 
-## Description
+Audio Output is where a patch meets your speakers. Whatever arrives at its inputs goes through a short mastering chain (DC blocking, volume, optional saturation and a peak limiter) and on to your audio device.
 
-The Audio Output module is the final destination for your audio signal, sending sound to your computer's audio interface. It provides master level control, metering, and a built-in limiter to prevent clipping.
-
-Every patch that makes sound needs exactly one Audio Output module.
+Every patch that makes sound needs one. If a patch has more than one Audio Output, only one of them is heard, so route everything to a single output.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Left** | Audio (Blue) | Left stereo channel input |
-| **Right** | Audio (Blue) | Right stereo channel input |
-| **Mono** | Audio (Blue) | Mono input (sent to both L and R) |
+| **Left** | Audio (Blue) | Left speaker |
+| **Right** | Audio (Blue) | Right speaker |
+| **Mono** | Audio (Blue) | Sent equally to both speakers. The easiest way to hear a patch |
 
-## Outputs
-
-*This module has no outputs—it sends audio to the system.*
+The module has no outputs.
 
 ## Parameters
 
-| Knob | Range | Default | Description |
-|------|-------|---------|-------------|
-| **Level** | -∞ to +6 dB | 0 dB | Master output level |
-| **Limiter** | On/Off | On | Enable/disable output limiter |
-| **Limiter Threshold** | -12 dB to 0 dB | -1 dB | Limiter ceiling |
+| Control | Range | Default | Description |
+|---------|-------|---------|-------------|
+| **Vol** (Volume) | 0 – 100% | 80% | Master volume |
+| **Limiter** | On / Off | On | Catches peaks before they can clip |
+| **Character** | On / Off | Off | Gentle soft-clip saturation, for color |
 
-## Display Elements
+## Routing
 
-### Level Meters
+**Mono** is added to both channels, on top of anything patched into **Left** and **Right**. Left and Right stay separate: a cable into **Left** alone plays only in the left speaker. For a mono source, use **Mono**. For stereo, patch a module's left and right outputs (an Oscillator's **Out L** and **Out R**, or any effect's **Out L** and **Out R**) into **Left** and **Right**.
 
-Stereo LED-style meters showing:
-- **Green**: Safe levels (-∞ to -6 dB)
-- **Yellow**: Moderate levels (-6 to -3 dB)
-- **Red**: Hot levels (-3 to 0 dB)
-- **Clip indicator**: Flashes on limiting/clipping
+The inputs are audio inputs, so a polyphonic cable is summed to one channel on the way in. A whole polyphonic voice can go straight to the output.
 
-### Limiter Activity
+## The output stage
 
-LED indicates when limiter is actively reducing gain.
+The signal passes through these stages, in order:
 
-## How It Works
+1. **Mix.** Left and Right, with Mono added to both. Any sample that isn't a valid number (NaN or infinity) is replaced by silence, so a misbehaving module can never send a burst of noise to your speakers.
+2. **DC blocker.** A 5 Hz high-pass removes any constant offset, such as a stray control signal or the lopsided output of an asymmetric distortion. It is far below anything you can hear.
+3. **Volume.**
+4. **Character** (when on). A soft clipper that leaves everything below about -3 dBFS untouched and rounds off peaks above it, never going past full scale. It adds a little warmth and density to loud material and none at all to quiet passages.
+5. **Limiter** (when on). A stereo-linked, look-ahead peak limiter with a ceiling of -0.3 dBFS. It sees each peak 1 ms before it arrives and turns the gain down just in time, so peaks are caught rather than clipped. It lets go quickly after a single transient and more slowly when it's working continuously, so it neither ducks audibly nor pumps. Linking the channels keeps the stereo image from shifting. The output never goes over the ceiling.
 
-1. **Mixing**: Left, Right, and Mono inputs are summed appropriately
-2. **Level**: Master level is applied
-3. **Limiter**: If enabled, prevents signal from exceeding threshold
-4. **Output**: Signal is sent to the audio hardware
+The limiter's look-ahead delays the output by 1 ms. The delay stays in place when the limiter is off, so switching it doesn't shift the timing.
 
-### Input Routing
+## The meter
 
-- **Left only**: Duplicated to both outputs (mono)
-- **Right only**: Duplicated to both outputs (mono)
-- **Mono only**: Sent to both outputs
-- **Left + Right**: True stereo
-- **All three**: Mono added to stereo
+The node shows a stereo peak meter, one bar per channel, scaled from -48 to +6 dBFS.
 
-## Usage Tips
+- The **bar** is the level you hear, after the limiter. It runs blue through the body of the signal and warms to amber near full scale.
+- A faint **orange extension** beyond the bar appears while the limiter is working. It reaches as far as the patch drove into it: the longer the extension, the harder the limiter is working.
+- A thin **tick** marks the ceiling: -0.3 dBFS with the limiter on, 0 dBFS with it off.
+- A **peak-hold mark** stays at the highest recent level for a moment and then falls.
+- The **readout** to the right shows the limiter's gain reduction, such as **-2.4 dB**. It reads **off** when the limiter is switched off.
 
-### Basic Connection
+With the limiter off, anything over 0 dBFS shows in **red**. Those peaks will clip your audio device.
 
-Simplest setup—one source to mono:
+Hover the meter for exact levels: what's going out, what's going into the limiter, and how much it's reducing.
 
-```
-[VCA] ──> [Output Mono]
-```
+## Setting levels
 
-Sound comes from both speakers equally.
+The limiter is a safety net, not a volume knob. A few decibels of reduction on the loudest peaks is inaudible. Constant reduction of 6 dB or more squashes the patch and dulls its transients. If the orange extension is always showing, turn something down earlier in the chain (the VCA's **Level**, the Mixer's levels, or an effect's output) rather than leaning on the limiter.
 
-### Stereo Connection
+Remember that voices add up. A four-note polyphonic chord is about four times as loud as one note.
 
-True stereo from stereo effects:
+Turn **Limiter** off when you want to hear exactly what the patch produces, for example while checking how an effect behaves at full scale. Keep **Vol** low while you do.
 
-```
-[Delay Left] ──> [Output Left]
-[Delay Right] ──> [Output Right]
+## Patches
+
+### Mono
+
+```text
+[VCA Out] ──> [Audio Output Mono]
 ```
 
-### Mono + Stereo
+### Stereo, through effects
 
-Add a mono source to a stereo mix:
-
-```
-[Bass VCA] ──> [Output Mono]
-[Pad Left] ──> [Output Left]
-[Pad Right] ──> [Output Right]
-```
-
-The bass appears center, pad is stereo.
-
-### Proper Gain Staging
-
-For best sound quality:
-
-1. Keep individual module outputs at reasonable levels
-2. Use VCAs and mixers to control levels
-3. Set Output Level near 0 dB
-4. Watch for limiter activation—occasional is fine, constant indicates too hot
-
-### Limiter Usage
-
-The built-in limiter prevents harsh digital clipping:
-
-**Limiter On (recommended)**:
-- Peaks are caught and reduced
-- Protects your ears and speakers
-- Slight compression on peaks
-
-**Limiter Off**:
-- True clipping on overs
-- Harsh digital distortion
-- May be desired for effect
-
-### Monitoring Levels
-
-Watch the meters while working:
-
-| Level | Action |
-|-------|--------|
-| Mostly green | Good, safe levels |
-| Occasional yellow | Fine, healthy levels |
-| Frequent yellow/red | Consider reducing input levels |
-| Constant red/clipping | Definitely reduce levels |
-
-### Avoiding Clipping
-
-If limiter is constantly engaged:
-
-1. Lower Level knob on Output module
-2. Lower levels earlier in the signal chain
-3. Use VCAs to control dynamics
-4. Consider a compressor before output
-
-### Testing Patches
-
-When building patches:
-
-1. Start with Output Level low
-2. Gradually increase while playing
-3. Find a comfortable level
-4. Leave headroom for dynamics
-
-### Multiple Sound Sources
-
-When mixing multiple voices:
-
-```
-[Voice 1] ──> [Mixer Ch 1]
-[Voice 2] ──> [Mixer Ch 2]
-[Mixer] ──> [Output Mono]
+```text
+[VCA Out] ──> [Delay In L]
+[Delay Out L] ──> [Reverb In L]
+[Delay Out R] ──> [Reverb In R]
+[Reverb Out L] ──> [Audio Output Left]
+[Reverb Out R] ──> [Audio Output Right]
 ```
 
-Use a mixer before output rather than connecting multiple sources.
+The Delay plays a mono input on both sides when **In R** is empty, so a mono voice becomes stereo at the first effect.
 
-## Connection Examples
+### Supersaw
 
-### Simple Mono Synth
-```
-[Oscillator] ──> [Filter] ──> [VCA] ──> [Output Mono]
-```
-
-### Stereo Synth with Effects
-```
-[Synth] ──> [Reverb L] ──> [Output Left]
-            [Reverb R] ──> [Output Right]
+```text
+[Oscillator Out L] ──> [Audio Output Left]
+[Oscillator Out R] ──> [Audio Output Right]
 ```
 
-### Full Mix
-```
-[Bass] ──> [Mixer Ch 1]
-[Lead] ──> [Mixer Ch 2]
-[Pad L/R] ──> [Mixer Ch 3/4]
-[Mixer L] ──> [Output Left]
-[Mixer R] ──> [Output Right]
-```
+With **Voices** above 1, the Oscillator spreads its unison voices across the two outputs.
 
 ## Troubleshooting
 
-### No Sound
+**No sound.** Press **Play** in the toolbar. Check that something is patched into the output, that **Vol** is up, and that the meter moves. If the meter moves but you hear nothing, check your audio device and system volume.
 
-1. Check that Output module exists in patch
-2. Verify inputs are connected
-3. Check Level knob isn't at minimum
-4. Verify system audio output settings
-5. Check speakers/headphones are connected
-6. Use Oscilloscope to verify signal is reaching Output
+**Sound in one speaker only.** A cable into **Left** or **Right** plays on that side alone. Move it to **Mono**, or patch the other side too.
 
-### Distorted Sound
+**Distortion.** If the limiter's readout shows large, constant reduction, the patch is too hot. Bring levels down before the output. If **Character** is on, the soft clipper also colors peaks above -3 dBFS.
 
-1. Lower Level knob
-2. Watch for constant limiter activation
-3. Reduce levels earlier in chain
-4. Check for feedback loops in patch
+## Related modules
 
-### One Channel Only
-
-1. Check if only Left or Right is connected
-2. Verify stereo effect settings
-3. Use Mono input for mono sources
-
-### Audio Glitches/Dropouts
-
-1. Reduce patch complexity
-2. Build with release mode (`cargo run --release`)
-3. Close other audio applications
-4. Check audio buffer settings
-
-## Technical Notes
-
-### Sample Rate
-
-Operates at system audio sample rate (typically 44.1 kHz or 48 kHz).
-
-### Bit Depth
-
-Internal processing at 32-bit float, converted to system format on output.
-
-### Latency
-
-Minimal latency determined by audio buffer size. Lower buffer = lower latency but higher CPU.
-
-## Tips
-
-1. **One output module per patch**: Multiple outputs will conflict
-2. **Use the limiter**: It's there to protect you
-3. **Watch your levels**: Meters are there for a reason
-4. **Gain stage properly**: Don't rely on the limiter for level control
-5. **Start quiet**: You can always turn up, but can't unhear loud surprises
-
-## Related Modules
-
-- [VCA](../utilities/vca.md) - Level control before output
-- [Mixer](../utilities/mixer.md) - Combine signals before output
-- [Compressor](../effects/compressor.md) - Dynamics control before output
-- [Oscilloscope](../visualization/oscilloscope.md) - Visualize what you're sending
+- [Mixer](../utilities/mixer.md): combine sources before the output
+- [VCA](../utilities/vca.md): shape and set the level of each voice
+- [Reverb](../effects/reverb.md) and [Delay](../effects/delay.md): stereo effects that usually come last

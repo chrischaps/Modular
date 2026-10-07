@@ -1,342 +1,100 @@
 # Rhythmic Sequence
 
-Create driving, rhythmic synthesizer patterns with sequencers and clock divisions.
+A 16-step acid bassline at 120 BPM: a saw through a resonant lowpass that snaps open on every note, warmed with distortion and pushed along by a dotted-eighth echo. It plays itself, and it's built to be tweaked while it runs. Grab the filter's **Cutoff** and **Res** knobs and play them like a 303.
 
-![Rhythmic Sequence Patch](../images/recipe-rhythmic-sequence.png)
-*The rhythmic sequence patch*
+> **Load it:** choose **📚 Examples → Rhythmic Sequence** in the toolbar and press **▶ Play**. It needs no keyboard.
+> The patch file is [`patches/rhythmic-sequence.json`](https://github.com/chrischaps/Modular/blob/master/patches/rhythmic-sequence.json).
 
-> **Play it now:** this recipe ships with the app. Choose **📚 Examples → Rhythmic Sequence** in the toolbar,
-> or download [`patches/rhythmic-sequence.json`](https://github.com/chrischaps/Modular/blob/master/patches/rhythmic-sequence.json) and open it.
->
-> - Press **Play** and listen. It plays itself.
-> - The filter's **Cutoff** input is 1 per octave, so one envelope opens it by only one octave. The patch sends the filter envelope into both inputs of a Mixer, which sums them to two octaves of sweep above a 300 Hz cutoff. That is a lot more squelch.
-> - The Delay's **Sync** is set to 1/8D, so it follows the Clock's tempo.
+![The Rhythmic Sequence patch](../images/recipe-rhythmic-sequence.png)
+*Two envelopes from the sequencer's gate: one squelches the filter, one shapes the volume.*
 
-## Overview
+## What it teaches
 
-This patch creates a complete rhythmic synthesizer pattern with a driving bassline, sequenced filter movement, and rhythmic interest. It demonstrates how to build compelling electronic music patterns from scratch.
+- **Sequencing a bassline.** Pitches, rests and an octave jump, all in one 16-step pattern.
+- **The filter envelope as the instrument.** Short decay and high resonance are the sound of acid.
+- **Tempo sync.** The delay locks to the Clock's tempo, so its echoes land on the beat.
 
-**Character**: Driving, hypnotic, rhythmic, energetic
-**Good for**: Techno, house, electro, acid, dance music
+## Modules
 
-## Modules Used
+| Module | Settings |
+|--------|----------|
+| [Clock](../modules/modulation/clock.md) | **BPM** 120, **Div** 1/16 |
+| [Step Sequencer](../modules/utilities/sequencer.md) | **Steps** 16, **Dir** Fwd, **Gate** 50% |
+| [Oscillator](../modules/sources/oscillator.md) | **Wave** Saw |
+| [SVF Filter](../modules/filters/svf-filter.md) | **Cutoff** 300 Hz, **Res** 70% |
+| [ADSR Envelope](../modules/modulation/adsr.md) (filter) | **Atk** 1 ms, **Dec** 200 ms, **Sus** 10%, **Rel** 50 ms |
+| [Mixer](../modules/utilities/mixer.md) | **Lv 1** 100%, **Lv 2** 100% |
+| [ADSR Envelope](../modules/modulation/adsr.md) (amp) | **Atk** 1 ms, **Dec** 150 ms, **Sus** 30%, **Rel** 50 ms |
+| [VCA](../modules/utilities/vca.md) | Defaults |
+| [Distortion](../modules/effects/distortion.md) | **Type** Soft, **Drive** 30%, **Mix** 70% |
+| [Stereo Delay](../modules/effects/delay.md) | **Sync** 1/8D, **FB** 30%, **Mix** 25%, **HiCut** 10 kHz, **LoCut** 300 Hz |
+| [Audio Output](../modules/output/audio-output.md) | **Vol** 55% |
 
-- 1x [Clock](../modules/modulation/clock.md)
-- 2x [Sequencer](../modules/utilities/sequencer.md)
-- 1x [Oscillator](../modules/sources/oscillator.md)
-- 1x [SVF Filter](../modules/filters/svf-filter.md)
-- 1x [VCA](../modules/utilities/vca.md)
-- 1x [ADSR Envelope](../modules/modulation/adsr.md)
-- 1x [Distortion](../modules/effects/distortion.md)
-- 1x [Delay](../modules/effects/delay.md)
-- 1x [Audio Output](../modules/output/audio-output.md)
+## How it's built
 
-Optional:
-- 1x [LFO](../modules/modulation/lfo.md)
-- 1x [Compressor](../modules/effects/compressor.md)
+### Clock and pattern
 
-## Patch Diagram
-
-```
-┌───────┐     ┌────────────┐     ┌─────────┐     ┌────────┐     ┌──────┐
-│ Clock │──▶  │ Sequencer 1│─CV──▶│Oscillator│─Audio─▶│ Filter │─Audio─▶│ VCA  │
-│(120BPM)│     │  (Pitch)   │     │  (Saw)  │      │ (SVF)  │      │      │
-└───┬───┘     └─────┬──────┘     └─────────┘      └───▲────┘      └──▲───┘
-    │               │                                  │             │
-    │1/16           │Gate                              │             │
-    │               ▼                                  │             │
-    │         ┌─────────┐                              │      ┌──────┴──────┐
-    │         │  ADSR   │──────────────────────────────┘      │    ADSR     │
-    │         │(Filter) │                                     │ (Amplitude) │
-    │         └────▲────┘                                     └──────▲──────┘
-    │              │                                                  │
-    │              │                                                  │
-    │    ┌─────────┴───────────────────────────────────────┐         │
-    └───▶│                   [Sequencer Gate]               │─────────┘
-         └─────────────────────────────────────────────────┘
-
-[VCA]──▶[Distortion]──▶[Delay]──▶[Output]
+```text
+[Clock Gate] ──> [Step Sequencer Clock]
+[Step Sequencer Pitch] ──> [Oscillator V/Oct]
 ```
 
-## Step-by-Step Setup
+At 120 BPM with **Div** at 1/16, the Clock pulses four times a beat, every 125 ms, and each pulse moves the sequencer one step. The sixteen steps make one bar:
 
-### 1. Clock - The Foundation
+| Step | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 |
+|------|---|---|---|---|---|---|---|---|---|----|----|----|----|----|----|----|
+| Note | C2 | C2 | – | G2 | C2 | – | D#2 | C2 | C3 | – | G2 | C2 | – | D#2 | F2 | G2 |
 
-Set up the master clock:
+A dash is a step with its gate off: a rest. The line sits on the root, C2, and moves through notes of C minor (D# is the minor third) with an octave leap on the downbeat of the second half. The rests do as much as the notes: they're what make it groove rather than drone.
 
-**Clock Settings**:
-| Parameter | Value |
-|-----------|-------|
-| BPM | 120 |
-| Pulse Width | 50% |
+### The squelch
 
-### 2. Pitch Sequencer
-
-Create a 16-step pattern:
-
-```
-[Clock 1/16] ──▶ [Sequencer 1 Clock]
+```text
+[Oscillator Out] ──> [SVF Filter In]
+[Step Sequencer Gate] ──> [ADSR (filter) Gate]
+[ADSR (filter) Out] ──> [Mixer Ch 1]
+                    ──> [Mixer Ch 2]
+[Mixer Out] ──> [SVF Filter Cutoff]
 ```
 
-**Sequencer 1 Settings**:
-- Length: **16 steps**
-- Direction: **Forward**
+The filter sits low, at 300 Hz, with **Res** at 70%. The filter envelope kicks it open on every step with a gate, then drops it back in 200 ms. That fast sweep of a sharp resonant peak is the acid sound.
 
-Example acid bassline pattern (1 octave range):
+The filter's **Cutoff** input works in octaves, and an envelope peaks at 1.0, so one envelope on its own opens the filter by one octave. The patch sends the envelope into both inputs of a Mixer to add two copies together, which opens it further. The Mixer softly limits anything over 1.0, so in practice the peak is about an octave and a third, up to roughly 750 Hz.
 
-| Step | Note | CV | Gate |
-|------|------|-----|------|
-| 1 | C2 | 0.00 | ON |
-| 2 | C2 | 0.00 | ON |
-| 3 | - | - | OFF |
-| 4 | G2 | 0.58 | ON |
-| 5 | C2 | 0.00 | ON |
-| 6 | - | - | OFF |
-| 7 | Eb2 | 0.25 | ON |
-| 8 | C2 | 0.00 | ON |
-| 9 | C3 | 1.00 | ON |
-| 10 | - | - | OFF |
-| 11 | G2 | 0.58 | ON |
-| 12 | C2 | 0.00 | ON |
-| 13 | - | - | OFF |
-| 14 | Eb2 | 0.25 | ON |
-| 15 | F2 | 0.42 | ON |
-| 16 | G2 | 0.58 | ON |
+### Volume, drive and echo
 
-### 3. Oscillator
-
-```
-[Sequencer 1 CV] ──▶ [Oscillator V/Oct]
+```text
+[Step Sequencer Gate] ──> [ADSR (amp) Gate]
+[SVF Filter LowPass] ──> [VCA In]
+[ADSR (amp) Out] ──> [VCA CV]
+[VCA Out] ──> [Distortion In]
+[Distortion Out] ──> [Stereo Delay In L]
+[Stereo Delay Out L] ──> [Audio Output Left]
+[Stereo Delay Out R] ──> [Audio Output Right]
 ```
 
-**Oscillator Settings**:
-- Waveform: **Saw** (classic acid sound)
-- Base Frequency: C2 (or lower for bass)
+The amp envelope is short and punchy, so each note is a distinct pluck. With **Gate** at 50%, each of the sequencer's gates lasts 50 ms (gate length is a share of a fixed 100 ms), well inside the 125 ms step.
 
-### 4. Envelopes
+Soft distortion at 30% drive, mixed at 70%, rounds and thickens the bass and makes the resonant peak growl.
 
-Connect gate to both envelopes:
-
-```
-[Sequencer 1 Gate] ──▶ [ADSR 1 Gate] (Filter)
-                   ──▶ [ADSR 2 Gate] (Amplitude)
-```
-
-**ADSR 1 (Filter)**:
-| Parameter | Value | Why |
-|-----------|-------|-----|
-| Attack | 1 ms | Instant |
-| Decay | 200 ms | Quick close |
-| Sustain | 0.1 | Mostly closed |
-| Release | 50 ms | Quick |
-
-**ADSR 2 (Amplitude)**:
-| Parameter | Value | Why |
-|-----------|-------|-----|
-| Attack | 1 ms | Punchy |
-| Decay | 150 ms | Short |
-| Sustain | 0.3 | Some body |
-| Release | 50 ms | Tight |
-
-### 5. Filter - The Acid Sound
-
-```
-[Oscillator Audio] ──▶ [Filter Input]
-[ADSR 1 Env] ──▶ [Filter Cutoff CV]
-```
-
-**Filter Settings**:
-| Parameter | Value |
-|-----------|-------|
-| Cutoff | 400 Hz (base) |
-| Resonance | 0.7 (high!) |
-| CV Amount | 0.6 |
-
-The high resonance creates the classic "acid" squelch.
-
-### 6. VCA
-
-```
-[Filter Lowpass] ──▶ [VCA Input]
-[ADSR 2 Env] ──▶ [VCA CV]
-```
-
-### 7. Effects Chain
-
-```
-[VCA] ──▶ [Distortion] ──▶ [Delay] ──▶ [Output]
-```
-
-**Distortion Settings**:
-| Parameter | Value |
-|-----------|-------|
-| Type | Soft |
-| Drive | 0.3 |
-| Mix | 0.7 |
-
-**Delay Settings**:
-| Parameter | Value |
-|-----------|-------|
-| Time | 375 ms (dotted 1/8 at 120 BPM) |
-| Feedback | 0.3 |
-| Mix | 0.25 |
-| HP Filter | 300 Hz |
-
-## Creating Variations
-
-### Accent Pattern
-
-Add accents on certain steps:
-
-**Method 1**: Use higher CV values
-**Method 2**: Add second envelope for accents
-
-```
-[Sequencer 2 (accent pattern)] ──▶ [Attenuverter] ──▶ [Filter Cutoff CV]
-```
-
-### Slide/Glide
-
-Add portamento for 303-style slides:
-
-Between certain notes, enable glide on the oscillator or add a slew limiter.
-
-### Gate Length Variation
-
-Vary gate lengths in the sequencer for rhythmic interest:
-- Long gates for legato
-- Short gates for staccato
-- Tied notes for slides
+The Stereo Delay's **Sync** is set to 1/8D, a dotted eighth. It takes its tempo from the Clock, so at 120 BPM each echo comes 375 ms after its note: three sixteenths later, falling between the notes and filling the gaps. Its **LoCut** keeps the echoes out of the bass register, so they don't muddy the line.
 
 ## Variations
 
-### Classic Acid
+**Play the filter.** While it runs, sweep **Cutoff** between 150 Hz and 1 kHz and push **Res** toward 90%. Lengthen the filter envelope's **Dec** to 400 ms for longer squelches.
 
-```
-Resonance: 0.85
-Filter Cutoff: 300 Hz
-Distortion: 0.5
-ADSR 1 Decay: 300 ms
-```
+**Change the line.** Click a step to toggle its gate. Right-click a step to move its pitch by a semitone or an octave.
 
-### Driving Techno Bass
+**Different tempo.** Turn the Clock's **BPM**. The delay follows, staying on the dotted eighth.
 
-```
-Oscillator: Square
-Resonance: 0.3
-Distortion: 0.4
-BPM: 135
-Shorter envelope decays
-```
+**Shorter loop.** Set **Steps** to 12 or 7 for a pattern that cycles against the bar.
 
-### Hypnotic Minimal
+**Fatter.** Swap the SVF for a [Ladder Filter](../modules/filters/ladder-filter.md) and use its **LP24** output. Raise its **Drive** to 3x.
 
-```
-BPM: 124
-Sequence Length: 4 steps
-Resonance: 0.5
-Delay: 500ms (1/4 note)
-Delay Feedback: 0.5
-```
+**Harder.** Set the Distortion's **Type** to Hard or Fold and raise **Drive**. Turn **Out** down to keep the level in check.
 
-### Electro Funk
+## Related
 
-```
-BPM: 110
-Syncopated gate pattern
-Moderate resonance: 0.4
-Add subtle chorus
-Longer envelope attack: 10 ms
-```
-
-## Adding Groove
-
-### Swing
-
-Apply swing to the clock:
-
-```
-Clock Swing: 30%
-```
-
-This pushes every other beat slightly late.
-
-### Velocity/Accent Sequencer
-
-Add a parallel sequencer for dynamics:
-
-```
-[Clock 1/16] ──▶ [Sequencer 2 Clock]
-[Sequencer 2 CV] ──▶ [VCA Level CV] (via attenuverter)
-```
-
-Program accent pattern in Sequencer 2.
-
-### Ghost Notes
-
-Add quiet notes between main beats:
-
-1. Program main pattern with normal gates
-2. Add additional quiet steps with very low output
-3. Creates more complex rhythm
-
-## Advanced Techniques
-
-### Filter Sequencing
-
-Use a second sequencer for filter cutoff:
-
-```
-[Clock 1/4] ──▶ [Sequencer 2 Clock]
-[Sequencer 2 CV] ──▶ [Filter Cutoff CV]
-```
-
-The filter pattern moves independently of the note pattern.
-
-### Polyrhythms
-
-Set sequencers to different lengths:
-
-```
-Sequencer 1 (pitch): 16 steps
-Sequencer 2 (filter): 12 steps
-```
-
-The patterns shift against each other over time.
-
-### External Modulation
-
-Add LFO for evolving character:
-
-```
-[LFO (slow)] ──▶ [Resonance CV]
-[LFO (slow)] ──▶ [Envelope Decay CV]
-```
-
-## Troubleshooting
-
-**No squelch**: Increase resonance, increase filter envelope depth
-
-**Too harsh**: Lower resonance, reduce distortion
-
-**Notes running together**: Shorten envelope release, check gate lengths
-
-**Too quiet**: Check VCA level, output level
-
-**Timing feels off**: Adjust clock BPM, check gate lengths
-
-## Performance Tips
-
-1. **Tweak the filter cutoff**: Main expressive control
-2. **Adjust resonance live**: Changes character dramatically
-3. **Play with envelope decay**: Longer = more squelch
-4. **Use delay feedback**: Build tension
-5. **Mute/unmute sequencer gates**: Create arrangement
-
-## What You've Learned
-
-- Building rhythmic sequenced patterns
-- Creating acid bass sounds
-- Using filter envelopes for character
-- Clock divisions for different rhythmic rates
-- Adding groove and variation
+- [Clock](../modules/modulation/clock.md) – tempo and divisions
+- [Step Sequencer](../modules/utilities/sequencer.md) – editing steps
+- [Generative Ambient](./generative-ambient.md) – the same clock and sequencer, slowed right down

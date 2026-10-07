@@ -1,313 +1,114 @@
 # Generative Ambient
 
-Create a self-playing ambient patch that evolves endlessly without input.
+A patch that plays itself. A slow pentatonic melody repeats every twelve seconds, but each note comes out with a different brightness, the tuning drifts, and long echoes and an eight-second reverb blur one phrase into the next. Press Play and leave it running.
 
-![Generative Ambient Patch](../images/recipe-generative-ambient.png)
-*The generative ambient patch*
+> **Load it:** choose **📚 Examples → Generative Ambient** in the toolbar and press **▶ Play**. It needs no keyboard.
+> The patch file is [`patches/generative-ambient.json`](https://github.com/chrischaps/Modular/blob/master/patches/generative-ambient.json).
 
-> **Play it now:** this recipe ships with the app. Choose **📚 Examples → Generative Ambient** in the toolbar,
-> or download [`patches/generative-ambient.json`](https://github.com/chrischaps/Modular/blob/master/patches/generative-ambient.json) and open it.
->
-> - Press **Play** and listen. It plays itself.
-> - The sequence is C4 D4 E4 G4 A4 G4 E4 D4. Step 6's gate is off, so the melody takes a breath. Oscillator 1 (Triangle) sits an octave below Oscillator 2 (Sine).
-> - The Clock's quarter notes trigger the Sample & Hold, so each note brings a new filter brightness.
-> - LFO 2 drifts Oscillator 1's pitch through **Exp FM**. The depth is 0.01 octave, about ±12 cents. LFO 2 also moves the filter's **Resonance**.
-> - The Delay has a single 600 ms **Time** with **Ping-Pong** on.
+![The Generative Ambient patch](../images/recipe-generative-ambient.png)
+*Clock and sequencer play the notes; two slow LFOs keep them from repeating.*
 
-## Overview
+## What it teaches
 
-Generative music creates itself through interconnected systems of clocks, sequences, and randomness. This patch plays indefinitely, always changing, always familiar—perfect for ambient backgrounds, meditation, or sleep.
+- **Clock and sequencer.** A clock sets the pace and a step sequencer turns each pulse into a note.
+- **Sample & hold.** Freezing a moving signal at each note gives every note its own setting, a step at a time.
+- **Cycles that don't line up.** When loops of different lengths run against each other, the combination takes a very long time to repeat. That's where the variety comes from, not from randomness.
 
-**Character**: Ethereal, evolving, infinite, peaceful
-**Good for**: Ambient backgrounds, meditation, installations, sleep
+## Modules
 
-## Modules Used
+| Module | Settings |
+|--------|----------|
+| [Clock](../modules/modulation/clock.md) | **BPM** 40, **Div** 1/4 |
+| [Step Sequencer](../modules/utilities/sequencer.md) | **Steps** 8, **Dir** Fwd, **Gate** 60%. Notes C4 D4 E4 G4 A4 G4 E4 D4, step 6 off |
+| [Oscillator](../modules/sources/oscillator.md) 1 | **Wave** Tri, **Oct** −1, **Exp FM** 0.01 oct |
+| [Oscillator](../modules/sources/oscillator.md) 2 | **Wave** Sine |
+| [Mixer](../modules/utilities/mixer.md) | **Lv 1** 100%, **Lv 2** 50% |
+| [SVF Filter](../modules/filters/svf-filter.md) | **Cutoff** 1.5 kHz, **Res** 20% |
+| [ADSR Envelope](../modules/modulation/adsr.md) | **Atk** 300 ms, **Dec** 500 ms, **Sus** 70%, **Rel** 2 s |
+| [VCA](../modules/utilities/vca.md) | Defaults |
+| [LFO](../modules/modulation/lfo.md) 1 | **Rate** 0.13 Hz, **Wave** Triangle, **Bipolar** on |
+| [Sample & Hold](../modules/utilities/sample-hold.md) | **Slew** 300 ms |
+| [LFO](../modules/modulation/lfo.md) 2 | **Rate** 0.03 Hz, **Wave** Sine, **Bipolar** on |
+| [Stereo Delay](../modules/effects/delay.md) | **Time** 600 ms, **FB** 50%, **Mix** 40%, **HiCut** 4 kHz, **LoCut** 200 Hz, **P-P** on |
+| [Reverb](../modules/effects/reverb.md) | **Size** 90%, **Decay** 8 s, **PreD** 100 ms, **Mix** 60% |
+| [Audio Output](../modules/output/audio-output.md) | **Vol** 100% |
 
-- 1x [Clock](../modules/modulation/clock.md)
-- 1x [Sequencer](../modules/utilities/sequencer.md)
-- 1x [Sample & Hold](../modules/utilities/sample-hold.md)
-- 2x [Oscillator](../modules/sources/oscillator.md)
-- 1x [SVF Filter](../modules/filters/svf-filter.md)
-- 1x [VCA](../modules/utilities/vca.md)
-- 2x [ADSR Envelope](../modules/modulation/adsr.md)
-- 2x [LFO](../modules/modulation/lfo.md)
-- 1x [Delay](../modules/effects/delay.md)
-- 1x [Reverb](../modules/effects/reverb.md)
-- 1x [Audio Output](../modules/output/audio-output.md)
+## How it's built
 
-## The Concept
+### The melody
 
-```
-Clock ──▶ Sequencer ──▶ Oscillator ──▶ Filter ──▶ VCA ──▶ Effects ──▶ Output
-  │                                       ▲         ▲
-  └──▶ S&H ──▶ Filter Mod                 │         │
-       (random)                       LFOs      ADSR (from clock)
-```
-
-Key elements:
-1. **Clock** provides regular timing
-2. **Sequencer** creates melodic patterns
-3. **Sample & Hold** adds randomness
-4. **LFOs** create slow movement
-5. **Long envelopes** create gentle dynamics
-6. **Heavy effects** create space and blur
-
-## Step-by-Step Setup
-
-### 1. The Clock
-
-The heartbeat of the patch:
-
-**Clock Settings**:
-| Parameter | Value |
-|-----------|-------|
-| BPM | 40 (very slow) |
-| Pulse Width | 50% |
-
-### 2. Melodic Sequencer
-
-Create a simple, pentatonic sequence:
-
-```
-[Clock 1/4] ──▶ [Sequencer Clock]
+```text
+[Clock Gate] ──> [Step Sequencer Clock]
+[Step Sequencer Pitch] ──> [Oscillator 1 V/Oct]
+                       ──> [Oscillator 2 V/Oct]
+[Step Sequencer Gate] ──> [ADSR Gate]
 ```
 
-**Sequencer Settings**:
-- Length: **8 steps**
-- Direction: **Forward**
+At 40 BPM with **Div** at 1/4, the Clock pulses once a beat, every 1.5 seconds. Each pulse moves the sequencer one step. Its eight steps rise and fall through a C major pentatonic scale, C D E G A G E D, and step 6's gate is off, so the melody takes a breath before it turns around. Eight steps of 1.5 seconds make a twelve-second loop.
 
-Program a pentatonic scale (no "wrong" notes):
+The pentatonic scale has no half steps, so no two of its notes clash. That's why the long echoes and reverb can pile notes on top of each other without the result turning muddy.
 
-| Step | CV (Note) |
-|------|-----------|
-| 1 | C (0.0) |
-| 2 | D (0.167) |
-| 3 | E (0.333) |
-| 4 | G (0.583) |
-| 5 | A (0.75) |
-| 6 | G (0.583) |
-| 7 | E (0.333) |
-| 8 | D (0.167) |
+### Two oscillators, an octave apart
 
-Gates: All ON (or create rhythm by turning some OFF)
-
-### 3. Random Modulation
-
-Add controlled randomness:
-
-```
-[LFO 1 (slow triangle)] ──▶ [S&H Input]
-[Clock 1/8] ──▶ [S&H Trigger]
-[S&H Output] ──▶ [Filter Cutoff CV]
+```text
+[Oscillator 1 Out] ──> [Mixer Ch 1]
+[Oscillator 2 Out] ──> [Mixer Ch 2]
+[Mixer Out] ──> [SVF Filter In]
 ```
 
-This creates stepped, random-ish filter movement.
+Oscillator 1 is a triangle an octave down, and Oscillator 2 a sine at pitch, mixed in at half level. Together they make a soft, hollow tone, closer to a flute or a mallet than to a synth lead.
 
-### 4. Dual Oscillators
+### Brightness, one note at a time
 
-```
-[Sequencer CV] ──▶ [Osc 1 V/Oct]
-               ──▶ [Osc 2 V/Oct]
-```
-
-**Oscillator 1**: Triangle wave
-**Oscillator 2**: Sine wave, +1 octave
-
-Mix together:
-```
-[Osc 1] ──▶ [Mixer Ch 1] (0.8)
-[Osc 2] ──▶ [Mixer Ch 2] (0.4)
+```text
+[LFO 1 Out] ──> [Sample & Hold In]
+[Clock Gate] ──> [Sample & Hold Trig]
+[Sample & Hold Out] ──> [SVF Filter Cutoff]
 ```
 
-### 5. Filter
+LFO 1 is a slow triangle, one cycle every 7.7 seconds. On every clock pulse, the Sample & Hold catches the LFO's current value and holds it until the next. The filter's **Cutoff** input works in octaves, so each note gets a cutoff somewhere between 750 Hz and 3 kHz. The 300 ms **Slew** glides between values instead of jumping.
 
-```
-[Mixer] ──▶ [Filter Input]
-```
+The LFO's 7.7-second cycle doesn't divide evenly into the 1.5-second pulses or the twelve-second loop. So the melody repeats exactly, but the brightness of each note doesn't: every pass through the phrase comes out shaded differently.
 
-**Filter Settings**:
-- Cutoff: **1500 Hz**
-- Resonance: **0.2**
-- CV Amount: **0.4** (from S&H)
+### Slow drift
 
-### 6. Amplitude Envelope
-
-```
-[Sequencer Gate] ──▶ [ADSR 1 Gate]
-[ADSR 1] ──▶ [VCA CV]
+```text
+[LFO 2 Out] ──> [Oscillator 1 Exp FM]
+            ──> [SVF Filter Resonance]
 ```
 
-**ADSR 1 (Amplitude)**:
-| Parameter | Value | Why |
-|-----------|-------|-----|
-| Attack | 300 ms | Soft entry |
-| Decay | 500 ms | Gentle fall |
-| Sustain | 0.5 | Held tone |
-| Release | 2000 ms | Long fade |
+LFO 2 takes over half a minute per cycle. On Oscillator 1's **Exp FM** input, with **Exp FM** set to 0.01 octave, it bends the pitch about 12 cents sharp and flat. Against the steady Oscillator 2, that makes a slow beating, like an instrument that's not quite in tune with itself. The same LFO raises and lowers the filter's resonance, so some passages ring and others are soft.
 
-### 7. Slow LFO Movement
+### Envelope, echoes and space
 
-Add slow evolution:
-
-```
-[LFO 2] ──▶ [Osc 1 Detune] (subtle)
-        ──▶ [Filter Resonance] (subtle)
+```text
+[SVF Filter LowPass] ──> [VCA In]
+[ADSR Out] ──> [VCA CV]
+[VCA Out] ──> [Stereo Delay In L]
+[Stereo Delay Out L] ──> [Reverb In L]
+[Stereo Delay Out R] ──> [Reverb In R]
+[Reverb Out L] ──> [Audio Output Left]
+[Reverb Out R] ──> [Audio Output Right]
 ```
 
-**LFO 2 Settings**:
-- Waveform: Sine
-- Rate: **0.03 Hz** (30+ seconds per cycle)
-- Bipolar: On
-
-### 8. Effects Chain
-
-```
-[VCA] ──▶ [Delay] ──▶ [Reverb] ──▶ [Output]
-```
-
-**Delay Settings**:
-| Parameter | Value |
-|-----------|-------|
-| Time L | 600 ms |
-| Time R | 800 ms |
-| Feedback | 0.5 |
-| Mix | 0.4 |
-| HP Filter | 200 Hz |
-| LP Filter | 4000 Hz |
-
-**Reverb Settings**:
-| Parameter | Value |
-|-----------|-------|
-| Decay | 8 s |
-| Pre-Delay | 100 ms |
-| Size | 0.9 |
-| Damping | 0.5 |
-| Mix | 0.6 |
-
-## Making It More Generative
-
-### Add Probability
-
-Not every step triggers:
-
-Make some sequencer gates OFF to create rests and variation.
-
-### Multiple Time Scales
-
-Add a slower sequence layer:
-
-```
-[Clock 1/2] ──▶ [Sequencer 2 (4 steps)] ──▶ [Drone Oscillator]
-```
-
-This creates an even slower-moving bass drone.
-
-### Evolving Sequence
-
-Occasionally change the sequence:
-
-```
-[Very slow clock] ──▶ [Random trigger to sequence edit]
-```
-
-Or manually tweak sequence values occasionally.
-
-### Self-Modifying Patch
-
-Route slow LFOs to sequence CV inputs:
-
-```
-[LFO (very slow)] ──▶ [Attenuverter (tiny amount)] ──▶ [Seq Step 1 CV]
-```
-
-The sequence gradually shifts.
+The envelope's 300 ms attack takes the edge off each note and its 2-second release lets it ring into the next one. The Stereo Delay repeats every 600 ms with **Ping-Pong** on, so echoes bounce between the speakers. Its **HiCut** and **LoCut** darken and thin each repeat, so the echoes recede instead of building up. The Reverb's large room and 8-second tail turn it all into a wash.
 
 ## Variations
 
-### Darker Ambient
+**Really generative.** Set the sequencer's **Dir** to Rnd. The notes now come in a random order, and because they're all from the pentatonic scale, every order works.
 
-```
-Filter Cutoff: 800 Hz
-Remove high oscillator
-Reverb Damping: 0.7
-BPM: 30
-```
+**Rewrite the melody.** Click a step to turn its gate on or off. Right-click a step to move its pitch by a semitone or an octave. Stay on C, D, E, G and A to keep the pentatonic calm.
 
-### Brighter Ambient
+**An odd-length loop.** Set **Steps** to 5 or 7 so the phrase falls out of step with the bar.
 
-```
-Filter Cutoff: 4000 Hz
-Add shimmer (short delay with high feedback, filtered)
-Reverb Damping: 0.2
-```
+**Slower still.** Turn the Clock down to 20 BPM, and raise the Reverb's **Decay** to 15 s or more.
 
-### Rhythmic Ambient
+**Tape echoes.** Turn on the delay's **Tape** for wobble and saturation in the repeats.
 
-```
-BPM: 60
-More complex gate pattern
-Shorter ADSR release (500ms)
-Delay synced to tempo
-```
+**Wider drift.** Raise Oscillator 1's **Exp FM** to 0.03 octave for a seasick, detuned-tape feel.
 
-### Drone-Based
+## Related
 
-```
-Remove sequencer
-Use very slow S&H for pitch
-Attack: 5000 ms
-Release: 10000 ms
-```
-
-## Advanced Techniques
-
-### Multiple Voices
-
-Add a second, independent voice with different timing:
-
-```
-[Clock 1/3] ──▶ [Sequencer 2] ──▶ [Voice 2]
-```
-
-The different divisions create polyrhythmic patterns.
-
-### Feedback Networks
-
-Carefully route modulation outputs back to modulation inputs for chaotic evolution.
-
-### External Control
-
-Feed LFO rate from S&H to create meta-modulation:
-
-```
-[S&H 2] ──▶ [LFO 1 Rate CV]
-```
-
-## Tips for Good Generative Patches
-
-1. **Pentatonic scales**: Can't sound "wrong"
-2. **Slow tempos**: Creates space
-3. **Long envelopes**: Soft dynamics
-4. **Heavy effects**: Blurs harsh edges
-5. **Multiple time scales**: Creates depth
-6. **Constraint + randomness**: Structure with surprise
-
-## Troubleshooting
-
-**Too static**: Add more modulation, especially to filter
-
-**Too chaotic**: Reduce S&H influence, simplify sequence
-
-**Too quiet**: Check VCA levels, reduce reverb mix
-
-**Notes don't fade**: Increase envelope release, check gate length
-
-**Too busy**: Slow down clock, add more rests in sequence
-
-## What You've Learned
-
-- Building self-playing patches
-- Using clocks and sequencers for automation
-- Adding controlled randomness
-- Layering multiple time scales
-- Creating space with effects
+- [Sample & Hold](../modules/utilities/sample-hold.md) – stepped modulation
+- [Step Sequencer](../modules/utilities/sequencer.md) – editing steps
+- [Rhythmic Sequence](./rhythmic-sequence.md) – the same clock and sequencer, at dance tempo

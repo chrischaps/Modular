@@ -1,254 +1,86 @@
 # Connections
 
-Connections are the cables that link modules together, allowing signals to flow through your patch. Understanding connection rules helps you build effective synthesizer patches.
+A cable carries a signal from one module's output to another module's input. Patching is the whole of Modular Synth: the modules decide what can happen, and the cables decide what does.
 
-## Basic Rules
+## Patching a cable
 
-### Outputs to Inputs
+Outputs are on the right edge of a module and inputs are on the left. To connect two modules:
 
-Connections always flow from **output ports** (right side of modules) to **input ports** (left side of modules).
+1. Press on an output jack and drag. A cable follows the pointer.
+2. Release over an input jack on another module.
 
-![Connection Direction](../images/connection-direction.png)
-*Signals flow from outputs (right) to inputs (left)*
+You can also start from an empty input and drag back to an output.
 
-You cannot:
-- Connect output to output
-- Connect input to input
-- Create circular connections that would cause feedback loops (the system prevents this)
+To unplug a cable, press on the input end and drag it away. The cable comes off the jack and follows the pointer: drop it on another input to re-patch it, or on empty canvas to remove it. Deleting a module removes all of its cables.
 
-### One Input, Many Outputs
+Patching and unpatching are recorded in the undo history, so **Ctrl + Z** puts back a cable you pulled by mistake.
 
-**Inputs** accept only one connection at a time. Connecting a new cable to an already-connected input will replace the existing connection.
+## The rules
 
-**Outputs** can feed multiple inputs. The signal is copied to each destination without reduction in level.
+- **An output can feed any number of inputs.** Each one receives the full signal, with no loss of level.
+- **An input takes one cable.** Patching a second cable into an occupied input replaces the first.
+- **Signal types must be compatible.** Audio and control connect to each other freely, and a gate can drive a control input, but a gate input only accepts gates. The full table is on [Signal Types](./signal-types.md#which-types-connect). If a cable can't connect, Modular Synth removes it and the status bar explains why.
+- **A module can't patch into itself, and signals don't loop.** Modular Synth processes the patch in one direction, from sources to the output, so a cable that would feed a module's output back into its own input, directly or through other modules, has no effect. For echoes and feedback, use the [Delay](../modules/effects/delay.md)'s **Feedback** knob.
 
-![Multiple Connections](../images/connection-multiple.png)
-*One output feeding multiple inputs*
+## Empty jacks
 
----
+An input with nothing patched in isn't necessarily zero. Each jack has a resting value chosen so the module does something sensible on its own. A [VCA](../modules/utilities/vca.md) with nothing in its **CV** jack plays at full level, for example, so you can hear its input before you add an envelope.
 
-## Making Connections
+The stereo effects work the same way. Patch only their left input and they treat the signal as mono, feeding both sides, so a mono voice into the Reverb still gets a stereo tail.
 
-### Creating a Connection
+## Knobs with jacks
 
-1. **Click and hold** on an output port
-2. **Drag** toward the destination input
-3. The cursor will show valid connection points
-4. **Release** over an input port to complete
+Many parameters have both a knob and an input jack of the same name, such as **Cutoff** on the filters or **Time** on the Delay. With nothing patched, the knob sets the value. Patch a cable in and the signal modulates the parameter *around the knob*: the knob sets the center, and the cable moves the value up and down from there.
 
-![Creating Connection](../images/connection-creating.png)
-*Dragging to create a connection*
+How far a cable moves the parameter depends on the parameter, and each module page gives the scale. On both filters, for instance, the Cutoff CV is 1 per octave: +1.0 doubles the cutoff and −1.0 halves it. With Cutoff at 1 kHz, a bipolar LFO sweeps the filter from 500 Hz to 2 kHz.
 
-### Visual Feedback
+A small dot above the knob shows that a cable is patched in: orange once the signal is arriving, green while it's connected but hasn't reported a value yet. On most knobs you can keep turning the knob to move the center while the cable plays. A few knobs (**Rate** on the LFO, **Rate** and **Depth** on the Chorus) dim while patched and turn by themselves to follow the incoming signal; unplug the cable to adjust them again.
 
-While dragging:
-- **Valid inputs** highlight to show they can accept the connection
-- **Invalid inputs** (wrong signal type or already connected) may dim
-- The cable preview shows the signal type color
+A knob mapped to a MIDI controller shows a purple **M** badge instead of the dot.
 
-### Quick Connect
-
-Double-click an output port to start a connection, then single-click an input to complete it. This is useful for long-distance connections.
-
----
-
-## Removing Connections
-
-### Right-Click Method
-
-**Right-click** on a cable to delete it immediately.
-
-### Disconnect from Port
-
-Click on a connected input port, then press **Escape** to disconnect.
-
-### Delete Module
-
-Deleting a module automatically removes all its connections.
-
----
-
-## Signal Type Matching
-
-### Preferred Connections
-
-For best results, match signal types:
-
-| Connection | Result |
-|------------|--------|
-| Audio → Audio | Full-bandwidth sound signal |
-| Control → Control | Modulation and CV |
-| Gate → Gate | Trigger and timing |
-| MIDI → MIDI | MIDI message passing |
-
-### Cross-Type Connections
-
-Some cross-type connections are useful:
-
-| Connection | Use Case |
-|------------|----------|
-| Audio → Control | Audio-rate modulation (FM synthesis) |
-| Gate → Control | Simple 0/1 control signal |
-| Control → Audio | Slow modulation mixed as audio |
-
-The system allows most cross-type connections, treating the signal according to the destination's expectations.
-
-### MIDI Special Case
-
-MIDI signals are structured differently and generally only connect to MIDI-specific inputs. Use the MIDI Note module to convert MIDI to CV signals (V/Oct, Gate, Velocity) for standard modules.
-
----
-
-## Cable Colors
-
-Cables are colored by signal type for easy visual identification:
-
-| Color | Signal Type |
-|-------|-------------|
-| **Blue** | Audio |
-| **Orange** | Control/CV |
-| **Green** | Gate/Trigger |
-| **Purple** | MIDI |
-
-![Cable Colors](../images/connection-colors.png)
-*Cables colored by signal type*
-
-This coloring helps you:
-- Trace signal flow through complex patches
-- Identify signal types at a glance
-- Debug routing issues
-
-## Reading the Signal in a Cable
+## Reading the signal in a cable
 
 While the patch plays, each cable shows what its signal has been doing over the last few seconds. The signal travels from the output to the input at a steady pace, so the end of the cable nearest the output is *now* and points further along are moments ago.
 
-- **Brightness is strength.** A cable lights up with its signal and goes dark when it's silent. A note becomes a packet of light that runs down the wire. Its length is how long the note lasted, and an audio cable's light fades out as the note releases.
-- **Chevrons point the way.** Marks ride the light from output to input, so you can read a patch's direction even in a still frame. Each mark keeps the brightness of the moment it left the output.
-- **Control cables draw their shape.** On orange cables the light swings to one side of the cable or the other with the signal's value. An LFO shows its waveform travelling down the wire, an envelope its rise and fall, and a sequencer its steps.
+- **Brightness is strength.** A cable lights up with its signal and goes dark when it's silent. A note becomes a packet of light that runs down the wire. The packet's length is how long the note lasted, and an audio cable's light fades out as the note releases.
+- **Marks point the way.** Chevrons ride the light from output to input, so you can read a patch's direction even in a still frame. Each mark keeps the brightness of the moment it left the output.
+- **Control cables draw their shape.** On orange cables the light swings to one side of the cable or the other with the signal's value. An LFO shows its waveform traveling down the wire, an envelope its rise and fall, a sequencer its steps.
 - **Gates are on or off.** A green cable shows bright packets with hard edges, one per gate.
 
-When you press **Stop**, the last of the signal drains out of the cables.
+When you press **Stop**, the last of the signal drains out of the cables rather than vanishing.
 
-Prefer a different look? **Cables** in the toolbar switches the marks between **Chevrons**, **Dots** and **Comets**.
+To change the marks, open **Cables** in the toolbar and choose **Chevrons**, **Dots** or **Comets**. Modular Synth remembers your choice.
 
----
+Polyphonic cables are drawn as a bundle of strands, one per voice. See [Seeing polyphony](./polyphony.md#seeing-polyphony).
 
-## Connection Tips
+## Laying out a patch
 
-### Keep It Organized
+A patch is easier to read, and easier to come back to, when it follows a few habits:
 
-- Position modules so signal flows left-to-right
-- Group related modules together
-- Use the canvas space to prevent cable crossings
+- Run the audio path from left to right, ending at the Audio Output.
+- Put modulation sources (envelopes, LFOs, the clock) above or below the audio path, so their cables reach across it rather than tangling with it.
+- Keep each voice's modules together.
 
-![Organized Patch](../images/connection-organized.png)
-*A well-organized patch with clear signal flow*
-
-### Modulation Routing
-
-Control signals often "reach across" the main signal flow:
-
-```
-[LFO] ────────────────────────┐
-                              ↓ (CV)
-[Osc] ──> [Filter] ──> [VCA] ──> [Out]
-            ↑
-[Envelope] ─┘
+```text
+               [LFO] ──┐
+                       ▼ Cutoff
+[Oscillator] ──> [SVF Filter] ──> [VCA] ──> [Audio Output]
+                                    ▲ CV
+               [ADSR] ──────────────┘
 ```
 
-Position modulation sources (LFOs, envelopes) above or below the main signal path.
+## When there's no sound
 
-### Check Signal Flow
+Work backward from the output:
 
-If you're not getting sound:
+1. **Is anything patched into the Audio Output?** The **Mono** input is the simplest place to start.
+2. **Is the transport running?** Press **Play** in the toolbar.
+3. **Is the VCA opening?** If its **CV** jack is patched to an envelope, the envelope needs a gate. Play a note.
+4. **Is the envelope getting a gate?** Its Gate cable should light green when you play.
+5. **Follow the light.** A cable that stays dark carries silence. The last lit cable before the dark ones points to the module to check.
 
-1. **Trace from output backward** - Is the Audio Output connected?
-2. **Check control signals** - Is the VCA getting a CV signal?
-3. **Verify gates** - Is the envelope receiving a gate?
-4. **Look at signal types** - Are the right types connected?
+## See also
 
----
-
-## Exposed Parameters
-
-Some module parameters can be controlled via connections. These are called "exposed" parameters.
-
-### How It Works
-
-When a parameter is exposed:
-- It has both a **knob** for manual control AND an **input port** for external control
-- When **disconnected**: The knob controls the parameter normally
-- When **connected**: The external signal takes over
-
-### Visual Indicators
-
-![Exposed Parameter](../images/connection-exposed.png)
-*An exposed parameter showing external control*
-
-When externally controlled:
-- The knob becomes **read-only** (dimmed)
-- The knob **animates** to show the incoming signal value
-- An **orange indicator dot** shows external control is active
-
-### Combining Manual and Modulation
-
-The external signal often adds to the knob's base value:
-- **Knob** sets the center/base value
-- **Input** adds modulation on top
-
-For example, a filter cutoff:
-- Knob at 1000 Hz
-- LFO input swinging ±500 Hz
-- Result: Cutoff sweeps between 500-1500 Hz
-
----
-
-## Advanced Topics
-
-### Audio-Rate Modulation
-
-Control inputs can accept audio-rate signals for special effects:
-
-- **FM Synthesis**: Oscillator frequency modulated at audio rate
-- **AM/Ring Mod**: Amplitude modulated at audio rate
-- **Filter FM**: Cutoff modulated at audio rate
-
-### Feedback Loops
-
-The system prevents direct feedback loops (output connecting back to earlier input in the same signal path). This is necessary to maintain stable, real-time audio processing.
-
-For delay-based feedback effects, use the Delay module's built-in feedback control.
-
-### DC Offset
-
-Control signals may have DC offset (a constant value added to the signal). Some modules include DC blocking or offset controls to manage this.
-
----
-
-## Troubleshooting
-
-### No Sound
-
-1. Check that Audio Output is connected
-2. Verify VCA is receiving CV or is set to pass audio
-3. Ensure oscillator is running (not waiting for trigger)
-4. Check system audio settings
-
-### Unexpected Sound
-
-1. Look for unintended connections
-2. Check signal levels (may need attenuation)
-3. Verify signal types match expectations
-
-### Clicking or Popping
-
-1. Ensure control signals are smoothed
-2. Check for abrupt gate transitions
-3. Add slight attack/release to envelopes
-
----
-
-## Next Steps
-
-- **[Module Reference](../modules/README.md)** - See connection details for each module
-- **[Your First Patch](../getting-started/your-first-patch.md)** - Practice making connections
+- [Signal Types](./signal-types.md): what each color carries, and which types connect
+- [Polyphony](./polyphony.md): one cable, up to eight voices
+- [Interface Overview](../getting-started/interface-overview.md): every editing action and shortcut

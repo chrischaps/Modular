@@ -1,284 +1,125 @@
 # Compressor
 
-**Module ID**: `fx.compressor`
-**Category**: Effects
-**Header Color**: Purple
+**Module ID** `fx.compressor` · **Category** Effect
 
 ![Compressor Module](../../images/module-compressor.png)
-*The Compressor module*
+*Threshold and Ratio set how much; Atk and Rel set how fast*
 
-## Description
+The Compressor turns down a signal when it gets loud and leaves it alone when it's quiet. That evens out the level of a bass line, adds snap to percussion, holds a pad steady, or, with a kick in the **Sidechain** input, makes a pad pump in time.
 
-The Compressor reduces the dynamic range of a signal by attenuating loud portions while leaving quiet portions unchanged. This creates a more consistent level, adds punch, and can create distinctive pumping effects.
+It also puts its gain reduction out as a control signal on **GR**, so the amount of compression can move other parts of the patch.
+
+## How it works
+
+1. The detector measures the level of **In**, or of **Sidechain** when something is patched there.
+2. When the level rises above **Thresh**, the compressor works out how far to turn it down: **Ratio** sets how much of the overshoot gets through.
+3. **Atk** sets how quickly that reduction is applied, and **Rel** how quickly it lets go.
+4. **Mkup** adds gain back afterward, and **Mix** blends the result with the dry input.
+
+Attack and release shape the *gain reduction*, in dB, not the measured level. So a steady tone above the threshold comes out exactly where the ratio says it should, however fast or slow the timing knobs are set; attack and release only decide how it gets there.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Input** | Audio (Blue) | Signal to be compressed |
-| **Sidechain** | Audio (Blue) | External signal to control compression (optional) |
+| **In** | Audio (Blue) | Signal to compress |
+| **Sidechain** | Audio (Blue) | Signal the detector listens to instead of In. When unpatched, the detector listens to In |
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Output** | Audio (Blue) | Compressed signal |
-| **Gain Reduction** | Control (Orange) | CV output showing compression amount |
+| **Out** | Audio (Blue) | Compressed signal |
+| **GR** | Control (Orange) | Gain reduction as CV: 0 is no reduction, 1 is 60 dB |
 
 ## Parameters
 
 | Control | Range | Default | Description |
 |---------|-------|---------|-------------|
-| **Threshold** | -60 dB to 0 dB | -20 dB | Level above which compression begins |
-| **Ratio** | 1:1 to 20:1 | 4:1 | How much gain reduction is applied |
-| **Attack** | 0.1 ms - 100 ms | 10 ms | How quickly compression engages |
-| **Release** | 10 ms - 1000 ms | 100 ms | How quickly compression releases |
-| **Knee** | 0 dB to 12 dB | 6 dB | Width of the soft knee (0 = hard knee) |
-| **Makeup** | 0 dB to +24 dB | 0 dB | Level boost after compression |
-| **Mix** | 0% to 100% | 100% | Blend of compressed and dry (parallel compression) |
-| **Detector** | Peak / RMS | Peak | What the level detector measures (inline select) |
+| **Thresh** (Threshold) | −60 dB – 0 dB | −20 dB | Level above which compression begins |
+| **Ratio** | 1:1 – 20:1 | 4:1 | How strongly levels above the threshold are reduced |
+| **Atk** (Attack) | 0.1 ms – 100 ms | 10 ms | How fast compression clamps down |
+| **Rel** (Release) | 10 ms – 1000 ms | 100 ms | How fast compression lets go |
+| **Knee** | 0 dB – 12 dB | 6 dB | Width of the soft knee around the threshold. 0 is a hard knee |
+| **Mkup** (Makeup) | 0 dB – +24 dB | 0 dB | Gain added after compression |
+| **Mix** | 0 – 100% | 100% | Dry (0%) to compressed (100%), for parallel compression |
+| **Detector** | Peak / RMS | Peak | What the detector measures (dropdown on the node) |
 
-## How It Works
+## The controls
 
-1. The level of the input is measured, or of the sidechain if one is connected
-2. When the level exceeds **Threshold**, compression begins
-3. **Ratio** determines how much signals above threshold are reduced
-4. **Attack** controls how fast compression responds to transients
-5. **Release** controls how fast compression recovers
-6. **Makeup** compensates for level reduction
+### Threshold and ratio
 
-Attack and release shape the *gain reduction*, in dB, rather than the measured
-level. So a steady tone above threshold comes out exactly where the ratio says,
-however fast or slow the timing knobs are set. Attack and release only decide how
-it gets there.
+Above the threshold, the ratio sets how many decibels go in for each decibel that comes out. At 2:1, a signal 10 dB over the threshold comes out 5 dB over. At 4:1 it comes out 2.5 dB over. At 20:1, the top of the range, the compressor is close to a limiter: almost nothing gets past the threshold.
 
-### Peak vs RMS
+For example, with **Thresh** at −20 dB and **Ratio** at 4:1:
+
+| In | Out |
+|----|-----|
+| −30 dB | −30 dB (below the threshold, untouched) |
+| −20 dB | −20 dB (at the threshold) |
+| −10 dB | −17.5 dB (10 dB over becomes 2.5 dB over) |
+
+### Knee
+
+With a hard knee (0 dB), compression starts abruptly at the threshold. A soft knee eases it in over a band centered on the threshold: with the default 6 dB, compression starts 3 dB below the threshold and reaches the full ratio 3 dB above it. Soft knees sound more transparent; hard knees more obviously compressed.
+
+### Attack and release
+
+**Atk** decides whether the start of each note gets through. Below about 1 ms the compressor catches every transient, which can flatten a sound. Around 10 to 30 ms, the first moment of each hit punches through before the compressor reacts, which is how compression adds snap to drums. Slower still, and only sustained parts of the sound are reduced.
+
+**Rel** decides how the level recovers. A fast release (under 50 ms) recovers between notes and can pump audibly; 50 to 150 ms is musical for most material; slow releases hold the reduction for a smooth, sustained squash.
+
+### Detector: Peak or RMS
 
 | Detector | Measures | Character |
 |----------|----------|-----------|
-| **Peak** | Every peak of the waveform | Catches transients; keeps peaks in check. Good for drums and for limiting |
-| **RMS** | Average power over ~20 ms | Responds to loudness, as the ear does. Smoother, gentler leveling for buses, pads and vocals |
+| **Peak** | Every peak of the waveform | Catches transients and keeps peaks in check. Good for drums and limiting |
+| **RMS** | Average power over about 20 ms | Follows loudness, as the ear does. Smoother, gentler leveling for pads, buses and sustained sounds |
 
-A sine reads 3 dB lower on RMS than on Peak, so the same settings compress it a
-little less.
+A sine reads 3 dB lower on RMS than on Peak, so the same settings compress it a little less.
 
-### Understanding Ratio
+## Bypass
 
-- **1:1**: No compression (bypass)
-- **2:1**: For every 2 dB above threshold, only 1 dB passes
-- **4:1**: For every 4 dB above threshold, only 1 dB passes
-- **10:1**: Heavy compression
-- **∞:1**: Limiting (nothing passes above threshold)
+Click the power switch in the node header, press **Ctrl+B** with the module selected, or choose **Bypass** from its right-click menu. In passes straight to Out; the sidechain isn't passed, and **GR** stays at zero. The switch crossfades over 20 ms, which makes it easy to compare the compressed and original sound while it plays.
 
-### Threshold Example
+## Setting it up
 
-If Threshold = -20 dB and Ratio = 4:1:
-- Signal at -30 dB: Unchanged
-- Signal at -20 dB: Unchanged (at threshold)
-- Signal at -10 dB: Reduced to -17.5 dB
+1. Start with **Ratio** around 4:1 and lower **Thresh** until the loudest moments are being turned down.
+2. Adjust **Atk** and **Rel** until the sound breathes the way you want.
+3. Raise **Mkup** until the level matches the bypassed sound, then compare with **Ctrl+B**. Louder nearly always sounds better, so compare at the same level.
 
-## Usage Tips
+A few decibels of reduction on the loudest moments is usually plenty.
 
-### Gentle Leveling
+## Starting points
 
-Smooth out dynamics without obvious compression:
+| Use | Thresh | Ratio | Atk | Rel | Detector |
+|-----|--------|-------|-----|-----|----------|
+| Gentle leveling | −18 dB | 2:1 | 20 ms | 200 ms | RMS |
+| Punchy percussion | −10 dB | 4:1 | 10 ms | 50 ms | Peak |
+| Even bass | −15 dB | 4:1 | 5 ms | 150 ms | Peak |
+| Steady pad | −24 dB | 3:1 | 30 ms | 300 ms | RMS |
+| Sidechain pump | −30 dB | 6:1 | 1 ms | 200 ms | Peak |
+| Peak catcher | −3 dB | 20:1 | 0.1 ms | 50 ms | Peak |
 
-```
-Threshold: -18 dB
-Ratio: 2:1
-Attack: 20 ms
-Release: 200 ms
-Knee: 6 dB
-Detector: RMS
-```
+## Patch ideas
 
-### Punchy Drums
+**Sidechain pumping.** A kick ducks a pad, and the pad swells back between hits:
 
-Add snap and punch:
-
-```
-Threshold: -10 dB
-Ratio: 4:1
-Attack: 10 ms
-Release: 50 ms
+```text
+[Kick VCA Out] ──> [Compressor Sidechain]
+[Pad VCA Out] ──> [Compressor In]
+[Compressor Out] ──> [Audio Output Mono]
 ```
 
-Fast attack catches transients, fast release lets energy through.
+The sidechain only drives the detector; it isn't heard through the compressor. Patch the kick to the output separately to hear it.
 
-### Sustained Bass
+**Parallel compression.** Set **Ratio** high (6:1 or more) and the threshold low, then bring **Mix** down to about 50%. The heavily compressed signal thickens the quiet details while the dry signal keeps the transients.
 
-Even out bass levels:
+**Moving other things with GR.** **GR** rises as the compressor works. Because 1.0 stands for 60 dB of reduction, the signal is small: 6 dB of reduction reads 0.1. Patched into a filter's **Cutoff** (1 per octave), that moves the cutoff a tenth of an octave: enough for the tone to brighten slightly as the compressor clamps down.
 
-```
-Threshold: -15 dB
-Ratio: 4:1
-Attack: 5 ms
-Release: 150 ms
-```
+## Related modules
 
-### Vocal Compression
-
-Consistent vocal level:
-
-```
-Threshold: -20 dB
-Ratio: 3:1
-Attack: 10 ms
-Release: 100 ms
-Knee: 6 dB
-Detector: RMS
-```
-
-### Synth Pad Sustain
-
-Make pads sustain more evenly:
-
-```
-Threshold: -24 dB
-Ratio: 3:1
-Attack: 30 ms
-Release: 300 ms
-```
-
-Slow attack preserves natural swell.
-
-### Sidechain Pumping
-
-Classic EDM pumping effect:
-
-```
-[Kick] ──> [Compressor Sidechain]
-[Pad/Bass] ──> [Compressor Input]
-
-Threshold: -30 dB
-Ratio: 6:1
-Attack: 1 ms
-Release: 200 ms
-```
-
-The kick ducks the pad, creating rhythmic pumping.
-
-### Peak Limiting
-
-Catch peaks without obvious compression:
-
-```
-Threshold: -3 dB
-Ratio: 10:1 or higher
-Attack: 0.1 ms
-Release: 50 ms
-```
-
-### Parallel Compression
-
-Blend compressed and dry signals:
-
-```
-[Input] ──> [Compressor] ──> [Mixer Ch 2]
-        ──> [Mixer Ch 1 (dry)]
-[Mixer] ──> [Output]
-```
-
-Heavy compression (6:1+) on the compressed path, blend to taste.
-
-### Using Gain Reduction Output
-
-Visualize or control other parameters based on compression:
-
-```
-[Compressor GR Output] ──> [Other Parameter CV]
-```
-
-Could modulate filter cutoff, pan, effects send, etc.
-
-## Attack and Release Guide
-
-### Attack Times
-
-| Attack | Effect |
-|--------|--------|
-| 0.1-1 ms | Catches all transients (can sound unnatural) |
-| 1-10 ms | Fast, punchy, some transients pass |
-| 10-30 ms | Balanced, musical compression |
-| 30-100 ms | Slow, lets transients through fully |
-
-### Release Times
-
-| Release | Effect |
-|---------|--------|
-| 10-50 ms | Fast, can cause pumping |
-| 50-150 ms | Medium, musical, versatile |
-| 150-400 ms | Slow, smooth, sustained |
-| 400+ ms | Very slow, sustained compression |
-
-## Knee
-
-### Hard Knee (0 dB)
-Compression applies suddenly at threshold. More obvious compression, more aggressive.
-
-### Soft Knee (up to 12 dB)
-Compression eases in across a band centred on the threshold: with a 6 dB knee it
-starts 3 dB below and reaches the full ratio 3 dB above. More transparent and natural.
-
-## Gain Staging
-
-1. Set Threshold to catch peaks you want to compress
-2. Adjust Ratio for desired amount
-3. Use Makeup to match bypassed level
-4. A/B compare with bypass to verify
-
-## Connection Examples
-
-### Channel Strip
-```
-[Synth] ──> [EQ] ──> [Compressor] ──> [Output]
-```
-
-### Sidechain Setup
-```
-[Kick] ──> [Compressor Sidechain]
-[Bass] ──> [Compressor Input]
-[Compressor Output] ──> [Output]
-```
-
-### Parallel Compression
-```
-[Drums] ──> [Compressor (heavy)] ──> [Mixer (wet)]
-        ──> [Mixer (dry)]
-[Mixer] ──> [Output]
-```
-
-### Ducking
-```
-[Voice/Narration] ──> [Compressor Sidechain]
-[Background Music] ──> [Compressor] ──> [Output]
-```
-
-Music ducks when voice is present.
-
-## Compression Cheat Sheet
-
-| Use Case | Threshold | Ratio | Attack | Release |
-|----------|-----------|-------|--------|---------|
-| Gentle leveling | -18 dB | 2:1 | 20 ms | 200 ms |
-| Punchy drums | -10 dB | 4:1 | 5 ms | 50 ms |
-| Sustained bass | -15 dB | 4:1 | 5 ms | 150 ms |
-| Vocal control | -20 dB | 3:1 | 10 ms | 100 ms |
-| Pad sustain | -24 dB | 3:1 | 30 ms | 300 ms |
-| Sidechain pump | -30 dB | 6:1 | 1 ms | 200 ms |
-| Peak limiting | -3 dB | 10:1+ | 0.1 ms | 50 ms |
-
-## Tips
-
-1. **Don't overcompress**: 2-6 dB of gain reduction is usually enough
-2. **Match levels**: Use Makeup to fairly compare compressed vs original
-3. **Attack is key**: It determines if transients punch through
-4. **Release affects groove**: Too fast causes pumping, too slow causes sustained squash
-5. **Use your ears**: Watch meters but trust what sounds good
-
-## Related Modules
-
-- [VCA](../utilities/vca.md) - Alternative level control
-- [EQ](./eq.md) - Often used before/after compression
-- [Distortion](./distortion.md) - Can add saturation like compressor
-- [Audio Output](../output/audio-output.md) - Has built-in limiter
+- [EQ](./eq.md): often placed just before the compressor
+- [VCA](../utilities/vca.md): level control under direct CV
+- [Distortion](./distortion.md): saturation is a kind of compression too
+- [Audio Output](../output/audio-output.md): the final output stage

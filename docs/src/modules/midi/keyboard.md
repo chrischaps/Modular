@@ -1,190 +1,82 @@
-# Keyboard Input
+# Keyboard
 
-**Module ID**: `midi.keyboard`
-**Category**: MIDI
-**Header Color**: Magenta
+**Module ID** `input.keyboard` · **Category** Source
 
-![Keyboard Input Module](../../images/module-keyboard.png)
-*The Keyboard Input module*
+![Keyboard module](../../images/module-keyboard.png)
+*The piano display lights the keys you're holding.*
 
-## Description
+The Keyboard turns your computer keyboard into a monophonic controller. Press a key and it sends the note's pitch as V/Oct, raises a gate for as long as you hold it, and sends a fixed velocity. It needs no setup and no hardware, which makes it the quickest way to hear a patch. The [First Sound](../../getting-started/your-first-patch.md) example that opens with the app is played from it.
 
-The Keyboard Input module converts computer keyboard presses into CV and Gate signals, allowing you to play synthesizer patches without external MIDI hardware. It's the quickest way to test sounds and play melodies.
-
-## Inputs
-
-*This module has no inputs—it generates signals from keyboard events.*
+It plays one note at a time. To play chords from the same keys, use [Poly MIDI](./poly-midi.md) instead: while a Poly MIDI module is in the patch, the computer keyboard plays it too.
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **V/Oct** | Control (Orange) | Pitch control voltage (1V per octave) |
-| **Gate** | Gate (Green) | High while key is pressed |
-| **Velocity** | Control (Orange) | Fixed velocity output (can be adjusted) |
-| **Aftertouch** | Control (Orange) | Simulated aftertouch (if supported) |
+| **Gate** | Gate (Green) | High while a key is held. Patch it into an envelope's **Gate** |
+| **Pitch** | Control (Orange) | The held note as V/Oct. C4 is 0.0, C5 is +1.0, C3 is −1.0 |
+| **Velocity** | Control (Orange) | The **Vel** knob's value, sent with every note |
+
+The **Gate** output lights up on the node while a note is held.
 
 ## Parameters
 
-| Knob | Range | Default | Description |
-|------|-------|---------|-------------|
-| **Octave** | -2 to +4 | 0 | Octave offset for keyboard mapping |
-| **Velocity** | 0.0 - 1.0 | 0.8 | Fixed velocity output level |
-| **Glide** | 0 ms - 1000 ms | 0 ms | Portamento/glide time between notes |
+| Control | Range | Default | Description |
+|---------|-------|---------|-------------|
+| **Oct** (Octave) | −2 to +2 | 0 | Shifts the whole keyboard up or down by octaves |
+| **Vel** (Velocity) | 0 – 100% | 100% | The strength sent for every note. A computer key can't tell soft from hard, so this sets it for all of them |
+| **Priority** | Last / Lowest / Highest | Last | Reserved for a future update. It has no effect yet (see [Playing](#playing)) |
 
-## Keyboard Layout
+## Key layout
 
-The computer keyboard is mapped to a piano-style layout:
+The bottom two letter rows form a piano keyboard starting at C4. The bottom row plays the white keys and the row above it plays the black keys, sitting between them as they would on a piano:
 
-### Lower Row (Z to M) - Lower Octave
-```
-| Z | X | C | V | B | N | M |
-| C | D | E | F | G | A | B |
-
-| S | D |   | G | H | J |   |
-| C#| D#|   | F#| G#| A#|   |
+```text
+Black keys:    S   D       G   H   J       L   ;
+White keys:  Z   X   C   V   B   N   M   ,   .   /
+Note:        C   D   E   F   G   A   B   C   D   E
 ```
 
-### Upper Row (Q to P) - Higher Octave
-```
-| Q | W | E | R | T | Y | U | I | O | P |
-| C | D | E | F | G | A | B | C | D | E |
+That's C4 to E5, a little over an octave. The top letter row plays too, in the same octave: **Q** is C4, **R** is E4 and **I** is B4, and **W E T Y U O P** are the black keys from C♯4 to D♯5. Turn **Oct** to move the whole range.
 
-| 2 | 3 |   | 5 | 6 | 7 |   | 9 | 0 |   |
-| C#| D#|   | F#| G#| A#|   | C#| D#|   |
-```
+## Playing
 
-### Octave Controls
-- **Number keys (or dedicated keys)**: Change octave
-- **Octave knob**: Set base octave offset
+Play one key at a time. While any key is held, the Keyboard stays on the note you pressed first: pressing other keys lights them on the piano display but doesn't change the pitch or retrigger the gate. Release every key and the next one you press sounds. For legato lines, note priority and retriggering, use a MIDI controller with [MIDI Note](./midi-note.md).
 
-## Usage Tips
+After you let go, **Pitch** stays on the last note, so the release tail stays in tune. Even a very quick tap holds the gate high for at least 30 ms, so every key press triggers a full envelope.
 
-### Basic Synth Playing
+Keys don't play notes while you hold **Ctrl** or **Alt** (those are shortcuts), while you're typing in a text field, or while the quick-add palette is open. **Space** and **Tab** open the palette, so they're never notes. The app has to have keyboard focus: if nothing happens, click the canvas.
 
-Connect to an oscillator for instant playability:
+Like everything else, the Keyboard only sounds while the patch is playing. Press **Play** in the toolbar first.
 
-```
-[Keyboard V/Oct] ──> [Oscillator V/Oct]
+## Patch examples
+
+The smallest playable voice, as in the First Sound example:
+
+```text
+[Keyboard Pitch] ──> [Oscillator V/Oct]
 [Keyboard Gate] ──> [ADSR Gate]
+[Oscillator Out] ──> [VCA In]
+[ADSR Out] ──> [VCA CV]
+[VCA Out] ──> [Audio Output Mono]
 ```
 
-### Monophonic vs Polyphonic
+Two oscillators following one keyboard, the second a fifth up (**Semi** +7):
 
-The Keyboard module is **monophonic**—only the most recent key press is active. For polyphonic playing, you'll need multiple keyboard modules or a polyphonic MIDI setup.
-
-### Using Glide/Portamento
-
-Set Glide > 0 for smooth pitch transitions:
-
-```
-Glide: 100 ms (subtle slide)
-Glide: 300 ms (noticeable portamento)
-Glide: 500+ ms (dramatic slide)
-```
-
-The V/Oct output smoothly transitions between notes instead of jumping.
-
-### Velocity for Dynamics
-
-Connect Velocity output to create expressive patches:
-
-```
-[Keyboard Velocity] ──> [VCA CV] (louder at higher velocity)
-                    ──> [Filter Cutoff CV] (brighter at higher velocity)
-```
-
-Since computer keyboards don't have velocity sensitivity, adjust the Velocity parameter manually or use a MIDI controller.
-
-### Octave Switching
-
-Use the Octave parameter to shift the entire keyboard up or down:
-
-- **-2**: Very low bass notes
-- **-1**: Bass range
-- **0**: Middle C centered
-- **+1**: Higher register
-- **+2 to +4**: High leads
-
-### Playing Techniques
-
-**Legato**: Hold one key while pressing another—gate stays high, only pitch changes.
-
-**Staccato**: Quick key presses for short notes.
-
-**Trills**: Rapidly alternate between two adjacent keys.
-
-### Focus and Keyboard Capture
-
-The module receives keyboard input when the application window is focused. Some tips:
-
-- Click on the canvas to ensure focus
-- Modifier keys (Ctrl, Alt, Shift) may not be captured
-- Some shortcuts may conflict with application functions
-
-## Connection Examples
-
-### Simple Monosynth
-```
-[Keyboard V/Oct] ──> [Oscillator V/Oct]
-[Keyboard Gate] ──> [ADSR] ──> [VCA CV]
-[Oscillator] ──> [Filter] ──> [VCA] ──> [Output]
-```
-
-### Velocity-Sensitive Patch
-```
-[Keyboard V/Oct] ──> [Oscillator V/Oct]
-[Keyboard Gate] ──> [ADSR Gate]
-[Keyboard Velocity] ──> [Attenuverter] ──> [Filter Cutoff CV]
-[Keyboard Velocity] ──> [VCA Level CV]
-```
-
-### Portamento Lead
-```
-[Keyboard V/Oct] ──> [Oscillator V/Oct]
-         (Glide: 200ms)
-```
-
-### Dual Oscillator Tracking
-```
-[Keyboard V/Oct] ──> [Oscillator 1 V/Oct]
+```text
+[Keyboard Pitch] ──> [Oscillator 1 V/Oct]
                  ──> [Oscillator 2 V/Oct]
 ```
 
-Both oscillators track the keyboard pitch.
+Turn **Vel** down and patch **Velocity** into the envelope's **Velocity** input to audition how a patch responds to softer playing:
 
-## Keyboard Shortcuts
+```text
+[Keyboard Velocity] ──> [ADSR Velocity]
+```
 
-| Key | Function |
-|-----|----------|
-| Z-M | Lower octave (C-B) |
-| A-J | Lower octave sharps/flats |
-| Q-P | Upper octave (C-E) |
-| 2-0 | Upper octave sharps/flats |
-| Octave buttons | Shift octave range |
+## Related modules
 
-## Comparison with MIDI Note
-
-| Feature | Keyboard | MIDI Note |
-|---------|----------|-----------|
-| Input source | Computer keyboard | MIDI device |
-| Velocity | Fixed | True velocity |
-| Aftertouch | Simulated | Real (if supported) |
-| Polyphony | Mono | Depends on mode |
-| Setup required | None | MIDI connection |
-
-Use Keyboard for quick testing; use MIDI Note for performance.
-
-## Tips
-
-1. **Start with Keyboard**: Test patches quickly before setting up MIDI
-2. **Use Glide**: Makes simple patches more expressive
-3. **Mind the focus**: Click the window if keys aren't responding
-4. **Combine with MIDI**: Use Keyboard for development, MIDI Note for performance
-
-## Related Modules
-
-- [MIDI Note](./midi-note.md) - External MIDI input
-- [Oscillator](../sources/oscillator.md) - Primary V/Oct destination
-- [ADSR Envelope](../modulation/adsr.md) - Gate destination
-- [VCA](../utilities/vca.md) - Velocity destination
+- [Poly MIDI](./poly-midi.md) – chords, from a MIDI keyboard or these same keys
+- [MIDI Note](./midi-note.md) – a monophonic voice played from a MIDI device
+- [Oscillator](../sources/oscillator.md) – where **Pitch** usually goes
+- [ADSR Envelope](../modulation/adsr.md) – where **Gate** usually goes

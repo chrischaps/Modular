@@ -1,225 +1,113 @@
 # Attenuverter
 
-**Module ID**: `util.attenuverter`
-**Category**: Utilities
-**Header Color**: Yellow
+**Module ID** `util.attenuverter` · **Category** Utility
 
 ![Attenuverter Module](../../images/module-attenuverter.png)
-*The Attenuverter module*
+*Amount scales and flips the input; Offset slides the result up or down.*
 
-## Description
+An attenuverter turns a signal down, turns it upside down, or both. The name joins *attenuate* and *invert*. It also has an **Offset** knob that adds a fixed value afterwards. Between them, the two knobs adapt one module's output to what another module's input expects. Use it to tame an LFO that swings too wide, to make an envelope close a filter instead of opening it, or to turn a 0–1 signal into a -1–1 one.
 
-The Attenuverter is a utility module that scales, inverts, and offsets signals. The name combines "attenuate" (reduce) and "invert" (flip). It's an essential tool for adapting modulation signals to fit the needs of your destination parameters.
+With nothing patched into **In**, the output is just the Offset: a steady, hand-set control value you can patch anywhere.
 
-**Key functions:**
-- Reduce signal strength (attenuation)
-- Flip signal polarity (inversion)
-- Shift signal baseline (offset)
+The Attenuverter is polyphonic. Each channel of a polyphonic cable is scaled on its own, with the same knob settings.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Input** | Any (matches input) | Signal to be processed |
+| **In** | Control (Orange) | The signal to scale, invert or shift. Audio patches in too |
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Output** | Any (matches input) | Processed signal |
+| **Out** | Control (Orange) | In × Amount + Offset, kept within -1 to +1 |
 
 ## Parameters
 
 | Knob | Range | Default | Description |
 |------|-------|---------|-------------|
-| **Amount** | -1.0 to +1.0 | 1.0 | Scale factor (negative = inverted) |
-| **Offset** | -1.0 to +1.0 | 0.0 | DC offset added to output |
+| **Amt** (Amount) | -1 to +1 | +1 | Scales the input. Negative values flip it upside down |
+| **Offset** | -1 to +1 | 0 | A constant added after scaling |
 
-## How It Works
+## How it works
 
-The attenuverter applies this formula:
-
-```
-Output = (Input × Amount) + Offset
+```text
+Out = In × Amount + Offset        (limited to -1 … +1)
 ```
 
-### Amount Knob
+| Amount | Effect |
+|--------|--------|
+| +1 | The input passes unchanged (the default) |
+| +0.5 | Half as strong |
+| 0 | The input is gone; only Offset remains |
+| -0.5 | Half as strong, upside down |
+| -1 | Full strength, upside down |
 
-- **+1.0**: Full positive (signal unchanged)
-- **+0.5**: Half strength
-- **0.0**: Signal canceled (only offset remains)
-- **-0.5**: Half strength, inverted
-- **-1.0**: Full negative (signal inverted)
+The output never goes past ±1. The Attenuverter can make a signal smaller or flip it, but it can't make it bigger. A sum that would exceed ±1 flattens at the limit, so if a large Offset clips the peaks of your signal, turn Amount down to make room.
 
-### Offset Knob
+Both knobs are smoothed, so turning them doesn't step or click.
 
-Adds a constant value to shift the signal:
+## Patches
 
-- **+0.5**: Shifts signal up by 0.5
-- **0.0**: No shift
-- **-0.5**: Shifts signal down by 0.5
+### Reduce modulation depth
 
-## Usage Tips
+An LFO at full strength is too much for vibrato. Turn it down before it reaches the oscillator:
 
-### Reducing Modulation Depth
-
-An LFO may be too strong for subtle vibrato:
-
-```
-[LFO] ──> [Attenuverter] ──> [Oscillator FM]
-           (Amount: 0.2)
+```text
+[LFO Out] ──> [Attenuverter In] ──> [Oscillator Exp FM]
+               (Amt 0.2)
 ```
 
-Only 20% of the LFO reaches the oscillator.
+### Invert an envelope
 
-### Inverting Modulation
+A negative Amount turns the envelope upside down, so the filter closes as the note starts and opens again as it releases:
 
-Flip the direction of modulation:
-
-```
-[Envelope] ──> [Attenuverter] ──> [Filter Cutoff CV]
-                (Amount: -1.0)
+```text
+[ADSR Out] ──> [Attenuverter In] ──> [SVF Filter Cutoff]
+                (Amt -1)
 ```
 
-Instead of the filter opening on attack, it closes.
+The SVF's Cutoff input moves the cutoff in octaves around its knob, so set the **Cutoff** knob high and let the inverted envelope pull it down.
 
-### Converting Unipolar to Bipolar
+### Unipolar to bipolar
 
-An envelope (0 to 1) needs to swing both ways:
+An envelope runs from 0 to 1. With Amount 1 and Offset -0.5, it runs from -0.5 to +0.5, centered on zero. (A full -1 to +1 swing would need a gain of 2, which the Attenuverter can't give.)
 
-```
-[Envelope] ──> [Attenuverter] ──> [Pitch CV]
-                (Amount: 2.0, Offset: -1.0)
-```
-
-- Original: 0 to 1
-- After: -1 to +1 (centered around zero)
-
-### Converting Bipolar to Unipolar
-
-An LFO (-1 to +1) needs to stay positive:
-
-```
-[LFO] ──> [Attenuverter] ──> [CV Destination]
-           (Amount: 0.5, Offset: 0.5)
+```text
+[ADSR Out] ──> [Attenuverter In]      (Amt 1, Offset -0.5)
 ```
 
-- Original: -1 to +1
-- After: 0 to 1
+### Bipolar to unipolar
 
-### Creating a Fixed Voltage
+A bipolar LFO swings from -1 to +1. Halve it and lift it by half to get 0 to 1:
 
-With no input connected, the offset becomes a constant:
-
-```
-[Attenuverter] ──> [Parameter CV]
-(Input: none, Offset: 0.7)
+```text
+[LFO Out] ──> [Attenuverter In]       (Amt 0.5, Offset 0.5)
 ```
 
-Outputs constant 0.7—useful for manual CV sources.
+The LFO's own **Bipolar** switch does the same thing; this is for sources without one.
 
-### Scaling for Range Matching
+### A fixed control value
 
-Match an envelope's range to a parameter:
+Leave **In** empty and use **Offset** as a knob you can patch. One Attenuverter can hold several destinations at the same value:
 
-```
-[Envelope (0-1)] ──> [Attenuverter] ──> [Filter Cutoff]
-                      (Amount: 0.6, Offset: 0.2)
-```
-
-- Output ranges from 0.2 to 0.8
-- Never fully closed, never fully open
-
-### Ducking/Sidechain Effect
-
-Invert an envelope for ducking:
-
-```
-[Kick Gate] ──> [Envelope] ──> [Attenuverter] ──> [Pad VCA CV]
-                                (Amount: -1.0, Offset: 1.0)
+```text
+[Attenuverter Out] ──> [SVF Filter Resonance]
+                   ──> [Ladder Filter Resonance]
 ```
 
-- Kick hits → Envelope rises → Attenuverter inverts → Pad ducks
-- Offset keeps pad at full volume when envelope is zero
+### Velocity to brightness, per voice
 
-### Precise Modulation Amount
+In a polyphonic patch, scale each voice's velocity before it moves the filter, so harder notes are brighter without the filter jumping a full octave:
 
-Many parameters don't have their own "modulation depth" control. Use attenuverter:
-
-```
-[LFO] ──> [Attenuverter (Amount: 0.3)] ──> [Filter Cutoff CV]
+```text
+[Poly MIDI Velocity] ──> [Attenuverter In] ──> [SVF Filter Cutoff]
+                          (Amt 0.5)
 ```
 
-Now you have precise control over modulation depth.
+## Related modules
 
-## Visual Understanding
-
-### Positive Amount
-```
-Input:  ╱╲╱╲╱╲   (LFO)
-Output: ╱╲╱╲╱╲   (Same direction, possibly smaller)
-```
-
-### Negative Amount (Inverted)
-```
-Input:  ╱╲╱╲╱╲
-Output: ╲╱╲╱╲╱   (Flipped upside down)
-```
-
-### With Offset
-```
-Input:  ╱╲╱╲╱╲   (Centered at 0)
-Output: ¯╱╲╱╲╱╲¯ (Shifted up by offset)
-```
-
-## Common Configurations
-
-| Use Case | Amount | Offset |
-|----------|--------|--------|
-| Full pass | +1.0 | 0.0 |
-| Invert | -1.0 | 0.0 |
-| Half strength | +0.5 | 0.0 |
-| Inverted half | -0.5 | 0.0 |
-| Unipolar to bipolar | +2.0 | -1.0 |
-| Bipolar to unipolar | +0.5 | +0.5 |
-| Fixed voltage | N/A | (your value) |
-
-## Connection Examples
-
-### Subtle Vibrato
-```
-[LFO] ──> [Attenuverter (0.1)] ──> [Osc FM]
-```
-
-### Inverted Filter Envelope
-```
-[Envelope] ──> [Attenuverter (-0.8)] ──> [Filter CV]
-```
-
-### Modulation Depth Control
-```
-[LFO] ──> [Attenuverter] ──> [Parameter]
-              ↑
-         [Mod Wheel] (controls Amount)
-```
-
-### Creating Complex Modulation
-```
-[LFO 1] ──> [Attenuverter 1 (0.5)] ──┐
-                                      ├──> [Mixer] ──> [Destination]
-[LFO 2] ──> [Attenuverter 2 (-0.3)] ─┘
-```
-
-## Tips
-
-1. **Start at 0**: When patching new modulation, start Amount at 0 and slowly increase
-2. **Watch polarity**: Some modulations sound better inverted
-3. **Use offset for bias**: Shift the modulation center to taste
-4. **Chain if needed**: Multiple attenuverters can create complex scaling
-
-## Related Modules
-
-- [LFO](../modulation/lfo.md) - Common source to attenuate
-- [ADSR Envelope](../modulation/adsr.md) - Common source to scale/invert
-- [Mixer](./mixer.md) - Combine after scaling
-- [VCA](./vca.md) - Alternative way to control signal strength
+- [VCA](./vca.md): scale a signal by another signal instead of by a knob
+- [Mixer](./mixer.md): add two signals together
+- [LFO](../modulation/lfo.md) and [ADSR Envelope](../modulation/adsr.md): the signals you'll most often scale

@@ -1,285 +1,228 @@
 # Interface Overview
 
-Modular Synth uses a node-graph interface where modules are represented as nodes that can be connected together to create synthesizer patches.
+The Modular Synth window has three parts: a toolbar along the top, the canvas where you build patches, and a status bar along the bottom.
 
-![Interface Overview](../images/interface-overview.png)
-*The main Modular Synth interface*
+![The Modular Synth window](../images/interface-overview.png)
+*The toolbar, the canvas with a patch on it, and the status bar.*
 
-## The Canvas
+## The toolbar
 
-The main area of the interface is the **node graph canvas**. This is where you create and connect modules.
+From left to right:
 
-### Navigation
+| Group | Controls |
+|-------|----------|
+| **Transport** | **▶ Play** starts the patch; **⏹ Stop** stops it. The app opens stopped. |
+| **File** | **📄 New**, **📂 Open**, **🕘 Recent**, **📚 Examples**, **💾 Save**, **💾 Save As** |
+| **Edit** | **↩ Undo** and **↪ Redo**. Hover either to see which edit it will undo or redo. |
+| **〰 Cables** | How signal flow is drawn along cables: **Chevrons**, **Dots** or **Comets** |
+| **Output** | The audio device to play through |
+| **MIDI In** | The MIDI controller to listen to. A filled dot (●) means it's connected. |
 
-| Action | Mouse | Keyboard |
-|--------|-------|----------|
-| **Pan** | Middle-click drag | Arrow keys |
-| **Zoom** | Scroll wheel | `+` / `-` |
-| **Fit to view** | - | `Home` |
-| **Select module** | Left-click | - |
-| **Multi-select** | Shift + left-click | - |
-| **Box select** | Left-click drag on empty space | - |
-| **Delete** | - | `Delete` or `Backspace` |
+At the right end, the toolbar shows a CPU meter while the patch plays, the device's sample rate and channel count, and whether the audio engine is running.
 
-### Canvas Tips
+## The status bar
 
-- Press `Space` or `Tab` over the canvas to add a module by name
-- Use the scroll wheel to zoom in for detailed work or out for an overview
-- Modules can be freely positioned anywhere on the canvas
-- Hover a jack's name or a knob to see what it does. Jacks also show their signal type in its cable colour, and knobs their range
-- The background grid moves and zooms with the patch, with a brighter line every five squares
+The status bar reports what just happened: a file saved, modules pasted, a cable refused and why. When there's nothing to report, it counts the modules and cables in the patch. On the right it names the open patch, with a dot (●) if it has unsaved changes.
 
-## Adding Modules
+If a patch loads with problems (a module this version doesn't know, a cable to a jack that no longer exists), a **⚠ load warning** appears on the right. Hover it to read the warnings; click it to dismiss them.
 
-### Context Menu
+## Moving around the canvas
 
-**Right-click** on empty canvas space to open the module browser:
+| To | Do this |
+|----|---------|
+| Zoom | Scroll the mouse wheel |
+| Pan | Drag with the middle mouse button, or hold `Ctrl` and drag empty canvas |
+| Select a module | Click it |
+| Select several | Drag a box across empty canvas |
+| Move modules | Drag a module by its body; a selection moves together |
 
-![Context Menu](../images/interface-context-menu.png)
-*The module browser context menu*
+The background grid moves and zooms with the patch, with a brighter line every five squares.
 
-Modules are organized by category:
+## Adding modules
 
-- **Sources** - Oscillators and sound generators
-- **Filters** - Frequency shaping
-- **Modulation** - Envelopes, LFOs, clocks
-- **Utilities** - VCAs, mixers, signal processing
-- **Effects** - Delays, reverbs, distortion
-- **MIDI** - MIDI input and processing
-- **Visualization** - Scopes and meters
-- **Output** - Audio output
+### The add menu
 
-Click a module name to add it at the cursor position.
+Right-click empty canvas to open the add menu. It lists the six categories in their header colors; hover or click one to see its modules, then click a module to place it where you right-clicked. Hover a module's name to read what it does.
 
-### Quick Add
+![The add menu, showing the Effect category](../images/interface-context-menu.png)
+*Right-click empty canvas, pick a category, then a module.*
 
-Press **Space** or **Tab** with the mouse over the canvas. A search box opens at the cursor, listing every module by category. Type a few letters to narrow it down, then press **Enter**, and the module appears where the box opened.
+### Quick add
 
-The search is forgiving. Letters only need to appear in order, so `lfo`, `svf`, `dly` and `s&h` all find what you'd expect. Typing a category name (`effect`, `mod`) lists that category. Use the arrow keys or `Tab` to move through the list, and `Escape` to close it.
+Press `Space` or `Tab` with the mouse over the canvas. A search box opens at the cursor, listing every module by category. Type a few letters to narrow the list, then press `Enter`, and the module appears where the box opened.
 
-## Editing Modules
+![The quick-add palette](../images/interface-quick-add.png)
+*Type a few letters of a module's name or category, then press Enter.*
 
-### The Module Menu
+The search is forgiving. Letters only need to appear in order, so `lfo`, `svf`, `dly` and `s&h` all find what you'd expect. Typing a category name (`effect`, `mod`) lists that category. Move through the list with the arrow keys or `Tab`, add the highlighted module with `Enter`, or close the box with `Escape`.
 
-**Right-click** a module's header or body (anywhere but a knob) to open its menu: **Duplicate**, **Copy**, **Bypass** (filters and effects), **Reset to defaults** and **Delete**. If the module is part of a selection, the action applies to the whole selection.
+## Anatomy of a module
 
-### Copy, Paste and Duplicate
+Every module has the same layout:
 
-- **Duplicate** (`Ctrl + D`) copies the selected modules a little down and to the right. Cables between them are copied too; cables to the rest of the patch aren't. The copies are selected, so pressing `Ctrl + D` again makes a row of them.
-- **Copy** (`Ctrl + C`) and **Cut** (`Ctrl + X`) put the selected modules on the clipboard. **Paste** (`Ctrl + V`) puts them at the mouse cursor with their layout, settings and the cables between them. Pasting again without moving the mouse fans the copies out.
-- The clipboard holds them as patch JSON. You can paste modules into another Modular window, or paste the text of a whole `.json` patch file to add its modules to the current patch.
-- MIDI mappings stay with the original modules.
+- **Header.** The module's name and category icon, on a bar in the category's color. Hover the header to read what the module does. The **×** at the right end deletes the module. Filters and effects also have a power switch at the left end: see [Bypass](#bypass).
+- **Inputs**, down the left edge. Each jack is labeled and colored by the signal it expects.
+- **Outputs**, down the right edge, colored by the signal they send. An output lights up while signal is coming out of it.
+- **Displays.** Many modules draw what they're doing: the oscillator its waveform, the envelope its shape, filters their frequency response, the LFO its wave with a dot riding its phase.
+- **Knobs**, along the bottom, with the current value under each.
 
-Each of these is one undo step, named after what it did, e.g. *Duplicate 3 modules*.
+Hover any jack's name or knob for a tooltip: what it does, its signal type in the cable's color, and for knobs, its range.
 
-## Module Anatomy
+## Knobs
 
-Each module has a consistent structure:
+| To | Do this |
+|----|---------|
+| Change a value | Drag up or down |
+| Make fine adjustments | Hold `Shift` while dragging |
+| Return to the default | Double-click |
+| Map to a MIDI controller | Right-click, then **Learn MIDI CC** |
 
-![Module Anatomy](../images/interface-module-anatomy.png)
-*Parts of a module*
+Some knobs move in whole steps, like the Oscillator's **Oct** and **Semi**: they click from one value to the next as you drag.
 
-### Header Bar
+### Knobs with a jack
 
-The colored bar at the top shows:
-- **Module name** - The type of module
-- **Category color** - Indicates the module's function category
+Many parameters have both a knob and an input jack of the same name. Patch a cable into the jack and the knob sets the center while the incoming signal moves the value around it. Each module page gives the scale.
 
-### Input Ports (Left Side)
+On most knobs, such as a filter's **Cutoff**, the knob stays live while the cable is patched, so you can keep moving the center. A few (the LFO's **Rate**, the Chorus's **Rate** and **Depth**) lock instead: the knob dims, stops responding and turns on its own to follow the incoming signal, and the cable modulates around wherever the knob was left.
 
-Circular connectors on the left side receive signals from other modules:
-- **Port color** indicates the expected signal type
-- **Port label** describes what the input controls
-- Hover over a port to see a tooltip with details
+Either way, a small dot appears above the knob while a cable is patched in, orange once signal arrives. Unplug the cable and the knob is yours again.
 
-### Output Ports (Right Side)
+## Cables
 
-Circular connectors on the right side send signals to other modules:
-- **Port color** indicates the signal type produced
-- Multiple modules can connect to the same output
+Drag from an output to an input to patch a cable; a jack turns white when the cable is close enough to land on it. You can also drag from an input to an output. Cables only connect where the signals make sense: audio and control mix freely, and a gate can drive a control input, but a cable between jacks that can't work won't attach, and the status bar says why when it can. [Signal Types](../concepts/signal-types.md) has the full rules.
 
-### Parameter Knobs (Bottom)
+- **One output can feed many inputs.** Each gets the full signal.
+- **Each input takes one cable.** Dropping a new cable onto an occupied input replaces the old one.
+- **No loops.** A cable that would feed a module's output back into its own input, directly or through other modules, is refused.
+- **To remove a cable,** drag its end off the input jack and let go over empty canvas.
 
-Rotary knobs for adjusting module parameters:
-- **Drag vertically** to adjust the value
-- **Double-click** to reset to default
-- **Ctrl + click** for fine adjustment
-- Value readout shows the current setting
+While the patch plays, cables show what their signal has been doing over the last few seconds. [Reading the signal in a cable](../concepts/connections.md#reading-the-signal-in-a-cable) explains what you're seeing.
 
-### Exposed Parameters
+## Editing modules
 
-Some parameters can be controlled both manually and via external signals. When an external signal is connected:
+### The module menu
 
-- The knob becomes **read-only** (dimmed appearance)
-- The knob **animates** to show the incoming signal value
-- An **orange indicator** shows external control is active
+Right-click a module's header or body (anywhere but a knob) to open its menu. **Bypass** appears only on filters and effects.
 
-When disconnected, the knob returns to manual control.
+| Item | Shortcut | Effect |
+|------|----------|--------|
+| **Duplicate** | `Ctrl + D` | Copies the module, slightly below and to the right |
+| **Copy** | `Ctrl + C` | Copies the module to the clipboard |
+| **Bypass** / **Switch on** | `Ctrl + B` | Takes a filter or effect out of the signal path, or puts it back |
+| **Reset to defaults** | | Returns every knob to its default |
+| **Delete** | `Delete` | Removes the module and its cables |
 
-## Making Connections
+If the module is part of a selection, the item applies to the whole selection.
 
-### Creating a Connection
+### Copy, paste and duplicate
 
-1. Click and hold on an **output port** (right side of a module)
-2. Drag to an **input port** (left side of another module)
-3. Release to complete the connection
+**Duplicate** (`Ctrl + D`) copies the selected modules a little down and to the right. Cables between them are copied too; cables to the rest of the patch aren't. The copies are selected, so pressing `Ctrl + D` again makes a row of them.
 
-![Making a Connection](../images/interface-connection.png)
-*Dragging a connection from output to input*
+**Copy** (`Ctrl + C`) and **Cut** (`Ctrl + X`) put the selected modules on the clipboard. **Paste** (`Ctrl + V`) drops them at the mouse cursor, keeping their layout, settings and the cables between them. Pasting again without moving the mouse fans the copies out.
 
-### Connection Rules
+The clipboard holds modules as patch text, so you can paste between two Modular Synth windows, or paste the contents of a whole patch file to add its modules to the current patch. MIDI mappings stay with the original modules.
 
-- Outputs connect to inputs (never output-to-output or input-to-input)
-- Signal types should match (Audio to Audio, Control to Control, etc.)
-- Some inputs accept multiple signal types (automatic conversion)
-- Multiple cables can connect to the same output
-- Only one cable can connect to each input
+### Bypass
 
-### Connection Colors
+Filters and effects can be bypassed: their audio inputs pass straight to their outputs, as if the module weren't there. Click the power switch at the left of the header, choose **Bypass** from the module menu, or select modules and press `Ctrl + B`. A bypassed module's header fades to gray and its controls dim. Switching takes a 20 ms crossfade, so it never clicks, and a bypassed module uses no CPU.
 
-Cables are colored by signal type:
+## Undo and redo
 
-| Color | Signal Type |
-|-------|-------------|
-| **Blue** | Audio |
-| **Orange** | Control/CV |
-| **Green** | Gate/Trigger |
-| **Purple** | MIDI |
+**Undo** (`Ctrl + Z`) and **Redo** (`Ctrl + Shift + Z` or `Ctrl + Y`) cover adding, deleting, moving and bypassing modules, patching and unpatching cables, and turning knobs. Hover the toolbar buttons to see which edit is next, such as *Move Oscillator* or *Set SVF Filter Cutoff*.
 
-### Removing Connections
+A whole drag is one step: turning a knob from 200 Hz to 2 kHz and back undoes in one go. A deleted module comes back with its settings, its cables and its MIDI mappings. Knobs moved by a MIDI controller aren't recorded, and opening a patch starts a fresh history.
 
-- **Right-click** on a connection to delete it
-- **Click** on an input port with an existing connection, then press `Escape` to disconnect
-- **Delete a module** to remove all its connections
+## Playing
 
-## Adjusting Parameters
+### Transport
 
-### Knob Interaction
+Nothing sounds until you press **▶ Play**. **⏹ Stop** silences the patch, lets the last of the signal drain out of the cables, and clears echoes and reverb tails, so they don't resume when you play again.
 
-![Knob Interaction](../images/interface-knob.png)
-*Adjusting a parameter knob*
+### The computer keyboard
 
-| Action | Result |
-|--------|--------|
-| **Drag up/down** | Adjust value |
-| **Ctrl + drag** | Fine adjustment |
-| **Double-click** | Reset to default |
-| **Right-click** | Open value entry / MIDI learn |
+The bottom row of letter keys plays like a piano, starting from C4 (middle C):
 
-### Value Display
+| Keys | Notes |
+|------|-------|
+| `Z` `X` `C` `V` `B` `N` `M` | C D E F G A B |
+| `,` `.` `/` | C D E, an octave up |
+| `S` `D` `G` `H` `J` | C♯ D♯ F♯ G♯ A♯ |
+| `L` `;` | C♯ D♯, an octave up |
 
-Below each knob is a value readout showing:
-- The current numeric value
-- The unit (Hz, ms, dB, etc.) where applicable
+The keys play every [Keyboard](../modules/midi/keyboard.md) module in the patch; use its **Oct** knob to shift it up or down. If the patch has a [Poly MIDI](../modules/midi/poly-midi.md) module, the keys play that too, so you can play chords without a MIDI controller. Keys typed into the quick-add box, or held with `Ctrl` or `Alt`, don't play notes.
 
-## Patch Management
+### MIDI
 
-### Saving Patches
+Choose your controller in the toolbar's **MIDI In** menu; Modular Synth doesn't connect to one until you do. If the controller isn't listed, plug it in and click **🔄 Refresh** at the bottom of the menu. **None (Disconnect)** lets it go. Disconnecting or switching devices releases any notes that were held. If a controller can't be opened, the reason appears in the status bar.
+
+Three modules listen to the controller: [MIDI Note](../modules/midi/midi-note.md) for a single voice, [Poly MIDI](../modules/midi/poly-midi.md) for chords, and [MIDI Monitor](../modules/midi/midi-monitor.md) to see what's arriving.
+
+### MIDI Learn
+
+Any knob can follow a MIDI controller's knob or fader:
+
+1. Right-click the knob and choose **Learn MIDI CC**. A purple **M** badge blinks above it.
+2. Move the control on your MIDI controller.
+
+The badge stops blinking and stays, and the knob now follows that control across its full range. Right-click it again to **Re-learn MIDI CC** or **Clear MIDI**. Mappings are saved with the patch.
+
+## Patches
+
+Patches are saved as `.json` files holding every module, setting, cable and MIDI mapping.
 
 | Action | Shortcut |
 |--------|----------|
+| **New** | `Ctrl + N` |
+| **Open** | `Ctrl + O` |
 | **Save** | `Ctrl + S` |
 | **Save As** | `Ctrl + Shift + S` |
 
-Patches are saved as `.json` files containing all module settings and connections.
+### Examples
 
-### Loading Patches
+The **📚 Examples** menu holds six ready-made patches: **First Sound**, which opens when the app starts, and one for each [recipe](../recipes/basic-subtractive.md) in this manual. Hover an example to read what it is. Saving an example always asks for a file name, so you save a copy and the original stays intact.
 
-| Action | Shortcut |
-|--------|----------|
-| **Open** | `Ctrl + O` |
-| **New** | `Ctrl + N` |
+### Recent patches
 
-### Undo and Redo
+**🕘 Recent** lists the last eight patches you opened or saved, newest first. Hover one to see where it lives. A file that has since been moved or deleted is grayed out. **Clear Recent** empties the list.
 
-**Undo** (`Ctrl + Z`) and **Redo** (`Ctrl + Shift + Z` or `Ctrl + Y`) are in the toolbar's **Edit** group. Hover either button to see which edit it will undo or redo, such as *Move Oscillator* or *Set SVF Filter Cutoff*.
+### Unsaved changes
 
-Undo covers adding, deleting, moving and bypassing modules, patching and unpatching cables, and turning knobs. A whole drag is one step: turning a knob from 200 Hz to 2 kHz and back undoes in one go. A deleted module comes back with its settings, its cables and its MIDI mappings. Knobs moved by a MIDI controller aren't recorded, and opening a patch starts a fresh history.
-
-### Recent Patches
-
-The **Recent** menu in the toolbar's **File** group lists the last eight patches you opened or saved, newest first. Hover one to see where it lives. A file that has since been moved or deleted is greyed out. **Clear Recent** empties the list.
-
-### Unsaved Changes
-
-While a patch has changes you haven't saved, the window title starts with a dot (`● Lush Pad · Modular Synth`), and so does its name in the status bar. Undoing back to the saved patch clears the dot.
+While a patch has unsaved changes, the window title starts with a dot (`● Lush Pad · Modular Synth`), and so does its name in the status bar. Undoing back to the saved state clears the dot.
 
 **New**, **Open**, opening an example or a recent file, and closing the window all ask first when there are unsaved changes:
 
 - **Save** saves the patch (asking where, if it has never been saved), then carries on. Cancelling the save dialog cancels the whole thing.
 - **Don't Save** (**Quit Without Saving**, when closing) carries on and lets the changes go.
-- **Cancel** (or `Escape`) goes back to the patch.
+- **Cancel**, or `Escape`, goes back to the patch.
 
-### Autosave and Recovery
+### Autosave and recovery
 
-Every 30 seconds, a patch with unsaved changes is autosaved alongside the app's settings. Saving the patch, or choosing **Quit Without Saving**, clears the autosave. So the only way one survives is if Modular closes without asking, after a crash or a forced quit.
+Every 30 seconds, a patch with unsaved changes is autosaved alongside the app's settings. Saving the patch, or choosing **Quit Without Saving**, clears the autosave, so one only survives if Modular Synth closes without asking: after a crash or a forced quit.
 
-The next time Modular starts, it offers the patch back: **Recover** reopens it exactly as it was at the last autosave, still marked unsaved, and **Discard** lets it go. You lose at most the last 30 seconds of work.
+The next time the app starts, it offers the patch back. **Recover** reopens it exactly as it was at the last autosave, still marked unsaved; **Discard** lets it go. At most, you lose the last 30 seconds of work.
 
-Recent files, the autosave and the window's size and position are kept in Modular's settings file (`%APPDATA%\Modular Synth\data\app.ron` on Windows, `~/.local/share/modularsynth/app.ron` on Linux, `~/Library/Application Support/Modular-Synth/app.ron` on macOS).
+Recent files, the autosave, your cable style and the window's size and position are kept in the settings file:
 
-## MIDI Setup
+- Windows: `%APPDATA%\Modular Synth\data\app.ron`
+- macOS: `~/Library/Application Support/Modular-Synth/app.ron`
+- Linux: `~/.local/share/modularsynth/app.ron`
 
-### Enabling MIDI Input
-
-1. Add a **MIDI Note** or **Keyboard** module to your patch
-2. The module will automatically receive input from connected MIDI devices
-
-### MIDI Learn
-
-To assign a MIDI controller to a knob:
-
-1. **Right-click** the knob
-2. Select **MIDI Learn**
-3. Move the desired MIDI controller
-4. The knob is now mapped to that controller
-
-### Computer Keyboard
-
-The **Keyboard** module allows playing notes using your computer keyboard:
-
-- **Z-M** row: Lower octave (C3-B3)
-- **Q-P** row: Upper octave (C4-B4)
-- **Number keys**: Octave selection
-
-## Keyboard Shortcuts
-
-### General
-
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl + N` | New patch |
-| `Ctrl + O` | Open patch |
-| `Ctrl + S` | Save patch |
-| `Ctrl + Shift + S` | Save patch as |
-| `Ctrl + Z` | Undo |
-| `Ctrl + Shift + Z` or `Ctrl + Y` | Redo |
-| `Escape` | Deselect / Cancel |
-
-### Navigation
-
-| Shortcut | Action |
-|----------|--------|
-| `Home` | Fit all to view |
-| `+` / `-` | Zoom in / out |
-| Arrow keys | Pan canvas |
-
-### Modules
+## Keyboard shortcuts
 
 | Shortcut | Action |
 |----------|--------|
 | `Space` or `Tab` | Quick add a module at the cursor |
-| `Delete` or `Backspace` | Delete selected |
-| `Ctrl + D` | Duplicate selected |
-| `Ctrl + C` | Copy selected |
-| `Ctrl + X` | Cut selected |
+| `Delete` or `Backspace` | Delete the selected modules |
+| `Ctrl + D` | Duplicate the selected modules |
+| `Ctrl + C` / `Ctrl + X` | Copy / cut the selected modules |
 | `Ctrl + V` | Paste at the cursor |
-| `Ctrl + B` | Bypass selected |
-
-## Next Steps
-
-Now that you understand the interface:
-
-- **[Your First Patch](./your-first-patch.md)** - Build a simple synthesizer step by step
-- **[Signal Types](../concepts/signal-types.md)** - Understand the different signal types
-- **[Module Reference](../modules/README.md)** - Explore all available modules
+| `Ctrl + B` | Bypass or switch on the selected filters and effects |
+| `Ctrl + Z` | Undo |
+| `Ctrl + Shift + Z` or `Ctrl + Y` | Redo |
+| `Ctrl + N` | New patch |
+| `Ctrl + O` | Open a patch |
+| `Ctrl + S` | Save |
+| `Ctrl + Shift + S` | Save as |
+| `Escape` | Close the add menu or quick-add box |
+| `Shift` + drag | Fine knob adjustment |
+| Double-click a knob | Reset it to its default |

@@ -1,82 +1,55 @@
 # Modular Synth
 
-Welcome to the documentation for **Modular Synth**, a node-based modular audio synthesizer built in Rust.
+Modular Synth is a modular synthesizer you patch on a canvas. You place modules (oscillators, filters, envelopes, effects) as nodes, draw cables between their jacks, and hear the result as you go. Nothing is wired in advance: the patch is the instrument.
 
-![Modular Synth Interface](./images/interface-overview.png)
-*The Modular Synth interface showing a basic patch*
+![The Modular Synth window with a patch loaded](./images/interface-overview.png)
+*A patch on the canvas. Cables are colored by what they carry, and light up as signal passes through them.*
 
-## What is Modular Synth?
+## A node graph, not a rack
 
-Modular Synth takes a different approach from traditional virtual modular synthesizers. Instead of emulating physical hardware with skeuomorphic interfaces, it uses a clean **node-graph approach** similar to Blender's node editor or Unreal Engine's Blueprints.
+Most software modulars imitate hardware: rows of panels, screws, and cables that sag in front of everything. Modular Synth borrows instead from node editors like Blender's. Every module is a rounded card with inputs on its left edge, outputs on its right, and knobs along the bottom. You can put modules anywhere, zoom out to see the whole patch, and zoom in to work on one corner of it.
 
-This design philosophy offers several advantages:
+What it keeps from hardware is the feedback. Cables glow with the signal they carry, so a note becomes a pulse of light running down the wire and an LFO draws its waveform along the cable. Knobs under modulation turn on their own. Oscillators, envelopes, filters and LFOs draw what they're doing on the module itself. You can see a patch working as well as hear it.
 
-- **Clarity**: Signal flow is immediately visible through color-coded connections
-- **Flexibility**: Modules can be freely arranged without physical constraints
-- **Efficiency**: Clean UI focuses on the essentials without decorative elements
-- **Learning**: The visual representation helps understand synthesis concepts
+## Signals
 
-## Design Philosophy
+Each cable carries one of three kinds of signal, and takes its color from it:
 
-### Visual Feedback Over Skeuomorphism
+| Color | Signal | What it carries |
+|-------|--------|-----------------|
+| <span class="swatch audio"></span>Blue | Audio | Sound, from −1 to 1 |
+| <span class="swatch control"></span>Orange | Control | Modulation (CV): envelopes, LFOs, pitch |
+| <span class="swatch gate"></span>Green | Gate | On or off: a key held down, a clock tick |
 
-While hardware emulations try to recreate the look of physical synthesizers, Modular Synth prioritizes **information density and visual feedback**. Every element serves a purpose:
+A cable can also carry up to eight voices at once, which is how Modular Synth plays chords. MIDI doesn't travel on cables: the MIDI modules listen to the controller you choose in the toolbar and turn what you play into pitch, gate and velocity. [Signal Types](./concepts/signal-types.md) and [Polyphony](./concepts/polyphony.md) cover both in depth.
 
-- **Color-coded signals** tell you instantly what type of data flows through each connection
-- **Animated knobs** show real-time modulation when controlled externally
-- **Waveform displays** provide immediate visual confirmation of signal content
+## Modules
 
-### Node Graph Architecture
+There are 23 modules in six categories. A module's header takes its category's color:
 
-The node-graph paradigm brings several benefits:
+| Category | Header | Modules |
+|----------|--------|---------|
+| Source | <span class="swatch bar source"></span>Blue | Oscillator, Keyboard, MIDI Note, Poly MIDI |
+| Filter | <span class="swatch bar filter"></span>Teal | SVF Filter, Ladder Filter |
+| Modulation | <span class="swatch bar modulation"></span>Orange | ADSR Envelope, LFO |
+| Effect | <span class="swatch bar effect"></span>Cyan | Stereo Delay, Reverb, 3-Band EQ, Distortion, Chorus, Compressor |
+| Utility | <span class="swatch bar utility"></span>Gray | Clock, VCA, Attenuverter, Mixer, Sample & Hold, Oscilloscope, Step Sequencer, MIDI Monitor |
+| Output | <span class="swatch bar output"></span>Purple | Audio Output |
 
-1. **Scalable patches**: Zoom out to see the big picture, zoom in for details
-2. **Flexible layout**: Arrange modules to match your mental model of the patch
-3. **Clear connections**: Bezier curves with signal-type coloring make routing obvious
-4. **No cable spaghetti**: Connections can cross without confusion thanks to color coding
+The [Module Overview](./modules/index.md) introduces each one.
 
-## Signal Types
+## Where to start
 
-Modular Synth uses four distinct signal types, each with its own color:
+If you're new to modular synthesis, read the Getting Started pages in order:
 
-| Signal | Color | Purpose |
-|--------|-------|---------|
-| **Audio** | Blue | Sound signals (-1.0 to 1.0) |
-| **Control** | Orange | Modulation and CV (0.0 to 1.0 or bipolar) |
-| **Gate** | Green | Triggers and gates (on/off) |
-| **MIDI** | Purple | Note and controller data |
+1. [Installation](./getting-started/installation.md) gets the app running.
+2. [Interface Overview](./getting-started/interface-overview.md) shows you around the window.
+3. [Your First Patch](./getting-started/your-first-patch.md) builds a playable synthesizer from an empty canvas, one cable at a time.
 
-Learn more in [Signal Types](./concepts/signal-types.md).
+If you already know your way around a modular, open the **📚 Examples** menu, load a patch, and keep the [module reference](./modules/index.md) to hand. The [recipes](./recipes/basic-subtractive.md) explain how each example works.
 
-## Module Categories
+## Under the hood
 
-Modules are organized into functional categories, each with a distinctive header color:
+Modular Synth is written in Rust, with [egui](https://github.com/emilk/egui) for the interface and [cpal](https://github.com/RustAudio/cpal) for audio. The audio engine runs on its own thread and never waits on the interface: edits travel to it over lock-free queues, every buffer is allocated before playback starts, and a test in the build fails if the audio thread ever allocates memory. That is what keeps the sound from glitching while you patch.
 
-- **Sources** (Blue) - Sound generators like oscillators
-- **Filters** (Green) - Frequency shaping modules
-- **Modulation** (Orange) - Envelopes, LFOs, and clocks
-- **Utilities** (Yellow) - VCAs, mixers, and signal processors
-- **Effects** (Purple) - Delays, reverbs, and other effects
-- **MIDI** (Magenta) - MIDI input and processing
-- **Output** (Red) - Final audio output
-
-## Getting Started
-
-Ready to dive in? Here's the recommended path:
-
-1. **[Installation](./getting-started/installation.md)** - Get Modular Synth running on your system
-2. **[Interface Overview](./getting-started/interface-overview.md)** - Learn the UI basics
-3. **[Your First Patch](./getting-started/your-first-patch.md)** - Build a simple synthesizer
-
-Or jump straight to the [Module Reference](./modules/README.md) if you're already familiar with modular synthesis.
-
-## Technical Foundation
-
-Modular Synth is built with:
-
-- **Rust** - For performance and safety
-- **egui** - Immediate-mode GUI framework
-- **cpal** - Cross-platform audio I/O
-- **Lock-free architecture** - UI and audio threads communicate without blocking
-
-The audio engine uses pre-allocated buffers and lock-free ring buffers to ensure glitch-free audio processing.
+The source is on [GitHub](https://github.com/chrischaps/Modular).

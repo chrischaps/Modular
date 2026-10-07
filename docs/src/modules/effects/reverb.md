@@ -1,293 +1,135 @@
 # Reverb
 
-**Module ID**: `fx.reverb`
-**Category**: Effects
-**Header Color**: Purple
+**Module ID** `fx.reverb` · **Category** Effect
 
 ![Reverb Module](../../images/module-reverb.png)
-*The Reverb module*
+*The room on the top row, its place in the mix below*
 
-## Description
+The Reverb puts a sound in a space: a dense wash of reflections that builds, blooms and dies away. It reaches from a small, splashy room to a tail that rings for half a minute.
 
-The Reverb simulates acoustic spaces by creating a dense wash of reflections that decay over time. From small rooms to vast halls, reverb places your sounds in a virtual environment and adds depth, dimension, and atmosphere.
+Its knobs sit in two rows. The top row shapes the room and its tail (**Size**, **Decay**, **Damp**, **Mod**); the bottom row places it in the mix (**PreD**, **Width**, **Mix**).
 
-### How it works
+## How it works
 
-The Reverb is an 8-line **feedback delay network** (FDN):
+The Reverb is an eight-line **feedback delay network** (FDN).
 
 1. **Pre-delay** holds the input back before anything else happens.
-2. A four-step **diffuser** splits the sound across eight channels. Each step delays the channels by different amounts, flips some of them, and mixes them all together. One click becomes 8, then 64, then 512, then 4,096 echoes. These are the early reflections.
-3. Eight **delay lines** circulate the sound. On every pass the lines are mixed into each other, so each echo spawns eight more and the tail turns into smooth, noise-like decay.
-4. Each line has its own gain and a **damping filter**. Both are calculated from that line's length, so the whole tail decays at the rate set by Decay, and every line loses its highs at the same rate.
-5. The lines **drift** slowly in length (the Mod knob). This keeps resonances from settling in and adds a gentle chorus to the tail.
+2. A four-step **diffuser** spreads the sound across eight channels. Each step delays the channels by different amounts, flips the polarity of some, and mixes them all together, so one click becomes 8 echoes, then 64, then 512, then 4,096. These are the early reflections.
+3. Eight **delay lines** circulate the sound. On every pass the lines are mixed into each other, so each echo spawns eight more and the tail thickens into a smooth, noise-like decay.
+4. Each line has its own gain and **damping filter**, both calculated from that line's length, so the whole tail decays at the rate Decay sets and every line loses its highs at the same rate.
+5. The lines **drift** slowly in length (the **Mod** knob). This keeps resonances from settling in and adds a gentle chorus to the tail.
 
-Freeverb-style reverbs use a few fixed combs. They tend to ring at the comb lengths and sound metallic on sharp transients like snares and claps. The FDN's tail has no repeating period, so those transients spread into an even wash.
+Simpler reverbs built from a few fixed comb filters tend to ring at the comb lengths, and sound metallic on snares and claps. The FDN's tail has no repeating period, so sharp transients spread into an even wash.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **In L** | Audio (Blue) | Left channel input |
-| **In R** | Audio (Blue) | Right channel input (normalled to In L when unpatched) |
+| **In L** | Audio (Blue) | Left input |
+| **In R** | Audio (Blue) | Right input. When unpatched, it copies In L |
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Out L** | Audio (Blue) | Processed left channel |
-| **Out R** | Audio (Blue) | Processed right channel |
+| **Out L** | Audio (Blue) | Left reverb, mixed with the dry signal |
+| **Out R** | Audio (Blue) | Right reverb, mixed with the dry signal |
 
 ## Parameters
 
 | Knob | Range | Default | Description |
 |------|-------|---------|-------------|
-| **Size** | 0% - 100% | 50% | Room size: scales every delay in the network |
-| **Decay** | 0.1 s - 30 s | 2.0 s | Time for the tail to fall 60 dB |
-| **Damp** | 0% - 100% | 50% | How much faster the highs die than the lows |
-| **Mod** | 0% - 100% | 25% | Slow drift of the delay lines (chorus in the tail) |
-| **PreD** | 0 ms - 100 ms | 0 ms | Time before the reverb begins |
-| **Width** | 0% - 100% | 100% | Stereo width of the reverb |
-| **Mix** | 0% - 100% | 30% | Dry/wet balance |
+| **Size** | 0 – 100% | 50% | Room size: scales every delay in the network |
+| **Decay** | 0.1 s – 30 s | 2.0 s | Time for the tail to fall by 60 dB |
+| **Damp** (Damping) | 0 – 100% | 50% | How much faster the highs die than the lows |
+| **Mod** | 0 – 100% | 25% | Slow drift of the delay lines: a chorus in the tail |
+| **PreD** (Pre-Delay) | 0 ms – 100 ms | 0 ms | Silence before the reverb begins |
+| **Width** | 0 – 100% | 100% | Stereo width of the reverb |
+| **Mix** | 0 – 100% | 30% | Dry (0%) to reverb only (100%) |
 
-## Parameter Deep Dive
-
-### Decay Time
-
-Decay is the reverb time (RT60) in seconds: how long the tail takes to fall by 60 dB. A test measures it on rendered impulse responses and holds it to within 15% of the knob, at every Size. In practice the low and mid frequencies land within a few percent.
-
-| Decay | Space Type |
-|-------|------------|
-| 0.1-0.5 s | Small room, tight space |
-| 0.5-1.5 s | Medium room, studio |
-| 1.5-3.0 s | Large hall, church |
-| 3.0-10 s | Cathedral, warehouse |
-| 10+ s | Infinite/ambient |
-
-### Pre-Delay
-
-Gap between dry signal and reverb onset:
-
-- **0-10 ms**: Reverb starts immediately, sound feels close
-- **20-40 ms**: Natural separation, clear attack
-- **50-100 ms**: Distinct gap before the reverb, adds depth
-
-Pre-delay helps maintain clarity: the attack of a sound comes through before the reverb does.
+## The controls
 
 ### Size
 
-Size sets the room's dimensions. The shortest delay line runs from 12 ms at 0% to 100 ms at 100%, and the early reflections scale with it:
+Size sets the dimensions of the room. The shortest delay line runs from 12 ms at 0% to 100 ms at 100%, and the early reflections scale with it. Small settings build up quickly, like a booth or a small room; large settings build slowly, like a hall.
 
-- **Small (0-30%)**: Tight, quick build-up, like a booth or small room
-- **Medium (40-60%)**: Balanced, natural
-- **Large (70-100%)**: Slow, spacious build-up, like a hall
+Size and Decay are independent, so a small room can still ring for a long time. Turn Size while a tail is sounding and the lines glide to their new lengths, bending the tail's pitch for a moment instead of clicking.
 
-Size and Decay are independent, so a small room can still ring for a long time. Turning Size while the tail plays bends its pitch briefly as the lines glide to their new lengths, like a tape effect.
+### Decay
 
-### Damping
+Decay is the reverb time (RT60): how long the tail takes to fall by 60 dB. Measured on rendered impulse responses, it lands within about 5% of the knob across the whole Size range.
 
-Damping simulates surfaces absorbing high frequencies. It sets how fast 4 kHz dies relative to the lows. At 0% it decays as long as Decay. At 100% it decays ten times faster. Low frequencies always keep the full Decay time.
+| Decay | Space |
+|-------|-------|
+| 0.1 – 0.5 s | Small room, booth |
+| 0.5 – 1.5 s | Studio, medium room |
+| 1.5 – 3 s | Hall, church |
+| 3 – 10 s | Cathedral, warehouse |
+| 10 s and up | Endless ambient wash |
 
-- **Low (0-30%)**: Bright, reflective surfaces (tile, glass, plate)
-- **Medium (40-60%)**: Balanced, natural decay
-- **High (70-100%)**: Dark, absorbed sound (carpet, curtains)
+### Damp
 
-Higher damping makes a darker reverb that's easier to mix.
+Damping models soft surfaces absorbing high frequencies. It sets how fast 4 kHz dies relative to the lows: at 0% it lasts the full Decay time, and at 100% it dies ten times faster. Low frequencies always keep the full Decay. Low settings sound like tile and glass; high settings like carpet and curtains, and a darker reverb is easier to sit in a mix.
 
 ### Mod
 
-Mod lets each of the eight delay lines drift slowly in length, each at its own rate between 0.3 and 1.1 Hz. The early reflections are left alone.
+Mod lets each of the eight lines drift slowly in length, each at its own rate between about 0.3 and 1.1 Hz. The early reflections stay still.
 
-- **0%**: Static. The most "accurate" setting, but long tails can show faint resonances.
-- **15-35%**: Subtle movement that smooths long tails. This is the default range.
-- **60-100%**: A noticeable chorus in the tail; lush on pads, seasick on pianos.
+At 0% the tail is static, the most literal setting, though long tails can show faint resonances. Around 15–35% (the default is 25%) the movement smooths long tails without drawing attention to itself. From 60% up it becomes an audible chorus in the tail: lush on pads, seasick on piano.
+
+### PreD
+
+Pre-delay is the gap between the dry sound and the start of the reverb. Up to about 10 ms the reverb starts at once and the source feels close. At 20–40 ms the attack of each note comes through clearly before the room answers, which keeps vocals and plucks distinct. Toward 100 ms the gap becomes an audible sense of depth.
 
 ### Width
 
-Controls stereo spread:
+Width sets how far apart the two sides of the reverb are. At 0% the reverb is mono, centered; at 100% the two sides come from different delay lines and are almost completely uncorrelated, so the tail fills the stereo field. Width affects only the reverb, not the dry signal.
 
-- **0%**: Mono reverb (centered)
-- **50%**: Moderate stereo spread
-- **100%**: Full stereo width. The two sides come from different delay lines, so they are almost completely uncorrelated.
+### Mix
 
-## Usage Tips
+Mix sets how far away the sound seems. Around 10–20% it sounds close and present, 20–40% places it at a natural distance in the room, and above 50% it recedes into the space. At 100% you hear only the reverb.
 
-### Vocal Reverb
+## Bypass
 
-Clear, present vocals:
+Click the power switch in the node header, press **Ctrl+B** with the module selected, or choose **Bypass** from its right-click menu. In L passes straight to Out L and In R to Out R (In R still copies In L when unpatched). The switch crossfades over 20 ms. A bypassed reverb stops running, and it starts from silence when you switch it back in, so no old tail comes back with it.
 
-```
-Decay: 1.5 s
-Pre-Delay: 40 ms
-Size: 0.5
-Damping: 0.6
-Mix: 0.2
-```
+## Starting points
 
-Pre-delay separates the vocal from reverb; damping prevents harshness.
+| Space | Size | Decay | Damp | Mod | PreD |
+|-------|------|-------|------|-----|------|
+| Small bright room | 15% | 0.6 s | 20% | 10% | 0 ms |
+| Room | 30% | 0.8 s | 50% | 20% | 10 ms |
+| Chamber | 50% | 1.5 s | 40% | 25% | 20 ms |
+| Hall | 70% | 3 s | 50% | 30% | 40 ms |
+| Cathedral | 90% | 6 s | 40% | 30% | 80 ms |
+| Endless | 100% | 20 s | 30% | 50% | 100 ms |
 
-### Drums/Percussion
+For a vocal or lead, start from the Chamber with Mix around 20% and Damp near 60%; the pre-delay keeps the words clear and the damping keeps the tail from hissing. For a pad, try the Hall with Mix 50% and Mod 70%: the chorus lives only in the tail, so the dry note stays steady.
 
-Tight, punchy room:
+## Patch ideas
 
-```
-Decay: 0.5 s
-Pre-Delay: 10 ms
-Size: 0.3
-Damping: 0.5
-Mix: 0.25
-```
+**Stereo insert.** A stereo source keeps its image through the reverb:
 
-Short decay keeps rhythm tight.
-
-### Synth Pad
-
-Lush, expansive atmosphere:
-
-```
-Decay: 4.0 s
-Pre-Delay: 50 ms
-Size: 0.8
-Damping: 0.4
-Mix: 0.5
+```text
+[Oscillator Out L] ──> [Reverb In L]
+[Oscillator Out R] ──> [Reverb In R]
+[Reverb Out L] ──> [Audio Output Left]
+[Reverb Out R] ──> [Audio Output Right]
 ```
 
-Long decay and large size create immersive space.
+**Shared room.** Mix several voices into one reverb so they sound like they're in the same space:
 
-### Ambient/Experimental
-
-Infinite shimmer:
-
-```
-Decay: 15+ s
-Pre-Delay: 100 ms
-Size: 1.0
-Damping: 0.3 (bright)
-Mix: 0.7
+```text
+[VCA 1 Out] ──> [Mixer Ch 1]
+[VCA 2 Out] ──> [Mixer Ch 2]
+[Mixer Out] ──> [Reverb In L] ──> [Audio Output]
 ```
 
-Creates evolving, self-sustaining textures.
+**Echoes of the room.** Put a [Delay](./delay.md) after the reverb and the tail itself repeats in rhythm.
 
-### Gated Reverb
+## Related modules
 
-80s drum sound (requires gate module):
-
-```
-[Drums] ──> [Reverb] ──> [Gate] ──> [Output]
-           Decay: 3s    Threshold: 0.3
-           Mix: 100%    Attack: 0ms
-                        Hold: 200ms
-                        Release: 50ms
-```
-
-Reverb is cut short by gate for dramatic effect.
-
-### Send/Return Setup
-
-Process multiple sources through one reverb:
-
-```
-[Synth 1] ──(send)──┐
-[Synth 2] ──(send)──┼──> [Reverb (Mix: 100%)] ──> [Return Mixer]
-[Drums]   ──(send)──┘
-```
-
-More efficient and creates cohesive space.
-
-### Moving Tail
-
-Lush, slowly shifting pad wash:
-
-```
-Decay: 6 s
-Size: 0.8
-Damping: 0.4
-Mod: 0.7
-Mix: 0.5
-```
-
-A deep Mod setting adds a chorus that only lives in the tail, so the dry note stays steady.
-
-### Small Bright Room
-
-Tight, lively ambience for percussion:
-
-```
-Size: 0.15
-Decay: 0.6 s
-Pre-Delay: 0 ms
-Damping: 0.2
-Mod: 0.1
-```
-
-Short lines and little damping give a quick, splashy room.
-
-### Plate Reverb Character
-
-Classic studio plate:
-
-```
-Size: 0.5
-Decay: 2.0 s
-Pre-Delay: 0 ms
-Damping: 0.4
-Width: 1.0
-```
-
-Dense, smooth decay.
-
-## Mix Positioning
-
-Reverb level affects perceived distance:
-
-| Mix | Perception |
-|-----|------------|
-| 10-20% | Close, present, intimate |
-| 20-40% | Natural room distance |
-| 40-60% | Far away, spacious |
-| 60-100% | Distant, atmospheric, effect |
-
-## Connection Examples
-
-### Insert Effect
-```
-[Synth] ──> [Reverb] ──> [Output]
-```
-
-### Send/Return
-```
-[Mixer] ──Send──> [Reverb (Mix: 100%)]
-[Reverb] ──Return──> [Mixer]
-```
-
-### Reverb into Delay
-```
-[Audio] ──> [Reverb] ──> [Delay] ──> [Output]
-```
-
-Creates rhythmic echoes of the reverb tail.
-
-### Sidechain Reverb
-```
-[Audio] ──> [Reverb] ──> [VCA] ──> [Output]
-[Audio] ──> [Envelope Follower] ──> [Inverted] ──> [VCA CV]
-```
-
-Reverb ducks when dry signal is present.
-
-## Space Presets
-
-| Space | Decay | Pre-Delay | Size | Damping | Mod |
-|-------|-------|-----------|------|---------|-----|
-| Closet | 0.2s | 0ms | 0.1 | 0.6 | 0.1 |
-| Room | 0.8s | 10ms | 0.3 | 0.5 | 0.2 |
-| Chamber | 1.5s | 20ms | 0.5 | 0.4 | 0.25 |
-| Hall | 3.0s | 40ms | 0.7 | 0.5 | 0.3 |
-| Cathedral | 6.0s | 80ms | 0.9 | 0.4 | 0.3 |
-| Infinite | 20s+ | 100ms | 1.0 | 0.3 | 0.5 |
-
-## Related Modules
-
-- [Delay](./delay.md) - Discrete echoes vs diffuse reverb
-- [Chorus](./chorus.md) - Thickening without space
-- [EQ](./eq.md) - Shape reverb tone
-- [VCA](../utilities/vca.md) - Control reverb level dynamically
+- [Delay](./delay.md): distinct echoes instead of a diffuse space
+- [Chorus](./chorus.md): width and movement without a room
+- [EQ](./eq.md): shape the reverb's tone
+- [Mixer](../utilities/mixer.md): feed several voices into one reverb

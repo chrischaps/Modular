@@ -1,285 +1,99 @@
 # Lush Pad
 
-Create rich, evolving pad sounds with multiple oscillators, modulation, and effects.
+A wide, slow-blooming pad for holding chords. Each note fades in over most of a second, a filter breathes open and closed over ten seconds, and chorus and reverb spread it across the stereo field. This is the polyphonic example: every note you hold gets its own oscillator, filter, envelope and VCA.
 
-![Lush Pad Patch](../images/recipe-lush-pad.png)
-*The lush pad patch*
+> **Load it:** choose **📚 Examples → Lush Pad** in the toolbar. Press **▶ Play**, then hold chords on a MIDI keyboard or on the Z to M keys.
+> The patch file is [`patches/lush-pad.json`](https://github.com/chrischaps/Modular/blob/master/patches/lush-pad.json).
 
-> **Play it now:** this recipe ships with the app. Choose **📚 Examples → Lush Pad** in the toolbar,
-> or download [`patches/lush-pad.json`](https://github.com/chrischaps/Modular/blob/master/patches/lush-pad.json) and open it.
->
-> - Press **Play**, then hold chords on the Z to M keys or a MIDI keyboard.
-> - The shipped patch is **polyphonic**. A [Poly MIDI](../modules/midi/poly-midi.md) module gives each held note its own oscillator, filter, envelope and VCA. See [Polyphony](../concepts/polyphony.md).
-> - Instead of two detuned oscillators and a Mixer, it uses one saw with 5 unison **Voices** and 30% **Detune**. The Mixer is a mono module, so it would merge every note into one voice. There is no second LFO.
+![The Lush Pad patch](../images/recipe-lush-pad.png)
+*The bundled cables carry one strand per voice.*
 
-## Overview
+## What it teaches
 
-Pads are sustained, atmospheric sounds that fill space and create ambience. This recipe combines detuned oscillators, slow modulation, and effects to create a rich, evolving pad sound.
+- **Polyphony.** One chain of modules plays every note of a chord, each as its own voice. See [Polyphony](../concepts/polyphony.md).
+- **Unison.** Several detuned copies of one oscillator make a single note sound wide and alive.
+- **Mono and poly together.** A mono LFO moves every voice at once, and the mono effects at the end hear all the voices summed.
 
-**Character**: Warm, wide, evolving, dreamy
-**Good for**: Ambient, cinematic, chillout, background textures
+## Modules
 
-## Modules Used
+| Module | Settings |
+|--------|----------|
+| [Poly MIDI](../modules/midi/poly-midi.md) | Defaults: 8 voices, Rotate |
+| [Oscillator](../modules/sources/oscillator.md) | **Wave** Saw, **Voices** 5, **Detune** 30%, **Spread** 60% |
+| [SVF Filter](../modules/filters/svf-filter.md) | **Cutoff** 2.5 kHz, **Res** 15% |
+| [LFO](../modules/modulation/lfo.md) | **Rate** 0.1 Hz, **Wave** Sine, **Bipolar** on |
+| [ADSR Envelope](../modules/modulation/adsr.md) | **Atk** 800 ms, **Dec** 500 ms, **Sus** 80%, **Rel** 2 s |
+| [VCA](../modules/utilities/vca.md) | **Level** 50% |
+| [Chorus](../modules/effects/chorus.md) | **Rate** 0.5 Hz, **Depth** 40%, **Delay** 10 ms, **Voices** 2, **Mix** 50% |
+| [Reverb](../modules/effects/reverb.md) | **Size** 70%, **Decay** 4 s, **Damp** 40%, **PreD** 50 ms, **Mix** 50% |
+| [Audio Output](../modules/output/audio-output.md) | **Vol** 80% |
 
-- 2x [Oscillator](../modules/sources/oscillator.md)
-- 1x [Mixer](../modules/utilities/mixer.md)
-- 1x [SVF Filter](../modules/filters/svf-filter.md)
-- 1x [VCA](../modules/utilities/vca.md)
-- 1x [ADSR Envelope](../modules/modulation/adsr.md)
-- 2x [LFO](../modules/modulation/lfo.md)
-- 1x [Chorus](../modules/effects/chorus.md)
-- 1x [Reverb](../modules/effects/reverb.md)
-- 1x [Keyboard Input](../modules/midi/keyboard.md)
-- 1x [Audio Output](../modules/output/audio-output.md)
+## How it's built
 
-## Patch Diagram
+### Voices from Poly MIDI
 
-```
-┌──────────┐
-│ Keyboard │─V/Oct─┬─▶ [Osc 1 (Saw)]──┐
-│          │       │                   ├─▶[Mixer]─▶[Filter]─▶[VCA]─▶[Chorus]─▶[Reverb]─▶[Out]
-└────┬─────┘       └─▶ [Osc 2 (Saw)]──┘      ▲              ▲
-     │                  (+7 cents)           │              │
-     │ Gate                                  │              │
-     └──────────────────────────────────────▶│◀────[ADSR]───┘
-                                             │
-                                        [LFO 1]
-                                       (slow)
-
-[LFO 2] ─────────────────────────────▶ [Osc 1 PWM]
-(very slow)                           [Osc 2 PWM]
+```text
+[Poly MIDI Pitch] ──> [Oscillator V/Oct]
+[Poly MIDI Gate] ──> [ADSR Gate]
+[Poly MIDI Velocity] ──> [ADSR Velocity]
 ```
 
-## Step-by-Step Setup
+Poly MIDI gives each held note a channel of its own, and these three cables carry all eight channels. The Oscillator and the ADSR are polyphonic, so they run one copy per channel: a four-note chord is four oscillators and four envelopes, each starting and releasing with its own key. Velocity reaches each note's envelope, so softer notes bloom quieter.
 
-### 1. Dual Detuned Oscillators
+### One note, five saws
 
-The foundation of a thick pad is detuned oscillators:
+The Oscillator stacks five saw waves per note with **Voices** 5, detuned 30% apart. They drift in and out of phase with each other, which gives each note its slow, chorused movement before any effect is added. Only the mono **Out** is used here; the stereo width comes later, from the chorus and reverb.
 
-**Oscillator 1**:
-- Waveform: **Saw** (or Square for PWM)
-- Detune: **0 cents** (reference)
+Five unison voices on each of eight notes is forty saws. If the patch strains your CPU, turn Poly MIDI's **Voices** down, or the Oscillator's.
 
-**Oscillator 2**:
-- Waveform: **Saw** (or Square for PWM)
-- Detune: **+7 cents** (slight detune for thickness)
+### A filter that breathes
 
-Connect both to the Mixer:
-```
-[Osc 1 Audio] ──▶ [Mixer Ch 1]
-[Osc 2 Audio] ──▶ [Mixer Ch 2]
+```text
+[Oscillator Out] ──> [SVF Filter In]
+[LFO Out] ──> [SVF Filter Cutoff]
 ```
 
-Both should track the keyboard:
-```
-[Keyboard V/Oct] ──▶ [Osc 1 V/Oct]
-                 ──▶ [Osc 2 V/Oct]
-```
+The LFO takes ten seconds per cycle. The filter's **Cutoff** input works in octaves, so the bipolar LFO swings the cutoff an octave either side of 2.5 kHz, from 1.25 kHz to 5 kHz and back. The LFO is a mono cable into a polyphonic filter, so every voice's filter moves together, and the whole chord brightens and darkens as one.
 
-### 2. Signal Path
+### The envelope and the VCA
 
-```
-[Mixer Out] ──▶ [Filter Input]
-[Filter Lowpass] ──▶ [VCA Input]
-[VCA Output] ──▶ [Chorus Input]
-[Chorus Output] ──▶ [Reverb Input]
-[Reverb Output] ──▶ [Audio Output]
+```text
+[SVF Filter LowPass] ──> [VCA In]
+[ADSR Out] ──> [VCA CV]
 ```
 
-### 3. Slow Attack Envelope
+The 800 ms attack makes each note swell in rather than start, and the 2-second release lets chords overlap as you change them. Rotate allocation helps here: a released note keeps ringing on its own voice while the next chord takes fresh ones.
 
-Pads have gentle attacks:
+The VCA's **Level** sits at 50%. Voices add up, so a full chord is several times louder than one note, and the headroom keeps chords out of the limiter.
 
-```
-[Keyboard Gate] ──▶ [ADSR Gate]
-[ADSR Env] ──▶ [VCA CV]
-```
+### Effects, after the voices are summed
 
-**ADSR Settings**:
-| Parameter | Value | Why |
-|-----------|-------|-----|
-| Attack | 800 ms | Slow fade in |
-| Decay | 500 ms | Gentle settle |
-| Sustain | 0.8 | Nearly full while held |
-| Release | 2000 ms | Long fade out |
-
-### 4. Filter for Warmth
-
-**Filter Settings**:
-- Cutoff: **3000 Hz** (removes harshness)
-- Resonance: **0.15** (subtle color)
-
-### 5. Slow Filter Modulation
-
-Add movement with LFO:
-
-```
-[LFO 1] ──▶ [Filter Cutoff CV]
+```text
+[VCA Out] ──> [Chorus In L]
+[Chorus Out L] ──> [Reverb In L]
+[Chorus Out R] ──> [Reverb In R]
+[Reverb Out L] ──> [Audio Output Left]
+[Reverb Out R] ──> [Audio Output Right]
 ```
 
-**LFO 1 Settings**:
-| Parameter | Value |
-|-----------|-------|
-| Waveform | Sine |
-| Rate | 0.1 Hz (very slow) |
-| Bipolar | On |
-
-**Filter CV Amount**: 0.2 (subtle movement)
-
-### 6. PWM for Animation (Optional)
-
-If using Square waves, add PWM:
-
-```
-[LFO 2] ──▶ [Osc 1 PWM]
-        ──▶ [Osc 2 PWM]
-```
-
-**LFO 2 Settings**:
-| Parameter | Value |
-|-----------|-------|
-| Waveform | Triangle |
-| Rate | 0.3 Hz |
-| Bipolar | Off |
-
-### 7. Chorus for Width
-
-**Chorus Settings**:
-| Parameter | Value |
-|-----------|-------|
-| Rate | 0.5 Hz |
-| Depth | 0.4 |
-| Voices | 2 |
-| Stereo | 1.0 |
-| Mix | 0.5 |
-
-### 8. Reverb for Space
-
-**Reverb Settings**:
-| Parameter | Value |
-|-----------|-------|
-| Decay | 4.0 s |
-| Pre-Delay | 50 ms |
-| Size | 0.7 |
-| Damping | 0.4 |
-| Mix | 0.5 |
-
-## Final Module Settings Summary
-
-| Module | Key Settings |
-|--------|--------------|
-| Osc 1 | Saw/Square, Detune: 0 |
-| Osc 2 | Saw/Square, Detune: +7c |
-| Mixer | Ch1: 0.8, Ch2: 0.8 |
-| Filter | Cutoff: 3kHz, Res: 0.15 |
-| VCA | Level: 1.0 |
-| ADSR | A:800ms D:500ms S:0.8 R:2000ms |
-| LFO 1 | Sine, 0.1Hz (filter) |
-| LFO 2 | Tri, 0.3Hz (PWM) |
-| Chorus | Rate:0.5, Depth:0.4, Mix:0.5 |
-| Reverb | Decay:4s, Mix:0.5 |
+The Chorus isn't polyphonic, so it hears the polyphonic cable summed into one signal. Its **In R** copies **In L** when nothing is patched there, and its two outputs come back with different modulation, which is where the stereo image starts. The Reverb's long, modulated tail does the rest.
 
 ## Variations
 
-### Darker Pad
+**Brighter or darker.** Turn the filter's **Cutoff** up for a glassier pad or down to 800 Hz for a warm, distant one. The LFO keeps sweeping an octave either side of wherever you set it.
 
-```
-Filter Cutoff: 1500 Hz
-Reverb Damping: 0.6
-LFO 1 Rate: 0.05 Hz (slower)
-```
+**Supersaw.** Set the Oscillator to **Voices** 7 and **Detune** 40%.
 
-### Brighter Pad
+**Strings.** Shorten **Atk** to 300 ms and **Rel** to 1 s, and set the reverb's **Decay** to 2 s.
 
-```
-Filter Cutoff: 5000 Hz
-Osc Waveforms: Saw
-Add subtle high-shelf EQ boost
-```
+**Swell.** Lengthen **Atk** to 3 s. Hold a chord and let it rise.
 
-### Evolving Pad
+**Each voice its own.** Replace the LFO's cable into the filter's **Cutoff** with Poly MIDI's **Velocity**. The filter is polyphonic, so each note's filter opens by up to an octave according to its own velocity, and harder notes come out brighter.
 
-```
-Add LFO 3 ──▶ Osc 2 Detune (very slow, very subtle)
-LFO 1 Rate: 0.03 Hz (extremely slow)
-Reverb Decay: 8s
-```
+**Cheaper.** Set the Oscillator's **Voices** to 1 and add more chorus **Depth**. It's thinner, but costs a fifth of the CPU.
 
-### Sparse Pad
+## Related
 
-```
-Attack: 2000 ms
-Reverb Mix: 0.7
-Filter Cutoff: 2000 Hz
-Remove Chorus
-```
-
-### Thick Supersaw
-
-```
-Add Osc 3 (Detune: -5c)
-Add Osc 4 (Detune: +12c)
-Chorus Voices: 4
-Reduce Reverb Mix: 0.3
-```
-
-## Enhancement Ideas
-
-### Add Sub Oscillator
-
-For weight:
-```
-[Osc 3 (Sine, -1 octave)] ──▶ [Mixer Ch 3] (low level)
-```
-
-### Velocity Expression
-
-```
-[Keyboard Velocity] ──▶ [Filter Cutoff CV]
-```
-
-Harder playing = brighter pad.
-
-### Modulated Reverb
-
-```
-[LFO (very slow)] ──▶ [Reverb Decay CV]
-```
-
-Space itself evolves.
-
-### Stereo Detuning
-
-Pan oscillators slightly:
-```
-Osc 1: Slight left
-Osc 2: Slight right
-```
-
-## Playing Tips
-
-1. **Hold chords**: Pads are meant to sustain
-2. **Use release**: Let notes fade naturally
-3. **Layer with other sounds**: Pads provide background
-4. **Play simply**: Complex melodies don't suit pads
-5. **Use inversions**: Voice chords to avoid bass clutter
-
-## Troubleshooting
-
-**Too thin**: Add more oscillators, increase detune
-
-**Too bright**: Lower filter cutoff
-
-**Too static**: Add more LFO modulation
-
-**Too muddy**: Raise filter cutoff, reduce reverb
-
-**Doesn't cut through**: Reduce reverb mix, raise filter
-
-## What You've Learned
-
-- Detuned oscillators for thickness
-- Slow envelopes for pad character
-- LFO modulation for movement
-- Effects layering for space and width
-- Balancing multiple modulation sources
+- [Polyphony](../concepts/polyphony.md) – how polyphonic cables work
+- [Poly MIDI](../modules/midi/poly-midi.md) – voice allocation and the sustain pedal
+- [Oscillator](../modules/sources/oscillator.md#unison-and-supersaw) – unison in detail

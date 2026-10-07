@@ -1,229 +1,95 @@
 # Oscilloscope
 
-**Module ID**: `util.oscilloscope`
-**Category**: Visualization
-**Header Color**: Cyan
+**Module ID** `util.oscilloscope` · **Category** Utility
 
 ![Oscilloscope Module](../../images/module-oscilloscope.png)
-*The Oscilloscope module*
+*Two traces, blue and orange, locked to the trigger level marked on the left edge.*
 
-## Description
+The Oscilloscope draws the shape of a signal as it plays. Patch an oscillator into it and you see its waveform; patch in the same oscillator after a filter and you see the filter rounding off its corners. It's the quickest way to check what a module is doing, and a good way to learn what a sound looks like.
 
-The Oscilloscope provides real-time visualization of audio and control signals. It displays waveforms, helping you understand what's happening in your patch, debug signal problems, and learn how different modules affect signals.
+It has two inputs, drawn as two overlaid traces, so you can compare a signal before and after a module. It passes nothing on: the scope only watches.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Input 1** | Any (matches input) | First signal to display (typically audio) |
-| **Input 2** | Any (matches input) | Second signal to display (overlay) |
-| **Trigger** | Gate (Green) | External trigger for stable display |
+| **In 1** | Audio (Blue) | The first trace, drawn in blue. Its signal also starts each sweep |
+| **In 2** | Audio (Blue) | The second trace, drawn in orange |
+| **Trig** | Gate (Green) | External trigger. A rising edge starts a sweep |
 
-## Outputs
-
-| Port | Signal Type | Description |
-|------|-------------|-------------|
-| **Thru 1** | Any | Passthrough of Input 1 |
-| **Thru 2** | Any | Passthrough of Input 2 |
+Control signals patch into **In 1** and **In 2** as well. A polyphonic cable is summed into one trace.
 
 ## Parameters
 
-| Knob | Range | Default | Description |
-|------|-------|---------|-------------|
-| **Time** | 1 ms - 500 ms | 20 ms | Time window displayed |
-| **Scale 1** | 0.1x - 10x | 1x | Vertical scale for Input 1 |
-| **Scale 2** | 0.1x - 10x | 1x | Vertical scale for Input 2 |
-| **Trigger Level** | -1.0 to +1.0 | 0.0 | Trigger threshold |
-| **Trigger Mode** | Auto/Normal/Single | Auto | Triggering behavior |
+| Control | Range | Default | Description |
+|---------|-------|---------|-------------|
+| **Mode** | Auto / Normal / Single / Free | Auto | How sweeps start (see below) |
+| **Trig** (Trigger Level) | -1 to +1 | 0 | The level In 1 must rise through to start a sweep |
 
-## Display Elements
+## Reading the display
 
-### Waveform Display
+The screen spans **-1 to +1** from bottom to top, the full range of an audio signal, with the center line at zero. A 4 × 4 grid helps you judge levels: each horizontal division is 0.5.
 
-The main area shows the signal amplitude over time:
-- **Horizontal axis**: Time (left = past, right = present)
-- **Vertical axis**: Amplitude (-1.0 to +1.0)
-- **Channel 1**: Typically blue trace
-- **Channel 2**: Typically orange trace (overlay)
+Each sweep shows 512 samples: about 11.6 ms at 44.1 kHz, or 10.7 ms at 48 kHz. That's a few cycles of a note in the middle of the keyboard: one cycle of C4 lasts 3.8 ms. The time scale is fixed.
 
-### Grid
+The trigger point sits a quarter of the way across, so you see a little of what came just before each trigger. A small arrow and a dashed line on the left edge mark the trigger level.
 
-Reference grid helps estimate values:
-- Horizontal lines at -1, -0.5, 0, +0.5, +1
-- Vertical time divisions based on Time setting
+## Triggering
 
-### Measurements
+Without triggering, each sweep would start at a random point in the wave and the picture would jitter. Triggering starts every sweep at the same point (where **In 1** rises through the trigger level), so a steady waveform stands still on the screen.
 
-May display:
-- **Frequency**: Detected fundamental frequency
-- **Peak-to-Peak**: Amplitude range
-- **DC Offset**: Average signal level
+A rising edge at **Trig** starts a sweep too. Both work at once: whichever comes first starts the sweep.
 
-## Usage Tips
+| Mode | Behavior |
+|------|----------|
+| **Auto** | Sweeps on each trigger. If none arrives within about 50 ms, it sweeps anyway, so you always see something, even a flat line |
+| **Normal** | Sweeps only on a trigger. With no trigger, the last picture stays on screen |
+| **Single** | Captures one sweep on the next trigger and then holds it. Use it to freeze a transient, such as the attack of a note |
+| **Free** | Ignores triggers and sweeps continuously. The picture scrolls unless the signal happens to line up |
 
-### Viewing Oscillator Waveforms
+In **Single** mode the held picture stays until the scope's state is reset, for example by stopping and restarting the transport.
 
-See what your oscillator outputs:
+If the picture won't stand still in Auto or Normal, the trigger level is probably outside the signal's range. A quiet signal that never rises through 0.5 never triggers at that level. Bring **Trig** back toward 0.
 
-```
-[Oscillator] ──> [Oscilloscope Input 1]
-             ──> [Rest of patch]
-```
+## What it's good for
 
-Verify waveform shape, frequency, and level.
+The scope is built for audio-rate signals, where a few milliseconds show whole cycles.
 
-### Comparing Two Signals
+- **Waveforms.** Compare the Oscillator's four waves, watch pulse width change the square, or see unison voices drift in and out of phase.
+- **Filters.** Put the raw oscillator on In 1 and the filter's output on In 2. Watch the corners round off as the cutoff falls, and resonance ring at the cutoff frequency.
+- **Distortion and saturation.** See the Ladder filter's Drive or the Distortion module flatten and fold a sine.
+- **Levels.** A trace that runs flat along the top or bottom edge is at full scale, and may be clipping.
 
-View two signals overlaid:
+Slow signals (LFOs, envelopes, sequences) take far longer than one sweep, so here they show as a near-flat line moving up and down. To see their shape, watch their cables instead: control cables draw their signal as it travels. See [Reading the signal in a cable](../../concepts/connections.md#reading-the-signal-in-a-cable).
 
-```
-[Oscillator 1] ──> [Scope Input 1]
-[Oscillator 2] ──> [Scope Input 2]
+## Patches
+
+### Before and after
+
+```text
+[Oscillator Out] ──> [SVF Filter In]
+[Oscillator Out] ──> [Oscilloscope In 1]
+[SVF Filter LowPass] ──> [Oscilloscope In 2]
 ```
 
-Useful for:
-- Comparing waveforms
-- Checking phase relationships
-- Viewing before/after processing
+Sweep the filter's **Cutoff** and watch the orange trace smooth out while the blue one stays sharp.
 
-### Viewing Envelopes
+### Hard sync
 
-See envelope shape in real-time:
+With In 1 on the master oscillator, the picture locks to its pitch, and In 2 shows the synced oscillator restarting its cycle in time:
 
-```
-[ADSR Output] ──> [Oscilloscope Input 1]
-```
-
-Adjust Time to 100-500ms to see the full envelope cycle.
-
-### Viewing LFO
-
-Check LFO waveform and rate:
-
-```
-[LFO] ──> [Oscilloscope Input 1]
+```text
+[Oscillator 2 Out] ──> [Oscillator 1 Sync]
+[Oscillator 2 Out] ──> [Oscilloscope In 1]
+[Oscillator 1 Out] ──> [Oscilloscope In 2]
 ```
 
-Time setting should be longer than one LFO cycle.
+### Catch a note's attack
 
-### Debugging Signal Problems
+Set **Mode** to **Single**, patch the VCA's output into **In 1**, and set **Trig** a little above zero, such as 0.1. Play a note and the scope freezes its first few milliseconds.
 
-No sound? Check the scope:
+## Related modules
 
-```
-[Mystery Signal] ──> [Oscilloscope]
-```
-
-- **Flat line**: No signal
-- **Clipped/squared-off peaks**: Distortion/clipping
-- **DC offset**: Signal not centered around zero
-- **Expected waveform**: Signal is fine, problem is elsewhere
-
-### Stable Display with External Trigger
-
-For synced display of periodic signals:
-
-```
-[Clock] ──> [Oscilloscope Trigger]
-[Signal] ──> [Oscilloscope Input]
-```
-
-The display starts at the same point each cycle.
-
-### Trigger Modes
-
-**Auto**: Triggers automatically if no trigger detected
-**Normal**: Only displays when trigger threshold is crossed
-**Single**: Captures one sweep, then freezes (for transients)
-
-### Using Thru Outputs
-
-The scope passes signals through, so it can be inserted anywhere:
-
-```
-[Osc] ──> [Scope Input 1]
-[Scope Thru 1] ──> [Filter] ──> [Scope Input 2]
-[Scope Thru 2] ──> [VCA] ──> [Output]
-```
-
-See signal before and after filter.
-
-### Setting Time Scale
-
-| Signal Type | Time Setting |
-|-------------|--------------|
-| Audio (440 Hz) | 5-10 ms |
-| Bass (100 Hz) | 20-50 ms |
-| LFO (1 Hz) | 500-1000 ms |
-| Envelope | 100-500 ms |
-| Control signals | 50-200 ms |
-
-### Amplitude Scaling
-
-If signal is too quiet or too loud:
-- Use Scale knob to zoom in/out
-- 1x = full range display
-- 2x = shows half range (zoomed in)
-- 0.5x = shows double range (zoomed out)
-
-## What to Look For
-
-### Healthy Signals
-
-| Signal Type | Expected Appearance |
-|-------------|---------------------|
-| Sine | Smooth curve |
-| Square | Flat tops and bottoms |
-| Saw | Diagonal ramp |
-| Triangle | Symmetric slopes |
-| Envelope | Rising/falling shape |
-| Gate | Flat at 0 or 1 |
-
-### Problem Signs
-
-| Appearance | Possible Problem |
-|------------|------------------|
-| Flat line | No signal |
-| All noise | Broken connection |
-| Clipped tops | Input too hot |
-| DC shift | DC offset added |
-| Unstable | Feedback loop |
-| Too fast | Time setting too slow |
-
-## Connection Examples
-
-### Signal Chain Analysis
-```
-[Osc] ──> [Scope In 1, Thru 1] ──> [Filter] ──> [Scope In 2, Thru 2] ──> [Output]
-```
-
-### Envelope Visualization
-```
-[Gate] ──> [ADSR] ──> [Scope In 1]
-```
-
-### LFO Phase Check
-```
-[LFO 1] ──> [Scope In 1]
-[LFO 2] ──> [Scope In 2]
-```
-
-### Pre/Post Effect
-```
-[Audio] ──> [Scope In 1, Thru 1] ──> [Distortion] ──> [Scope In 2]
-```
-
-## Tips
-
-1. **Insert anywhere**: Use Thru outputs to monitor without breaking the signal chain
-2. **Match time to signal**: Audio needs fast time, envelopes need slow time
-3. **Use trigger**: For stable display of periodic signals
-4. **Two channels**: Compare before/after or two related signals
-5. **Check levels**: Scope shows you clipping before you hear it
-
-## Related Modules
-
-- [Oscillator](../sources/oscillator.md) - Waveforms to visualize
-- [LFO](../modulation/lfo.md) - Modulation to visualize
-- [ADSR Envelope](../modulation/adsr.md) - Envelopes to visualize
-- [MIDI Monitor](../midi/midi-monitor.md) - MIDI visualization alternative
+- [Oscillator](../sources/oscillator.md): the first thing to look at
+- [SVF Filter](../filters/svf-filter.md) and [Ladder Filter](../filters/ladder-filter.md): see what filtering does to a waveform
+- [Audio Output](../output/audio-output.md): its meter shows levels at the end of the chain

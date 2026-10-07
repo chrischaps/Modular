@@ -1,231 +1,112 @@
-# Sequencer
+# Step Sequencer
 
-**Module ID**: `util.sequencer`
-**Category**: Utilities
-**Header Color**: Yellow
+**Module ID** `seq.step` · **Category** Utility
 
-![Sequencer Module](../../images/module-sequencer.png)
-*The Sequencer module*
+![Step Sequencer Module](../../images/module-sequencer.png)
+*Green steps play, dark steps rest; the outlined step is the one sounding now.*
 
-## Description
+The Step Sequencer plays a repeating pattern of up to 16 notes. Each clock pulse moves it one step along, and each step sends out its own pitch, a gate if the step is switched on, and a velocity. Patch **Pitch** into an oscillator and **Gate** into an envelope, and a [Clock](../modulation/clock.md) turns it into a bass line, an arpeggio or a riff.
 
-The 16-Step Sequencer generates programmable CV and gate patterns that cycle through a sequence of values. It's the heart of pattern-based music, outputting melodies, rhythms, and modulation sequences.
-
-Each step can have:
-- A CV value (for pitch, modulation, etc.)
-- A gate on/off state (for triggering)
-- Adjustable length (1-16 active steps)
+The pattern lives on the node itself: a grid of step buttons with each step's note name underneath.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Clock** | Gate (Green) | Advances to next step on rising edge |
-| **Reset** | Gate (Green) | Returns to step 1 on rising edge |
-| **Run** | Gate (Green) | Gate high = running, gate low = paused |
+| **Clock** | Gate (Green) | Each rising edge advances one step |
+| **Reset** | Gate (Green) | A rising edge jumps back to step 1 |
+| **Run** | Gate (Green) | Steps advance only while this is high. With nothing patched, the sequencer runs |
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **CV** | Control (Orange) | Current step's CV value |
-| **Gate** | Gate (Green) | Current step's gate state |
-| **EOC** | Gate (Green) | End of Cycle pulse when sequence restarts |
+| **Pitch** | Control (Orange) | The current step's note as V/Oct. Middle C (C4) is 0.0, the same as the Keyboard and MIDI modules |
+| **Gate** | Gate (Green) | A pulse on each clock when the current step is switched on |
+| **Velocity** | Control (Orange) | The current step's velocity, 0 to 1 |
+| **Step** | Control (Orange) | The current position as a ramp: 0 on the first step, 1 on the last |
+| **EOC** | Gate (Green) | End of cycle: a 1 ms pulse each time the pattern comes round |
 
 ## Parameters
 
-| Control | Range | Description |
-|---------|-------|-------------|
-| **Step 1-16 CV** | 0.0 - 1.0 | CV value for each step (displayed as knobs or sliders) |
-| **Step 1-16 Gate** | On/Off | Gate state for each step (toggles) |
-| **Length** | 1 - 16 | Number of active steps |
-| **Direction** | Forward/Backward/Pendulum/Random | Playback direction |
+| Control | Range | Default | Description |
+|---------|-------|---------|-------------|
+| **Steps** | 1 – 16 | 8 | How many steps play before the pattern loops |
+| **Gate** (Gate Length) | 1 – 99% | 50% | How long each gate stays high, as a percentage of 100 ms |
+| **Dir** (Direction) | Fwd / Bwd / P-P / Rnd | Fwd | Playback order |
 
-## How It Works
+Each of the 16 steps also stores a note (default C4), a gate on/off (default on) and a velocity (default 100 of 127). Patches save all of them.
 
-1. Clock input advances to the next step
-2. CV output immediately changes to new step's value
-3. Gate output goes high if step's gate is on
-4. Gate goes low before next clock (based on gate length)
-5. At end of sequence (length reached), EOC pulses and sequence restarts
+## Programming a pattern
 
-## Usage Tips
+The grid shows one button per active step, in rows of eight. Steps beyond **Steps** are hidden, not lost: turn **Steps** back up and they return as you left them.
 
-### Basic Melody Sequencing
+- **Click** a step to switch its gate on (green) or off (dark). An off step is a rest: Pitch still moves to its note, but no gate fires.
+- **Right-click** a step to change its note: **Pitch +12 (Octave Up)**, **Pitch +1 (Semitone Up)**, **Pitch -1 (Semitone Down)** or **Pitch -12 (Octave Down)**. The note name under the step updates as you go.
 
-Create a simple melodic pattern:
+While the patch plays, the current step is drawn brighter, with a white outline.
 
-```
-[Clock 1/8] ──> [Sequencer Clock]
-[Sequencer CV] ──> [Oscillator V/Oct]
-[Sequencer Gate] ──> [ADSR Gate]
-```
+Velocities can't be edited on the node yet. Every step plays at 100 unless the patch file says otherwise. If you do set them there, patch **Velocity** into an envelope's **Velocity** input for accents.
 
-1. Set step CV values for your melody
-2. Toggle gates on for notes, off for rests
-3. Adjust length for pattern size
+## Timing
 
-### Programming Pitches
+### Clock and gate length
 
-CV values map to pitch:
-- 0.0 = Base note
-- 0.083 = +1 semitone
-- 0.167 = +2 semitones
-- 0.5 = +6 semitones (tritone)
-- 1.0 = +1 octave
+The sequencer has no tempo of its own. It moves on each rising edge at **Clock**, so the clock you patch in sets the speed, and its swing or irregularity carries through.
 
-For a C major scale pattern:
-| Step | CV | Note |
-|------|-----|------|
-| 1 | 0.000 | C |
-| 2 | 0.167 | D |
-| 3 | 0.333 | E |
-| 4 | 0.417 | F |
-| 5 | 0.583 | G |
-| 6 | 0.750 | A |
-| 7 | 0.917 | B |
-| 8 | 1.000 | C (octave) |
+**Gate** sets the length of each note as a share of a fixed 100 ms, not of the step. At 50% each gate lasts 50 ms; at 99%, 99 ms. Fast patterns (sixteenths at 120 BPM are 125 ms apart) stay detached at every setting, which suits plucks and basses. For longer notes, give the envelope a longer **Decay** and higher **Sustain**, or a longer **Release**.
 
-### Rhythmic Patterns
+### Reset and the first step
 
-Use gates for rhythm:
+The pattern advances *before* it plays, so each clock moves to the next step and then sounds it. After a **Reset**, the sequencer sits on step 1 and the next clock plays step 2. If you want step 1 on the downbeat, send the reset just after the last step of the bar instead of on the downbeat, or treat step 2 as the start of the phrase.
 
-```
-Step:  1  2  3  4  5  6  7  8
-Gate:  ●  ○  ●  ○  ●  ●  ○  ●
-```
-(● = on, ○ = off)
+### Directions
 
-This creates a syncopated pattern.
+| Dir | Order (with 4 steps) | EOC |
+|-----|---------------------|-----|
+| **Fwd** | 1 2 3 4 1 2 3 4 … | After step 4 |
+| **Bwd** | 4 3 2 1 4 3 2 1 … | After step 1 |
+| **P-P** (ping-pong) | 1 2 3 4 3 2 1 2 … | At each end |
+| **Rnd** | A random step on each clock | Never |
 
-### Modulation Sequences
+Ping-pong doesn't repeat the end steps, so a four-step pattern bounces over six clocks.
 
-Use CV output for parameter modulation:
+## Patches
 
-```
-[Sequencer CV] ──> [Filter Cutoff CV]
+### A sequenced voice
+
+```text
+[Clock Gate] ──> [Step Sequencer Clock]
+[Step Sequencer Pitch] ──> [Oscillator V/Oct]
+[Step Sequencer Gate] ──> [ADSR Gate]
+[Oscillator Out] ──> [SVF Filter In]
+[SVF Filter LowPass] ──> [VCA In]
+[ADSR Out] ──> [VCA CV]
+[VCA Out] ──> [Audio Output Mono]
 ```
 
-Each step changes the filter cutoff, creating rhythmic timbral variation.
+Set the Clock's **Div** to 1/8 or 1/16, switch a few steps off to make rests, and use the Oscillator's **Oct** knob to move the whole pattern up or down.
 
-### Direction Modes
+### Modulation sequences
 
-**Forward**: 1 → 2 → 3 → ... → 16 → 1 → ...
+**Pitch** is a control signal like any other. Patch it into a filter's **Cutoff** and each step sets a brightness instead of a note: one octave of cutoff for each octave of pitch. Combine with a second sequencer for melody, both clocked together.
 
-**Backward**: 16 → 15 → 14 → ... → 1 → 16 → ...
+### Patterns of different lengths
 
-**Pendulum**: 1 → 2 → ... → 16 → 15 → ... → 1 → ...
+Two sequencers on the same clock with different **Steps** settings drift against each other and line up again only every few bars. Eight steps against five repeats every 40 clocks.
 
-**Random**: Jumps to random step each clock
-
-### Using Reset
-
-Sync sequences to song sections:
-
-```
-[Master Clock 1/1 (bar)] ──> [Sequencer Reset]
-[Master Clock 1/16] ──> [Sequencer Clock]
+```text
+[Clock Gate] ──> [Step Sequencer A Clock]      (Steps 8)
+[Clock Gate] ──> [Step Sequencer B Clock]      (Steps 5)
 ```
 
-Sequence resets every bar, keeping it locked to the downbeat.
+### Stop and start
 
-### EOC for Chaining
+Patch a gate into **Run** to pause the pattern in place. While Run is low, clocks are ignored and the sequencer stays on its current step.
 
-Use End of Cycle to trigger events:
+## Related modules
 
-```
-[Sequencer A EOC] ──> [Sequencer B Reset]
-```
-
-Sequencer B resets when A completes a cycle.
-
-### Variable Length Patterns
-
-Set length shorter than 16 for odd meters:
-
-- Length 3: Creates waltz/triplet feel
-- Length 5: Creates 5/8 time
-- Length 7: Creates 7/8 time
-- Length 12: Swing/shuffle patterns
-
-### Polyrhythms
-
-Run two sequencers at the same clock with different lengths:
-
-```
-[Clock] ──> [Seq A (Length: 4)] ──> [Osc 1]
-        ──> [Seq B (Length: 3)] ──> [Osc 2]
-```
-
-4 against 3 creates evolving polyrhythmic patterns.
-
-### Ratcheting
-
-Clock the sequencer faster for a step by using clock multiplication or additional triggers.
-
-### CV and Gate Independence
-
-CV and Gate don't have to move together:
-
-```
-[Fast Clock] ──> [Sequencer Clock] ──> [CV to Modulation]
-[Slow Clock] ──> [Envelope Gate] (separate rhythm)
-```
-
-## Building Sequences
-
-### Bassline (8 steps)
-| Step | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
-|------|---|---|---|---|---|---|---|---|
-| CV | C | C | G | G | F | F | G | G |
-| Gate | ● | ○ | ● | ○ | ● | ○ | ● | ● |
-
-### Arpeggio (4 steps)
-| Step | 1 | 2 | 3 | 4 |
-|------|---|---|---|---|
-| CV | C | E | G | E |
-| Gate | ● | ● | ● | ● |
-
-### Filter Sequence (8 steps)
-| Step | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
-|------|---|---|---|---|---|---|---|---|
-| CV | 0.2 | 0.5 | 0.8 | 0.5 | 0.3 | 0.6 | 0.9 | 0.4 |
-
-## Connection Examples
-
-### Complete Bass Voice
-```
-[Clock 1/8] ──> [Sequencer Clock]
-[Clock 1/1] ──> [Sequencer Reset]
-[Sequencer CV] ──> [Oscillator V/Oct]
-[Sequencer Gate] ──> [ADSR Gate]
-[Oscillator] ──> [Filter] ──> [VCA] ──> [Output]
-```
-
-### Polymetric Setup
-```
-[Clock] ──> [Seq A (7 steps)] ──> [Voice 1]
-        ──> [Seq B (5 steps)] ──> [Voice 2]
-```
-
-### Modulation Sequencing
-```
-[Slow Clock] ──> [Sequencer]
-[Seq CV] ──> [Attenuverter] ──> [Filter Cutoff]
-[Seq CV] ──> [Attenuverter] ──> [Resonance]
-```
-
-## Tips
-
-1. **Start simple**: Begin with 4-step patterns and expand
-2. **Use rests**: Gates off create space in the rhythm
-3. **Vary length**: Odd lengths create interesting cycles
-4. **Reset strategically**: Keep sequences locked to musical sections
-5. **Layer sequences**: Multiple sequences at different rates create complexity
-
-## Related Modules
-
-- [Clock](../modulation/clock.md) - Timing source for sequencer
-- [Oscillator](../sources/oscillator.md) - CV destination for melody
-- [ADSR Envelope](../modulation/adsr.md) - Gate destination for note shaping
-- [Sample & Hold](./sample-hold.md) - Alternative for random sequences
+- [Clock](../modulation/clock.md): drives the sequencer
+- [ADSR Envelope](../modulation/adsr.md): shapes each step's note from the Gate output
+- [Oscillator](../sources/oscillator.md): plays the Pitch output
+- [Sample & Hold](./sample-hold.md): stepped values that aren't programmed by hand

@@ -1,107 +1,26 @@
-# Documentation Images
+# Documentation images
 
-This directory contains images for the Modular Synth documentation.
+Screenshots for the manual. This file isn't part of the book; it's a note for whoever updates them.
 
-## Required Images
+## What's here
 
-### Interface Screenshots
-- `interface-overview.png` - Main application window
-- `interface-context-menu.png` - Right-click module browser
-- `interface-module-anatomy.png` - Annotated module parts
-- `interface-connection.png` - Creating a connection
-- `interface-knob.png` - Knob interaction
-- `interface-*.png` - Other UI screenshots
+| File | Shows | Used on |
+|------|-------|---------|
+| `interface-overview.png` | The whole window, Lush Pad playing a chord | Introduction, Interface Overview |
+| `interface-context-menu.png` | The right-click add menu | Interface Overview |
+| `interface-quick-add.png` | The quick-add palette | Interface Overview |
+| `tutorial-complete-patch.png` | The finished First Patch, playing a note | Your First Patch |
+| `module-<page>.png` | One module, playing, cropped with a margin of grid | Each module page (`module-svf-filter.png` for `svf-filter.md`) |
+| `recipe-<page>.png` | The whole example patch, playing | Each recipe (`recipe-lush-pad.png` for `lush-pad.md`) |
 
-### Signal Type Diagrams
-- `signal-types-overview.png` - All four signal types
-- `signal-port-colors.png` - Port coloring
-- `signal-cable-colors.png` - Cable coloring
+## Guidelines
 
-### Connection Diagrams
-- `connection-direction.png` - Output to input flow
-- `connection-multiple.png` - One output to many inputs
-- `connection-creating.png` - Dragging a connection
-- `connection-colors.png` - Cable colors by type
-- `connection-organized.png` - Well-organized patch
-- `connection-exposed.png` - Exposed parameter indicator
+- Capture while the patch is playing, so cables glow and displays show signal.
+- Keep module shots at one scale (1.5 pixels per point) so modules compare at a glance.
+- Crop modules tightly, leaving a little of the dark grid around the edge. Don't let cables cross a module's face.
+- Keep each PNG under about 400 KB, and full-window shots no wider than 1600 px.
+- Recapture a module's shot whenever its ports, knobs or display change. A screenshot that disagrees with the table under it is worse than none.
 
-### Module Screenshots
-Each module should have a screenshot:
-- `module-oscillator.png`
-- `module-svf-filter.png`
-- `module-adsr.png`
-- `module-lfo.png`
-- `module-clock.png`
-- `module-vca.png`
-- `module-mixer.png`
-- `module-attenuverter.png`
-- `module-sample-hold.png`
-- `module-sequencer.png`
-- `module-delay.png`
-- `module-reverb.png`
-- `module-chorus.png`
-- `module-distortion.png`
-- `module-eq.png`
-- `module-compressor.png`
-- `module-keyboard.png`
-- `module-midi-note.png`
-- `module-midi-monitor.png`
-- `module-oscilloscope.png`
-- `module-audio-output.png`
+## Wanted
 
-### Waveform Diagrams
-- `waveform-sine.png`
-- `waveform-saw.png`
-- `waveform-square.png`
-- `waveform-triangle.png`
-
-### Filter Response Diagrams
-- `filter-lowpass.png`
-- `filter-highpass.png`
-- `filter-bandpass.png`
-
-### Envelope Diagrams
-- `envelope-adsr-diagram.png`
-
-### LFO Diagrams
-- `lfo-sine.png`
-- `lfo-triangle.png`
-- `lfo-square.png`
-- `lfo-saw.png`
-
-### Recipe Patch Diagrams
-- `recipe-basic-subtractive.png`
-- `recipe-fm-synthesis.png`
-- `recipe-lush-pad.png`
-- `recipe-generative-ambient.png`
-- `recipe-rhythmic-sequence.png`
-
-### Tutorial Screenshots
-- `tutorial-first-patch.png`
-- `tutorial-add-oscillator.png`
-- `tutorial-first-connection.png`
-- `tutorial-keyboard-connected.png`
-- `tutorial-vca-added.png`
-- `tutorial-filter-added.png`
-- `tutorial-complete-patch.png`
-
-## Image Guidelines
-
-1. **Format**: PNG preferred for UI screenshots
-2. **Size**: Reasonable resolution (1x or 2x for retina)
-3. **Background**: Use dark theme for consistency
-4. **Annotations**: Use simple arrows/labels when needed
-5. **Cropping**: Focus on the relevant UI element
-
-## Creating Screenshots
-
-Screenshots can be captured from the running application:
-
-```bash
-cargo run --release
-```
-
-Use your system's screenshot tool to capture:
-- Full window for overview shots
-- Cropped regions for detail shots
-- Use annotation tools for callouts if needed
+- `interface-module-menu.png`: a module's right-click menu (Duplicate, Copy, Bypass, Reset to defaults, Delete), for the Interface Overview's "The module menu" section.

@@ -1,131 +1,89 @@
 # Installation
 
-Modular Synth is built from source using Rust's Cargo build system.
+Modular Synth runs on Windows, macOS and Linux. You can download a prebuilt release or build it from source with Rust.
 
-## Prerequisites
+## Download a release
 
-### Rust Toolchain
+Prebuilt binaries for Windows, macOS (Intel and Apple Silicon) and Linux are attached to each [release on GitHub](https://github.com/chrischaps/Modular/releases). Download the zip for your system, unzip it, and run `modular_synth`.
 
-Install the Rust toolchain via [rustup](https://rustup.rs/):
+Releases are cut from time to time and can trail the source. This manual describes the current source, so if a feature here is missing from your copy, build from source.
+
+## Build from source
+
+### Install Rust
+
+Install the Rust toolchain with [rustup](https://rustup.rs/):
 
 ```bash
-# On Windows (PowerShell)
+# Windows
 winget install Rustlang.Rustup
 
-# On macOS/Linux
+# macOS and Linux
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-Verify the installation:
+Check that it worked:
 
 ```bash
-rustc --version
 cargo --version
 ```
 
-### Platform-Specific Dependencies
+### Install system libraries (Linux only)
 
-#### Windows
+Windows and macOS need nothing more: Modular Synth uses WASAPI and CoreAudio, which come with the system.
 
-No additional dependencies required. The WASAPI audio backend is included with Windows.
-
-#### macOS
-
-No additional dependencies required. CoreAudio is included with macOS.
-
-#### Linux
-
-Install the ALSA development libraries:
+On Linux, install the development packages for ALSA (audio), X11 and keyboard handling. On Debian and Ubuntu:
 
 ```bash
-# Debian/Ubuntu
-sudo apt install libasound2-dev
-
-# Fedora
-sudo dnf install alsa-lib-devel
-
-# Arch Linux
-sudo pacman -S alsa-lib
+sudo apt install libasound2-dev libxcb-render0-dev libxcb-shape0-dev \
+  libxcb-xfixes0-dev libxkbcommon-dev libssl-dev
 ```
 
-## Building from Source
+On other distributions, install the equivalent ALSA, xcb and xkbcommon development packages (for example `alsa-lib-devel` on Fedora, `alsa-lib` on Arch).
 
-### Clone the Repository
-
-```bash
-git clone https://github.com/your-repo/modular.git
-cd modular
-```
-
-### Build and Run
-
-For development (faster compilation, slower runtime):
+### Build and run
 
 ```bash
-cargo run
-```
-
-For release (slower compilation, optimized runtime):
-
-```bash
+git clone https://github.com/chrischaps/Modular.git
+cd Modular
 cargo run --release
 ```
 
-The release build is recommended for actual music-making, as it provides significantly better audio performance with lower CPU usage.
+The first build takes a few minutes. Always use `--release` to play: the debug build is much slower and can't keep up with a busy patch, so you'll hear dropouts. The finished binary is `target/release/modular_synth`.
 
-## Build Options
+The app opens on the **First Sound** example. Press **▶ Play**, then play the `Z` to `M` keys on your computer keyboard. If you hear a note, everything is working.
 
-### Debug Build
+## Command line
 
-```bash
-cargo build
-```
-
-Creates an unoptimized binary in `target/debug/` with debug symbols for development and troubleshooting.
-
-### Release Build
+Pass a patch file to open it instead of First Sound:
 
 ```bash
-cargo build --release
+cargo run --release -- patches/lush-pad.json
 ```
 
-Creates an optimized binary in `target/release/` suitable for regular use.
-
-### Running Tests
+The `render` tool plays a patch into a WAV file without opening the app or using an audio device, then prints each channel's peak and RMS level:
 
 ```bash
-cargo test
+cargo run --release --bin render -- patches/fm-synthesis.json out.wav --seconds 5
 ```
+
+| Option | Default | Effect |
+|--------|---------|--------|
+| `--seconds N` | 5 | Length of the render |
+| `--sample-rate HZ` | 48000 | Sample rate of the file |
+| `--block-size N` | 256 | Samples processed per block |
+| `--audition` | off | Plays a short phrase into the patch's Keyboard, MIDI Note and Poly MIDI modules |
+
+A patch that waits for a player renders silence unless something inside it plays notes (a Clock or Step Sequencer, say) or you add `--audition`.
+
+To run the test suite, use `cargo test`.
 
 ## Troubleshooting
 
-### Audio Device Not Found
+**No sound.** Check that **▶ Play** is pressed: the app opens stopped. Then check the **Output** device menu in the toolbar. It lists every output device, with the system default marked **(Default)**; pick the one you're listening on. **🔄 Refresh** at the bottom of the menu picks up a device you plugged in after starting.
 
-If you receive an audio device error:
+**"Audio unavailable" in the toolbar.** Modular Synth couldn't open an output device. Make sure one is connected and that no other application holds it exclusively, then restart.
 
-1. Check that your audio device is connected and working
-2. Verify no other application has exclusive access to the audio device
-3. Try a different sample rate if available
+**Crackles and dropouts.** Make sure you're running the release build. The toolbar's CPU meter, shown while the patch plays, tells you how close the engine is to its limit. If it's near the top, remove modules or lower the voice count on Poly MIDI and the Oscillator's unison.
 
-### High CPU Usage
-
-If you experience high CPU usage or audio glitches:
-
-1. Use the release build (`cargo run --release`)
-2. Reduce the number of active modules
-3. Check that your audio buffer size is appropriate (larger buffers reduce CPU but increase latency)
-
-### Linux: ALSA Underruns
-
-If you experience audio dropouts on Linux:
-
-1. Ensure the ALSA development libraries are installed
-2. Try increasing the audio buffer size
-3. Consider running with real-time priority (requires appropriate permissions)
-
-## Next Steps
-
-Once you have Modular Synth running:
-
-1. **[Interface Overview](./interface-overview.md)** - Learn to navigate the UI
-2. **[Your First Patch](./your-first-patch.md)** - Build your first synthesizer
+**My MIDI controller does nothing.** Choose it in the toolbar's **MIDI In** menu: Modular Synth doesn't connect to a controller until you do. A filled dot (●) before the name means it's connected. Connection errors appear in the status bar at the bottom of the window. See [MIDI](./interface-overview.md#midi).

@@ -1,63 +1,68 @@
 # Chorus
 
-**Module ID**: `fx.chorus`
-**Category**: Effects
-**Header Color**: Purple
+**Module ID** `fx.chorus` · **Category** Effect
 
 ![Chorus Module](../../images/module-chorus.png)
-*The Chorus module*
+*Voices and Shape are dropdowns; the knobs set the sweep*
 
-## Description
+The Chorus thickens a sound by layering copies of it, each delayed by a few milliseconds that keep changing. The moving delays bend each copy's pitch slightly up and down, and the copies beat against each other and against the original, the way several players on the same part never quite line up.
 
-The Chorus effect creates a thicker, richer sound by layering slightly detuned and delayed copies of the input signal. It simulates the natural variation when multiple performers play the same part, adding warmth and movement without obvious echoes.
+It is true stereo, and it makes a mono source wide on its own. Short delays and a little feedback take it into flanging.
+
+## How it works
+
+1. Each channel has its own delay line: left stays left, right stays right.
+2. Each voice reads both lines through a pair of taps, and an LFO sweeps each tap's delay around **Delay**. At full **Depth** the delay swings all the way from zero to twice the Delay time.
+3. The voices are spaced evenly around the LFO cycle, so they never move in step.
+4. The voices are summed and blended with the dry signal by **Mix**.
+
+### True stereo
+
+A stereo source keeps its image: nothing patched into **In L** ever reaches **Out R**.
+
+With **In R** unpatched, In L feeds both sides and the chorus creates the width itself. Each right tap's LFO sits halfway between two left taps (180° away with one voice, 90° with two), so the two sides always bend in pitch in opposite directions.
+
+Changing **Voices** fades voices in or out and slides the rest to their new places on the cycle, so it never clicks.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Left In** | Audio (Blue) | Left channel input |
-| **Right In** | Audio (Blue) | Right channel input (normalled to Left) |
-| **Rate CV** | Control (Orange) | Modulation input for LFO rate |
-| **Depth CV** | Control (Orange) | Modulation input for depth amount |
+| **In L** | Audio (Blue) | Left input |
+| **In R** | Audio (Blue) | Right input. When unpatched, it copies In L |
+| **Rate CV** | Control (Orange) | Speeds up or slows down the sweep: ±1 changes Rate by ±50% |
+| **Depth CV** | Control (Orange) | Adds to Depth: ±1 adds ±50% |
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Left Out** | Audio (Blue) | Processed left channel |
-| **Right Out** | Audio (Blue) | Processed right channel |
+| **Out L** | Audio (Blue) | Left chorus, mixed with the dry signal |
+| **Out R** | Audio (Blue) | Right chorus, mixed with the dry signal |
 
 ## Parameters
 
 | Control | Range | Default | Description |
 |---------|-------|---------|-------------|
-| **Rate** | 0.1 Hz - 10 Hz | 1 Hz | Speed of modulation LFO |
-| **Depth** | 0.0 - 1.0 | 0.5 | Amount of delay modulation |
-| **Delay** | 1 ms - 30 ms | 10 ms | Base delay time |
-| **Feedback** | -0.5 - +0.5 | 0 | Feeds the voices back into the delay lines, for flanging |
-| **Voices** | 1 - 4 | 2 | Number of chorus voices (inline select) |
-| **Mix** | 0.0 - 1.0 | 0.5 | Dry/wet balance |
-| **Shape** | Sine / Tri | Sine | LFO waveform (inline select) |
+| **Rate** | 0.1 Hz – 10 Hz | 1 Hz | Speed of the sweep |
+| **Depth** | 0 – 100% | 50% | How far the delay sweeps around Delay |
+| **Delay** | 1 ms – 30 ms | 10 ms | Center delay time |
+| **FB** (Feedback) | −0.5 – +0.5 | 0 | Feeds the voices back into the delay lines, for flanging. Negative values sound hollower |
+| **Mix** | 0 – 100% | 50% | Dry (0%) to chorus only (100%) |
+| **Voices** | 1 – 4 | 2 | Number of voices (dropdown on the node) |
+| **Shape** | Sine / Tri | Sine | LFO waveform (dropdown on the node) |
 
-## How It Works
+While **Rate CV** or **Depth CV** is patched, its knob dims and follows the incoming signal, and you can't turn it. The CV still works around the knob's last position, so set Rate and Depth before you patch them.
 
-1. Each channel runs through its own delay line: left stays left, right stays right
-2. Every voice reads both lines through a pair of taps, each tap swept by the LFO
-3. The voices are spread evenly around the LFO cycle, so they never move in step
-4. The varying delays create pitch shifts and phase differences
-5. Mixed together, this creates the characteristic "ensemble" sound
+## Shaping the sound
 
-### True Stereo
+**Rate and Depth.** Slow rates sway gently; fast rates turn into vibrato. Light depth thickens without drawing attention; heavy depth wobbles until it sounds out of tune. The two work together, since the pitch bend depends on how fast the delay is changing: a fast rate needs less depth.
 
-A stereo source keeps its image: nothing patched into **In L** ever reaches **Out R**.
-With **In R** unpatched, In L feeds both sides, and the chorus makes the width itself.
-Each right tap's LFO sits halfway between two left taps: 180° away with one voice,
-90° with two. The two sides then always pitch-bend in different directions.
+**Delay.** Below about 5 ms the copies comb-filter against the dry sound, and with some feedback it becomes a flanger. From 5 to 15 ms is classic chorus. From 15 to 30 ms the copies separate into a wide, doubled sound.
 
-Changing **Voices** fades voices in and out and slides the rest to their new places
-on the cycle, so it never clicks.
+**Voices.** One voice is the simplest, almost flanger-like, with the two sides sweeping in opposite directions. Two is the classic stereo chorus. Three and four build toward a thick ensemble, at some cost in clarity. The output stays at about the same loudness whatever the voice count.
 
-### LFO Shape
+**Shape.**
 
 | Shape | Character |
 |-------|-----------|
@@ -66,207 +71,49 @@ on the cycle, so it never clicks.
 
 Switching shape morphs between the two over 20 ms.
 
-### The Chorus Sound
+**Feedback.** Feedback deepens the comb-filter peaks and makes the sweep ring. The loop uses the voices' average, so its gain never exceeds the knob however many voices are running.
 
-The effect creates subtle beating and pitch variation:
-- **Slow rate**: Gentle swaying, lush
-- **Fast rate**: Vibrato-like, more intense
-- **Light depth**: Subtle thickening
-- **Heavy depth**: Dramatic wobble, almost out of tune
+## Bypass
 
-## Usage Tips
+Click the power switch in the node header, press **Ctrl+B** with the module selected, or choose **Bypass** from its right-click menu. In L passes straight to Out L and In R to Out R (In R still copies In L when unpatched). The switch crossfades over 20 ms.
 
-### Classic Analog Chorus
+## Starting points
 
-Warm, vintage sound:
+| Sound | Rate | Depth | Delay | FB | Voices | Mix |
+|-------|------|-------|-------|----|--------|-----|
+| Subtle thickening | 0.3 Hz | 20% | 5 ms | 0 | 2 | 30% |
+| Classic chorus | 0.5 Hz | 40% | 8 ms | 0 | 2 | 50% |
+| String ensemble | 0.8 Hz | 60% | 15 ms | 0 | 4 | 60% |
+| Flanger | 0.2 Hz | 70% | 2 ms | +0.4 | 1 | 50% |
+| Vibrato | 5 Hz | 30% | 5 ms | 0 | 1 | 100% |
 
-```
-Rate: 0.5 Hz
-Depth: 0.4
-Delay: 8 ms
-Voices: 2
-Mix: 0.5
-```
+At 100% Mix you hear only the moving copies, without the dry signal to beat against, so the chorus becomes pure vibrato.
 
-### Subtle Thickening
+On bass, keep Depth and Mix low, or the low end turns vague.
 
-Barely perceptible but adds depth:
+## Patch ideas
 
-```
-Rate: 0.3 Hz
-Depth: 0.2
-Delay: 5 ms
-Mix: 0.3
+**Widen a mono voice.** Patch only In L and take both outputs:
+
+```text
+[VCA Out] ──> [Chorus In L]
+[Chorus Out L] ──> [Audio Output Left]
+[Chorus Out R] ──> [Audio Output Right]
 ```
 
-Good for vocals and solo instruments.
+**Before the space.** Chorus usually goes before time-based effects, so the reverb smears the movement together:
 
-### Lush Ensemble
-
-Rich, string-machine style:
-
-```
-Rate: 0.8 Hz
-Depth: 0.6
-Delay: 15 ms
-Voices: 4
-Mix: 0.6
+```text
+[VCA Out] ──> [Chorus In L]
+[Chorus Out L] ──> [Reverb In L]
+[Chorus Out R] ──> [Reverb In R]
 ```
 
-Creates wide, dreamy textures.
+**Drifting chorus.** A very slow LFO into **Rate CV** makes the chorus speed itself wander.
 
-### Bass Chorus
+## Related modules
 
-Keep low end intact:
-
-```
-Rate: 0.4 Hz
-Depth: 0.3
-Delay: 10 ms
-Mix: 0.4
-```
-
-Lighter settings prevent the bass from getting muddy.
-
-### Vibrato Mode
-
-Extreme settings for pitch wobble:
-
-```
-Rate: 4 Hz
-Depth: 0.8
-Mix: 1.0 (100% wet)
-```
-
-At full wet, you hear only the modulated signal—pure vibrato.
-
-### Leslie Speaker Simulation
-
-For organ-like rotation:
-
-```
-Rate: Slow: 0.7 Hz / Fast: 6 Hz (modulate via Rate CV)
-Depth: 0.7
-Voices: 2
-```
-
-Switch between slow and fast for classic organ effect.
-
-### Stereo Width Enhancement
-
-Use chorus to widen a mono source:
-
-```
-[Mono Signal] ──> [Chorus In L] ──> [Out L / Out R] ──> [Stereo Output]
-                  Mix: 0.4
-```
-
-Leave In R unpatched: the left and right taps sweep in opposite directions, creating stereo spread.
-
-### Clean Guitar Chorus
-
-Classic '80s clean tone:
-
-```
-Rate: 0.6 Hz
-Depth: 0.5
-Delay: 12 ms
-Voices: 2
-Mix: 0.5
-```
-
-### Synth Pad Enhancement
-
-Make pads more interesting:
-
-```
-[Pad Oscillators] ──> [Chorus] ──> [Reverb] ──> [Output]
-                      Rate: 0.4 Hz
-                      Depth: 0.5
-                      Voices: 4
-```
-
-The chorus adds movement before reverb smears it together.
-
-### Modulating Rate
-
-Create evolving chorus textures:
-
-```
-[LFO (very slow)] ──> [Chorus Rate CV]
-```
-
-The chorus speed itself changes over time.
-
-## Voice Count Effects
-
-| Voices | Character |
-|--------|-----------|
-| 1 | Simple, flanger-like; the sides sweep in opposite directions |
-| 2 | Classic stereo chorus |
-| 3 | Richer, more complex |
-| 4 | Full ensemble, thick |
-
-More voices = thicker but potentially muddier sound.
-
-## Delay Time Effects
-
-| Delay | Character |
-|-------|-----------|
-| 1-5 ms | Tight, flanger territory |
-| 5-15 ms | Classic chorus zone |
-| 15-30 ms | Wide, ADT-like doubling |
-
-## Connection Examples
-
-### Basic Insert
-```
-[Synth] ──> [Chorus] ──> [Output]
-```
-
-### In Effects Chain
-```
-[Synth] ──> [Chorus] ──> [Delay] ──> [Reverb] ──> [Output]
-```
-
-Chorus before time-based effects is typical.
-
-### Parallel Chorus
-```
-[Signal] ──> [Mixer Ch 1 (dry)]
-         ──> [Chorus] ──> [Mixer Ch 2 (wet)]
-         [Mixer] ──> [Output]
-```
-
-Blend dry and chorused signals independently.
-
-### Modulated Ensemble
-```
-[LFO 1 (slow)] ──> [Chorus Rate CV]
-[LFO 2] ──> [Chorus Depth CV]
-[Synth] ──> [Chorus] ──> [Output]
-```
-
-## Chorus vs Similar Effects
-
-| Effect | Character |
-|--------|-----------|
-| **Chorus** | Multiple voices, thickening |
-| **Flanger** | Shorter delay, comb filtering, "jet" sound |
-| **Phaser** | All-pass filters, hollow sweep |
-| **Doubling** | Fixed short delay, no modulation |
-
-## Tips
-
-1. **Less is more**: Subtle chorus often works better than heavy
-2. **Watch the bass**: Heavy chorus can muddy low frequencies
-3. **Use stereo**: Chorus really shines in stereo
-4. **Stack effects**: Chorus into reverb is magical
-5. **Try extreme settings**: 100% wet creates interesting vibratos
-
-## Related Modules
-
-- [Delay](./delay.md) - For longer echo effects
-- [Reverb](./reverb.md) - Combine for ambient textures
-- [LFO](../modulation/lfo.md) - For rate modulation
-- [Oscillator](../sources/oscillator.md) - PWM creates similar thickening
+- [Delay](./delay.md): longer echoes
+- [Reverb](./reverb.md): chorus into reverb for ambient washes
+- [Oscillator](../sources/oscillator.md): unison detune thickens at the source
+- [LFO](../modulation/lfo.md): modulates Rate and Depth

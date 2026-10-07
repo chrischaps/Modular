@@ -1,253 +1,81 @@
 # Signal Types
 
-Modular Synth uses a type system for signals that helps you understand what kind of data flows through each connection. Each signal type has a distinctive color, making it easy to trace the flow of audio, control, gate, and MIDI signals through your patch.
+Every jack in Modular Synth has a signal type, and every type has a color. The color of a jack tells you what it sends or expects, and a cable takes the color of the output it comes from, so you can read a patch's signal flow at a glance.
 
-## Overview
+| Type | Color | Range | Carries |
+|------|-------|-------|---------|
+| **Audio** | <span class="swatch audio"></span>Blue | −1.0 to 1.0 | Sound |
+| **Control** | <span class="swatch control"></span>Orange | 0.0 to 1.0, or −1.0 to 1.0 | Modulation and pitch (CV) |
+| **Gate** | <span class="swatch gate"></span>Green | 0.0 or 1.0 | Notes, clock pulses, triggers |
+| **MIDI** | <span class="swatch midi"></span>Purple | Note and controller events | Reserved; see [MIDI](#midi) |
 
-| Type | Color | Range | Primary Use |
-|------|-------|-------|-------------|
-| **Audio** | Blue | -1.0 to 1.0 | Sound signals |
-| **Control** | Orange | 0.0 to 1.0 (unipolar) or -1.0 to 1.0 (bipolar) | Modulation, CV |
-| **Gate** | Green | 0.0 or 1.0 | Triggers, on/off states |
-| **MIDI** | Purple | Structured data | Note/CC messages |
+Underneath, audio, control and gate signals are all the same thing: a stream of numbers at the audio sample rate. The type describes what the numbers mean, and it decides which jacks a cable may connect (see [Which types connect](#which-types-connect)).
 
-![Signal Types](../images/signal-types-overview.png)
-*The four signal types with their colors*
+## Audio
 
----
+Audio is the sound itself: a waveform swinging between −1.0 and 1.0, at your audio device's sample rate (typically 44.1 or 48 kHz). Oscillators make it; filters, the VCA, the Mixer and the effects shape it; the [Audio Output](../modules/output/audio-output.md) sends it to your speakers.
 
-## Audio Signals
+Keep audio within ±1.0 and it passes through the output untouched. Louder than that and the output stage's limiter, on by default, catches the peaks before they clip. It's a safety net, though, not a mixing tool. When several voices or oscillators add up, bring the level down with a VCA or the Mixer.
 
-**Color: Blue**
+## Control
 
-Audio signals carry the actual sound you hear. They oscillate rapidly (typically 20 Hz to 20 kHz) and represent the waveform that will be sent to your speakers.
+Control signals, often called CV (control voltage), move a parameter instead of making a sound. They come from envelopes, LFOs, the sequencer, the keyboard and MIDI modules, and they go into jacks such as a filter's **Cutoff** or an oscillator's **FM**.
 
-### Characteristics
+A control signal is either:
 
-- **Range**: -1.0 to 1.0 (bipolar)
-- **Sample Rate**: Matches your audio interface (typically 44.1 kHz or 48 kHz)
-- **Bandwidth**: Full audio spectrum
+- **Unipolar**, from 0.0 to 1.0. An envelope is unipolar: it rises from nothing to its peak and falls back.
+- **Bipolar**, from −1.0 to 1.0. An LFO in bipolar mode swings both ways around the center, which suits vibrato or a sweep around a set cutoff.
 
-### Common Sources
+Most control signals change slowly, but nothing stops them running at audio rate. Patch an oscillator into another oscillator's **FM** input and you have FM synthesis.
 
-- Oscillators (all waveforms)
-- Filter outputs
-- Effect outputs
-- Sample playback
+### Pitch: 1 per octave
 
-### Common Destinations
+Pitch travels as a control signal on a 1-per-octave scale, the digital version of the 1 V/octave standard in hardware modular. Each 1.0 is an octave:
 
-- Filter inputs
-- Effect inputs
-- VCA inputs
-- Audio Output module
+| Pitch CV | Note (with the oscillator's tune knobs at 0) |
+|----------|-----------|
+| −1.0 | C3 |
+| 0.0 | C4 (261.63 Hz) |
+| 0.5 | F♯4 |
+| 1.0 | C5 |
+| 2.0 | C6 |
 
-### Signal Level
+One semitone is 1/12. The **Pitch** outputs of [Keyboard](../modules/midi/keyboard.md), [MIDI Note](../modules/midi/midi-note.md), [Poly MIDI](../modules/midi/poly-midi.md) and the [Step Sequencer](../modules/utilities/sequencer.md) all use this scale, so they play an [Oscillator](../modules/sources/oscillator.md) in tune with nothing to calibrate. Both filters take their **Cutoff** CV on the same scale, so a pitch cable patched into Cutoff makes the filter track the keyboard exactly.
 
-Audio signals should stay within the -1.0 to 1.0 range to avoid clipping (distortion). The Audio Output module includes a limiter to prevent harsh digital clipping, but it's best to manage levels throughout your patch.
+## Gate
 
----
+A gate is either on (1.0) or off (0.0). It says *when*: a key held down, a step in a sequence, a tick of the clock. The [ADSR Envelope](../modules/modulation/adsr.md), for example, starts its attack the moment its **Gate** goes on (the rising edge) and starts its release the moment it goes off (the falling edge).
 
-## Control Signals
+A short gate is often called a trigger. Modules that only care about the moment a gate begins, such as the clock input of the Step Sequencer or the **Trig** input of [Sample & Hold](../modules/utilities/sample-hold.md), treat both the same way.
 
-**Color: Orange**
+Gates come from the **Gate** outputs of Keyboard, MIDI Note, Poly MIDI, the [Clock](../modules/modulation/clock.md) and the Step Sequencer (which also has an **EOC**, end-of-cycle, gate).
 
-Control signals (also called CV or Control Voltage) carry slower-moving data used to modulate parameters. They don't produce sound directly but shape and control other modules.
+## MIDI
 
-### Characteristics
+MIDI is the purple signal type, and today no jack uses it. MIDI from your controller doesn't arrive over a cable. It goes straight into the modules that listen for it: MIDI Note, Poly MIDI and the [MIDI Monitor](../modules/midi/midi-monitor.md). Those modules turn notes into ordinary **Pitch**, **Gate** and **Velocity** signals that the rest of the patch understands. The Keyboard module does the same for your computer keyboard.
 
-- **Unipolar Range**: 0.0 to 1.0 (e.g., envelope output, LFO with offset)
-- **Bipolar Range**: -1.0 to 1.0 (e.g., bipolar LFO)
-- **Bandwidth**: Typically low frequency (< 100 Hz), but can be audio rate
+## Which types connect
 
-### Common Sources
+Same-type connections always work. A few cross-type connections work too, and the rest are refused:
 
-- Envelopes (ADSR)
-- LFOs
-- Sequencers
-- MIDI CC (converted to CV)
-- Attenuverters
+| From | To | Allowed? | Why |
+|------|----|----------|-----|
+| Audio | Control | Yes | Audio-rate modulation, such as FM |
+| Control | Audio | Yes | Mix or process a CV like audio, such as an LFO into the Mixer |
+| Gate | Control | Yes | Use a gate as a 0-or-1 modulation signal |
+| Gate | Audio | No | A gate needs an envelope or VCA to become sound |
+| Audio or Control | Gate | No | Gate inputs only take gates |
+| MIDI | Anything else | No | MIDI needs a converter module |
 
-### Common Destinations
+Allowed cross-type connections pass the signal through unchanged. An audio cable into a control input is the raw waveform; a gate into a control input is exactly 0.0 or 1.0.
 
-- Filter cutoff
-- Oscillator frequency (FM)
-- VCA CV input
-- Effect parameters
-- Any "modulatable" parameter
+If you drop a cable on a jack that can't take it, Modular Synth removes the cable and the status bar at the bottom of the window explains why, for example *Control cannot connect to Gate*.
 
-### Unipolar vs. Bipolar
+## Signal color and category color
 
-**Unipolar (0.0 to 1.0)**:
-- Always positive
-- Good for controlling parameters that shouldn't go negative
-- Examples: envelope output, volume control
+Don't confuse the two palettes. Jacks and cables are colored by **signal type**, as above. The bar across the top of each module is colored by the module's **category**: blue for Sources, teal for Filters, and so on. See the [Module Overview](../modules/index.md#categories).
 
-**Bipolar (-1.0 to 1.0)**:
-- Swings positive and negative
-- Good for vibrato, filter sweeps that go both ways
-- Examples: LFO output, pitch modulation
+## See also
 
-### V/Oct (Volts per Octave)
-
-A special control signal convention where each 1.0 increase represents one octave up in pitch. This allows precise musical pitch control:
-
-- 0.0 = Base frequency (e.g., C0)
-- 1.0 = One octave up (C1)
-- 2.0 = Two octaves up (C2)
-- 0.5 = Half octave up (F#0)
-- -1.0 = One octave down (C-1)
-
-The Keyboard and MIDI Note modules output V/Oct signals for controlling oscillator pitch.
-
----
-
-## Gate Signals
-
-**Color: Green**
-
-Gate signals are binary on/off signals used for triggering events. Unlike audio or control signals that vary continuously, gates are either fully on (1.0) or fully off (0.0).
-
-### Characteristics
-
-- **Range**: 0.0 (off) or 1.0 (on)
-- **Transitions**: Rising edge (0→1) and falling edge (1→0)
-- **Duration**: The time the gate stays high
-
-### Gate vs. Trigger
-
-While both use the green color, there's a conceptual difference:
-
-**Gate**: Stays high for a duration (like holding a key)
-- Used for: Envelope gate input, held notes
-
-**Trigger**: Brief pulse (like a drum hit)
-- Used for: Clock pulses, one-shot events
-
-Most modules respond appropriately to both.
-
-### Common Sources
-
-- Keyboard/MIDI Note (key pressed/released)
-- Clock modules (rhythmic pulses)
-- Sequencers (step triggers)
-- LFOs in square wave mode
-
-### Common Destinations
-
-- Envelope gate input
-- Sample & Hold trigger
-- Sequencer clock input
-- Any module that responds to triggers
-
-### Edge Detection
-
-Some modules respond to:
-- **Rising edge**: The moment gate goes from 0 to 1
-- **Falling edge**: The moment gate goes from 1 to 0
-- **Gate high**: While the gate is 1
-- **Gate low**: While the gate is 0
-
-For example, an ADSR envelope:
-- Begins Attack on rising edge
-- Enters Release on falling edge
-
----
-
-## MIDI Signals
-
-**Color: Purple**
-
-MIDI signals carry structured musical data including note events, control changes, and other MIDI messages. Unlike the other signal types which are continuous values, MIDI signals contain discrete events.
-
-### Characteristics
-
-- **Format**: Structured messages (Note On/Off, CC, etc.)
-- **Data**: Note number, velocity, channel, CC values
-- **Timing**: Event-based rather than continuous
-
-### Common Sources
-
-- MIDI Note module (from external MIDI devices)
-- Keyboard module (from computer keyboard)
-
-### Common Destinations
-
-- MIDI Monitor (for debugging)
-- Modules that accept MIDI input directly
-
-### MIDI to CV Conversion
-
-Most modules don't work with MIDI directly. The MIDI Note module converts MIDI to:
-
-- **V/Oct**: Note number → pitch CV
-- **Gate**: Note On/Off → gate signal
-- **Velocity**: Note velocity → control signal
-
-This conversion allows standard synthesis modules to respond to MIDI input.
-
----
-
-## Signal Type Compatibility
-
-### Automatic Conversion
-
-Some connections perform automatic conversion:
-
-| From | To | Conversion |
-|------|-----|------------|
-| Audio | Control | Treated as control signal |
-| Control | Audio | Treated as audio (modulation) |
-| Gate | Control | 0.0 or 1.0 control value |
-| Control | Gate | Threshold at 0.5 |
-
-### Best Practices
-
-While some conversions work, it's best to match signal types:
-
-1. **Audio to audio**: Full bandwidth sound processing
-2. **Control to control**: Modulation and CV routing
-3. **Gate to gate**: Trigger and timing signals
-4. **MIDI to MIDI modules**: Then convert to CV
-
-### Audio-Rate Modulation
-
-Control signals can run at audio rate for special effects:
-
-- **FM Synthesis**: Audio-rate modulation of oscillator frequency
-- **Ring Modulation**: Audio-rate amplitude modulation
-- **Filter FM**: Audio-rate cutoff modulation for unusual timbres
-
----
-
-## Visual Identification
-
-### Port Colors
-
-Input and output ports are colored to indicate the expected signal type:
-
-![Port Colors](../images/signal-port-colors.png)
-*Ports showing their signal type colors*
-
-### Cable Colors
-
-Cables inherit the color of the signal they carry, making it easy to trace signal flow:
-
-![Cable Colors](../images/signal-cable-colors.png)
-*Cables colored by signal type*
-
-### Module Headers
-
-Module header colors indicate the category, not signal type:
-
-- Blue header = Source (produces audio signals)
-- Green header = Filter (processes audio signals)
-- Orange header = Modulation (produces control signals)
-- etc.
-
----
-
-## Next Steps
-
-- **[Connections](./connections.md)** - Learn the rules for connecting modules
-- **[Module Reference](../modules/README.md)** - See signal types for each module
+- [Connections](./connections.md): patching, and reading the signal in a cable
+- [Polyphony](./polyphony.md): cables that carry up to eight voices

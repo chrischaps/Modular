@@ -1,214 +1,96 @@
 # Sample & Hold
 
-**Module ID**: `util.samplehold`
-**Category**: Utilities
-**Header Color**: Yellow
+**Module ID** `util.sample_hold` · **Category** Utility
 
 ![Sample & Hold Module](../../images/module-sample-hold.png)
-*The Sample & Hold module*
+*Each trigger freezes the input; the output holds until the next one.*
 
-## Description
+Sample & Hold takes a snapshot of its input each time a trigger arrives, and holds that value steady until the next trigger. A smooth, continuous signal goes in; a staircase of held steps comes out, one step per trigger.
 
-The Sample & Hold (S&H) module captures the instantaneous value of an input signal when triggered, then holds that value constant until the next trigger. This creates stepped, staircase-like outputs from continuous signals.
+That staircase is the sound of classic analog randomness: a filter that jumps to a new brightness on every beat, or a melody that wanders. The **Slew** knob softens the steps into glides.
 
-**Classic uses:**
-- Random pitched sequences from noise
-- Stepped modulation from LFOs
-- Quantized parameter changes
-- Creating rhythmic variation
+Sample & Hold is polyphonic. Patch polyphonic cables in and each voice samples and holds its own channel. A mono trigger is shared by every voice, so all of them step together.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Input** | Any (matches input) | Signal to be sampled |
-| **Trigger** | Gate (Green) | Rising edge captures the input value |
+| **In** | Control (Orange) | The signal to sample. Audio patches in too |
+| **Trig** | Gate (Green) | Each rising edge (crossing 0.5 on the way up) captures the input. Takes gate cables only |
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Output** | Any (matches input) | Held value from last sample |
+| **Out** | Control (Orange) | The held value, steady until the next trigger |
 
 ## Parameters
 
 | Knob | Range | Default | Description |
 |------|-------|---------|-------------|
-| **Slew** | 0 ms - 500 ms | 0 ms | Smoothing time between held values |
+| **Slew** | 0 – 1 s | 0 s | Glide time to each new value. At 0 the output jumps |
 
-## How It Works
+## How it works
 
-1. Input signal changes continuously
-2. Trigger receives a rising edge (gate goes from 0 to 1)
-3. Output instantly captures input value at that moment
-4. Output holds steady until next trigger
-5. Repeat
-
-```
-Input:   ~~~∿∿~~~∿∿~~~  (continuous signal)
-Trigger: _|‾|__|‾|__|‾   (pulses)
-Output:  ____‾‾‾‾____‾‾  (stepped values)
+```text
+In:    ~~~~~/\/\~~~~~/\~~~~        (moving signal)
+Trig:  _|‾|____|‾|____|‾|__        (rising edges)
+Out:   __‾‾‾‾‾‾____‾‾‾‾‾‾‾‾        (one held value per edge)
 ```
 
-## Usage Tips
+Only the rising edge counts: how long the trigger stays high makes no difference. With nothing patched into **In** the module holds 0.
 
-### Random Notes from Noise
+### Slew
 
-The classic S&H patch—random melodies:
+With **Slew** above zero, the output glides to each new value at a steady rate instead of jumping. The knob is the time a change of 1.0 takes, so a 0.2 s Slew moves from 0 to 1 in 0.2 s and from 0 to 0.5 in 0.1 s. Small steps arrive sooner than large ones, the way a portamento circuit behaves.
 
+Short slews (a few tens of milliseconds) take the click off stepped modulation while keeping its rhythm. Long ones turn the staircase into a slow, wandering curve.
+
+## Patches
+
+### Stepped random modulation
+
+Modular Synth has no noise module, but a fast oscillator sampled by a slower clock does the job. Tune the oscillator to a frequency with no simple relation to the clock and every sample lands at an unrelated point in its cycle:
+
+```text
+[Oscillator Out] ──> [Sample & Hold In]        (Saw, Oct +2, Fine a few cents off)
+[Clock Gate] ──> [Sample & Hold Trig]
+[Sample & Hold Out] ──> [SVF Filter Cutoff]
 ```
-[Noise] ──> [S&H Input]
-[Clock] ──> [S&H Trigger]
-[S&H Output] ──> [Oscillator V/Oct]
-```
 
-Each clock pulse picks a random voltage from the noise, creating random pitches.
+The filter jumps to a new brightness on every clock. Add a little **Slew** to smooth the jumps.
 
 ### Stepped LFO
 
-Turn a smooth LFO into stepped modulation:
+Sample a slow LFO with a faster clock and it climbs and falls in steps:
 
-```
-[LFO (Sine)] ──> [S&H Input]
-[Clock (faster)] ──> [S&H Trigger]
-[S&H Output] ──> [Filter Cutoff]
-```
-
-The filter cutoff moves in discrete steps rather than smoothly.
-
-### Rhythmic Variations
-
-Sample a slow LFO at regular intervals:
-
-```
-[LFO (very slow)] ──> [S&H Input]
-[Clock 1/4] ──> [S&H Trigger]
-[S&H Output] ──> [Parameter]
+```text
+[LFO Out] ──> [Sample & Hold In]               (LFO Rate 0.2 Hz)
+[Clock Gate] ──> [Sample & Hold Trig]          (Clock Div 1/16)
+[Sample & Hold Out] ──> [Oscillator V/Oct]
 ```
 
-Each beat has a different (but related) modulation value.
+Into **V/Oct**, this gives a gliding arpeggio of unquantized pitches. Run it through an [Attenuverter](./attenuverter.md) first to narrow the range.
 
-### Track and Hold
+### Hold a value per note
 
-Sample a melodic sequence to create variations:
+Trigger from a keyboard gate and each note gets a fresh value that stays put while the key is held:
 
-```
-[Sequencer CV] ──> [S&H Input]
-[Random Trigger] ──> [S&H Trigger]
-[S&H Output] ──> [Another Oscillator V/Oct]
-```
-
-The second oscillator plays held notes from the sequence.
-
-### Slew for Portamento
-
-Use the Slew parameter to smooth transitions:
-
-```
-[Noise] ──> [S&H] ──> [Osc V/Oct]
-             (Slew: 100ms)
+```text
+[LFO Out] ──> [Sample & Hold In]
+[Keyboard Gate] ──> [Sample & Hold Trig]
+[Sample & Hold Out] ──> [SVF Filter Cutoff]
 ```
 
-Instead of instant pitch jumps, notes glide to each new value.
+Every note sounds a little different, like a player who never strikes the same way twice. In a polyphonic patch, feed **Trig** from [Poly MIDI](../midi/poly-midi.md)'s **Gate** and each voice holds its own value.
 
-### Quantized Random
+### Gliding steps
 
-For random notes that stay in key, add a quantizer after S&H:
+Raise **Slew** to 0.1–0.3 s on any of the patches above and the steps become smooth curves that still move in time with the clock.
 
-```
-[Noise] ──> [S&H] ──> [Quantizer] ──> [Osc V/Oct]
-```
+## Related modules
 
-(Requires a quantizer module)
-
-### Stutter Effect
-
-Sample audio at regular intervals:
-
-```
-[Audio] ──> [S&H Input]
-[Fast Clock] ──> [S&H Trigger]
-[S&H Output] ──> [Output]
-```
-
-Creates a bit-crusher/sample-rate-reduction effect.
-
-### Probability-Based Changes
-
-Use a randomly triggered S&H:
-
-```
-[Random Gate (probability)] ──> [S&H Trigger]
-[Parameter Source] ──> [S&H Input]
-```
-
-The parameter only changes when the random gate fires.
-
-### Self-Patched Chaos
-
-Feed S&H output back with modification:
-
-```
-[S&H Output] ──> [Attenuverter] ──> [S&H Input]
-[Clock] ──> [S&H Trigger]
-```
-
-Creates chaotic, evolving patterns. Adjust attenuverter for different behaviors.
-
-## Slew Control
-
-The Slew parameter adds portamento between held values:
-
-| Slew | Effect |
-|------|--------|
-| 0 ms | Instant jumps (classic S&H) |
-| 10-50 ms | Subtle smoothing |
-| 100-200 ms | Noticeable glide |
-| 300+ ms | Long slides between values |
-
-With high slew values, the output may not reach the held value before the next trigger—creating even smoother movement.
-
-## Connection Examples
-
-### Random Arpeggio
-```
-[Noise] ──> [S&H] ──> [Quantizer] ──> [Osc V/Oct]
-[Clock 1/16] ──> [S&H Trigger]
-```
-
-### Generative Modulation
-```
-[LFO 1 (slow)] ──> [S&H] ──> [Filter Cutoff CV]
-[LFO 2 (fast)] ──> [S&H Trigger]
-```
-
-### Held Sequence Notes
-```
-[Sequencer] ──> [S&H] ──> [Second Voice]
-[Random Gate] ──> [S&H Trigger]
-```
-
-### Bit Crusher
-```
-[Audio] ──> [S&H] ──> [Output]
-[Clock (very fast)] ──> [S&H Trigger]
-```
-
-## Sample Sources
-
-Different inputs create different results:
-
-| Source | Result |
-|--------|--------|
-| **Noise** | Random, unpredictable values |
-| **LFO** | Stepped, cyclic pattern |
-| **Envelope** | Held modulation snapshots |
-| **Audio** | Crushed/reduced sample rate |
-| **Sequencer** | Held sequence steps |
-
-## Related Modules
-
-- [Clock](../modulation/clock.md) - Trigger source for S&H
-- [LFO](../modulation/lfo.md) - Input source for stepped modulation
-- [Sequencer](./sequencer.md) - Alternative way to create stepped sequences
-- [Attenuverter](./attenuverter.md) - Scale S&H output
+- [Clock](../modulation/clock.md): steady triggers
+- [LFO](../modulation/lfo.md): a slow signal to sample
+- [Attenuverter](./attenuverter.md): scale the held values to a useful range
+- [Step Sequencer](./sequencer.md): stepped values you choose yourself
