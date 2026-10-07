@@ -1,0 +1,15 @@
+-1.0000 play
+-1.0000 view 170 30 0.05
+-0.9000 camera 572.5 285 2.75 0.05
+0.2000 note 48 90 5.5
+0.2120 note 55 85 5.5
+0.2240 note 59 80 5.5
+0.2360 note 62 75 5.5
+0.2480 note 64 70 5.5
+0.2600 note 71 65 5.5
+1.2000 still cover-0
+2.0000 still cover-1
+3.0000 still cover-2
+4.0000 still cover-3
+5.0000 still cover-4
+5.2000 end

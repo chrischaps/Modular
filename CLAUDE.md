@@ -172,6 +172,14 @@ cargo run --release --bin render -- patch.json out.wav --seconds 5
 # ...playing a short phrase into Keyboard/MIDI nodes (for patches that need a player)
 cargo run --release --bin render -- patches/lush-pad.json out.wav --audition
 
+# Film the app with sound: a frame-stepped capture plays a cue script through the real
+# input paths (see src/app/capture.rs). The showcase kit wraps it; build into
+# target/capture so a running copy of the app doesn't lock the exe
+CARGO_TARGET_DIR=target/capture cargo build --release
+python tools/showcase/shots.py --list            # shots for the chaps.dev page
+python tools/showcase/shots.py hero --preview    # frame 0 only, to aim from
+python tools/showcase/encode.py hero out.mp4 --loop 2 --fps 30 --crf 27 --poster 0.5
+
 # Open a patch at launch (otherwise the First Sound example opens)
 cargo run -- patches/fm-synthesis.json
 

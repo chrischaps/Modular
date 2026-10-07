@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::audio_processor::AudioProcessor;
+use crate::dsp::MidiEvent;
 
 /// Errors that can occur during audio engine operation.
 #[derive(Debug, Clone)]
@@ -331,6 +332,29 @@ impl AudioEngine {
         let processor = Arc::new(Mutex::new(processor));
         self.processor = Some(Arc::clone(&processor));
         self.build_processor_stream(processor)
+    }
+
+    /// Stops the device stream but keeps its processor, re-prepared at
+    /// `sample_rate`, for [`render_offline`](Self::render_offline) to drive
+    /// by hand.
+    pub fn go_offline(&mut self, sample_rate: f32) -> Result<(), AudioError> {
+        self.stop()?;
+        if let Some(Ok(mut processor)) = self.processor.as_ref().map(|p| p.lock()) {
+            processor.set_sample_rate(sample_rate);
+        }
+        Ok(())
+    }
+
+    /// Renders one buffer through the processor with the given MIDI, after
+    /// [`go_offline`](Self::go_offline). Returns false with no processor.
+    pub fn render_offline(&self, output: &mut [f32], channels: usize, midi: &mut [MidiEvent]) -> bool {
+        match self.processor.as_ref().map(|p| p.lock()) {
+            Some(Ok(mut processor)) => {
+                processor.process_offline(output, channels, midi);
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Builds and starts a stream on the current device that runs `processor`.

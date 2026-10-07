@@ -8,7 +8,7 @@ use std::time::Instant;
 use rtrb::Consumer;
 
 use crate::dsp::denormal::DenormalGuard;
-use crate::dsp::{ModuleRegistry, Poly, ProcessContext};
+use crate::dsp::{MidiEvent, ModuleRegistry, Poly, ProcessContext};
 use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Chorus, Clock, Compressor, Distortion, KeyboardInput, LadderFilter, Lfo, MidiMonitor, MidiNote, Mixer, Oscilloscope, PolyMidi, ParametricEq, Reverb, SampleHold, Oscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
 
 use super::channels::EngineHandle;
@@ -153,19 +153,8 @@ impl AudioProcessor {
         }
 
         let num_frames = output.len() / channels;
-        let mut midi = self.midi.collect(start_time, num_frames);
-
-        // Run the graph over the device buffer in plan-sized blocks, each
-        // with the MIDI that falls inside it
-        let block = self.plan.max_block_size().max(1);
-        for (index, chunk) in output.chunks_mut(block * channels).enumerate() {
-            let frames = chunk.len() / channels;
-            let start = index * block;
-            let chunk_midi = take_chunk(&mut midi, start, start + frames);
-            let context = ProcessContext::new(self.sample_rate, frames).with_midi(chunk_midi);
-            self.plan.process(&context);
-            Self::write_output(&self.plan, chunk, channels, frames);
-        }
+        let midi = self.midi.collect(start_time, num_frames);
+        Self::render(&mut self.plan, self.sample_rate, output, channels, midi);
 
         self.send_monitor_values();
         self.send_scope_captures();
@@ -185,6 +174,42 @@ impl AudioProcessor {
         if self.frame_counter >= Self::CPU_REPORT_INTERVAL {
             self.frame_counter = 0;
             self.engine_handle.send_event_lossy(EngineEvent::CpuLoad(self.cpu_load_avg));
+        }
+    }
+
+    /// Processes one buffer with MIDI the caller has already placed, instead
+    /// of live input, and without a device clock.
+    ///
+    /// The capture mode renders this way, one video frame's worth of audio
+    /// per UI frame, so picture and sound advance in lockstep however long
+    /// each frame takes to draw. Live MIDI that arrived meanwhile is dropped.
+    pub fn process_offline(&mut self, output: &mut [f32], channels: usize, midi: &mut [MidiEvent]) {
+        let _denormals = DenormalGuard::new();
+        self.process_messages();
+        self.midi.skip(Instant::now());
+        output.fill(0.0);
+        if !self.is_playing || channels == 0 {
+            return;
+        }
+
+        Self::render(&mut self.plan, self.sample_rate, output, channels, midi);
+
+        self.send_monitor_values();
+        self.send_scope_captures();
+        self.send_output_level();
+    }
+
+    /// Runs the graph over a buffer in plan-sized blocks, each with the MIDI
+    /// that falls inside it, and writes the output module's audio into it.
+    fn render(plan: &mut GraphPlan, sample_rate: f32, output: &mut [f32], channels: usize, mut midi: &mut [MidiEvent]) {
+        let block = plan.max_block_size().max(1);
+        for (index, chunk) in output.chunks_mut(block * channels).enumerate() {
+            let frames = chunk.len() / channels;
+            let start = index * block;
+            let chunk_midi = take_chunk(&mut midi, start, start + frames);
+            let context = ProcessContext::new(sample_rate, frames).with_midi(chunk_midi);
+            plan.process(&context);
+            Self::write_output(plan, chunk, channels, frames);
         }
     }
 

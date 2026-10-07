@@ -1,0 +1,825 @@
+//! Frame-stepped capture: films the app with its sound, in lockstep.
+//!
+//! `modular_synth <patch.json> --capture <script.txt> --out <dir>` opens the
+//! patch, plays a timed script into it, and records every frame along with
+//! exactly the audio that frame covers. The clock advances one video frame
+//! per UI frame, however long each frame takes to draw and save, and the
+//! audio engine renders that frame's samples by hand instead of running on
+//! the device. Picture and sound can't drift apart, and a script plays out
+//! the same way every time.
+//!
+//! The script drives the app through its real input paths: key presses
+//! reach the QWERTY keyboard, mouse moves and drags reach the node graph and
+//! knobs, MIDI notes reach Poly MIDI and MIDI Note modules at the exact
+//! sample they're scheduled for. Real mouse and keyboard input is ignored
+//! while capturing.
+//!
+//! Output, in `--out`:
+//! - `video.mkv`: lossless RGB frames (ffmpeg must be on the PATH)
+//! - `audio.wav`: 32-bit float stereo
+//! - `<name>.ppm`: stills taken with the `still` cue
+//!
+//! # Script
+//!
+//! One cue per line, `<seconds> <cue> <args...>`; `#` starts a comment.
+//! Coordinates are in points (the window is `size / ppp` points across).
+//!
+//! ```text
+//! 0.0  play                         # start the transport
+//! 0.5  key Z 0.4                    # tap a QWERTY key, held 0.4 s
+//! 0.5  type osc 0.1                 # type text, a letter every 0.1 s
+//! 1.0  note 60 100 2.0              # MIDI note, velocity, length
+//! 1.0  chord 60,64,67 90 3.0
+//! 2.0  param osc.sine Detune 12 1.5 # module (#n for the nth), input, value, ramp
+//! 2.0  param filter.svf#2 Cutoff 800
+//! 3.0  cursor on                    # draw a pointer over the picture
+//! 3.0  move 400 300 0.6             # glide the pointer
+//! 3.5  drag 500 340 0.8             # press, glide, release
+//! 3.5  press / release
+//! 4.0  view 120 -40 2.0             # pan the graph to an offset over 2 s
+//! 4.0  zoom 1.4 2.0                 # zoom the graph by a factor over 2 s
+//! 4.0  camera -300 0 0.5 3.0        # move a virtual camera: the view as
+//!                                   # first framed, scaled 0.5 about the
+//!                                   # centre and shifted (-300, 0), over 3 s
+//! 5.0  still filter-opens           # save this frame as filter-opens.ppm
+//! 9.0  end
+//! ```
+
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+
+use eframe::egui;
+use egui::{Pos2, Vec2};
+
+use crate::engine::MidiEvent;
+
+/// The fewest frames drawn before recording starts, so the window size,
+/// theme and patch have settled. Cues at negative times lengthen the warmup
+/// to reach them: a shot can start the transport, set its view and let a
+/// reverb fill before the first recorded frame.
+const WARMUP_FRAMES: i64 = 45;
+
+/// How the capture is set up, from the command line.
+#[derive(Debug, Clone)]
+pub struct CaptureConfig {
+    pub script: PathBuf,
+    pub out_dir: PathBuf,
+    pub fps: u32,
+    pub sample_rate: u32,
+    /// Output size in pixels.
+    pub size: [u32; 2],
+    /// Pixels per point: how large the interface is drawn.
+    pub ppp: f32,
+}
+
+impl CaptureConfig {
+    /// Reads `--capture <script> [--out DIR] [--fps N] [--size WxH] [--ppp X]`
+    /// from the command line, or `None` without `--capture`.
+    pub fn from_args(args: &[String]) -> Result<Option<Self>, String> {
+        let Some(at) = args.iter().position(|a| a == "--capture") else {
+            return Ok(None);
+        };
+        let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
+        let script = args.get(at + 1).ok_or("--capture needs a script")?;
+        let size = match value("--size") {
+            Some(s) => {
+                let (w, h) = s.split_once('x').ok_or("--size is WxH")?;
+                [w.parse().map_err(|_| "bad --size")?, h.parse().map_err(|_| "bad --size")?]
+            }
+            None => [1920, 1080],
+        };
+        Ok(Some(Self {
+            script: PathBuf::from(script),
+            out_dir: PathBuf::from(value("--out").unwrap_or_else(|| "capture".into())),
+            fps: value("--fps").map(|f| f.parse()).transpose().map_err(|_| "bad --fps")?.unwrap_or(60),
+            sample_rate: 48_000,
+            size,
+            ppp: value("--ppp").map(|f| f.parse()).transpose().map_err(|_| "bad --ppp")?.unwrap_or(1.5),
+        }))
+    }
+
+    /// The window's inner size in points.
+    pub fn size_in_points(&self) -> Vec2 {
+        Vec2::new(self.size[0] as f32, self.size[1] as f32) / self.ppp
+    }
+
+    /// The command-line arguments that aren't capture options, such as the
+    /// patch to open.
+    pub fn is_option(arg: &str) -> bool {
+        matches!(arg, "--capture" | "--out" | "--fps" | "--size" | "--ppp")
+    }
+}
+
+/// A cue from the script.
+#[derive(Debug, Clone)]
+enum Cue {
+    Play(bool),
+    KeyDown(egui::Key),
+    KeyUp(egui::Key),
+    Text(String),
+    Note { note: u8, velocity: u8, on: bool },
+    Param { module: String, nth: usize, input: String, value: f32, dur: f64 },
+    Cursor(bool),
+    Move { to: Pos2, dur: f64 },
+    Button(bool),
+    View { pan: Vec2, dur: f64 },
+    Zoom { factor: f32, dur: f64 },
+    Camera { offset: Vec2, scale: f32, dur: f64 },
+    Still(String),
+    End,
+}
+
+/// Something the app has to do for the script this frame, beyond input.
+#[derive(Debug, Clone)]
+pub enum CaptureAction {
+    Play(bool),
+    /// A MIDI event, `offset` samples into the frame's audio.
+    Midi { event: MidiEvent, offset: u32 },
+    /// Set a module's input to a value in real units.
+    SetParam { module: String, nth: usize, input: String, value: f32 },
+}
+
+/// A value easing from one point to another over a span of time.
+#[derive(Debug, Clone, Copy)]
+struct Glide<T> {
+    from: T,
+    to: T,
+    start: f64,
+    dur: f64,
+}
+
+impl<T: Copy + std::ops::Add<Output = T> + std::ops::Sub<Output = T> + std::ops::Mul<f32, Output = T>> Glide<T> {
+    /// Where the glide is at `t`, eased in and out.
+    fn at(&self, t: f64) -> T {
+        self.from + (self.to - self.from) * ease(self.progress(t))
+    }
+
+    fn progress(&self, t: f64) -> f32 {
+        if self.dur <= 0.0 { 1.0 } else { ((t - self.start) / self.dur).clamp(0.0, 1.0) as f32 }
+    }
+
+    fn done(&self, t: f64) -> bool {
+        self.progress(t) >= 1.0
+    }
+}
+
+/// A camera move: scale eases in log space, so a zoom feels even.
+#[derive(Debug, Clone, Copy)]
+struct CameraGlide {
+    from: (f32, Vec2),
+    to: (f32, Vec2),
+    start: f64,
+    dur: f64,
+}
+
+impl CameraGlide {
+    fn progress(&self, t: f64) -> f32 {
+        ((t - self.start) / self.dur).clamp(0.0, 1.0) as f32
+    }
+
+    fn at(&self, t: f64) -> (f32, Vec2) {
+        let p = ease(self.progress(t));
+        let scale = (self.from.0.ln() + (self.to.0.ln() - self.from.0.ln()) * p).exp();
+        (scale, self.from.1 + (self.to.1 - self.from.1) * p)
+    }
+}
+
+/// Smoothstep, the motion of a hand that starts and stops gently.
+fn ease(x: f32) -> f32 {
+    x * x * (3.0 - 2.0 * x)
+}
+
+/// A parameter turning from one value to another.
+#[derive(Debug, Clone)]
+struct Ramp {
+    module: String,
+    nth: usize,
+    input: String,
+    /// Filled in from the parameter's value when the ramp starts.
+    from: Option<f32>,
+    to: f32,
+    start: f64,
+    dur: f64,
+}
+
+/// The running capture.
+pub struct Capture {
+    config: CaptureConfig,
+    cues: Vec<(f64, Cue)>,
+    next_cue: usize,
+    /// The frame being drawn; negative while warming up.
+    frame: i64,
+    /// How many frames the warmup lasts.
+    warmup: i64,
+    /// Whether this UI pass is a new frame (rather than a repaint while
+    /// waiting for the last frame's screenshot).
+    fresh: bool,
+    /// A screenshot has been asked for and hasn't arrived.
+    awaiting_shot: bool,
+    actions: Vec<CaptureAction>,
+    ffmpeg: Option<Child>,
+    wav: Option<hound::WavWriter<BufWriter<File>>>,
+    audio: Vec<f32>,
+    /// Samples rendered so far, so each frame takes its exact share.
+    samples_done: u64,
+    stills: Vec<String>,
+    cursor_visible: bool,
+    /// Where the pointer is; `None` until the script first moves it, so
+    /// nothing is hovered by accident.
+    pointer: Option<Pos2>,
+    pointer_glide: Option<Glide<Vec2>>,
+    button_down: bool,
+    ramps: Vec<Ramp>,
+    pan_glide: Option<Glide<Vec2>>,
+    /// Zoom still to apply: (log of the factor left, frames left).
+    zoom_left: Option<(f32, f64, f64)>,
+    /// The virtual camera, relative to the view when it was first moved:
+    /// the screen is scaled by `scale` about the editor's centre, then
+    /// shifted by `offset` points.
+    camera: (f32, Vec2),
+    camera_glide: Option<CameraGlide>,
+    /// Pan to add this frame, from the camera.
+    pending_pan_delta: Vec2,
+    pending_zoom: f32,
+
+    finished: bool,
+    size_checked: bool,
+}
+
+impl Capture {
+    /// Reads the script and opens the outputs.
+    pub fn start(config: CaptureConfig) -> Result<Self, String> {
+        let text = std::fs::read_to_string(&config.script)
+            .map_err(|e| format!("can't read {}: {}", config.script.display(), e))?;
+        let cues = parse_script(&text)?;
+        let earliest = cues.first().map_or(0.0, |c| c.0).min(0.0);
+        let warmup = WARMUP_FRAMES.max((-earliest * config.fps as f64).ceil() as i64 + 1);
+        std::fs::create_dir_all(&config.out_dir).map_err(|e| e.to_string())?;
+
+        let wav = hound::WavWriter::create(
+            config.out_dir.join("audio.wav"),
+            hound::WavSpec {
+                channels: 2,
+                sample_rate: config.sample_rate,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            },
+        )
+        .map_err(|e| e.to_string())?;
+
+        let [w, h] = config.size;
+        let ffmpeg = Command::new("ffmpeg")
+            .args(["-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba"])
+            .args(["-s", &format!("{}x{}", w, h), "-r", &config.fps.to_string(), "-i", "-"])
+            .args(["-c:v", "libx264rgb", "-crf", "0", "-preset", "ultrafast"])
+            .arg(config.out_dir.join("video.mkv"))
+            .stdin(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("can't start ffmpeg: {}", e))?;
+
+        Ok(Self {
+            config,
+            cues,
+            next_cue: 0,
+            frame: -warmup - 1,
+            warmup,
+            fresh: false,
+            awaiting_shot: false,
+            actions: Vec::new(),
+            ffmpeg: Some(ffmpeg),
+            wav: Some(wav),
+            audio: Vec::new(),
+            samples_done: 0,
+            stills: Vec::new(),
+            cursor_visible: false,
+            pointer: None,
+            pointer_glide: None,
+            button_down: false,
+            ramps: Vec::new(),
+            pan_glide: None,
+            zoom_left: None,
+            camera: (1.0, Vec2::ZERO),
+            camera_glide: None,
+            pending_pan_delta: Vec2::ZERO,
+            pending_zoom: 1.0,
+
+            finished: false,
+            size_checked: false,
+        })
+    }
+
+    pub fn config(&self) -> &CaptureConfig {
+        &self.config
+    }
+
+    fn dt(&self) -> f64 {
+        1.0 / self.config.fps as f64
+    }
+
+    /// The script time at the start of the current frame.
+    pub fn time(&self) -> f64 {
+        self.frame as f64 * self.dt()
+    }
+
+    fn recording(&self) -> bool {
+        self.frame >= 0
+    }
+
+    /// Whether this UI pass is a new frame.
+    pub fn is_fresh(&self) -> bool {
+        self.fresh
+    }
+
+    pub fn is_finished(&self) -> bool {
+        self.finished
+    }
+
+    /// Replaces the frame's input with the script's: called before each UI
+    /// pass. A pass only becomes a new frame once the last frame's
+    /// screenshot is in hand.
+    pub fn prepare_input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let mut shot = None;
+        for event in raw.events.drain(..) {
+            if let egui::Event::Screenshot { image, .. } = event {
+                shot = Some(image);
+            }
+        }
+        raw.hovered_files.clear();
+        raw.dropped_files.clear();
+        raw.modifiers = egui::Modifiers::default();
+        raw.focused = true;
+        raw.predicted_dt = self.dt() as f32;
+
+        if self.awaiting_shot {
+            match shot {
+                Some(image) => {
+                    self.awaiting_shot = false;
+                    self.take_frame(&image);
+                }
+                None => {
+                    // A repaint between frames: same time, no input
+                    self.fresh = false;
+                    raw.time = Some(self.ui_time());
+                    return;
+                }
+            }
+        }
+        if self.finished {
+            self.fresh = false;
+            return;
+        }
+
+        self.frame += 1;
+        self.fresh = true;
+        raw.time = Some(self.ui_time());
+
+        // Draw the interface at the configured scale, whatever the display's
+        if let Some(native) = raw.viewport().native_pixels_per_point {
+            let zoom = self.config.ppp / native;
+            if (ctx.zoom_factor() - zoom).abs() > 1e-4 {
+                ctx.set_zoom_factor(zoom);
+            }
+        }
+        if self.frame == -self.warmup {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(self.config.size_in_points()));
+        }
+
+        self.fire_cues(raw);
+        self.animate(raw);
+    }
+
+    /// egui's clock, which mustn't go below zero during warmup.
+    fn ui_time(&self) -> f64 {
+        (self.frame + self.warmup + 1) as f64 * self.dt()
+    }
+
+    /// Fires the cues that fall inside this frame.
+    fn fire_cues(&mut self, raw: &mut egui::RawInput) {
+        let t = self.time();
+        let end = t + self.dt();
+        while let Some((at, cue)) = self.cues.get(self.next_cue).cloned() {
+            if at >= end - 1e-9 {
+                break;
+            }
+            self.next_cue += 1;
+            let offset = (((at - t).max(0.0)) * self.config.sample_rate as f64).round() as u32;
+            match cue {
+                Cue::Play(on) => self.actions.push(CaptureAction::Play(on)),
+                Cue::KeyDown(key) | Cue::KeyUp(key) => {
+                    let pressed = matches!(cue, Cue::KeyDown(_));
+                    raw.events.push(egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed,
+                        repeat: false,
+                        modifiers: egui::Modifiers::default(),
+                    });
+                }
+                Cue::Text(text) => raw.events.push(egui::Event::Text(text)),
+                Cue::Note { note, velocity, on } => {
+                    let event = if on {
+                        MidiEvent::NoteOn { channel: 0, note, velocity }
+                    } else {
+                        MidiEvent::NoteOff { channel: 0, note, velocity: 0 }
+                    };
+                    self.actions.push(CaptureAction::Midi { event, offset });
+                }
+                Cue::Param { module, nth, input, value, dur } => self.ramps.push(Ramp {
+                    module,
+                    nth,
+                    input,
+                    from: None,
+                    to: value,
+                    start: at,
+                    dur,
+                }),
+                Cue::Cursor(on) => self.cursor_visible = on,
+                Cue::Move { to, dur } => {
+                    // The first move comes in from below and to the right
+                    let from = self.pointer.unwrap_or(to + Vec2::new(150.0, 200.0));
+                    self.pointer = Some(from);
+                    self.pointer_glide = Some(Glide { from: from.to_vec2(), to: to.to_vec2(), start: at, dur });
+                }
+                Cue::Button(down) => {
+                    self.button_down = down;
+                    raw.events.push(egui::Event::PointerButton {
+                        pos: self.pointer.unwrap_or_default(),
+                        button: egui::PointerButton::Primary,
+                        pressed: down,
+                        modifiers: egui::Modifiers::default(),
+                    });
+                }
+                Cue::View { pan, dur } => {
+                    // `from` is filled in by the app, which knows the pan
+                    self.pan_glide = Some(Glide { from: Vec2::NAN, to: pan, start: at, dur });
+                }
+                Cue::Camera { offset, scale, dur } => {
+                    self.camera_glide = Some(CameraGlide {
+                        from: self.camera,
+                        to: (scale, offset),
+                        start: at,
+                        dur: dur.max(self.dt()),
+                    });
+                }
+                Cue::Zoom { factor, dur } => {
+                    self.zoom_left = Some((factor.ln(), at, dur.max(self.dt())));
+                }
+                Cue::Still(name) => self.stills.push(name),
+                Cue::End => self.finished = true,
+            }
+        }
+    }
+
+    /// Advances the pointer, pan and zoom glides for this frame.
+    fn animate(&mut self, raw: &mut egui::RawInput) {
+        let t = self.time() + self.dt();
+        if let Some(glide) = self.pointer_glide {
+            self.pointer = Some(glide.at(t).to_pos2());
+            if glide.done(t) {
+                self.pointer_glide = None;
+            }
+        }
+        // egui needs to know where the pointer is every frame
+        let pointer = match self.pointer {
+            Some(p) => egui::Event::PointerMoved(p),
+            None => egui::Event::PointerGone,
+        };
+        raw.events.insert(0, pointer);
+
+        if let Some((log_factor, start, dur)) = self.zoom_left {
+            // This frame's share of the zoom, eased
+            let p0 = ease(((self.time() - start) / dur).clamp(0.0, 1.0) as f32);
+            let p1 = ease(((t - start) / dur).clamp(0.0, 1.0) as f32);
+            self.pending_zoom *= (log_factor * (p1 - p0)).exp();
+            if p1 >= 1.0 {
+                self.zoom_left = None;
+            }
+        }
+
+        if let Some(glide) = self.camera_glide {
+            // Zooming by r scales the screen, and so the camera's offset,
+            // about the centre; panning then makes up the rest
+            let (scale, offset) = glide.at(t);
+            let r = scale / self.camera.0;
+            self.pending_zoom *= r;
+            self.pending_pan_delta += offset - self.camera.1 * r;
+            self.camera = (scale, offset);
+            if glide.progress(t) >= 1.0 {
+                self.camera_glide = None;
+            }
+        }
+    }
+
+    /// The pan the graph should have this frame, given its current pan.
+    pub fn take_pan(&mut self, current: Vec2) -> Option<Vec2> {
+        let t = self.time() + self.dt();
+        let delta = std::mem::take(&mut self.pending_pan_delta);
+        let Some(glide) = self.pan_glide.as_mut() else {
+            return (delta != Vec2::ZERO).then(|| current + delta);
+        };
+        if glide.from.x.is_nan() {
+            glide.from = current;
+        }
+        let pan = glide.at(t);
+        if glide.done(t) {
+            self.pan_glide = None;
+        }
+        Some(pan + delta)
+    }
+
+    /// The zoom factor to apply this frame (1.0 for none).
+    pub fn take_zoom(&mut self) -> f32 {
+        std::mem::replace(&mut self.pending_zoom, 1.0)
+    }
+
+    /// The app's work for this frame.
+    pub fn take_actions(&mut self) -> Vec<CaptureAction> {
+        std::mem::take(&mut self.actions)
+    }
+
+    /// The parameter values the script sets this frame, given a way to read
+    /// a parameter's current value.
+    pub fn param_values(&mut self, mut current: impl FnMut(&str, usize, &str) -> Option<f32>) -> Vec<CaptureAction> {
+        let t = self.time() + self.dt();
+        let mut out = Vec::new();
+        self.ramps.retain_mut(|ramp| {
+            let from = *ramp.from.get_or_insert_with(|| current(&ramp.module, ramp.nth, &ramp.input).unwrap_or(ramp.to));
+            let p = if ramp.dur <= 0.0 { 1.0 } else { ease(((t - ramp.start) / ramp.dur).clamp(0.0, 1.0) as f32) };
+            // Wide ranges of positive values (frequencies, times) turn evenly
+            // in log space, as a knob with a log taper would
+            let value = if from > 0.0 && ramp.to > 0.0 && (ramp.to / from).max(from / ramp.to) > 4.0 {
+                (from.ln() + (ramp.to.ln() - from.ln()) * p).exp()
+            } else {
+                from + (ramp.to - from) * p
+            };
+            out.push(CaptureAction::SetParam {
+                module: ramp.module.clone(),
+                nth: ramp.nth,
+                input: ramp.input.clone(),
+                value,
+            });
+            p < 1.0
+        });
+        out
+    }
+
+    /// How many samples this frame covers. Warmup frames render at the
+    /// same rate as recorded ones, so the music is already in time.
+    pub fn samples_this_frame(&self) -> usize {
+        let frames_done = (self.frame + self.warmup + 1).max(0) as f64;
+        let end = (frames_done * self.config.sample_rate as f64 / self.config.fps as f64).round() as u64;
+        end.saturating_sub(self.samples_done) as usize
+    }
+
+    /// A buffer for this frame's audio, interleaved stereo.
+    pub fn audio_buffer(&mut self) -> &mut Vec<f32> {
+        let frames = self.samples_this_frame();
+        self.audio.resize(frames * 2, 0.0);
+        &mut self.audio
+    }
+
+    /// Keeps the frame's rendered audio.
+    pub fn commit_audio(&mut self) {
+        self.samples_done += (self.audio.len() / 2) as u64;
+        if !self.recording() {
+            return;
+        }
+        if let Some(wav) = self.wav.as_mut() {
+            for &s in &self.audio {
+                let _ = wav.write_sample(s);
+            }
+        }
+    }
+
+    /// Draws the pointer, which the screenshot wouldn't otherwise show.
+    pub fn draw_cursor(&self, ctx: &egui::Context) {
+        let (true, Some(p)) = (self.cursor_visible, self.pointer) else {
+            return;
+        };
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("capture_cursor")));
+        let shape: Vec<Pos2> = [(0.0, 0.0), (0.0, 17.0), (4.2, 13.2), (7.2, 19.6), (9.6, 18.6), (6.7, 12.3), (12.2, 12.3)]
+            .iter()
+            .map(|&(x, y)| p + Vec2::new(x, y))
+            .collect();
+        let shadow: Vec<Pos2> = shape.iter().map(|q| *q + Vec2::new(1.0, 1.5)).collect();
+        painter.add(egui::Shape::convex_polygon(shadow, egui::Color32::from_black_alpha(90), egui::Stroke::NONE));
+        // The arrow isn't convex; a closed path fills it correctly
+        painter.add(egui::Shape::Path(egui::epaint::PathShape {
+            points: shape,
+            closed: true,
+            fill: egui::Color32::WHITE,
+            stroke: egui::epaint::PathStroke::new(1.2, egui::Color32::from_gray(20)),
+        }));
+        if self.button_down {
+            painter.circle_stroke(p, 9.0, egui::Stroke::new(1.5, egui::Color32::from_white_alpha(120)));
+        }
+    }
+
+    /// Asks for this frame's screenshot, after the app has drawn it.
+    pub fn end_frame(&mut self, ctx: &egui::Context) {
+        if self.fresh {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+            self.awaiting_shot = true;
+        }
+        ctx.request_repaint();
+    }
+
+    /// Writes a finished frame to the video (and as a still if one was cued).
+    fn take_frame(&mut self, image: &egui::ColorImage) {
+        let [w, h] = self.config.size;
+        if image.size != [w as usize, h as usize] {
+            if self.recording() {
+                eprintln!(
+                    "capture: frame is {}x{}, expected {}x{}; is the window too big for the screen?",
+                    image.size[0], image.size[1], w, h
+                );
+                self.finished = true;
+            }
+            return;
+        }
+        if !self.size_checked {
+            self.size_checked = true;
+            eprintln!("capture: window is {}x{}, recording", w, h);
+        }
+        if !self.recording() {
+            return;
+        }
+        if let Some(stdin) = self.ffmpeg.as_mut().and_then(|f| f.stdin.as_mut()) {
+            if let Err(e) = stdin.write_all(image.as_raw()) {
+                eprintln!("capture: ffmpeg write failed: {}", e);
+                self.finished = true;
+            }
+        }
+        for name in std::mem::take(&mut self.stills) {
+            if let Err(e) = write_ppm(&self.config.out_dir.join(format!("{}.ppm", name)), image) {
+                eprintln!("capture: still {} failed: {}", name, e);
+            }
+        }
+    }
+
+    /// Closes the video and audio files. Returns true once everything is on
+    /// disk and the app can close.
+    pub fn finish(&mut self) -> bool {
+        if !self.finished || self.awaiting_shot {
+            return false;
+        }
+        if let Some(wav) = self.wav.take() {
+            let _ = wav.finalize();
+        }
+        if let Some(mut ffmpeg) = self.ffmpeg.take() {
+            drop(ffmpeg.stdin.take());
+            let _ = ffmpeg.wait();
+            eprintln!(
+                "capture: {} frames, {:.2} s, written to {}",
+                self.frame,
+                self.frame as f64 * self.dt(),
+                self.config.out_dir.display()
+            );
+        }
+        true
+    }
+}
+
+/// Saves an image as a binary PPM, which any image tool can read.
+fn write_ppm(path: &Path, image: &egui::ColorImage) -> std::io::Result<()> {
+    let mut out = BufWriter::new(File::create(path)?);
+    write!(out, "P6\n{} {}\n255\n", image.size[0], image.size[1])?;
+    for px in &image.pixels {
+        out.write_all(&[px.r(), px.g(), px.b()])?;
+    }
+    out.flush()
+}
+
+/// Parses a script into time-ordered cues, expanding cues with a length
+/// (key taps, notes, drags) into their start and end.
+fn parse_script(text: &str) -> Result<Vec<(f64, Cue)>, String> {
+    let mut cues = Vec::new();
+    for (line_no, line) in text.lines().enumerate() {
+        // `#` starts a comment at the start of a line or after a space;
+        // `module#2` is a module reference
+        let line = match line.find(" #") {
+            Some(at) => &line[..at],
+            None if line.trim_start().starts_with('#') => "",
+            None => line,
+        };
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let err = |msg: &str| format!("script line {}: {} ({})", line_no + 1, msg, line);
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let num = |i: usize| -> Result<f64, String> {
+            words.get(i).ok_or_else(|| err("missing value"))?.parse::<f64>().map_err(|_| err("not a number"))
+        };
+        let opt = |i: usize| -> Result<f64, String> { if words.len() > i { num(i) } else { Ok(0.0) } };
+        let t = num(0)?;
+        let cue = *words.get(1).ok_or_else(|| err("missing cue"))?;
+        let key = |i: usize| -> Result<egui::Key, String> {
+            let name = words.get(i).ok_or_else(|| err("missing key"))?;
+            egui::Key::from_name(name).ok_or_else(|| err("unknown key"))
+        };
+        match cue {
+            "play" => cues.push((t, Cue::Play(true))),
+            "stop" => cues.push((t, Cue::Play(false))),
+            "key" => {
+                let k = key(2)?;
+                cues.push((t, Cue::KeyDown(k)));
+                cues.push((t + num(3)?, Cue::KeyUp(k)));
+            }
+            "keydown" => cues.push((t, Cue::KeyDown(key(2)?))),
+            "keyup" => cues.push((t, Cue::KeyUp(key(2)?))),
+            "type" => {
+                // A word typed a letter at a time, as a person would
+                let text = words.get(2).ok_or_else(|| err("missing text"))?;
+                let gap = if words.len() > 3 { num(3)? } else { 0.09 };
+                for (i, c) in text.chars().enumerate() {
+                    cues.push((t + i as f64 * gap, Cue::Text(c.to_string())));
+                }
+            }
+            "note" | "chord" => {
+                let notes: Vec<u8> = words.get(2).ok_or_else(|| err("missing note"))?
+                    .split(',')
+                    .map(|n| n.parse().map_err(|_| err("bad note")))
+                    .collect::<Result<_, _>>()?;
+                let velocity = num(3)? as u8;
+                let len = num(4)?;
+                for note in notes {
+                    cues.push((t, Cue::Note { note, velocity, on: true }));
+                    cues.push((t + len, Cue::Note { note, velocity, on: false }));
+                }
+            }
+            "param" => {
+                let target = words.get(2).ok_or_else(|| err("missing module"))?;
+                let (module, nth) = match target.split_once('#') {
+                    Some((m, n)) => (m.to_string(), n.parse::<usize>().map_err(|_| err("bad #n"))?.max(1) - 1),
+                    None => (target.to_string(), 0),
+                };
+                // Input names may contain spaces: everything up to the value
+                let value_at = (3..words.len()).find(|&i| words[i].parse::<f64>().is_ok()).ok_or_else(|| err("missing value"))?;
+                let input = words[3..value_at].join(" ");
+                cues.push((t, Cue::Param { module, nth, input, value: num(value_at)? as f32, dur: opt(value_at + 1)? }));
+            }
+            "cursor" => cues.push((t, Cue::Cursor(words.get(2) != Some(&"off")))),
+            "move" => cues.push((t, Cue::Move { to: Pos2::new(num(2)? as f32, num(3)? as f32), dur: opt(4)? })),
+            "press" => cues.push((t, Cue::Button(true))),
+            "release" => cues.push((t, Cue::Button(false))),
+            "drag" => {
+                let dur = num(4)?;
+                cues.push((t, Cue::Button(true)));
+                cues.push((t + 0.05, Cue::Move { to: Pos2::new(num(2)? as f32, num(3)? as f32), dur }));
+                cues.push((t + 0.1 + dur, Cue::Button(false)));
+            }
+            "view" => cues.push((t, Cue::View { pan: Vec2::new(num(2)? as f32, num(3)? as f32), dur: opt(4)? })),
+            "zoom" => cues.push((t, Cue::Zoom { factor: num(2)? as f32, dur: opt(3)? })),
+            "camera" => cues.push((t, Cue::Camera {
+                offset: Vec2::new(num(2)? as f32, num(3)? as f32),
+                scale: num(4)? as f32,
+                dur: opt(5)?,
+            })),
+            "still" => cues.push((t, Cue::Still(words.get(2).ok_or_else(|| err("missing name"))?.to_string()))),
+            "end" => cues.push((t, Cue::End)),
+            _ => return Err(err("unknown cue")),
+        }
+    }
+    // Stable: cues at the same time keep their script order
+    cues.sort_by(|a, b| a.0.total_cmp(&b.0));
+    if !cues.iter().any(|(_, c)| matches!(c, Cue::End)) {
+        return Err("script has no `end` cue".into());
+    }
+    Ok(cues)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn script_expands_lengths_and_sorts() {
+        let cues = parse_script("1.0 key Z 0.5\n0.5 chord 60,64 90 1\n0.0 play\n3 param filter.svf#2 Cut Off 800 1\n4 end").unwrap();
+        let times: Vec<f64> = cues.iter().map(|c| c.0).collect();
+        assert_eq!(times, vec![0.0, 0.5, 0.5, 1.0, 1.5, 1.5, 1.5, 3.0, 4.0]);
+        match &cues[7].1 {
+            Cue::Param { module, nth, input, value, dur } => {
+                assert_eq!((module.as_str(), *nth, input.as_str(), *value, *dur), ("filter.svf", 1, "Cut Off", 800.0, 1.0));
+            }
+            other => panic!("expected a param cue, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn script_needs_an_end() {
+        assert!(parse_script("0 play").is_err());
+        assert!(parse_script("0 bogus\n1 end").is_err());
+    }
+
+    #[test]
+    fn glide_eases_to_its_target() {
+        let g = Glide { from: Vec2::ZERO, to: Vec2::new(10.0, 0.0), start: 1.0, dur: 2.0 };
+        assert_eq!(g.at(0.0), Vec2::ZERO);
+        assert_eq!(g.at(2.0), Vec2::new(5.0, 0.0));
+        assert_eq!(g.at(5.0), Vec2::new(10.0, 0.0));
+        assert!(g.done(3.0) && !g.done(2.9));
+    }
+}

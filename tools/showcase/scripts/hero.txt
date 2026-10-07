@@ -1,0 +1,12 @@
+-3.0000 play
+-3.0000 zoom 0.9 0.05
+-3.0000 view 0 -45 0.05
+0.5000 still clock-and-sequencer
+6.5000 camera -1075 0 1 21.5
+17.0000 still oscillators-and-filter
+27.6000 still delay-and-reverb
+28.0000 camera -268 -10 0.5 5
+33.0000 camera -268 -10 0.53 7
+34.0000 still whole-patch
+40.0000 camera 0 0 1 4.5
+46.5000 end

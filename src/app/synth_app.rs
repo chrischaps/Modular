@@ -25,6 +25,7 @@ use crate::persistence::{
     EXAMPLES,
 };
 use crate::widgets::{cpu_meter, CpuMeterConfig};
+use super::capture::{Capture, CaptureAction, CaptureConfig};
 use super::editing;
 use super::engine_sync;
 use super::palette::{PaletteAction, QuickAdd};
@@ -174,6 +175,8 @@ pub struct SynthApp {
     allow_close: bool,
     /// The window title last sent, so it's only sent when it changes.
     window_title: String,
+    /// Filming the app with `--capture`: the script, clock and outputs.
+    capture: Option<Capture>,
 }
 
 /// What a module's right-click menu asked for, handled once the graph is drawn.
@@ -289,12 +292,74 @@ impl SynthApp {
             saved_midi_mappings: Vec::new(),
             allow_close: false,
             window_title: String::new(),
+            capture: None,
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
         let _ = enable_test_tone;
 
         app
+    }
+
+    /// Hands the audio engine's clock to a capture: from here on audio is
+    /// rendered one video frame at a time, in step with the picture.
+    pub fn start_capture(&mut self, config: CaptureConfig) -> Result<(), String> {
+        let engine = self.audio_engine.as_mut().map_err(|e| e.to_string())?;
+        engine.go_offline(config.sample_rate as f32).map_err(|e| e.to_string())?;
+        self.capture = Some(Capture::start(config)?);
+        Ok(())
+    }
+
+    /// Runs the capture's cues for a new frame, then renders the audio the
+    /// frame covers, so this frame's picture shows what it sounds like.
+    fn step_capture(&mut self) {
+        let Some(capture) = self.capture.as_mut() else { return };
+        if !capture.is_fresh() {
+            return;
+        }
+        let mut actions = capture.take_actions();
+        let graph = &self.graph_state.graph;
+        actions.extend(capture.param_values(|module, nth, input| {
+            find_input(graph, module, nth, input).map(|id| graph.get_input(id).value.actual_value())
+        }));
+
+        let mut midi = Vec::new();
+        for action in actions {
+            match action {
+                CaptureAction::Play(on) => {
+                    if on != self.is_playing {
+                        self.is_playing = on;
+                        self.user_state.is_playing = on;
+                        self.send_command(EngineCommand::SetPlaying(on));
+                    }
+                }
+                CaptureAction::Midi { event, offset } => {
+                    // The UI's copy lights the pianos; the audio's copy is
+                    // placed by sample below instead
+                    if let Some(engine) = self.midi_engine.as_ref() {
+                        engine.send(event);
+                    }
+                    midi.extend(event.to_dsp(offset));
+                }
+                CaptureAction::SetParam { module, nth, input, value } => {
+                    match find_input(&self.graph_state.graph, &module, nth, &input) {
+                        Some(id) => self.graph_state.graph.inputs[id].value.set_actual_value(value),
+                        None => eprintln!("capture: no input {} on {} #{}", input, module, nth + 1),
+                    }
+                }
+            }
+        }
+
+        // Ship the frame's edits before rendering it
+        self.sync_parameters();
+        if let Some(handle) = self.ui_handle.as_mut() {
+            handle.flush();
+        }
+        midi.sort_by_key(|e| e.sample_offset);
+        let (Ok(engine), Some(capture)) = (self.audio_engine.as_ref(), self.capture.as_mut()) else { return };
+        let buffer = capture.audio_buffer();
+        engine.render_offline(buffer, 2, &mut midi);
+        capture.commit_audio();
     }
 
     /// Refresh the list of available audio devices
@@ -921,6 +986,16 @@ impl SynthApp {
 
                 // Draw the node graph editor
                 let (zoom_before, pan_before) = (self.graph_state.pan_zoom.zoom, self.graph_state.pan_zoom.pan);
+                // A capture script moves the view like a camera
+                if let Some(capture) = self.capture.as_mut() {
+                    let zoom = capture.take_zoom();
+                    if zoom != 1.0 {
+                        self.graph_state.zoom(ui, zoom);
+                    }
+                    if let Some(pan) = capture.take_pan(self.graph_state.pan_zoom.pan) {
+                        self.graph_state.pan_zoom.pan = pan;
+                    }
+                }
                 let graph_response = self.graph_state.draw_graph_editor(
                     ui,
                     AllNodeTemplates,
@@ -2267,6 +2342,13 @@ impl SynthApp {
     }
 }
 
+/// The `nth` module of a kind (by registry id, in graph order) and its input
+/// named `input`, for capture scripts.
+fn find_input(graph: &crate::graph::SynthGraph, module: &str, nth: usize, input: &str) -> Option<egui_node_graph2::InputId> {
+    let node = graph.nodes.values().filter(|n| n.user_data.module_id == module).nth(nth)?;
+    node.inputs.iter().find(|(name, _)| name.eq_ignore_ascii_case(input)).map(|(_, id)| *id)
+}
+
 /// Tooltip for the Undo and Redo buttons, e.g. "Undo Move Oscillator (Ctrl+Z)".
 fn history_hint(verb: &str, label: Option<&str>, shortcut: &str) -> String {
     match label {
@@ -2303,6 +2385,9 @@ impl eframe::App for SynthApp {
             theme::apply_theme(ctx);
             self.theme_applied = true;
         }
+
+        // A capture renders this frame's audio before anything is drawn
+        self.step_capture();
 
         // Process events from the audio engine
         self.process_engine_events();
@@ -2516,11 +2601,32 @@ impl eframe::App for SynthApp {
             // Request one more repaint to clear the message
             ctx.request_repaint_after(std::time::Duration::from_secs(2));
         }
+
+        if let Some(capture) = self.capture.as_mut() {
+            capture.draw_cursor(ctx);
+            capture.end_frame(ctx);
+            if capture.finish() {
+                self.allow_close = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+
+    /// While capturing, the script replaces the mouse and keyboard, and the
+    /// clock moves one frame per pass.
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        if let Some(capture) = self.capture.as_mut() {
+            capture.prepare_input(ctx, raw_input);
+        }
     }
 
     /// Stores recent files, and the patch while it has unsaved changes, so
     /// a crash loses at most [`session::AUTOSAVE_INTERVAL`] of work.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        // A capture's edits are the script's, not work to keep
+        if self.capture.is_some() {
+            return;
+        }
         self.recent_files.store(storage);
         storage.set_string(FLOW_GLYPH_KEY, self.user_state.flow_glyph.name().to_string());
         let autosave = if let Some(recovery) = &self.recovery {
