@@ -78,19 +78,26 @@ mod tests {
 
     #[test]
     fn every_port_and_parameter_has_a_tooltip() {
+        // Placeholder text that must never reach a tooltip. `Hint::show` prints
+        // the description verbatim, so a stub like "None" would ship as-is.
+        const PLACEHOLDERS: [&str; 4] = ["none", "todo", "tbd", "n/a"];
+        let is_placeholder = |description: &str| {
+            let description = description.trim().to_ascii_lowercase();
+            description.is_empty() || PLACEHOLDERS.contains(&description.as_str())
+        };
         let mut missing = Vec::new();
         for spec in modules() {
             for port in &spec.ports {
-                if port.description.is_empty() {
+                if is_placeholder(port.description) {
                     missing.push(format!("{} port {:?}", spec.info.id, port.name));
                 }
             }
             for param in &spec.parameters {
-                if param.description.is_empty() {
+                if is_placeholder(param.description) {
                     missing.push(format!("{} parameter {:?}", spec.info.id, param.name));
                 }
             }
         }
-        assert!(missing.is_empty(), "No description:\n{}", missing.join("\n"));
+        assert!(missing.is_empty(), "Missing or placeholder description:\n{}", missing.join("\n"));
     }
 }
