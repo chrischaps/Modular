@@ -1,6 +1,6 @@
 [package]
 name = "modular_synth"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A node-based modular audio synthesizer"
 authors = ["Chris"]

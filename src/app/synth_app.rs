@@ -2111,7 +2111,7 @@ impl SynthApp {
                         .color(theme::text::DISABLED)
                         .small());
                 }
-                ui.label(RichText::new("Modular Synth v0.1")
+                ui.label(RichText::new(concat!("Modular Synth v", env!("CARGO_PKG_VERSION")))
                     .color(theme::text::DISABLED)
                     .small());
             });
