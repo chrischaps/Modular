@@ -7,6 +7,7 @@ use crate::dsp::{MeterLevels, OutputLevels, SignalBuffer, MAX_CHANNELS};
 use crate::modules::oscilloscope::SCOPE_BUFFER_SIZE;
 
 use super::graph_plan::GraphPlan;
+use super::recorder::RecordTap;
 
 /// Unique identifier for a node in the audio graph.
 /// Maps to the node ID from egui_node_graph2.
@@ -135,6 +136,11 @@ pub enum AudioMessage {
     SetBypass { node_id: NodeId, bypassed: bool },
     /// Start or stop audio processing.
     SetPlaying(bool),
+    /// Start copying the output into a recording's ring. A tap already
+    /// running is handed back first.
+    StartRecording(RecordTap),
+    /// Hand the recording's tap back to the UI, which ends the recording.
+    StopRecording,
 }
 
 /// One oscilloscope capture, sent from the audio thread by value so that

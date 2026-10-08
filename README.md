@@ -26,6 +26,7 @@ It doesn't imitate hardware panels. Every module is a node with jacks on its sid
 
 - **Visual feedback.** Waveform, envelope and filter-response displays sit on their modules, LEDs light on active outputs, and the scope shows what's actually there. Hover any jack or knob to see what it does.
 - **Fast editing.** Space opens a fuzzy quick-add palette at the cursor. Undo and redo cover every edit. Copy, paste and duplicate work across windows, because the clipboard holds patch JSON.
+- **Record what you hear.** **● Rec** (`Ctrl+R`) writes the output to a WAV, sample for sample, while you play and tweak. It never gets in the audio's way, and every take is saved with the patch that made it.
 - **MIDI.** Play from any MIDI controller, map any knob to a CC with MIDI Learn, or play the computer keyboard.
 - **Your work is safe.** Modular asks before New, Open or Quit would lose unsaved changes. A patch with unsaved changes is autosaved every 30 seconds and offered back after a crash. Recently opened patches are a menu away.
 - **Real-time-safe engine.** The audio thread never allocates or locks. The UI sends it commands over lock-free ring buffers, and CI runs a test that fails if it ever allocates.
@@ -60,6 +61,7 @@ cargo run --release --bin render -- patches/lush-pad.json out.wav --audition  # 
 | `Delete` | Delete the selected modules |
 | `Ctrl+B` | Bypass the selected effects |
 | `Ctrl+N`, `Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S` | New, open, save, save as |
+| `Ctrl+R` | Record, or stop recording |
 
 ## How it's built
 

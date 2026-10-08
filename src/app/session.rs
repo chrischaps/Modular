@@ -45,6 +45,15 @@ impl Discard {
             _ => "Don't Save",
         }
     }
+
+    /// What the prompt's button says when there's nothing to save, only a
+    /// recording to stop.
+    fn go_ahead(&self) -> &'static str {
+        match self {
+            Self::Quit => "Stop and Quit",
+            _ => "Stop Recording",
+        }
+    }
 }
 
 /// What the unsaved-changes prompt was answered with.
@@ -156,27 +165,56 @@ fn ago(seconds: u64) -> String {
 
 /// Asks whether to save `patch_name`'s changes before `action`. Returns the
 /// answer on the frame it's given; Escape or a click outside is Cancel.
-pub fn unsaved_changes_prompt(ctx: &egui::Context, patch_name: &str, action: &Discard) -> Option<Answer> {
+///
+/// `recording` is the length of a take in progress that `action` will stop
+/// (quitting does), so the prompt says so. With a take running and nothing
+/// unsaved, it only asks whether to stop the take and go ahead: Discard.
+pub fn unsaved_changes_prompt(
+    ctx: &egui::Context,
+    patch_name: &str,
+    action: &Discard,
+    unsaved: bool,
+    recording: Option<&str>,
+) -> Option<Answer> {
     let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
     let response = prompt(ctx, "unsaved_changes", |ui| {
-        ui.label(RichText::new(format!("Save changes to “{patch_name}”?")).size(17.0).color(theme::text::PRIMARY));
+        let title = if unsaved {
+            format!("Save changes to “{patch_name}”?")
+        } else {
+            "Stop recording?".to_string()
+        };
+        ui.label(RichText::new(title).size(17.0).color(theme::text::PRIMARY));
         ui.add_space(4.0);
-        ui.label(RichText::new("Your changes will be lost if you don't save them.").color(theme::text::SECONDARY));
+        if unsaved {
+            ui.label(RichText::new("Your changes will be lost if you don't save them.").color(theme::text::SECONDARY));
+        }
+        if let Some(length) = recording {
+            ui.label(
+                RichText::new(format!("● A recording is running ({length}). It will be stopped and saved."))
+                    .color(theme::accent::ERROR),
+            );
+        }
         ui.add_space(14.0);
 
         let mut answer = None;
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if ui.add(primary_button("Save")).clicked() || enter {
-                answer = Some(Answer::Save);
+            if unsaved {
+                if ui.add(primary_button("Save")).clicked() || enter {
+                    answer = Some(Answer::Save);
+                }
+            } else if ui.add(primary_button(action.go_ahead())).clicked() || enter {
+                answer = Some(Answer::Discard);
             }
             if ui.button("Cancel").clicked() {
                 answer = Some(Answer::Cancel);
             }
-            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                if ui.button(RichText::new(action.verb()).color(theme::accent::ERROR)).clicked() {
-                    answer = Some(Answer::Discard);
-                }
-            });
+            if unsaved {
+                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                    if ui.button(RichText::new(action.verb()).color(theme::accent::ERROR)).clicked() {
+                        answer = Some(Answer::Discard);
+                    }
+                });
+            }
         });
         answer
     });

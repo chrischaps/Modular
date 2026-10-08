@@ -11,7 +11,7 @@ use eframe::egui::{self, RichText, Layout, Align};
 use egui_node_graph2::{FlowGlyph, GraphEditorState, NodeResponse, NodeTemplateTrait, InputParamKind};
 
 use crate::engine::{
-    AudioEngine, AudioError, AudioProcessor, DeviceInfo, EngineChannels, EngineCommand, UiHandle,
+    AudioEngine, AudioError, AudioProcessor, DeviceInfo, EngineChannels, EngineCommand, Recording, UiHandle,
     MidiDeviceInfo, MidiEngine, MidiEvent, MidiReceivers, TimestampedMidiEvent,
 };
 use rtrb::Consumer;
@@ -29,6 +29,7 @@ use super::capture::{Capture, CaptureAction, CaptureConfig};
 use super::editing;
 use super::engine_sync;
 use super::palette::{PaletteAction, QuickAdd};
+use super::recording::{self, RecState, Toast, ToastAction};
 use super::session::{self, Answer, Autosave, Discard, RecentFiles};
 use super::theme;
 use super::undo::{Applied, History};
@@ -49,6 +50,10 @@ const FLOW_GLYPH_KEY: &str = "cable_flow_glyph";
 
 /// Storage key for how knobs are drawn (Knobs menu)
 const KNOB_STYLE_KEY: &str = "knob_style";
+
+/// How long a stopped recording waits for the audio thread to hand its tap
+/// back before the file is finished without it (the device has gone quiet).
+const RECORDING_PATIENCE: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Target parameter for MIDI Learn mode.
 ///
@@ -189,6 +194,14 @@ pub struct SynthApp {
     window_title: String,
     /// Filming the app with `--capture`: the script, clock and outputs.
     capture: Option<Capture>,
+
+    // --- Recording ---
+    /// The take being recorded, or being finished after Stop.
+    recording: Option<Recording>,
+    /// Where takes are written, if not the default Music/Modular.
+    recordings_folder: Option<PathBuf>,
+    /// The note about the last finished take.
+    record_toast: Option<Toast>,
 }
 
 /// What a module's right-click menu asked for, handled once the graph is drawn.
@@ -306,6 +319,9 @@ impl SynthApp {
             allow_close: false,
             window_title: String::new(),
             capture: None,
+            recording: None,
+            recordings_folder: None,
+            record_toast: None,
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -622,6 +638,14 @@ impl SynthApp {
 
     /// Select an audio output device by index
     fn select_device(&mut self, index: usize) {
+        // A take has one rate and channel count, so it ends before the switch.
+        // Stopping the stream hands its tap back, so it finishes cleanly
+        if self.is_recording() {
+            self.stop_recording();
+            if let Some(handle) = self.ui_handle.as_mut() {
+                handle.flush();
+            }
+        }
         if let Ok(ref mut engine) = self.audio_engine {
             match engine.select_device(index) {
                 Ok(()) => {
@@ -643,6 +667,135 @@ impl SynthApp {
     fn toggle_test_tone(&mut self) {
         // Test tone is disabled when using AudioProcessor
         // This function is kept for potential future debug use
+    }
+
+    /// Whether a take is being recorded (not counting one being finished).
+    fn is_recording(&self) -> bool {
+        self.recording.as_ref().is_some_and(|r| !r.is_stopping())
+    }
+
+    /// The folder takes are written to.
+    fn recordings_folder(&self) -> PathBuf {
+        self.recordings_folder.clone().unwrap_or_else(recording::default_folder)
+    }
+
+    /// Starts or stops recording.
+    fn toggle_recording(&mut self) {
+        if self.is_recording() {
+            self.stop_recording();
+        } else {
+            self.start_recording();
+        }
+    }
+
+    /// Starts a take: a WAV named after the patch, with the patch saved
+    /// beside it, recording what the device plays from the next callback.
+    /// Starts the transport too, if it's stopped.
+    fn start_recording(&mut self) {
+        if self.recording.is_some() {
+            return;
+        }
+        let (Ok(engine), Some(_)) = (&self.audio_engine, &self.ui_handle) else {
+            self.status_message = Some("Can't record: no audio output".to_string());
+            return;
+        };
+        // While filming, the capture renders stereo at its own rate, and the
+        // take goes with its other outputs
+        let (sample_rate, channels, folder) = match &self.capture {
+            Some(capture) => (capture.config().sample_rate, 2, capture.config().out_dir.clone()),
+            None => (engine.sample_rate(), engine.channels(), self.recordings_folder()),
+        };
+
+        if let Err(e) = std::fs::create_dir_all(&folder) {
+            self.status_message = Some(format!("Can't record to {}: {}", folder.display(), e));
+            return;
+        }
+        let path = recording::take_path(&folder, &self.patch_title(), chrono::Local::now());
+        let (take, tap) = match Recording::start(&path, sample_rate, channels) {
+            Ok(started) => started,
+            Err(e) => {
+                self.status_message = Some(format!("Can't record: {}", e));
+                return;
+            }
+        };
+        // Saved now, so even a crash mid-take leaves the patch with the audio
+        self.save_take_patch(&path);
+        if let Some(handle) = self.ui_handle.as_mut() {
+            handle.start_recording(tap);
+        }
+        self.recording = Some(take);
+        if !self.is_playing {
+            self.set_playing(true);
+        }
+    }
+
+    /// Ends the take. The file is finished once the audio thread hands the
+    /// tap back, a frame or so later; then the note pops up.
+    fn stop_recording(&mut self) {
+        let Some(take) = self.recording.as_mut().filter(|r| !r.is_stopping()) else { return };
+        take.mark_stopping();
+        let path = take.path().to_path_buf();
+        if let Some(handle) = self.ui_handle.as_mut() {
+            handle.stop_recording();
+        }
+        // Saved again as the take ended, with ridden knobs where they were left
+        self.save_take_patch(&path);
+    }
+
+    /// Saves the patch beside a take, as `<take>.json`.
+    fn save_take_patch(&mut self, wav: &Path) {
+        let patch = self.create_patch(&self.patch_title());
+        if let Err(e) = save_to_file(&patch, &wav.with_extension("json")) {
+            eprintln!("Couldn't save the patch beside {}: {}", wav.display(), e);
+        }
+    }
+
+    /// Once a stopped take's file is finished, puts up the note about it.
+    fn poll_recording(&mut self, ctx: &egui::Context) {
+        let Some(take) = self.recording.as_ref() else { return };
+        if !take.is_stopping() {
+            return;
+        }
+        if !take.poll_finished(RECORDING_PATIENCE) {
+            ctx.request_repaint_after(std::time::Duration::from_millis(20));
+            return;
+        }
+        let take = self.recording.take().expect("checked above");
+        let summary = take.finish(RECORDING_PATIENCE);
+        let patch = summary.path.with_extension("json");
+        self.record_toast = Some(Toast {
+            patch: patch.exists().then_some(patch),
+            summary,
+            shown_at: ctx.input(|i| i.time),
+        });
+    }
+
+    /// Stops and finishes the take right now, waiting for the file to be
+    /// written: for quitting.
+    fn finish_recording_now(&mut self) {
+        self.stop_recording();
+        let Some(take) = self.recording.take() else { return };
+        // Give the audio thread a moment to hand the tap back, dropping it
+        // here as soon as it does
+        let deadline = Instant::now() + RECORDING_PATIENCE;
+        while !take.poll_finished(RECORDING_PATIENCE) && Instant::now() < deadline {
+            if let Some(handle) = self.ui_handle.as_mut() {
+                handle.flush();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let summary = take.finish(RECORDING_PATIENCE);
+        eprintln!("Recording saved: {}", summary.path.display());
+    }
+
+    /// Plays or stops the transport. Stopping also ends a take.
+    fn set_playing(&mut self, playing: bool) {
+        self.is_playing = playing;
+        self.user_state.is_playing = playing;
+        self.send_command(EngineCommand::SetPlaying(playing));
+        if !playing {
+            self.stop_recording();
+        }
     }
 
     /// The recently opened patches, as menu items.
@@ -727,6 +880,42 @@ impl SynthApp {
             if ui.button(RichText::new(play_text).color(play_color)).clicked() {
                 actions.toggle_playing = true;
             }
+
+            // Record what you hear: the button breathes while a take runs
+            let rec_state = match &self.recording {
+                None => RecState::Idle,
+                Some(take) if take.is_stopping() => RecState::Finishing,
+                Some(take) => RecState::Recording(take.elapsed()),
+            };
+            let folder = self.recordings_folder();
+            let hint = match rec_state {
+                RecState::Recording(_) => "Stop recording and save the take (Ctrl+R)".to_string(),
+                _ => format!(
+                    "Record what you hear to a WAV in {} (Ctrl+R)\nRight-click to choose the folder",
+                    recording::short_path(&folder)
+                ),
+            };
+            let rec = recording::rec_button(ui, &rec_state).on_hover_text(hint);
+            if rec.clicked() {
+                actions.toggle_recording = true;
+            }
+            rec.context_menu(|ui| {
+                ui.label(RichText::new("Recordings folder").color(theme::text::SECONDARY));
+                ui.label(recording::short_path(&folder));
+                ui.separator();
+                if ui.button("📂 Open Folder").clicked() {
+                    actions.open_recordings = true;
+                    ui.close_menu();
+                }
+                if ui.button("Change…").clicked() {
+                    actions.choose_recordings_folder = true;
+                    ui.close_menu();
+                }
+                if ui.add_enabled(self.recordings_folder.is_some(), egui::Button::new("Use Music/Modular")).clicked() {
+                    actions.reset_recordings_folder = true;
+                    ui.close_menu();
+                }
+            });
 
             group_break(ui);
 
@@ -1948,7 +2137,9 @@ impl SynthApp {
     /// Does `action` now if nothing would be lost, or asks first.
     fn request(&mut self, ctx: &egui::Context, action: Discard) {
         self.sync_history();
-        if self.has_unsaved_changes() {
+        // Quitting stops a take, so that asks too
+        let stops_take = matches!(action, Discard::Quit) && self.is_recording();
+        if self.has_unsaved_changes() || stops_take {
             self.pending_discard = Some(action);
         } else {
             self.perform(ctx, action);
@@ -1964,6 +2155,7 @@ impl SynthApp {
             Discard::OpenFile(path) => self.open_file(&path),
             Discard::OpenExample(example) => self.open_example(example),
             Discard::Quit => {
+                self.finish_recording_now();
                 self.allow_close = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
@@ -1973,7 +2165,12 @@ impl SynthApp {
     /// Shows whichever prompt is waiting, and acts on its answer.
     fn show_prompts(&mut self, ctx: &egui::Context) {
         if let Some(action) = self.pending_discard.clone() {
-            if let Some(answer) = session::unsaved_changes_prompt(ctx, &self.patch_title(), &action) {
+            let unsaved = self.has_unsaved_changes();
+            let take = match (&action, &self.recording) {
+                (Discard::Quit, Some(take)) if !take.is_stopping() => Some(recording::clock(take.elapsed())),
+                _ => None,
+            };
+            if let Some(answer) = session::unsaved_changes_prompt(ctx, &self.patch_title(), &action, unsaved, take.as_deref()) {
                 self.pending_discard = None;
                 match answer {
                     // A cancelled save dialog cancels the whole thing
@@ -2029,6 +2226,10 @@ impl SynthApp {
                 .find(|g| g.name() == glyph)
                 .unwrap_or_default();
         }
+        self.recordings_folder = storage
+            .and_then(|s| s.get_string(recording::FOLDER_KEY))
+            .filter(|folder| !folder.is_empty())
+            .map(PathBuf::from);
         if let Some(style) = storage.and_then(|s| s.get_string(KNOB_STYLE_KEY)) {
             self.user_state.knob_style = KnobStyle::ALL
                 .into_iter()
@@ -2491,6 +2692,10 @@ enum AudioStatus {
 #[derive(Default)]
 struct ToolbarActions {
     toggle_playing: bool,
+    toggle_recording: bool,
+    open_recordings: bool,
+    choose_recordings_folder: bool,
+    reset_recordings_folder: bool,
     select_device: Option<usize>,
     refresh_devices: bool,
     save_patch: bool,
@@ -2553,6 +2758,7 @@ impl eframe::App for SynthApp {
         let mut keyboard_save_as = false;
         let mut keyboard_load = false;
         let mut keyboard_bypass = false;
+        let mut keyboard_record = false;
 
         // Closing the window with unsaved changes asks first
         if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close {
@@ -2602,6 +2808,10 @@ impl eframe::App for SynthApp {
             if i.modifiers.ctrl && i.key_pressed(egui::Key::B) {
                 keyboard_bypass = true;
             }
+            // Ctrl+R: Record, or stop recording
+            if i.modifiers.ctrl && i.key_pressed(egui::Key::R) {
+                keyboard_record = true;
+            }
         });
 
         if keyboard_bypass {
@@ -2649,9 +2859,25 @@ impl eframe::App for SynthApp {
 
         // Handle deferred actions (to avoid borrow checker issues)
         if toolbar_actions.toggle_playing {
-            self.is_playing = !self.is_playing;
-            self.user_state.is_playing = self.is_playing;
-            self.send_command(EngineCommand::SetPlaying(self.is_playing));
+            self.set_playing(!self.is_playing);
+        }
+        if toolbar_actions.toggle_recording || keyboard_record {
+            self.toggle_recording();
+        }
+        if toolbar_actions.open_recordings {
+            let folder = self.recordings_folder();
+            if let Err(e) = std::fs::create_dir_all(&folder).and_then(|()| recording::open_folder(&folder)) {
+                self.status_message = Some(format!("Couldn't open {}: {}", folder.display(), e));
+            }
+        }
+        if toolbar_actions.choose_recordings_folder {
+            if let Some(folder) = rfd::FileDialog::new().set_directory(self.recordings_folder()).pick_folder() {
+                self.status_message = Some(format!("Recording to {}", folder.display()));
+                self.recordings_folder = Some(folder);
+            }
+        }
+        if toolbar_actions.reset_recordings_folder {
+            self.recordings_folder = None;
         }
         if toolbar_actions.refresh_devices {
             self.refresh_devices();
@@ -2702,6 +2928,20 @@ impl eframe::App for SynthApp {
 
         // Process pending MIDI events
         self.process_midi_events();
+
+        // A stopped take's note, once its file is finished
+        self.poll_recording(ctx);
+        if let Some(toast) = &self.record_toast {
+            match recording::show_toast(ctx, toast) {
+                Some(ToastAction::ShowInFolder) => {
+                    if let Err(e) = recording::reveal_in_folder(&toast.summary.path) {
+                        self.status_message = Some(format!("Couldn't open the folder: {}", e));
+                    }
+                }
+                Some(ToastAction::Dismiss) => self.record_toast = None,
+                None => {}
+            }
+        }
 
         // "Save changes?" and crash recovery, over everything else
         self.show_prompts(ctx);
@@ -2766,6 +3006,8 @@ impl eframe::App for SynthApp {
         self.recent_files.store(storage);
         storage.set_string(FLOW_GLYPH_KEY, self.user_state.flow_glyph.name().to_string());
         storage.set_string(KNOB_STYLE_KEY, self.user_state.knob_style.name().to_string());
+        let folder = self.recordings_folder.as_ref().map(|f| f.display().to_string()).unwrap_or_default();
+        storage.set_string(recording::FOLDER_KEY, folder);
         let autosave = if let Some(recovery) = &self.recovery {
             // Not answered yet: keep it for next time
             Some(recovery.clone())

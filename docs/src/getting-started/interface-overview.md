@@ -11,7 +11,7 @@ From left to right:
 
 | Group | Controls |
 |-------|----------|
-| **Transport** | **▶ Play** starts the patch; **⏹ Stop** stops it. The app opens stopped. |
+| **Transport** | **▶ Play** starts the patch; **⏹ Stop** stops it. The app opens stopped. **● Rec** records what you hear: see [Recording](#recording). |
 | **File** | **📄 New**, **📂 Open**, **🕘 Recent**, **📚 Examples**, **💾 Save**, **💾 Save As** |
 | **Edit** | **↩ Undo** and **↪ Redo**. Hover either to see which edit it will undo or redo. |
 | **〰 Cables** | How signal flow is drawn along cables: **Chevrons**, **Dots** or **Comets** |
@@ -169,6 +169,20 @@ The badge stops blinking and stays, and the knob now follows that control across
 
 To back out before moving a control, press `Escape`, or right-click the blinking knob and choose **Cancel MIDI Learn**. Choosing **Learn MIDI CC** on a different knob moves learn mode to that knob instead.
 
+## Recording
+
+When something good happens (a filter sweep you rode by hand, a lucky generative passage, an improvisation on a MIDI keyboard), press **● Rec** or `Ctrl + R` to keep it. If the patch is stopped, Rec starts it.
+
+While recording, the button turns red, with a slowly pulsing light and the length of the take so far. Press it again, press `Ctrl + R`, or press **⏹ Stop** to end the take. A note pops up in the corner with the take's name and length, and **📂 Show in folder** opens it in your file manager.
+
+- **What's recorded:** exactly what you hear, after the output limiter, sample for sample. It's a 32-bit float WAV at your audio device's sample rate and channel count.
+- **Where it goes:** `Music/Modular`, named after the patch and the minute you pressed Rec, such as `First Sound 2026-10-08 14-03.wav`. To use another folder, right-click **● Rec** and choose **Change…**; **Open Folder** opens it.
+- **The patch comes too.** Every take is saved with the patch beside it, as a `.json` with the same name, so you can always open the patch that made a recording. It's saved when the take ends, so knobs you rode during the take are saved where you left them.
+- **Edit freely.** Turning knobs, patching cables, even opening another patch: the recording keeps going through all of it.
+- Switching the **Output** device ends the take cleanly. Closing the window while recording asks first, and then saves the take.
+
+Recording runs alongside the audio, never in its way. If your disk ever falls more than two seconds behind, the missing audio is skipped rather than allowed to cause a glitch, and the note tells you how much was lost.
+
 ## Patches
 
 Patches are saved as `.json` files holding every module, setting, cable and MIDI mapping.
@@ -197,6 +211,8 @@ While a patch has unsaved changes, the window title starts with a dot (`● Lush
 - **Save** saves the patch (asking where, if it has never been saved), then carries on. Cancelling the save dialog cancels the whole thing.
 - **Don't Save** (**Quit Without Saving**, when closing) carries on and lets the changes go.
 - **Cancel**, or `Escape`, goes back to the patch.
+
+Closing the window while a [recording](#recording) is running asks too, even with nothing unsaved, and the prompt shows how long the take is. Quitting stops the take and saves it before the window closes.
 
 ### Autosave and recovery
 

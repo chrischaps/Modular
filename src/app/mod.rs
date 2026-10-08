@@ -6,6 +6,7 @@ pub mod capture;
 mod editing;
 mod engine_sync;
 mod palette;
+mod recording;
 mod session;
 pub mod synth_app;
 pub mod theme;

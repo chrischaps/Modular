@@ -6,6 +6,8 @@
 //! - **messages** (UI -> audio): compiled plans, parameter changes, play/stop
 //! - **retired plans** (audio -> UI): replaced plans, to be dropped off the
 //!   audio thread
+//! - **retired taps** (audio -> UI): recording taps the audio thread is done
+//!   with, for the same reason
 //! - **events** (audio -> UI): metering, monitor values, status
 //! - **scope frames** (audio -> UI): oscilloscope captures, by value
 //!
@@ -22,6 +24,7 @@ use super::audio_graph::AudioGraph;
 use super::audio_processor::create_module_registry;
 use super::commands::{AudioMessage, EngineCommand, EngineEvent, ScopeFrame};
 use super::graph_plan::GraphPlan;
+use super::recorder::RecordTap;
 
 /// Default buffer size for the message queue (UI -> Engine).
 pub const DEFAULT_COMMAND_BUFFER_SIZE: usize = 1024;
@@ -33,6 +36,10 @@ pub const DEFAULT_EVENT_BUFFER_SIZE: usize = 256;
 /// audio thread at once. This bounds the queue that returns retired plans,
 /// so the audio thread always has room to hand one back.
 pub const MAX_PLANS_IN_FLIGHT: usize = 4;
+
+/// Recording taps that can be on their way back at once. The UI starts a
+/// recording only once the last one's tap is back, so one would do.
+const RETIRED_TAP_BUFFER_SIZE: usize = 4;
 
 /// Oscilloscope captures that can wait for the UI.
 const SCOPE_FRAME_BUFFER_SIZE: usize = 8;
@@ -115,6 +122,7 @@ impl EngineChannels {
         let (retired_tx, retired_rx) = RingBuffer::new(MAX_PLANS_IN_FLIGHT);
         let (event_tx, event_rx) = RingBuffer::new(event_capacity);
         let (scope_tx, scope_rx) = RingBuffer::new(SCOPE_FRAME_BUFFER_SIZE);
+        let (retired_tap_tx, retired_tap_rx) = RingBuffer::new(RETIRED_TAP_BUFFER_SIZE);
 
         // Placeholder settings until an AudioProcessor reports the real ones
         let graph = AudioGraph::with_registry(44100.0, 256, create_module_registry());
@@ -126,11 +134,13 @@ impl EngineChannels {
                 graph,
                 message_tx,
                 retired_rx,
+                retired_tap_rx,
                 event_rx,
                 scope_rx,
                 config: Arc::clone(&config),
                 unsent_plan: None,
                 unsent_transport: UnsentTransport::default(),
+                unsent_recording: Vec::new(),
                 // The processor starts with an empty plan of its own, which
                 // it retires to us like any other
                 plans_in_flight: 1,
@@ -138,6 +148,7 @@ impl EngineChannels {
             engine: EngineHandle {
                 message_rx,
                 retired_tx,
+                retired_tap_tx,
                 event_tx,
                 scope_tx,
                 config,
@@ -167,6 +178,7 @@ pub struct UiHandle {
     graph: AudioGraph,
     message_tx: Producer<AudioMessage>,
     retired_rx: Consumer<Box<GraphPlan>>,
+    retired_tap_rx: Consumer<RecordTap>,
     event_rx: Consumer<EngineEvent>,
     scope_rx: Consumer<ScopeFrame>,
     config: Arc<AudioConfig>,
@@ -175,6 +187,8 @@ pub struct UiHandle {
     unsent_plan: Option<Box<GraphPlan>>,
     /// Play/stop changes that didn't fit in the queue yet.
     unsent_transport: UnsentTransport,
+    /// Recording starts and stops that didn't fit in the queue yet, in order.
+    unsent_recording: Vec<AudioMessage>,
     /// Plans sent (or held by the audio thread) and not yet returned.
     plans_in_flight: usize,
 }
@@ -216,6 +230,34 @@ impl UiHandle {
         }
     }
 
+    /// Hands a recording's tap to the audio thread, which starts copying its
+    /// output into it from the next callback. Never dropped: if the queue is
+    /// full it's delivered by a later [`flush`](Self::flush).
+    pub fn start_recording(&mut self, tap: RecordTap) {
+        self.unsent_recording.push(AudioMessage::StartRecording(tap));
+        self.send_recording();
+    }
+
+    /// Asks the audio thread to hand the recording's tap back, ending the
+    /// recording once a [`flush`](Self::flush) drops it.
+    pub fn stop_recording(&mut self) {
+        self.unsent_recording.push(AudioMessage::StopRecording);
+        self.send_recording();
+    }
+
+    /// Sends any recording starts and stops waiting for room in the queue.
+    /// Returns true if none are left waiting.
+    fn send_recording(&mut self) -> bool {
+        while !self.unsent_recording.is_empty() {
+            let message = self.unsent_recording.remove(0);
+            if let Err(PushError::Full(message)) = self.message_tx.push(message) {
+                self.unsent_recording.insert(0, message);
+                return false;
+            }
+        }
+        true
+    }
+
     /// Sends any play/stop changes that are waiting for room in the queue.
     /// Returns true if none are left waiting.
     fn send_transport(&mut self) -> bool {
@@ -240,11 +282,15 @@ impl UiHandle {
             drop(retired);
             self.plans_in_flight = self.plans_in_flight.saturating_sub(1);
         }
+        // Dropping a tap here is what tells its recording to finish
+        while let Ok(tap) = self.retired_tap_rx.pop() {
+            drop(tap);
+        }
 
         let (sample_rate, block_size) = self.config.load();
         self.graph.set_audio_config(sample_rate, block_size);
 
-        if !self.send_transport() {
+        if !self.send_recording() || !self.send_transport() {
             return false;
         }
 
@@ -307,6 +353,7 @@ impl UiHandle {
 pub struct EngineHandle {
     message_rx: Consumer<AudioMessage>,
     retired_tx: Producer<Box<GraphPlan>>,
+    retired_tap_tx: Producer<RecordTap>,
     event_tx: Producer<EngineEvent>,
     scope_tx: Producer<ScopeFrame>,
     config: Arc<AudioConfig>,
@@ -330,6 +377,18 @@ impl EngineHandle {
         if let Err(PushError::Full(plan)) = self.retired_tx.push(plan) {
             debug_assert!(false, "retired plan queue full");
             drop(plan);
+        }
+    }
+
+    /// Hands a recording tap back to the UI thread, so its ring is freed
+    /// there and its recording finishes.
+    ///
+    /// REAL-TIME SAFE: the UI has at most one tap out at a time. Should the
+    /// queue ever be full, the tap is dropped here rather than lost.
+    pub fn retire_tap(&mut self, tap: RecordTap) {
+        if let Err(PushError::Full(tap)) = self.retired_tap_tx.push(tap) {
+            debug_assert!(false, "retired tap queue full");
+            drop(tap);
         }
     }
 
@@ -404,6 +463,11 @@ mod tests {
                     seen.push("param");
                 }
                 AudioMessage::SetPlaying(playing) => seen.push(if playing { "play" } else { "stop" }),
+                AudioMessage::StartRecording(tap) => {
+                    engine.retire_tap(tap);
+                    seen.push("record");
+                }
+                AudioMessage::StopRecording => seen.push("stop recording"),
             }
         }
         seen

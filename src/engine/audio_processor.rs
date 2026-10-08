@@ -16,6 +16,7 @@ use super::commands::{AudioMessage, EngineEvent, ScopeFrame};
 use super::graph_plan::GraphPlan;
 use super::midi_engine::TimestampedMidiEvent;
 use super::midi_scheduler::{take_chunk, MidiScheduler};
+use super::recorder::RecordTap;
 
 /// Creates a module registry with all built-in modules.
 ///
@@ -80,6 +81,8 @@ pub struct AudioProcessor {
     frame_counter: u32,
     /// Running average of CPU load (0.0-100.0).
     cpu_load_avg: f32,
+    /// Where the finished output is copied while recording.
+    recorder: Option<RecordTap>,
 }
 
 impl AudioProcessor {
@@ -102,6 +105,7 @@ impl AudioProcessor {
             is_playing: false,
             frame_counter: 0,
             cpu_load_avg: 0.0,
+            recorder: None,
         }
     }
 
@@ -126,6 +130,7 @@ impl AudioProcessor {
     /// 2. Places the MIDI that arrived since the last callback in this buffer
     /// 3. If playing, runs the graph, in chunks of at most the plan's block size
     /// 4. Writes the output module's audio to the output buffer
+    /// 5. While recording, copies that buffer to the recording
     ///
     /// REAL-TIME SAFE: no allocation, locking or blocking.
     ///
@@ -151,12 +156,14 @@ impl AudioProcessor {
             self.midi.skip(start_time);
             // Reset CPU load when not playing
             self.cpu_load_avg = 0.0;
+            self.record(output, channels);
             return;
         }
 
         let num_frames = output.len() / channels;
         let midi = self.midi.collect(start_time, num_frames);
         Self::render(&mut self.plan, self.sample_rate, output, channels, midi);
+        self.record(output, channels);
 
         self.send_monitor_values();
         self.send_scope_captures();
@@ -192,10 +199,12 @@ impl AudioProcessor {
         self.midi.skip(Instant::now());
         output.fill(0.0);
         if !self.is_playing || channels == 0 {
+            self.record(output, channels);
             return;
         }
 
         Self::render(&mut self.plan, self.sample_rate, output, channels, midi);
+        self.record(output, channels);
 
         self.send_monitor_values();
         self.send_scope_captures();
@@ -214,6 +223,14 @@ impl AudioProcessor {
             let context = ProcessContext::new(sample_rate, frames).with_midi(chunk_midi);
             plan.process(&context);
             Self::write_output(plan, chunk, channels, frames);
+        }
+    }
+
+    /// Copies a finished buffer, exactly as the device gets it, to the
+    /// recording, if one is running.
+    fn record(&mut self, output: &[f32], channels: usize) {
+        if let Some(tap) = self.recorder.as_mut() {
+            tap.write(output, channels);
         }
     }
 
@@ -282,6 +299,16 @@ impl AudioProcessor {
                     };
                     self.engine_handle.send_event_lossy(event);
                 }
+                AudioMessage::StartRecording(tap) => {
+                    if let Some(old) = self.recorder.replace(tap) {
+                        self.engine_handle.retire_tap(old);
+                    }
+                }
+                AudioMessage::StopRecording => {
+                    if let Some(tap) = self.recorder.take() {
+                        self.engine_handle.retire_tap(tap);
+                    }
+                }
             }
         }
     }
@@ -306,6 +333,11 @@ impl AudioProcessor {
                 *ch = (l + r) * 0.5;
             }
         }
+    }
+
+    /// Whether the output is being copied to a recording.
+    pub fn is_recording(&self) -> bool {
+        self.recorder.is_some()
     }
 
     /// Returns whether audio processing is currently active.

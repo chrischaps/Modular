@@ -4,7 +4,8 @@
 //! plays a patch of more than 30 modules (every built-in module, some
 //! twice), through odd device buffer sizes, while the patch is edited and
 //! its Clock changes tempo under a tempo-synced Delay and its effects are
-//! bypassed and brought back, and live MIDI plays its MIDI Note modules.
+//! bypassed and brought back, live MIDI plays its MIDI Note modules, and
+//! the output is recorded (one take stopped and a new one started midway).
 //! Edits are compiled on the "UI" side (outside the counted region);
 //! installing them happens inside it.
 
@@ -13,7 +14,7 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use modular_synth::engine::{
-    create_module_registry, AudioProcessor, EngineChannels, EngineCommand, MidiEvent, NodeId,
+    create_module_registry, AudioProcessor, EngineChannels, EngineCommand, MidiEvent, NodeId, Recording,
     TimestampedMidiEvent, UiHandle,
 };
 
@@ -137,6 +138,12 @@ fn audio_callback_never_allocates() {
         ui.send_command(EngineCommand::SetParameter { node_id, param_index: 6, value: 2.0 });
     }
     ui.send_command(EngineCommand::SetPlaying(true));
+
+    // Record the whole run: the tap copies every callback into its ring
+    let takes = std::env::temp_dir().join("modular-realtime-alloc");
+    std::fs::create_dir_all(&takes).unwrap();
+    let (mut recording, tap) = Recording::start(&takes.join("take1.wav"), 48000, 2).unwrap();
+    ui.start_recording(tap);
     assert!(ui.flush());
 
     // Typical WASAPI/CoreAudio sizes, including ones larger than a block
@@ -147,6 +154,20 @@ fn audio_callback_never_allocates() {
 
     for round in 0..1000 {
         let frames = device_buffers[round % device_buffers.len()];
+
+        // Midway, end the take and start another: the old tap comes back to
+        // be dropped here, the new one goes in
+        if round == 500 {
+            ui.stop_recording();
+            let (next, tap) = Recording::start(&takes.join("take2.wav"), 48000, 2).unwrap();
+            ui.start_recording(tap);
+            let first = std::mem::replace(&mut recording, next);
+            ui.flush();
+            allocations += count_allocations(|| processor.process(&mut output[..frames * 2], 2));
+            ui.flush();
+            let summary = first.finish(std::time::Duration::from_secs(5));
+            assert!(summary.frames > 0 && summary.error.is_none());
+        }
 
         // Edit the patch while it plays: knob moves and tempo changes every
         // block, and a module swapped out every 50 blocks
@@ -195,6 +216,8 @@ fn audio_callback_never_allocates() {
     assert!(processor.is_playing());
     assert_eq!(processor.plan().len(), nodes.len());
     assert!(processor.plan().tempo_bpm().is_some(), "the Clock sets the patch tempo");
+    assert!(processor.is_recording());
+    assert!(recording.elapsed().as_secs_f32() > 1.0, "the second take heard half the run");
     assert!(output.iter().all(|s| s.is_finite()));
     assert_eq!(allocations, 0, "audio callback allocated {allocations} times over {blocks} callbacks");
 }

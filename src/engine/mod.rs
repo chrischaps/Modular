@@ -12,6 +12,7 @@ pub mod graph_plan;
 pub mod midi_engine;
 pub mod midi_scheduler;
 pub mod offline;
+pub mod recorder;
 
 pub use audio_engine::{AudioEngine, AudioError, DeviceInfo};
 pub use audio_graph::{AudioGraph, Connection};
@@ -22,6 +23,7 @@ pub use channels::{
 };
 pub use commands::{AudioMessage, ChannelPeaks, EngineCommand, EngineEvent, NodeId, PortIndex, ScopeFrame};
 pub use graph_plan::GraphPlan;
+pub use recorder::{RecordTap, Recording, RecordingSummary};
 pub use offline::{OfflineRenderer, StereoBuffer, AUDITION};
 pub use midi_engine::{
     MidiDeviceInfo, MidiEngine, MidiError, MidiEvent, MidiReceivers, TimestampedMidiEvent,
