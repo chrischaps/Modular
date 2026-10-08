@@ -73,14 +73,15 @@ To use it, build Modular with ASIO ([Build with ASIO](../../getting-started/inst
 
 **Buffer** sets how many frames the driver hands over at a time, and the closed Output menu shows it beside the driver's name:
 
-| Buffer | At 48 kHz | Round trip, about | |
-|--------|-----------|-------------------|---|
-| **64** | 1.3 ms | 5 ms | The quickest; needs a computer with headroom |
-| **128** | 2.7 ms | 8 ms | A good start for guitar and voice |
-| **256** | 5.3 ms | 13 ms | Busy patches with long reverbs |
-| **512** | 10.7 ms | 24 ms | Room to spare; too slow to play against |
+| Buffer | At 48 kHz | Round trip, measured | |
+|--------|-----------|----------------------|---|
+| **32** | 0.7 ms | 11 ms | The quickest; needs a computer with headroom |
+| **64** | 1.3 ms | 14 ms | Tight enough to play guitar against |
+| **128** | 2.7 ms | 20 ms | A good start: feels immediate for most playing |
+| **256** | 5.3 ms | 32 ms | Busy patches with long reverbs |
+| **512** | 10.7 ms | 52 ms | Room to spare; too slow to play against |
 
-The round trip is roughly one buffer in and one out, plus the interface's own converters and Modular's 1 ms limiter. If you hear crackles, or the CPU meter runs high, go up a size. Smaller buffers make Modular answer more often, with less time for each answer.
+Measured on a first-generation Scarlett 2i2 with Focusrite's driver. The round trip is more than one buffer in and one out: each driver keeps a safety margin of its own, Focusrite's about another buffer and a few milliseconds each way, and Modular's limiter adds 1 ms. The status bar's **In** shows yours. If you hear crackles, or the CPU meter runs high, go up a size. Smaller buffers make Modular answer more often, with less time for each answer.
 
 - ASIO drivers serve one app at a time. If another app (a DAW, say) has the interface, choosing ASIO says so and stays on Windows Audio.
 - Changing the buffer from the driver's own control panel restarts audio at the driver's new size, with a note in the status bar.

@@ -69,6 +69,7 @@ fn default_input_reaches_the_audio_input_module() {
     let mut readings = 0;
     let start = Instant::now();
     let seconds = std::env::var("LIVE_INPUT_SECONDS").ok().and_then(|s| s.parse().ok()).unwrap_or(3);
+    let mut reported_minute = 0;
     while start.elapsed() < Duration::from_secs(seconds) {
         ui.flush();
         for event in ui.drain_events() {
@@ -78,6 +79,18 @@ fn default_input_reaches_the_audio_input_module() {
             }
         }
         std::thread::sleep(Duration::from_millis(10));
+        // A long run reports as it goes
+        let minute = start.elapsed().as_secs() / 60;
+        if minute > reported_minute {
+            reported_minute = minute;
+            let trip = RoundTrip::of(&monitor, engine.output_latency(), engine.sample_rate());
+            println!(
+                "{minute} min: round trip {:.1} ms, dropouts {} frames, device glitches {}",
+                trip.total().as_secs_f64() * 1000.0,
+                monitor.underrun_frames() + monitor.overflow_frames(),
+                monitor.device_xruns() + engine.output_xruns(),
+            );
+        }
     }
 
     let rate = engine.sample_rate() as f64;
@@ -103,6 +116,7 @@ fn default_input_reaches_the_audio_input_module() {
     );
     assert!(!monitor.failed(), "the input stream reported an error");
     assert!(!engine.stream_failed(), "the output stream reported an error");
+    assert!(trip.total() < Duration::from_secs(1), "the round trip stays believable");
     if system == AudioSystem::Asio {
         assert_eq!(monitor.underrun_frames(), 0, "a shared clock never runs dry");
         assert_eq!(monitor.overflow_frames(), 0, "a shared clock never runs ahead");

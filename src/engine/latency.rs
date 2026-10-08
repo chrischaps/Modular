@@ -38,15 +38,19 @@ pub struct LatencyGauge {
 impl LatencyGauge {
     /// How much of each new reading the smoothed value takes in (1 / this).
     const SMOOTHING: i64 = 16;
+    /// No device takes this long. A reading past it is a timestamp gone
+    /// wrong (cpal's ASIO clock jumps ahead by days whenever a driver's
+    /// clock steps back a fraction of a millisecond), and is ignored.
+    pub const IMPLAUSIBLE: Duration = Duration::from_secs(1);
 
     /// Takes in one callback's delay: `later.duration_since(earlier)` of
-    /// its two timestamps, or `None` if they ran backwards. A zero or
-    /// missing reading leaves the gauge as it was.
+    /// its two timestamps, or `None` if they ran backwards. A zero,
+    /// missing or impossibly long reading leaves the gauge as it was.
     ///
     /// REAL-TIME SAFE: an atomic load and store.
     #[inline]
     pub fn record(&self, delay: Option<Duration>) {
-        let Some(delay) = delay.filter(|d| !d.is_zero()) else {
+        let Some(delay) = delay.filter(|d| !d.is_zero() && *d < Self::IMPLAUSIBLE) else {
             return;
         };
         let reading = (delay.as_micros() as u64).max(1);
@@ -173,6 +177,17 @@ mod tests {
 
         gauge.clear();
         assert_eq!(gauge.get(), None);
+    }
+
+    #[test]
+    fn test_gauge_ignores_impossible_readings() {
+        let gauge = LatencyGauge::default();
+        gauge.record(Some(Duration::from_secs(1_000_000)));
+        assert_eq!(gauge.get(), None, "a wild first reading isn't taken whole");
+        gauge.record(Some(ms(9)));
+        gauge.record(Some(Duration::from_secs(16_000_000_000)));
+        gauge.record(Some(LatencyGauge::IMPLAUSIBLE));
+        assert_eq!(gauge.get(), Some(ms(9)), "nor does one drag the average");
     }
 
     #[test]

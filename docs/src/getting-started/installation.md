@@ -55,7 +55,7 @@ The app opens on the **First Sound** example. Press **▶ Play**, then play the 
 
 ### Build with ASIO (Windows, optional)
 
-For playing a guitar or singing through Modular, Windows Audio's round trip of 60 ms or so is too slow to play against. An audio interface's **ASIO** driver talks to the hardware directly and gets it down to around 10 ms. ASIO support is a build option, off by default:
+For playing a guitar or singing through Modular, Windows Audio's round trip of 60 ms or so is too slow to play against. An audio interface's **ASIO** driver talks to the hardware directly and gets it down to 11–20 ms on a Scarlett 2i2. ASIO support is a build option, off by default:
 
 1. **Install your interface's ASIO driver** from its maker. For a Focusrite Scarlett, that's the Focusrite USB driver from [focusrite.com](https://focusrite.com/downloads). Restart, or unplug the interface and plug it back in, once it's installed: until then the driver may not find the interface.
 2. **Install LLVM**, which the build uses to read the ASIO headers:
