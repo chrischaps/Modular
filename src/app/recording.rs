@@ -156,6 +156,9 @@ pub fn show_toast(ctx: &egui::Context, toast: &Toast) -> Option<ToastAction> {
                         });
                     });
                     ui.label(RichText::new(name).color(theme::text::SECONDARY));
+                    if let Some(folder) = summary.path.parent() {
+                        ui.label(RichText::new(format!("in {}", short_path(folder))).small().color(theme::text::DISABLED));
+                    }
                     if toast.patch.is_some() {
                         ui.label(RichText::new("The patch is saved beside it.").small().color(theme::text::DISABLED));
                     }
@@ -212,9 +215,14 @@ pub fn reveal_in_folder(path: &Path) -> std::io::Result<()> {
     use std::process::Command;
     #[cfg(target_os = "windows")]
     {
-        let mut arg = std::ffi::OsString::from("/select,");
-        arg.push(path);
-        Command::new("explorer").arg(arg).spawn().map(drop)
+        // Explorer wants `/select,"C:\...\take.wav"`: quotes around the path
+        // only. `arg` would quote the whole thing (take names have spaces),
+        // which Explorer can't read, so it opens its default folder instead
+        // It also only finds paths written with backslashes
+        use std::os::windows::process::CommandExt;
+        let path = path.to_string_lossy().replace('/', "\\");
+        let arg = format!("/select,\"{path}\"");
+        Command::new("explorer").raw_arg(arg).spawn().map(drop)
     }
     #[cfg(target_os = "macos")]
     {
