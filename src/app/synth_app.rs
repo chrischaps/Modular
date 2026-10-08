@@ -2533,7 +2533,7 @@ impl SynthApp {
                         engine.channels()
                     )).color(theme::text::SECONDARY).small());
                     if let Some(monitor) = &self.input_monitor {
-                        let glitches = monitor.underrun_frames() + monitor.overflow_frames();
+                        let glitches = monitor.underrun_frames() + monitor.overflow_frames() + monitor.device_xruns();
                         let now = Instant::now();
                         if glitches != self.input_glitches.0 {
                             self.input_glitches = (glitches, now);
@@ -2559,13 +2559,18 @@ impl SynthApp {
                                 ),
                                 _ => String::new(),
                             };
+                            let device_glitches = match monitor.device_xruns() {
+                                0 => String::new(),
+                                n => format!("\nGlitches the input device reported: {n}"),
+                            };
                             format!(
-                                "Input: {}{}\n{}\nDropouts so far: {:.0} ms of silence, {:.0} ms skipped",
+                                "Input: {}{}\n{}\nDropouts so far: {:.0} ms of silence, {:.0} ms skipped{}",
                                 engine.input_name().unwrap_or("?"),
                                 converted,
                                 input_device::round_trip_details(&trip),
                                 monitor.underrun_frames() as f64 / rate * 1000.0,
                                 monitor.overflow_frames() as f64 / rate * 1000.0,
+                                device_glitches,
                             )
                         };
                         ui.label(RichText::new(text).color(color).small()).on_hover_text(details);

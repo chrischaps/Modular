@@ -4,7 +4,7 @@
 //! The audio callback runs in a separate thread and must be real-time safe.
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, FromSample, Host, SampleFormat, SampleRate, SizedSample, Stream, StreamConfig};
+use cpal::{Device, FromSample, Host, SampleFormat, SizedSample, Stream, StreamConfig};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -87,6 +87,8 @@ struct AudioState {
     callbacks: AtomicU64,
     /// Set by the stream's error callback (device unplugged, driver reset).
     stream_failed: AtomicBool,
+    /// Glitches the output device reported, which the stream recovers from.
+    xruns: AtomicU64,
     /// The output device's own delay, from callback to playback.
     output_latency: LatencyGauge,
 }
@@ -98,6 +100,7 @@ impl AudioState {
             phase_fixed: AtomicU32::new(0),
             callbacks: AtomicU64::new(0),
             stream_failed: AtomicBool::new(false),
+            xruns: AtomicU64::new(0),
             output_latency: LatencyGauge::default(),
         }
     }
@@ -130,10 +133,10 @@ impl AudioEngine {
             .default_output_config()
             .map_err(|e| AudioError::ConfigurationFailed(e.to_string()))?;
 
-        let sample_rate = supported_config.sample_rate().0;
+        let sample_rate = supported_config.sample_rate();
         let config = StreamConfig {
             channels: supported_config.channels(),
-            sample_rate: SampleRate(sample_rate),
+            sample_rate,
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -155,7 +158,7 @@ impl AudioEngine {
         let default_name = self
             .host
             .default_output_device()
-            .and_then(|d| d.name().ok());
+            .and_then(|d| device_name(&d));
 
         self.host
             .output_devices()
@@ -163,7 +166,7 @@ impl AudioEngine {
                 devices
                     .enumerate()
                     .filter_map(|(index, device)| {
-                        device.name().ok().map(|name| DeviceInfo {
+                        device_name(&device).map(|name| DeviceInfo {
                             is_default: Some(&name) == default_name.as_ref(),
                             name,
                             index,
@@ -176,7 +179,7 @@ impl AudioEngine {
 
     /// Get the name of the currently selected device.
     pub fn current_device_name(&self) -> String {
-        self.device.name().unwrap_or_else(|_| "Unknown".to_string())
+        device_name(&self.device).unwrap_or_else(|| "Unknown".to_string())
     }
 
     /// Select a different output device by index.
@@ -204,10 +207,10 @@ impl AudioEngine {
             .default_output_config()
             .map_err(|e| AudioError::ConfigurationFailed(e.to_string()))?;
 
-        let sample_rate = supported_config.sample_rate().0;
+        let sample_rate = supported_config.sample_rate();
         let config = StreamConfig {
             channels: supported_config.channels(),
-            sample_rate: SampleRate(sample_rate),
+            sample_rate,
             buffer_size: cpal::BufferSize::Default,
         };
 
@@ -233,14 +236,14 @@ impl AudioEngine {
 
     /// Get information about all available input devices.
     pub fn enumerate_input_devices(&self) -> Vec<DeviceInfo> {
-        let default_name = self.host.default_input_device().and_then(|d| d.name().ok());
+        let default_name = self.host.default_input_device().and_then(|d| device_name(&d));
         self.host
             .input_devices()
             .map(|devices| {
                 devices
                     .enumerate()
                     .filter_map(|(index, device)| {
-                        device.name().ok().map(|name| DeviceInfo {
+                        device_name(&device).map(|name| DeviceInfo {
                             is_default: Some(&name) == default_name.as_ref(),
                             name,
                             index,
@@ -267,7 +270,7 @@ impl AudioEngine {
             .map_err(|e| AudioError::ConfigurationFailed(e.to_string()))?
             .nth(index)
             .ok_or(AudioError::NoInputDevice)?;
-        let name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+        let name = device_name(&device).unwrap_or_else(|| "Unknown".to_string());
 
         let rate = self.config.sample_rate;
         let supported: Vec<_> = device
@@ -313,7 +316,7 @@ impl AudioEngine {
             sample_rate: supported_config.sample_rate(),
             buffer_size: cpal::BufferSize::Default,
         };
-        let (sender, feed, monitor) = input_channel_converting(config.sample_rate.0, rate.0);
+        let (sender, feed, monitor) = input_channel_converting(config.sample_rate, rate);
         let stream = match supported_config.sample_format() {
             SampleFormat::I32 => build_input_stream::<i32>(&device, &config, sender, monitor.clone()),
             SampleFormat::I16 => build_input_stream::<i16>(&device, &config, sender, monitor.clone()),
@@ -327,7 +330,7 @@ impl AudioEngine {
             index,
             name,
             channels: config.channels,
-            sample_rate: config.sample_rate.0,
+            sample_rate: config.sample_rate,
         });
         Ok((feed, monitor))
     }
@@ -367,7 +370,7 @@ impl AudioEngine {
 
     /// Get the sample rate in Hz.
     pub fn sample_rate(&self) -> u32 {
-        self.config.sample_rate.0
+        self.config.sample_rate
     }
 
     /// Get the number of output channels.
@@ -394,7 +397,7 @@ impl AudioEngine {
         let state = Arc::clone(&self.state);
         let error_state = Arc::clone(&self.state);
         self.state.stream_failed.store(false, Ordering::Relaxed);
-        let sample_rate = self.config.sample_rate.0 as f32;
+        let sample_rate = self.config.sample_rate as f32;
         let channels = self.config.channels as usize;
 
         // Phase increment per sample for 440Hz
@@ -407,7 +410,7 @@ impl AudioEngine {
         let stream = self
             .device
             .build_output_stream(
-                &self.config,
+                self.config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     // REAL-TIME SAFE: No allocations, no locks, no blocking
                     state.callbacks.fetch_add(1, Ordering::Relaxed);
@@ -447,8 +450,12 @@ impl AudioEngine {
                     }
                 },
                 move |err| {
-                    eprintln!("Audio stream error: {}", err);
-                    error_state.stream_failed.store(true, Ordering::Relaxed);
+                    if is_glitch(&err) {
+                        error_state.xruns.fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        eprintln!("Audio stream error: {}", err);
+                        error_state.stream_failed.store(true, Ordering::Relaxed);
+                    }
                 },
                 None,
             )
@@ -491,6 +498,11 @@ impl AudioEngine {
     /// if it doesn't report timestamps (or the graph stream hasn't run yet).
     pub fn output_latency(&self) -> Option<Duration> {
         self.state.output_latency.get()
+    }
+
+    /// Glitches the output device has reported since the engine started.
+    pub fn output_xruns(&self) -> u64 {
+        self.state.xruns.load(Ordering::Relaxed)
     }
 
     /// Whether the stream has reported an error since it was started.
@@ -557,11 +569,11 @@ impl AudioEngine {
         let stream = self
             .device
             .build_output_stream(
-                &self.config,
+                self.config,
                 move |data: &mut [f32], info: &cpal::OutputCallbackInfo| {
                     state.callbacks.fetch_add(1, Ordering::Relaxed);
                     let time = info.timestamp();
-                    state.output_latency.record(time.playback.duration_since(&time.callback));
+                    state.output_latency.record(time.playback.checked_duration_since(time.callback));
                     // REAL-TIME SAFE: the lock is only ever taken here, or by
                     // select_device while no stream is running, so try_lock
                     // never fails in practice. If it did, output silence
@@ -572,8 +584,12 @@ impl AudioEngine {
                     }
                 },
                 move |err| {
-                    eprintln!("Audio stream error: {}", err);
-                    error_state.stream_failed.store(true, Ordering::Relaxed);
+                    if is_glitch(&err) {
+                        error_state.xruns.fetch_add(1, Ordering::Relaxed);
+                    } else {
+                        eprintln!("Audio stream error: {}", err);
+                        error_state.stream_failed.store(true, Ordering::Relaxed);
+                    }
                 },
                 None,
             )
@@ -586,6 +602,18 @@ impl AudioEngine {
         self.stream = Some(stream);
         Ok(())
     }
+}
+
+/// Whether a stream error is a passing glitch the stream carries on from
+/// (it dropped or repeated a buffer, or the OS wouldn't raise the audio
+/// thread's priority) rather than the end of the stream.
+fn is_glitch(err: &cpal::Error) -> bool {
+    matches!(err.kind(), cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied)
+}
+
+/// A device's human-readable name, or `None` if it can't say.
+fn device_name(device: &Device) -> Option<String> {
+    device.description().ok().map(|description| description.name().to_string())
 }
 
 /// Builds a stream that pushes device `device`'s input, in samples of type
@@ -603,16 +631,20 @@ where
     let channels = config.channels as usize;
     device
         .build_input_stream(
-            config,
+            *config,
             move |data: &[T], info: &cpal::InputCallbackInfo| {
                 // REAL-TIME SAFE: a copy into the ring and an atomic store
                 let time = info.timestamp();
-                sender.record_latency(time.callback.duration_since(&time.capture));
+                sender.record_latency(time.callback.checked_duration_since(time.capture));
                 sender.push(data, channels, |sample| sample.to_sample::<f32>());
             },
             move |err| {
-                eprintln!("Audio input error: {}", err);
-                monitor.mark_failed();
+                if is_glitch(&err) {
+                    monitor.mark_xrun();
+                } else {
+                    eprintln!("Audio input error: {}", err);
+                    monitor.mark_failed();
+                }
             },
             None,
         )

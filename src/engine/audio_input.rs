@@ -52,6 +52,9 @@ struct InputStats {
     target_frames: AtomicUsize,
     /// Set by the input stream's error callback (unplugged, say).
     failed: AtomicBool,
+    /// Glitches the input device itself reported (it dropped audio before
+    /// Modular saw it), which the stream recovers from.
+    device_xruns: AtomicU64,
     /// The input device's own delay, from its buffers' timestamps.
     device_latency: LatencyGauge,
 }
@@ -353,6 +356,19 @@ impl InputMonitor {
     /// Marks the input as failed, from the stream's error callback.
     pub fn mark_failed(&self) {
         self.stats.failed.store(true, Ordering::Relaxed);
+    }
+
+    /// Glitches the input device has reported, so far.
+    pub fn device_xruns(&self) -> u64 {
+        self.stats.device_xruns.load(Ordering::Relaxed)
+    }
+
+    /// Counts a glitch the device reported, from the stream's error
+    /// callback. The stream carries on.
+    ///
+    /// REAL-TIME SAFE: an atomic add.
+    pub fn mark_xrun(&self) {
+        self.stats.device_xruns.fetch_add(1, Ordering::Relaxed);
     }
 }
 
