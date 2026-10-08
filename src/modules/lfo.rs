@@ -114,7 +114,7 @@ impl Lfo {
                     360.0,
                     0.0,
                     ParameterDisplay::linear("°"),
-                ).describe("None"),
+                ).describe("Where in the cycle the waveform starts, and where Sync restarts it"),
                 // Bipolar toggle
                 ParameterDefinition::toggle("bipolar", "Bipolar", true).describe("On swings from -1 to 1; off stays between 0 and 1"),
             ],

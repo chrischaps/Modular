@@ -76,21 +76,27 @@ pub fn module(module_id: &str) -> Option<&'static ModuleSpec> {
 mod tests {
     use super::*;
 
+    /// A description that says nothing: empty, or a word left in as a stand-in.
+    fn is_placeholder(description: &str) -> bool {
+        let word = description.trim().trim_end_matches('.').to_lowercase();
+        matches!(word.as_str(), "" | "none" | "todo" | "tbd" | "fixme" | "n/a" | "description")
+    }
+
     #[test]
     fn every_port_and_parameter_has_a_tooltip() {
         let mut missing = Vec::new();
         for spec in modules() {
             for port in &spec.ports {
-                if port.description.is_empty() {
-                    missing.push(format!("{} port {:?}", spec.info.id, port.name));
+                if is_placeholder(port.description) {
+                    missing.push(format!("{} port {:?}: {:?}", spec.info.id, port.name, port.description));
                 }
             }
             for param in &spec.parameters {
-                if param.description.is_empty() {
-                    missing.push(format!("{} parameter {:?}", spec.info.id, param.name));
+                if is_placeholder(param.description) {
+                    missing.push(format!("{} parameter {:?}: {:?}", spec.info.id, param.name, param.description));
                 }
             }
         }
-        assert!(missing.is_empty(), "No description:\n{}", missing.join("\n"));
+        assert!(missing.is_empty(), "No real description:\n{}", missing.join("\n"));
     }
 }
