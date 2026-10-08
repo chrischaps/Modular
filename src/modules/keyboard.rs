@@ -8,6 +8,7 @@ use crate::dsp::{
     module_trait::{DspModule, ModuleCategory, ModuleInfo},
     parameter::ParameterDefinition,
     port::PortDefinition,
+    primitives::{glide_parameters, Glide, GlideMode},
     signal::SignalBuffer,
     ParameterDisplay, SignalType,
 };
@@ -66,6 +67,9 @@ impl KeyPriority {
 /// - **Octave** (-2 to +2): Octave shift applied to keyboard input.
 /// - **Velocity** (0-1): Fixed velocity value for all notes.
 /// - **Priority** (0-2): Key priority mode (Last, Lowest, Highest).
+/// - **Glide** (0-2 s): Time for the pitch to slide to a new note. 0 is off.
+/// - **Glide Mode** (Always, Legato): Glide on every note, or only on notes
+///   played while another key is held.
 pub struct KeyboardInput {
     /// Sample rate from last prepare() call.
     sample_rate: f32,
@@ -73,16 +77,19 @@ pub struct KeyboardInput {
     ports: Vec<PortDefinition>,
     /// Parameter definitions.
     parameters: Vec<ParameterDefinition>,
-    /// Current output pitch (smoothed to avoid clicks).
-    current_pitch: f32,
-    /// Current output gate state.
+    /// The note the pitch heads for, octave included, as a MIDI number.
+    /// Only moves while the gate is high, so the release stays in tune.
+    target: f32,
+    /// The pitch as it slides toward `target`.
+    glide: Glide,
+    /// Gate state at the end of the last block.
     current_gate: f32,
 }
 
 impl KeyboardInput {
     /// Creates a new keyboard input module.
     pub fn new() -> Self {
-        Self {
+        let mut keyboard = Self {
             sample_rate: 44100.0,
             ports: vec![
                 // Output ports
@@ -122,9 +129,13 @@ impl KeyboardInput {
                     0,
                 ).describe("Which key sounds when several are held"),
             ],
-            current_pitch: 0.0,
+            target: 60.0,
+            glide: Glide::NEW,
             current_gate: 0.0,
-        }
+        };
+        // After the others, so saved patches load unchanged
+        keyboard.parameters.extend(glide_parameters());
+        keyboard
     }
 
     /// Port index constants.
@@ -139,6 +150,8 @@ impl KeyboardInput {
     const PARAM_VELOCITY: usize = 3;
     /// Read by the UI, which picks the sounding note from the held keys.
     pub const PARAM_PRIORITY: usize = 4;
+    const PARAM_GLIDE: usize = 5;
+    const PARAM_GLIDE_MODE: usize = 6;
 
     /// Convert MIDI note number to V/Oct pitch CV.
     ///
@@ -192,22 +205,26 @@ impl DspModule for KeyboardInput {
         let gate = if params[Self::PARAM_GATE] > 0.5 { 1.0 } else { 0.0 };
         let octave = params[Self::PARAM_OCTAVE];
         let velocity = params[Self::PARAM_VELOCITY];
+        let glide = Glide::coefficient(params[Self::PARAM_GLIDE], self.sample_rate);
+        let glide_mode = GlideMode::from_param(params[Self::PARAM_GLIDE_MODE]);
 
-        // Calculate pitch with octave shift
-        let shifted_note = note + (octave * 12.0);
-        let target_pitch = Self::midi_to_voct(shifted_note);
+        // The note moves only while a key is held. A gate that just rose is
+        // a note from silence, which Legato mode starts on its own pitch;
+        // a new note under a held gate is legato and glides
+        if gate > 0.5 {
+            let shifted_note = note + (octave * 12.0);
+            if self.current_gate < 0.5 {
+                self.glide.start(shifted_note, glide_mode.glides(false));
+            }
+            self.target = shifted_note;
+        }
 
         // Fill output buffers
         for i in 0..context.block_size {
             // Gate output - instant transition
             outputs[Self::PORT_GATE].samples[i] = gate;
 
-            // Pitch output - could add glide/portamento here later
-            // For now, instant pitch changes when gate is high
-            if gate > 0.5 {
-                self.current_pitch = target_pitch;
-            }
-            outputs[Self::PORT_PITCH].samples[i] = self.current_pitch;
+            outputs[Self::PORT_PITCH].samples[i] = Self::midi_to_voct(self.glide.next(self.target, glide));
 
             // Velocity output
             outputs[Self::PORT_VELOCITY].samples[i] = velocity;
@@ -217,7 +234,8 @@ impl DspModule for KeyboardInput {
     }
 
     fn reset(&mut self) {
-        self.current_pitch = 0.0;
+        self.target = 60.0;
+        self.glide = Glide::NEW;
         self.current_gate = 0.0;
     }
 }
@@ -322,13 +340,15 @@ mod tests {
         let kbd = KeyboardInput::new();
         let params = kbd.parameters();
 
-        assert_eq!(params.len(), 5);
+        assert_eq!(params.len(), 7);
 
         assert_eq!(params[0].id, "note");
         assert_eq!(params[1].id, "gate");
         assert_eq!(params[2].id, "octave");
         assert_eq!(params[3].id, "velocity");
         assert_eq!(params[4].id, "priority");
+        assert_eq!(params[5].id, "glide");
+        assert_eq!(params[6].id, "glide_mode");
     }
 
     #[test]
@@ -424,7 +444,7 @@ mod tests {
         let ctx = ProcessContext::new(44100.0, 256);
 
         // Test with gate on, note 60, octave 0, velocity 1.0
-        kbd.process(&[], &mut outputs, &[60.0, 1.0, 0.0, 1.0, 0.0], &ctx);
+        kbd.process(&[], &mut outputs, &[60.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0], &ctx);
 
         // Gate should be 1.0
         assert!((outputs[0].samples[0] - 1.0).abs() < f32::EPSILON);
@@ -449,13 +469,71 @@ mod tests {
         let ctx = ProcessContext::new(44100.0, 256);
 
         // Note 60 (C4) with octave +1 should output pitch +1.0 (C5)
-        kbd.process(&[], &mut outputs, &[60.0, 1.0, 1.0, 1.0, 0.0], &ctx);
+        kbd.process(&[], &mut outputs, &[60.0, 1.0, 1.0, 1.0, 0.0, 0.0, 1.0], &ctx);
         assert!((outputs[1].samples[0] - 1.0).abs() < f32::EPSILON);
 
         // Note 60 (C4) with octave -1 should output pitch -1.0 (C3)
         kbd.reset();
-        kbd.process(&[], &mut outputs, &[60.0, 1.0, -1.0, 1.0, 0.0], &ctx);
+        kbd.process(&[], &mut outputs, &[60.0, 1.0, -1.0, 1.0, 0.0, 0.0, 1.0], &ctx);
         assert!((outputs[1].samples[0] - (-1.0)).abs() < f32::EPSILON);
+    }
+
+    /// Plays `blocks` blocks of `note` with the gate at `gate`, returning the
+    /// pitch in semitones from C4.
+    fn play(kbd: &mut KeyboardInput, note: f32, gate: f32, glide: f32, mode: GlideMode, blocks: usize) -> Vec<f32> {
+        let mut outputs = vec![SignalBuffer::gate(256), SignalBuffer::control(256), SignalBuffer::control(256)];
+        let ctx = ProcessContext::new(48000.0, 256);
+        let params = [note, gate, 0.0, 1.0, 0.0, glide, mode as i32 as f32];
+        let mut pitch = Vec::new();
+        for _ in 0..blocks {
+            kbd.process(&[], &mut outputs, &params, &ctx);
+            pitch.extend(outputs[1].samples.iter().map(|p| p * 12.0));
+        }
+        pitch
+    }
+
+    fn keyboard() -> KeyboardInput {
+        let mut kbd = KeyboardInput::new();
+        kbd.prepare(48000.0, 256);
+        kbd
+    }
+
+    #[test]
+    fn test_keyboard_glides_legato() {
+        // Hold C, then G under the same gate: a slide that arrives in 200 ms
+        let mut kbd = keyboard();
+        play(&mut kbd, 60.0, 1.0, 0.2, GlideMode::Legato, 1);
+        let p = play(&mut kbd, 67.0, 1.0, 0.2, GlideMode::Legato, 50);
+        assert!(p[0] < 0.1);
+        let at99 = p.iter().position(|&s| s >= 7.0 * 0.99).unwrap() as f32 / 48000.0;
+        assert!((at99 - 0.2).abs() < 0.001, "99% at {at99} s");
+    }
+
+    #[test]
+    fn test_keyboard_legato_mode_starts_after_a_gap_on_pitch() {
+        let mut kbd = keyboard();
+        play(&mut kbd, 60.0, 1.0, 0.5, GlideMode::Legato, 1);
+        play(&mut kbd, 60.0, 0.0, 0.5, GlideMode::Legato, 1);
+        let p = play(&mut kbd, 67.0, 1.0, 0.5, GlideMode::Legato, 1);
+        assert_eq!(p[0], 7.0);
+
+        // Always mode slides from C even after the gap
+        let mut kbd = keyboard();
+        play(&mut kbd, 60.0, 1.0, 0.5, GlideMode::Always, 1);
+        play(&mut kbd, 60.0, 0.0, 0.5, GlideMode::Always, 1);
+        let p = play(&mut kbd, 67.0, 1.0, 0.5, GlideMode::Always, 1);
+        assert!(p[0] < 0.1);
+    }
+
+    #[test]
+    fn test_keyboard_zero_glide_is_instant() {
+        let mut kbd = keyboard();
+        play(&mut kbd, 60.0, 1.0, 0.0, GlideMode::Always, 1);
+        let p = play(&mut kbd, 67.0, 1.0, 0.0, GlideMode::Always, 1);
+        assert!(p.iter().all(|&s| s == 7.0));
+        // Released, the pitch holds where it was
+        let p = play(&mut kbd, 72.0, 0.0, 0.0, GlideMode::Always, 1);
+        assert!(p.iter().all(|&s| s == 7.0));
     }
 
     #[test]

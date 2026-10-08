@@ -26,6 +26,8 @@ The **Gate** output lights up on the node while a note is held.
 | **Oct** (Octave) | −2 to +2 | 0 | Shifts the whole keyboard up or down by octaves |
 | **Vel** (Velocity) | 0 – 100% | 100% | The strength sent for every note. A computer key can't tell soft from hard, so this sets it for all of them |
 | **Priority** | Last / Lowest / Highest | Last | Which key sounds when several are held: the one pressed most recently, the lowest or the highest (see [Playing](#playing)) |
+| **Glide** | Off – 2 s | Off | How long the pitch takes to slide to a new note (see [Glide](#glide)) |
+| **Glide** (Glide Mode) | Always / Legato | Legato | Which notes slide: all of them, or only those played while another key is held |
 
 ## Key layout
 
@@ -56,6 +58,23 @@ After you let go, **Pitch** stays on the last note, so the release tail stays in
 Keys don't play notes while you hold **Ctrl** or **Alt** (those are shortcuts), while you're typing in a text field, or while the quick-add palette is open. **Space** and **Tab** open the palette, so they're never notes. The app has to have keyboard focus: if nothing happens, click the canvas.
 
 Like everything else, the Keyboard only sounds while the patch is playing. Press **Play** in the toolbar first.
+
+## Glide
+
+**Glide** makes the pitch slide from one note to the next instead of jumping, like the portamento on a classic monosynth. The knob sets how long the slide takes, from Off up to 2 seconds. Most of its travel covers the short times, where glide is most useful: 200 ms is a little past halfway.
+
+- **Even across the keyboard.** The slide moves evenly in pitch, so it sounds the same low or high.
+- **The same time for any distance.** An octave leap arrives as quickly as a step to the next semitone.
+- **Eases in.** The pitch covers most of the distance early and settles gently onto the note: about two thirds of the way in the first fifth of the time, and within 1% of the note by the end of it.
+
+The **Glide** dropdown picks which notes slide:
+
+| Glide Mode | Which notes slide | Feels like |
+|------------|-------------------|------------|
+| **Legato** | Only a note played while another key is still held. A note after a gap starts on its own pitch | A Minimoog or a 303: you choose each slide with your fingers |
+| **Always** | Every note, from wherever the last one left off | Portamento that's always on |
+
+To hear it, open First Sound and turn **Glide** to about 200 ms. Hold **Z** (C) and tap **B** (G): the pitch slides up to G and, when you let go of B, back down to C. Then play B on its own: in Legato mode it starts on G.
 
 ## Patch examples
 

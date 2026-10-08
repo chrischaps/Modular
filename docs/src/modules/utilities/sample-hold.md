@@ -28,7 +28,7 @@ Sample & Hold is polyphonic. Patch polyphonic cables in and each voice samples a
 
 | Knob | Range | Default | Description |
 |------|-------|---------|-------------|
-| **Slew** | 0 – 1 s | 0 s | Glide time to each new value. At 0 the output jumps |
+| **Slew** | Off – 1 s | Off | Glide time to each new value. Off, the output jumps |
 
 ## How it works
 

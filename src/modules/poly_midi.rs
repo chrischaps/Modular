@@ -14,6 +14,7 @@ use crate::dsp::{
     module_trait::{DspModule, ModuleCategory, ModuleInfo},
     parameter::ParameterDefinition,
     port::PortDefinition,
+    primitives::{glide_parameters, Glide, GlideMode},
     signal::SignalBuffer,
     MidiEvent, MidiMessage, ParameterDisplay, SignalType, MAX_CHANNELS,
 };
@@ -29,6 +30,10 @@ const ALL_NOTES_OFF: u8 = 123;
 
 /// How quickly pitch bend follows the wheel, as in MIDI Note.
 const BEND_SMOOTHING_SECONDS: f32 = 0.005;
+
+/// Notes this soon after a note played from silence are one chord, struck
+/// together: in Legato mode none of them glide.
+const CHORD_SECONDS: f32 = 0.03;
 
 /// How a new note picks its voice.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,6 +63,9 @@ struct Voice {
     /// The note the voice plays. Kept after release, so the release tail
     /// stays in tune.
     note: u8,
+    /// The voice's pitch as it slides toward `note`, from the voice's own
+    /// previous note.
+    glide: Glide,
     /// The note's velocity (0.0-1.0).
     velocity: f32,
     /// The key is down.
@@ -79,6 +87,7 @@ struct Voice {
 impl Voice {
     const IDLE: Voice = Voice {
         note: 60,
+        glide: Glide::NEW,
         velocity: 0.0,
         held: false,
         sustained: false,
@@ -121,6 +130,10 @@ impl Voice {
 /// - **Allocation** (Rotate, Reuse): How a new note picks its voice.
 /// - **Octave** (-4 to +4): Octave shift.
 /// - **Bend Range** (0-12 semitones): How far the pitch bend wheel bends.
+/// - **Glide** (0-2 s): Time for each voice to slide from its own previous
+///   note to its new one. 0 is off.
+/// - **Glide Mode** (Always, Legato): Glide on every note, or only on notes
+///   played while another key is held.
 ///
 /// When every voice is busy, a new note steals one: a voice the sustain
 /// pedal is holding if there is one, otherwise the oldest note.
@@ -142,6 +155,10 @@ pub struct PolyMidi {
     bend: f32,
     /// One-pole coefficient for the bend glide.
     bend_coeff: f32,
+    /// Sample rate from the last prepare() call.
+    sample_rate: f32,
+    /// Samples left in which a new note joins the chord begun from silence.
+    chord_window: u32,
 }
 
 impl PolyMidi {
@@ -181,7 +198,11 @@ impl PolyMidi {
             bend_target: 0.0,
             bend: 0.0,
             bend_coeff: 1.0,
+            sample_rate: 44100.0,
+            chord_window: 0,
         };
+        // After the others, so saved patches load unchanged
+        module.parameters.extend(glide_parameters());
         module.prepare(44100.0, 256);
         module
     }
@@ -198,6 +219,8 @@ impl PolyMidi {
     pub const PARAM_ALLOCATION: usize = 2;
     pub const PARAM_OCTAVE: usize = 3;
     pub const PARAM_BEND_RANGE: usize = 4;
+    pub const PARAM_GLIDE: usize = 5;
+    pub const PARAM_GLIDE_MODE: usize = 6;
 
     /// The next tick of the note-event clock.
     fn tick(&mut self) -> u64 {
@@ -206,10 +229,10 @@ impl PolyMidi {
     }
 
     /// Applies one MIDI event to the first `count` voices.
-    fn handle(&mut self, event: &MidiEvent, count: usize, allocation: Allocation) {
+    fn handle(&mut self, event: &MidiEvent, count: usize, allocation: Allocation, glide_mode: GlideMode) {
         match event.message {
             MidiMessage::NoteOn { note, velocity } if velocity > 0 => {
-                self.note_on(note, velocity, count, allocation);
+                self.note_on(note, velocity, count, allocation, glide_mode);
             }
             // Note On at velocity 0 is a Note Off
             MidiMessage::NoteOn { note, .. } | MidiMessage::NoteOff { note, .. } => {
@@ -242,7 +265,13 @@ impl PolyMidi {
         }
     }
 
-    fn note_on(&mut self, note: u8, velocity: u8, count: usize, allocation: Allocation) {
+    fn note_on(&mut self, note: u8, velocity: u8, count: usize, allocation: Allocation, glide_mode: GlideMode) {
+        // A key held from before this chord: Legato mode glides
+        let key_held = self.voices[..count].iter().any(|voice| voice.held);
+        if !key_held {
+            self.chord_window = (CHORD_SECONDS * self.sample_rate) as u32;
+        }
+        let legato = key_held && self.chord_window == 0;
         let index = self.allocate(note, count, allocation);
         let started = self.tick();
         let voice = &mut self.voices[index];
@@ -252,6 +281,8 @@ impl PolyMidi {
         } else {
             voice.hold_gate = true;
         }
+        // The voice glides from wherever it was, stolen or not
+        voice.glide.start(note as f32, glide_mode.glides(legato));
         voice.note = note;
         voice.velocity = velocity as f32 / 127.0;
         voice.held = true;
@@ -329,6 +360,7 @@ impl DspModule for PolyMidi {
     }
 
     fn prepare(&mut self, sample_rate: f32, _max_block_size: usize) {
+        self.sample_rate = sample_rate;
         self.bend_coeff = 1.0 - (-1.0 / (BEND_SMOOTHING_SECONDS * sample_rate)).exp();
     }
 
@@ -343,6 +375,8 @@ impl DspModule for PolyMidi {
         let allocation = Allocation::from_param(params[Self::PARAM_ALLOCATION]);
         let octave = params[Self::PARAM_OCTAVE].round();
         let bend_range = params[Self::PARAM_BEND_RANGE];
+        let glide = Glide::coefficient(params[Self::PARAM_GLIDE], self.sample_rate);
+        let glide_mode = GlideMode::from_param(params[Self::PARAM_GLIDE_MODE]);
 
         // As many voices as the knob asks for and the cables have room for
         let room = outputs[..Self::PORT_AFTERTOUCH].iter().map(|output| output.max_channels()).min().unwrap_or(1);
@@ -352,7 +386,7 @@ impl DspModule for PolyMidi {
         }
         // Voices turned off let go of their notes
         for voice in &mut self.voices[count..] {
-            *voice = Voice { note: voice.note, ..Voice::IDLE };
+            *voice = Voice { note: voice.note, glide: voice.glide, ..Voice::IDLE };
         }
         self.next %= count;
 
@@ -365,15 +399,17 @@ impl DspModule for PolyMidi {
         for i in 0..context.block_size {
             // Everything that lands on this sample, in order
             while let Some(event) = events.next_if(|event| event.sample_offset as usize <= i) {
-                self.handle(event, count, allocation);
+                self.handle(event, count, allocation, glide_mode);
             }
 
+            self.chord_window = self.chord_window.saturating_sub(1);
             self.bend += (self.bend_target - self.bend) * self.bend_coeff;
+            // Bend rides on top of each voice's glide, unslewed by it
             let shift = octave * 12.0 + self.bend * bend_range;
 
             for (index, voice) in self.voices[..count].iter_mut().enumerate() {
                 let gate = voice.take_gate();
-                outputs[Self::PORT_PITCH].channel_mut(index)[i] = MidiNote::midi_to_voct(voice.note as f32 + shift);
+                outputs[Self::PORT_PITCH].channel_mut(index)[i] = MidiNote::midi_to_voct(voice.glide.next(voice.note as f32, glide) + shift);
                 outputs[Self::PORT_GATE].channel_mut(index)[i] = if gate { 1.0 } else { 0.0 };
                 outputs[Self::PORT_VELOCITY].channel_mut(index)[i] = voice.velocity;
             }
@@ -382,7 +418,7 @@ impl DspModule for PolyMidi {
 
         // Anything placed past the block still counts, from the next one
         for event in events {
-            self.handle(event, count, allocation);
+            self.handle(event, count, allocation, glide_mode);
         }
     }
 
@@ -394,6 +430,7 @@ impl DspModule for PolyMidi {
         self.aftertouch = 0.0;
         self.bend_target = 0.0;
         self.bend = 0.0;
+        self.chord_window = 0;
     }
 
     fn polyphonic(&self) -> bool {
@@ -408,11 +445,12 @@ mod tests {
     const SR: f32 = 48000.0;
     const BLOCK: usize = 256;
 
-    /// Default parameters: Omni, 8 voices, Rotate, octave 0, ±2 st.
-    const DEFAULTS: [f32; 5] = [0.0, 8.0, 0.0, 0.0, 2.0];
+    /// Default parameters: Omni, 8 voices, Rotate, octave 0, ±2 st, no glide
+    /// (Legato).
+    const DEFAULTS: [f32; 7] = [0.0, 8.0, 0.0, 0.0, 2.0, 0.0, 1.0];
 
-    fn params(voices: usize, allocation: Allocation) -> [f32; 5] {
-        [0.0, voices as f32, allocation as i32 as f32, 0.0, 2.0]
+    fn params(voices: usize, allocation: Allocation) -> [f32; 7] {
+        [0.0, voices as f32, allocation as i32 as f32, 0.0, 2.0, 0.0, 1.0]
     }
 
     fn module() -> PolyMidi {
@@ -613,7 +651,7 @@ mod tests {
     #[test]
     fn test_channel_filter_and_all_notes_off() {
         let mut m = module();
-        let ch1_only = [1.0, 8.0, 0.0, 0.0, 2.0];
+        let ch1_only = [1.0, 8.0, 0.0, 0.0, 2.0, 0.0, 1.0];
         let out = run(&mut m, &ch1_only, &[MidiEvent::note_on(0, 1, 60, 100), on(0, 64)]);
         assert_eq!(sounding(&out, 0)[..2], [Some(64), None]);
 
@@ -635,6 +673,87 @@ mod tests {
         let context = ProcessContext::new(SR, BLOCK).with_midi(&midi);
         m.process(&[], &mut out, &DEFAULTS, &context);
         assert_eq!(sounding(&out, 20), [Some(64)]);
+    }
+
+    fn glide_params(voices: usize, seconds: f32, mode: GlideMode) -> [f32; 7] {
+        [0.0, voices as f32, 0.0, 0.0, 2.0, seconds, mode as i32 as f32]
+    }
+
+    /// Voice `v`'s pitch at sample `i`, in semitones from C4.
+    fn semitones(out: &[SignalBuffer], v: usize, i: usize) -> f32 {
+        out[PolyMidi::PORT_PITCH].voice(v).samples[i] * 12.0
+    }
+
+    #[test]
+    fn test_each_voice_glides_from_its_own_note() {
+        let p = glide_params(2, 0.1, GlideMode::Always);
+        let mut m = module();
+        // C and E on voices 1 and 2, released; then G and A take them in turn
+        run(&mut m, &p, &[on(0, 60), on(0, 64), off(10, 60), off(10, 64)]);
+        let out = run(&mut m, &p, &[on(0, 67), on(0, 69)]);
+        assert!(semitones(&out, 0, 0) < 0.1, "G slides up from C");
+        assert!((semitones(&out, 1, 0) - 4.0).abs() < 0.1, "A slides up from E");
+        for _ in 0..30 {
+            run(&mut m, &p, &[]);
+        }
+        let out = run(&mut m, &p, &[]);
+        assert!((semitones(&out, 0, 0) - 7.0).abs() < 0.01);
+        assert!((semitones(&out, 1, 0) - 9.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_stolen_voice_glides_from_where_it_was() {
+        let p = glide_params(2, 0.5, GlideMode::Legato);
+        let mut m = module();
+        // Both voices held; G, played after the chord, steals C's voice and
+        // slides up from C
+        run(&mut m, &p, &[on(0, 60), on(0, 64)]);
+        for _ in 0..10 {
+            run(&mut m, &p, &[]);
+        }
+        let out = run(&mut m, &p, &[on(100, 67)]);
+        assert!(semitones(&out, 0, 101) < 0.1);
+        assert!(semitones(&out, 0, BLOCK - 1) > semitones(&out, 0, 101));
+        assert_eq!(semitones(&out, 1, BLOCK - 1), 4.0, "E is left alone");
+    }
+
+    #[test]
+    fn test_legato_chord_from_silence_doesnt_glide() {
+        let p = glide_params(3, 0.5, GlideMode::Legato);
+        let mut m = module();
+        run(&mut m, &p, &[on(0, 60), on(0, 64), off(10, 60), off(10, 64)]);
+        // G takes voice 3 and C5 voice 1, 4 ms apart: one chord, no slides
+        let out = run(&mut m, &p, &[on(5, 67), on(200, 72)]);
+        assert_eq!(semitones(&out, 2, 5), 7.0);
+        assert_eq!(semitones(&out, 0, 200), 12.0);
+
+        // A note added once the chord is down glides, from its voice's last
+        // note (E4)
+        for _ in 0..10 {
+            run(&mut m, &p, &[]);
+        }
+        let out = run(&mut m, &p, &[on(10, 76)]);
+        assert!((semitones(&out, 1, 10) - 4.0).abs() < 0.1, "E5 slides up from E4");
+    }
+
+    #[test]
+    fn test_zero_glide_matches_no_glide() {
+        let mut m = module();
+        let mut p = glide_params(8, 0.0, GlideMode::Always);
+        p[PolyMidi::PARAM_OCTAVE] = -1.0;
+        let bend = MidiEvent::new(0, 0, MidiMessage::PitchBend { value: -3000 });
+        let out = run(&mut m, &p, &[on(0, 60), on(0, 67), bend, off(20, 60), on(40, 62)]);
+        let mut b = 0.0f32;
+        let coeff = 1.0 - (-1.0 / (BEND_SMOOTHING_SECONDS * SR)).exp();
+        for i in 0..BLOCK {
+            b += (-3000.0 / 8192.0 - b) * coeff;
+            let shift = -12.0 + b * 2.0;
+            let pitch = &out[PolyMidi::PORT_PITCH];
+            assert_eq!(pitch.voice(1).samples[i], MidiNote::midi_to_voct(67.0 + shift));
+            if i >= 40 {
+                assert_eq!(pitch.voice(2).samples[i], MidiNote::midi_to_voct(62.0 + shift));
+            }
+        }
     }
 
     #[test]

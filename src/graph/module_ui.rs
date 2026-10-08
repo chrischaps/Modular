@@ -123,7 +123,8 @@ static MODULE_UI: &[ModuleUi] = &[
     },
     ModuleUi {
         module_id: "input.keyboard",
-        knobs: &[knob_as("Octave", "Oct"), knob_as("Velocity", "Vel")],
+        knobs: &[knob_as("Octave", "Oct"), knob_as("Velocity", "Vel"), knob("Glide")],
+        labels: &[("Glide Mode", "Glide")],
         hidden: &["Note", "Gate"],
         live_params: 2,
         monitor: &["Gate"],
@@ -132,18 +133,21 @@ static MODULE_UI: &[ModuleUi] = &[
     },
     ModuleUi {
         module_id: "input.midi_note",
-        knobs: &[knob_as("Octave", "Oct"), knob_as("Bend Range", "Bend")],
-        labels: &[("Channel", "Ch"), ("Retrigger", "Retrig")],
+        knobs: &[knob_as("Octave", "Oct"), knob_as("Bend Range", "Bend"), knob("Glide")],
+        labels: &[("Channel", "Ch"), ("Retrigger", "Retrig"), ("Glide Mode", "Glide")],
         monitor: &["Gate"],
         display: NodeDisplay::MidiPiano,
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
         module_id: "input.poly_midi",
-        knobs: &[knob("Voices"), knob_as("Octave", "Oct"), knob_as("Bend Range", "Bend")],
-        labels: &[("Channel", "Ch"), ("Allocation", "Mode")],
+        // How the voices play over their pitch offsets, two by two, so the
+        // node stays narrow
+        knobs: &[knob("Voices"), knob("Glide"), knob_as("Octave", "Oct"), knob_as("Bend Range", "Bend")],
+        labels: &[("Channel", "Ch"), ("Allocation", "Mode"), ("Glide Mode", "Glide")],
         monitor: &["Gate"],
         display: NodeDisplay::MidiPiano,
+        knobs_per_row: 2,
         ..ModuleUi::DEFAULT
     },
     ModuleUi {

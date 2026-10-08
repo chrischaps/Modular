@@ -43,7 +43,7 @@ Simpler reverbs built from a few fixed comb filters tend to ring at the comb len
 | **Decay** | 0.1 s – 30 s | 2.0 s | Time for the tail to fall by 60 dB |
 | **Damp** (Damping) | 0 – 100% | 50% | How much faster the highs die than the lows |
 | **Mod** | 0 – 100% | 25% | Slow drift of the delay lines: a chorus in the tail |
-| **PreD** (Pre-Delay) | 0 ms – 100 ms | 0 ms | Silence before the reverb begins |
+| **PreD** (Pre-Delay) | Off – 100 ms | Off | Silence before the reverb begins |
 | **Width** | 0 – 100% | 100% | Stereo width of the reverb |
 | **Mix** | 0 – 100% | 30% | Dry (0%) to reverb only (100%) |
 

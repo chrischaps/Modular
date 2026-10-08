@@ -34,8 +34,9 @@ impl NumberSpec {
             max: def.max,
             default: def.default,
             unit: def.display.unit().unwrap_or(""),
-            // A log curve needs a positive range
-            logarithmic: def.display.is_logarithmic() && def.min > 0.0,
+            // A log curve needs a range from zero up (a knob from zero
+            // tapers to reach it)
+            logarithmic: def.display.is_logarithmic() && def.min >= 0.0 && def.max > 0.0,
             stepped: matches!(def.display, ParameterDisplay::Stepped { .. }),
         }
     }
@@ -288,9 +289,11 @@ mod tests {
     }
 
     #[test]
-    fn test_log_curve_needs_positive_minimum() {
-        let def = ParameterDefinition::new("x", "X", 0.0, 1.0, 0.5, ParameterDisplay::logarithmic(""));
+    fn test_log_curve_needs_a_range_from_zero_up() {
+        let def = ParameterDefinition::new("x", "X", -1.0, 1.0, 0.5, ParameterDisplay::logarithmic(""));
         assert!(!NumberSpec::from_definition(&def).logarithmic);
+        let def = ParameterDefinition::new("x", "X", 0.0, 2.0, 0.0, ParameterDisplay::logarithmic("s"));
+        assert!(NumberSpec::from_definition(&def).logarithmic);
     }
 
     #[test]

@@ -5,6 +5,7 @@
 pub mod adaa;
 pub mod blep;
 pub mod delay;
+pub mod glide;
 pub mod noise;
 pub mod oversample;
 pub mod saturation;
@@ -12,6 +13,7 @@ pub mod tpt;
 
 pub use blep::BlepDelay;
 pub use delay::FracDelay;
+pub use glide::{glide_parameters, Glide, GlideMode};
 pub use noise::NoiseFloor;
 pub use adaa::{Adaa1, BiasedTanh, Curve, HardClip, RoundedFolder, Tanh};
 pub use oversample::{Downsampler2x, Downsampler4x, Upsampler2x, Upsampler4x};

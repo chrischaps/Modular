@@ -29,6 +29,8 @@ Once the patch is playing, each polyphonic output shows its channel count in a s
 | **Voices** | 1 – 8 | 8 | How many notes can sound at once, and so how many channels the cables carry |
 | **Oct** (Octave) | −4 to +4 | 0 | Shifts every note by whole octaves |
 | **Bend** (Bend Range) | 0 – 12 semitones | 2 | How far the pitch bend wheel bends every voice |
+| **Glide** | Off – 2 s | Off | How long the pitch takes to slide to a new note (see [Glide](#glide)) |
+| **Glide** (Glide Mode) | Always / Legato | Legato | Which notes slide: all of them, or only those played while another key is held |
 
 Each voice runs a full copy of every polyphonic module downstream, so eight voices cost about eight times the CPU of one. If a patch is heavy, turn **Voices** down.
 
@@ -54,6 +56,14 @@ The taken voice's gate drops for one sample, so its envelope starts again for th
 The sustain pedal (CC 64) holds notes after their keys come up. Lifting it releases them all. **All Notes Off** (CC 123) and **All Sound Off** (CC 120) release everything, pedal or not.
 
 Pitch bend glides over about 5 ms, as on [MIDI Note](./midi-note.md), and MIDI arrives on the exact sample it's scheduled for.
+
+## Glide
+
+Glide works as on [MIDI Note](./midi-note.md#glide): the knob sets how long a slide takes, from Off to 2 seconds, and every slide takes the same time whatever the distance. On Poly MIDI, each voice slides from **its own** previous note. Change chords with Glide up and every voice takes its own path, crossing and converging, the way the voices of a vintage polysynth do. A stolen voice slides from wherever it was.
+
+**Mode** decides where each slide starts. With **Reuse**, a note played again returns to the voice that last played it, so it doesn't slide at all. With **Rotate**, the voices take turns, so each slide starts from a different note of the last chord or two.
+
+In **Legato** mode, only notes played while another key is held slide. A chord struck from nothing starts on its own pitches: notes arriving within 30 ms of the first note count as part of that chord, since no hand strikes every key at once. Hold one chord and play the next over it, and the new voices slide.
 
 ## Patch example
 

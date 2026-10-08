@@ -27,6 +27,8 @@ When several keys are held, **Priority** decides which one sounds, as on a class
 | **Retrig** (Retrigger) | Off / On | Off | Restarts the gate when you move between held keys |
 | **Oct** (Octave) | −4 to +4 | 0 | Shifts every note by whole octaves |
 | **Bend** (Bend Range) | 0 – 12 semitones | 2 | How far the pitch bend wheel bends at full travel |
+| **Glide** | Off – 2 s | Off | How long the pitch takes to slide to a new note (see [Glide](#glide)) |
+| **Glide** (Glide Mode) | Always / Legato | Legato | Which notes slide: all of them, or only those played while another key is held |
 
 ## Choosing a MIDI device
 
@@ -69,6 +71,23 @@ Release the sounding key and another held key takes over, so you can trill again
 With **Retrig** off, playing legato (pressing a new key before releasing the old one) changes the pitch but keeps the gate high. The envelope carries on, for smooth, connected lines.
 
 With **Retrig** on, each legato note drops the gate for a single sample, so the envelope starts again on every note.
+
+### Glide
+
+**Glide** makes the pitch slide from one note to the next instead of jumping, like the portamento on a classic monosynth. The knob sets how long the slide takes, from Off up to 2 seconds. Most of its travel covers the short times, where glide is most useful: 200 ms is a little past halfway.
+
+- **Even across the keyboard.** The slide moves evenly in pitch, so it sounds the same low or high.
+- **The same time for any distance.** An octave leap arrives as quickly as a step to the next semitone.
+- **Eases in.** The pitch covers most of the distance early and settles gently onto the note: about two thirds of the way in the first fifth of the time, and within 1% of the note by the end of it.
+
+The **Glide** dropdown picks which notes slide:
+
+| Glide Mode | Which notes slide | Feels like |
+|------------|-------------------|------------|
+| **Legato** | Only a note played while another key is still held. A note after a gap starts on its own pitch | A Minimoog or a 303: you choose each slide with your fingers |
+| **Always** | Every note, from wherever the last one left off | Portamento that's always on |
+
+Pitch bend rides on top of the glide: the wheel moves the pitch at once while the note underneath slides. **Glide** and **Retrig** work together, so with both on, each legato note restarts the envelope and slides into pitch.
 
 ## MIDI Learn
 

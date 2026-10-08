@@ -118,6 +118,7 @@ Drive a voice from a sequence instead of a keyboard:
 | Play a microphone or guitar through the patch | [Audio Input](./sources/audio-input.md) |
 | Let a live sound or drum loop move or trigger the patch | [Audio Input](./sources/audio-input.md)'s **Follow** and **Gate** |
 | Play notes | [Keyboard](./midi/keyboard.md), [MIDI Note](./midi/midi-note.md), or [Poly MIDI](./midi/poly-midi.md) for chords |
+| Slide from note to note | **Glide** on [Keyboard](./midi/keyboard.md#glide), [MIDI Note](./midi/midi-note.md#glide) or [Poly MIDI](./midi/poly-midi.md#glide) |
 | Darken or brighten a sound | [SVF Filter](./filters/svf-filter.md) or [Ladder Filter](./filters/ladder-filter.md) |
 | Give each note a shape in time | [ADSR Envelope](./modulation/adsr.md) into a [VCA](./utilities/vca.md) |
 | Add slow, repeating movement | [LFO](./modulation/lfo.md) |

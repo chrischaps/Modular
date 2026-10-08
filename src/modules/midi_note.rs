@@ -13,6 +13,7 @@ use crate::dsp::{
     module_trait::{DspModule, ModuleCategory, ModuleInfo},
     parameter::ParameterDefinition,
     port::PortDefinition,
+    primitives::{glide_parameters, Glide, GlideMode},
     signal::SignalBuffer,
     MidiEvent, MidiMessage, ParameterDisplay, SignalType,
 };
@@ -70,6 +71,9 @@ const BEND_SMOOTHING_SECONDS: f32 = 0.005;
 /// - **Retrigger**: When on, moving between held keys (legato) drops the
 ///   gate for one sample, so envelopes start again.
 /// - **Bend Range** (0-12 semitones): How far the pitch bend wheel bends.
+/// - **Glide** (0-2 s): Time for the pitch to slide to a new note. 0 is off.
+/// - **Glide Mode** (Always, Legato): Glide on every note, or only on notes
+///   played while another key is held.
 pub struct MidiNote {
     /// Port definitions.
     ports: Vec<PortDefinition>,
@@ -81,6 +85,8 @@ pub struct MidiNote {
     /// The note the pitch output plays. Kept after release, so the release
     /// tail stays in tune.
     note: u8,
+    /// The pitch as it slides toward `note`.
+    glide: Glide,
     /// Whether any key is held.
     gate: bool,
     /// The sounding note's velocity (0.0-1.0).
@@ -93,6 +99,8 @@ pub struct MidiNote {
     bend: f32,
     /// One-pole coefficient for the bend glide.
     bend_coeff: f32,
+    /// Sample rate from the last prepare() call.
+    sample_rate: f32,
     /// Keep the gate high for this sample even if the note already ended,
     /// so the shortest note still makes a rising edge.
     hold_gate: bool,
@@ -131,15 +139,19 @@ impl MidiNote {
             ],
             held: Vec::with_capacity(128),
             note: 60,
+            glide: Glide::NEW,
             gate: false,
             velocity: 0.0,
             aftertouch: 0.0,
             bend_target: 0.0,
             bend: 0.0,
             bend_coeff: 1.0,
+            sample_rate: 44100.0,
             hold_gate: false,
             retrigger_gap: false,
         };
+        // After the others, so saved patches load unchanged
+        module.parameters.extend(glide_parameters());
         module.prepare(44100.0, 256);
         module
     }
@@ -156,6 +168,8 @@ impl MidiNote {
     pub const PARAM_PRIORITY: usize = 2;
     pub const PARAM_RETRIGGER: usize = 3;
     pub const PARAM_BEND_RANGE: usize = 4;
+    pub const PARAM_GLIDE: usize = 5;
+    pub const PARAM_GLIDE_MODE: usize = 6;
 
     /// Convert MIDI note number to V/Oct pitch CV.
     ///
@@ -174,19 +188,19 @@ impl MidiNote {
     }
 
     /// Applies one MIDI event.
-    fn handle(&mut self, event: &MidiEvent, priority: VoicePriority, retrigger: bool) {
+    fn handle(&mut self, event: &MidiEvent, play: Play) {
         match event.message {
             MidiMessage::NoteOn { note, velocity } if velocity > 0 => {
                 self.held.retain(|&(held, _)| held != note);
                 if self.held.len() < self.held.capacity() {
                     self.held.push((note, velocity));
                 }
-                self.choose_note(priority, retrigger);
+                self.choose_note(play);
             }
             // Note On at velocity 0 is a Note Off
             MidiMessage::NoteOn { note, .. } | MidiMessage::NoteOff { note, .. } => {
                 self.held.retain(|&(held, _)| held != note);
-                self.choose_note(priority, retrigger);
+                self.choose_note(play);
             }
             MidiMessage::PitchBend { value } => {
                 self.bend_target = (value as f32 / 8192.0).clamp(-1.0, 1.0);
@@ -212,23 +226,33 @@ impl MidiNote {
     }
 
     /// Updates the sounding note and gate after the held keys changed.
-    fn choose_note(&mut self, priority: VoicePriority, retrigger: bool) {
-        let Some((note, velocity)) = self.active(priority) else {
+    fn choose_note(&mut self, play: Play) {
+        let Some((note, velocity)) = self.active(play.priority) else {
             self.gate = false;
             return;
         };
         if !self.gate {
             self.gate = true;
             self.hold_gate = true;
+            // No key was held: in Legato mode the note starts on its pitch
+            self.glide.start(note as f32, play.glide_mode.glides(false));
         } else if note == self.note {
             // Still the same key sounding: nothing to change
             return;
-        } else if retrigger {
+        } else if play.retrigger {
             self.retrigger_gap = true;
         }
         self.note = note;
         self.velocity = velocity as f32 / 127.0;
     }
+}
+
+/// The parameters that decide how a note event plays.
+#[derive(Clone, Copy)]
+struct Play {
+    priority: VoicePriority,
+    retrigger: bool,
+    glide_mode: GlideMode,
 }
 
 impl Default for MidiNote {
@@ -257,6 +281,7 @@ impl DspModule for MidiNote {
     }
 
     fn prepare(&mut self, sample_rate: f32, _max_block_size: usize) {
+        self.sample_rate = sample_rate;
         self.bend_coeff = 1.0 - (-1.0 / (BEND_SMOOTHING_SECONDS * sample_rate)).exp();
     }
 
@@ -269,9 +294,13 @@ impl DspModule for MidiNote {
     ) {
         let channel = params[Self::PARAM_CHANNEL];
         let octave = params[Self::PARAM_OCTAVE].round();
-        let priority = VoicePriority::from_param(params[Self::PARAM_PRIORITY]);
-        let retrigger = params[Self::PARAM_RETRIGGER] > 0.5;
+        let play = Play {
+            priority: VoicePriority::from_param(params[Self::PARAM_PRIORITY]),
+            retrigger: params[Self::PARAM_RETRIGGER] > 0.5,
+            glide_mode: GlideMode::from_param(params[Self::PARAM_GLIDE_MODE]),
+        };
         let bend_range = params[Self::PARAM_BEND_RANGE];
+        let glide = Glide::coefficient(params[Self::PARAM_GLIDE], self.sample_rate);
 
         let mut events = context
             .midi
@@ -282,11 +311,12 @@ impl DspModule for MidiNote {
         for i in 0..context.block_size {
             // Everything that lands on this sample, in order
             while let Some(event) = events.next_if(|event| event.sample_offset as usize <= i) {
-                self.handle(event, priority, retrigger);
+                self.handle(event, play);
             }
 
             self.bend += (self.bend_target - self.bend) * self.bend_coeff;
-            let semitones = self.note as f32 + octave * 12.0 + self.bend * bend_range;
+            // Bend rides on top of the glide, unslewed by it
+            let semitones = self.glide.next(self.note as f32, glide) + octave * 12.0 + self.bend * bend_range;
 
             let gate = if self.hold_gate {
                 true
@@ -304,12 +334,13 @@ impl DspModule for MidiNote {
 
         // Anything placed past the block still counts, from the next one
         for event in events {
-            self.handle(event, priority, retrigger);
+            self.handle(event, play);
         }
     }
 
     fn reset(&mut self) {
         self.held.clear();
+        self.glide = Glide::NEW;
         self.gate = false;
         self.velocity = 0.0;
         self.aftertouch = 0.0;
@@ -327,8 +358,9 @@ mod tests {
     const SR: f32 = 48000.0;
     const BLOCK: usize = 256;
 
-    /// Default parameters: Omni, octave 0, Last priority, no retrigger, ±2 st.
-    const DEFAULTS: [f32; 5] = [0.0, 0.0, 0.0, 0.0, 2.0];
+    /// Default parameters: Omni, octave 0, Last priority, no retrigger, ±2 st,
+    /// no glide (Legato).
+    const DEFAULTS: [f32; 7] = [0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 1.0];
 
     fn module() -> MidiNote {
         let mut module = MidiNote::new();
@@ -401,7 +433,7 @@ mod tests {
     fn test_midi_note_parameters() {
         let module = MidiNote::new();
         let ids: Vec<&str> = module.parameters().iter().map(|p| p.id).collect();
-        assert_eq!(ids, ["channel", "octave", "priority", "retrigger", "bend_range"]);
+        assert_eq!(ids, ["channel", "octave", "priority", "retrigger", "bend_range", "glide", "glide_mode"]);
         let defaults: Vec<f32> = module.parameters().iter().map(|p| p.default).collect();
         assert_eq!(defaults, DEFAULTS);
     }
@@ -479,11 +511,11 @@ mod tests {
 
         // Channel parameter 2 is MIDI channel 2, which is wire channel 1
         let mut ch2 = module();
-        let params = [2.0, 0.0, 0.0, 0.0, 2.0];
+        let params = [2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 1.0];
         assert_eq!(gate(&run(&mut ch2, &params, &on_ch2))[0], 1.0);
 
         let mut ch1 = module();
-        let params = [1.0, 0.0, 0.0, 0.0, 2.0];
+        let params = [1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 1.0];
         assert!(gate(&run(&mut ch1, &params, &on_ch2)).iter().all(|&s| s == 0.0));
     }
 
@@ -497,7 +529,7 @@ mod tests {
         ];
         let sounding = |priority: f32| {
             let mut m = module();
-            let out = run(&mut m, &[0.0, 0.0, priority, 0.0, 2.0], &chord);
+            let out = run(&mut m, &[0.0, 0.0, priority, 0.0, 2.0, 0.0, 1.0], &chord);
             (pitch(&out)[30] * 12.0 + 60.0).round() as u8
         };
         assert_eq!(sounding(0.0), 64, "Last");
@@ -527,7 +559,7 @@ mod tests {
         assert_eq!(rising_edges(gate(&out)), vec![0], "legato without retrigger keeps one gate");
 
         let mut retrig = module();
-        let out = run(&mut retrig, &[0.0, 0.0, 0.0, 1.0, 2.0], &legato);
+        let out = run(&mut retrig, &[0.0, 0.0, 0.0, 1.0, 2.0, 0.0, 1.0], &legato);
         assert_eq!(rising_edges(gate(&out)), vec![0, 101], "one-sample gap before the new note");
         assert_eq!(gate(&out)[100], 0.0);
         assert_eq!(pitch(&out)[100], 2.0 / 12.0, "the new pitch arrives with the gap");
@@ -540,7 +572,7 @@ mod tests {
         let mut m = module();
         let out = run(
             &mut m,
-            &[0.0, 0.0, 1.0, 1.0, 2.0],
+            &[0.0, 0.0, 1.0, 1.0, 2.0, 0.0, 1.0],
             &[MidiEvent::note_on(0, 0, 60, 100), MidiEvent::note_on(100, 0, 72, 100)],
         );
         assert_eq!(rising_edges(gate(&out)), vec![0]);
@@ -562,7 +594,7 @@ mod tests {
         assert!((semitones - 2.0).abs() < 0.01, "full bend is +2 st by default, got {semitones}");
 
         // Bend Range 12: a full octave
-        let params = [0.0, 0.0, 0.0, 0.0, 12.0];
+        let params = [0.0, 0.0, 0.0, 0.0, 12.0, 0.0, 1.0];
         let out = run(&mut m, &params, &[]);
         assert!((pitch(&out)[BLOCK - 1] - 1.0).abs() < 0.01);
 
@@ -589,9 +621,9 @@ mod tests {
     #[test]
     fn test_octave_shift() {
         let mut m = module();
-        let out = run(&mut m, &[0.0, 1.0, 0.0, 0.0, 2.0], &[MidiEvent::note_on(0, 0, 60, 100)]);
+        let out = run(&mut m, &[0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 1.0], &[MidiEvent::note_on(0, 0, 60, 100)]);
         assert_eq!(pitch(&out)[0], 1.0);
-        let out = run(&mut m, &[0.0, -2.0, 0.0, 0.0, 2.0], &[]);
+        let out = run(&mut m, &[0.0, -2.0, 0.0, 0.0, 2.0, 0.0, 1.0], &[]);
         assert_eq!(pitch(&out)[0], -2.0);
     }
 
@@ -629,6 +661,116 @@ mod tests {
         m.reset();
         let out = run(&mut m, &DEFAULTS, &[]);
         assert!(gate(&out).iter().all(|&g| g == 0.0));
+    }
+
+    /// Defaults with a glide of `seconds` in `mode`.
+    fn glide_params(seconds: f32, mode: GlideMode) -> [f32; 7] {
+        [0.0, 0.0, 0.0, 0.0, 2.0, seconds, mode as i32 as f32]
+    }
+
+    /// Runs `blocks` blocks, the first with `midi`, returning the pitch in
+    /// semitones from C4.
+    fn pitch_run(m: &mut MidiNote, params: &[f32], midi: &[MidiEvent], blocks: usize) -> Vec<f32> {
+        let mut semitones = Vec::new();
+        for block in 0..blocks {
+            let out = run(m, params, if block == 0 { midi } else { &[] });
+            semitones.extend(pitch(&out).iter().map(|p| p * 12.0));
+        }
+        semitones
+    }
+
+    #[test]
+    fn test_glide_arrives_in_its_time() {
+        // Hold C4, then G4 from a block boundary: a 7 semitone step
+        let params = glide_params(0.2, GlideMode::Legato);
+        let mut m = module();
+        run(&mut m, &params, &[MidiEvent::note_on(0, 0, 60, 100)]);
+        let p = pitch_run(&mut m, &params, &[MidiEvent::note_on(0, 0, 67, 100)], 50);
+
+        let crossing = |fraction: f32| p.iter().position(|&s| s >= 7.0 * fraction).unwrap() as f32 / SR;
+        let tau = 0.2 / 100f32.ln();
+        assert!((crossing(1.0 - (-1.0f32).exp()) - tau).abs() < 0.001, "63% at τ = {tau} s");
+        assert!((crossing(0.99) - 0.2).abs() < 0.001, "99% at the Glide time");
+        assert!(p.windows(2).all(|w| w[1] >= w[0]), "a smooth rise");
+    }
+
+    #[test]
+    fn test_legato_mode_doesnt_glide_from_a_released_key() {
+        let params = glide_params(0.5, GlideMode::Legato);
+        let mut m = module();
+        let out = run(&mut m, &params, &[MidiEvent::note_on(0, 0, 60, 100), MidiEvent::note_off(50, 0, 60, 0), MidiEvent::note_on(100, 0, 67, 100)]);
+        assert_eq!(pitch(&out)[100], 7.0 / 12.0, "G starts on G");
+
+        // The same phrase in Always mode slides up from C
+        let mut m = module();
+        let params = glide_params(0.5, GlideMode::Always);
+        let out = run(&mut m, &params, &[MidiEvent::note_on(0, 0, 60, 100), MidiEvent::note_off(50, 0, 60, 0), MidiEvent::note_on(100, 0, 67, 100)]);
+        assert!(pitch(&out)[100] * 12.0 < 0.1);
+    }
+
+    #[test]
+    fn test_first_note_never_glides() {
+        let mut m = module();
+        let out = run(&mut m, &glide_params(1.0, GlideMode::Always), &[MidiEvent::note_on(10, 0, 72, 100)]);
+        assert_eq!(pitch(&out)[10], 1.0);
+    }
+
+    #[test]
+    fn test_legato_glides_back_to_a_held_key() {
+        // Trill: hold C, tap G, let go of G, and the pitch slides back
+        let params = glide_params(0.1, GlideMode::Legato);
+        let mut m = module();
+        let midi = [MidiEvent::note_on(0, 0, 60, 100), MidiEvent::note_on(0, 0, 67, 100)];
+        run(&mut m, &params, &midi);
+        let p = pitch_run(&mut m, &params, &[MidiEvent::note_off(0, 0, 67, 0)], 40);
+        assert!(p[0] > 0.0 && p[0] < 7.0, "on its way down, not jumped: {}", p[0]);
+        assert!(p.last().unwrap().abs() < 0.01);
+    }
+
+    #[test]
+    fn test_zero_glide_matches_no_glide() {
+        // With Glide at 0, both modes play exactly the pitch the note, octave
+        // and bend make
+        let phrase = [
+            MidiEvent::note_on(0, 0, 60, 100),
+            MidiEvent::note_on(30, 0, 64, 100),
+            MidiEvent::new(40, 0, MidiMessage::PitchBend { value: 4000 }),
+            MidiEvent::note_off(90, 0, 64, 0),
+            MidiEvent::note_off(150, 0, 60, 0),
+            MidiEvent::note_on(200, 0, 55, 100),
+        ];
+        for mode in [GlideMode::Always, GlideMode::Legato] {
+            let mut params = glide_params(0.0, mode);
+            params[MidiNote::PARAM_OCTAVE] = 1.0;
+            let mut glided = module();
+            let out = run(&mut glided, &params, &phrase);
+
+            // Today's formula, from the bend the module heard
+            let mut bend = 0.0f32;
+            let coeff = 1.0 - (-1.0 / (BEND_SMOOTHING_SECONDS * SR)).exp();
+            let notes = |i: usize| match i {
+                0..=29 => 60.0,
+                30..=89 => 64.0,
+                90..=199 => 60.0,
+                _ => 55.0,
+            };
+            for (i, &p) in pitch(&out).iter().enumerate() {
+                let target = if i >= 40 { 4000.0 / 8192.0 } else { 0.0 };
+                bend += (target - bend) * coeff;
+                let expected = MidiNote::midi_to_voct(notes(i) + 12.0 + bend * 2.0);
+                assert_eq!(p, expected, "{mode:?} at sample {i}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_bend_rides_on_top_of_the_glide() {
+        // A long glide doesn't slow the bend: it settles in its usual 5 ms
+        let params = glide_params(2.0, GlideMode::Always);
+        let mut m = module();
+        run(&mut m, &params, &[MidiEvent::note_on(0, 0, 60, 100)]);
+        let p = pitch_run(&mut m, &params, &[MidiEvent::new(0, 0, MidiMessage::PitchBend { value: 8191 })], 10);
+        assert!((p[(0.05 * SR) as usize] - 2.0).abs() < 0.01);
     }
 
     #[test]

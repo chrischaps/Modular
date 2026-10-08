@@ -56,7 +56,10 @@ impl ParamFormat {
                 }
             }
             ParamFormat::Time => {
-                if value >= 1.0 {
+                // A time of nothing (no glide, no slew, no pre-delay) is off
+                if value <= 0.0 {
+                    "Off".to_string()
+                } else if value >= 1.0 {
                     format!("{:.2} s", value)
                 } else if value >= 0.01 {
                     format!("{:.0} ms", value * 1000.0)
@@ -239,7 +242,35 @@ impl KnobConfig {
         self.size = size;
         self
     }
+
+    /// How far round its travel (0 to 1) the knob sits at `value`.
+    pub fn travel(&self, value: f32) -> f32 {
+        let (min, max) = (*self.range.start(), *self.range.end());
+        if !self.logarithmic {
+            (value - min) / (max - min)
+        } else if min > 0.0 {
+            (value.ln() - min.ln()) / (max.ln() - min.ln())
+        } else {
+            // From zero: log above the first few percent, reaching true zero
+            (1.0 + value.max(0.0) / max * (ZERO_LOG_RATIO - 1.0)).ln() / ZERO_LOG_RATIO.ln()
+        }
+    }
+
+    /// The value at `travel` (0 to 1) round a logarithmic knob.
+    fn value_at(&self, travel: f32) -> f32 {
+        let (min, max) = (*self.range.start(), *self.range.end());
+        let value = if min > 0.0 {
+            (min.ln() + travel * (max.ln() - min.ln())).exp()
+        } else {
+            max * (ZERO_LOG_RATIO.powf(travel) - 1.0) / (ZERO_LOG_RATIO - 1.0)
+        };
+        value.clamp(min, max)
+    }
 }
+
+/// How a logarithmic knob that starts at zero spreads its travel: the
+/// value at mid-travel is about a tenth of the top (2 s puts 180 ms there).
+const ZERO_LOG_RATIO: f32 = 100.0;
 
 /// A rotary knob widget for audio parameter control.
 ///
@@ -292,14 +323,7 @@ pub fn knob(ui: &mut Ui, value: &mut f32, config: &KnobConfig) -> Response {
         }
 
         if config.logarithmic {
-            // Logarithmic scaling
-            let min = *config.range.start();
-            let max = *config.range.end();
-            let log_min = min.ln();
-            let log_max = max.ln();
-            let current_log = value.ln();
-            let new_log = current_log + delta_normalized * (log_max - log_min);
-            *value = new_log.exp().clamp(min, max);
+            *value = config.value_at((config.travel(*value) + delta_normalized).clamp(0.0, 1.0));
         } else {
             // Linear scaling
             let range = config.range.end() - config.range.start();
@@ -324,15 +348,7 @@ pub fn knob(ui: &mut Ui, value: &mut f32, config: &KnobConfig) -> Response {
         let radius = config.size / 2.0 - 2.0 * scale;
 
         // Normalize value for display (0.0 to 1.0)
-        let normalized = if config.logarithmic {
-            let min = *config.range.start();
-            let max = *config.range.end();
-            let log_min = min.ln();
-            let log_max = max.ln();
-            (value.ln() - log_min) / (log_max - log_min)
-        } else {
-            (*value - config.range.start()) / (config.range.end() - config.range.start())
-        };
+        let normalized = config.travel(*value);
 
         // Angle calculation: start from bottom-left (-225°) to bottom-right (+45°)
         // Arc spans 270 degrees
@@ -766,6 +782,8 @@ mod tests {
         assert_eq!(ParamFormat::Time.format(0.001), "1.0 ms");
         assert_eq!(ParamFormat::Milliseconds.format(500.0), "500 ms");
         assert_eq!(ParamFormat::Milliseconds.format(1500.0), "1.50 s");
+        assert_eq!(ParamFormat::Time.format(0.0), "Off");
+        assert_eq!(ParamFormat::Milliseconds.format(0.0), "Off");
     }
 
     #[test]
@@ -819,5 +837,25 @@ mod tests {
     fn test_knob_config_with_size() {
         let config = KnobConfig::default().with_size(60.0);
         assert_eq!(config.size, 60.0);
+    }
+
+    #[test]
+    fn test_log_travel_from_zero() {
+        let config = KnobConfig { range: 0.0..=2.0, logarithmic: true, ..Default::default() };
+        assert_eq!(config.travel(0.0), 0.0);
+        assert!((config.travel(2.0) - 1.0).abs() < 1e-6);
+        let middle = config.value_at(0.5);
+        assert!((middle - 0.18).abs() < 0.01, "mid-travel is {middle} s");
+        for value in [0.0, 0.01, 0.2, 1.5] {
+            assert!((config.value_at(config.travel(value)) - value).abs() < 1e-5);
+        }
+        assert_eq!(config.value_at(0.0), 0.0, "all the way down is exactly zero");
+    }
+
+    #[test]
+    fn test_log_travel_positive_range() {
+        let config = KnobConfig::frequency(20.0, 20000.0, 1000.0);
+        assert!((config.travel(632.456) - 0.5).abs() < 1e-4);
+        assert!((config.value_at(0.5) - 632.456).abs() < 0.01);
     }
 }
