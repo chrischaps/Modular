@@ -19,7 +19,7 @@ use crate::graph::{
     port_mapping, validate_connection, AllNodeTemplates, AnyParameterId, SynthDataType, SynthGraphState,
     SynthNodeData, SynthNodeTemplate, SynthValueType,
 };
-use crate::modules::keyboard::{key_to_note, relative_to_midi};
+use crate::modules::keyboard::{key_to_note, relative_to_midi, KeyPriority, KeyboardInput};
 use crate::persistence::{
     capture_patch, examples, load_from_file, save_to_file, stage_patch, Example, MidiMapping, Patch, PatchError,
     EXAMPLES,
@@ -118,9 +118,6 @@ pub struct SynthApp {
 
     /// Whether the gate is currently being held high (for minimum duration).
     gate_held_high: bool,
-
-    /// The last note that was triggered (to maintain pitch during gate hold).
-    last_triggered_note: f32,
 
     /// Current CPU load percentage from the audio engine (0-100).
     cpu_load: f32,
@@ -283,7 +280,6 @@ impl SynthApp {
             pressed_keys: Vec::new(),
             last_gate_on: None,
             gate_held_high: false,
-            last_triggered_note: 60.0,
             cpu_load: 0.0,
             toolbar_full_width: None,
             audio_heartbeat: (0, Instant::now()),
@@ -2344,22 +2340,17 @@ impl SynthApp {
     /// Updates the Note and Gate parameters based on the currently pressed keys.
     /// Implements minimum gate duration to ensure reliable triggering.
     fn sync_keyboard_modules(&mut self) {
-        // Determine the active note based on key priority (for now, always use "Last" priority)
-        let (active_note, should_gate_on) = if let Some((note, _key)) = self.pressed_keys.last() {
-            let midi_note = relative_to_midi(*note, 0);
-            (midi_note as f32, true)
-        } else {
-            (self.last_triggered_note, false)
-        };
+        // Held notes, in the order their keys went down
+        let held: Vec<i32> = self.pressed_keys.iter().map(|(note, _)| *note).collect();
 
-        // Determine actual gate state considering minimum duration
-        let gate_value = if should_gate_on {
-            // Key is pressed - gate should be on
+        // Determine actual gate state considering minimum duration. The gate
+        // rises with the first key and stays up while any key is held, so a
+        // change of note under it is legato: the pitch moves, nothing retriggers
+        let gate_value = if !held.is_empty() {
             if !self.gate_held_high {
                 // New note trigger
                 self.last_gate_on = Some(Instant::now());
                 self.gate_held_high = true;
-                self.last_triggered_note = active_note;
             }
             1.0
         } else if self.gate_held_high {
@@ -2393,17 +2384,24 @@ impl SynthApp {
         let note_param_idx = 0;
         let gate_param_idx = 1;
 
-        // Use the triggered note when gate is high, otherwise active_note
-        let note_to_send = if self.gate_held_high { self.last_triggered_note } else { active_note };
-
         // Update all Keyboard modules
         for engine_node_id in keyboard_nodes {
-            // Update Note parameter
-            self.send_command(EngineCommand::SetParameter {
-                node_id: engine_node_id,
-                param_index: note_param_idx,
-                value: note_to_send,
-            });
+            // Each module chooses its note from the held keys by its own
+            // Priority. With nothing held the Note stays where it was, so the
+            // last note rings through the release
+            let priority = self.cached_params
+                .get(&(engine_node_id, KeyboardInput::PARAM_PRIORITY))
+                .map_or(KeyPriority::Last, |&value| KeyPriority::from_param(value));
+            if let Some(note) = priority.select_note(&held) {
+                let note = relative_to_midi(note, 0) as f32;
+                self.send_command(EngineCommand::SetParameter {
+                    node_id: engine_node_id,
+                    param_index: note_param_idx,
+                    value: note,
+                });
+                // Also update the cached params so sync_parameters doesn't overwrite
+                self.cached_params.insert((engine_node_id, note_param_idx), note);
+            }
 
             // Update Gate parameter
             self.send_command(EngineCommand::SetParameter {
@@ -2411,9 +2409,6 @@ impl SynthApp {
                 param_index: gate_param_idx,
                 value: gate_value,
             });
-
-            // Also update the cached params so sync_parameters doesn't overwrite
-            self.cached_params.insert((engine_node_id, note_param_idx), note_to_send);
             self.cached_params.insert((engine_node_id, gate_param_idx), gate_value);
         }
 

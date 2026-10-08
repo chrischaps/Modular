@@ -25,7 +25,7 @@ The **Gate** output lights up on the node while a note is held.
 |---------|-------|---------|-------------|
 | **Oct** (Octave) | −2 to +2 | 0 | Shifts the whole keyboard up or down by octaves |
 | **Vel** (Velocity) | 0 – 100% | 100% | The strength sent for every note. A computer key can't tell soft from hard, so this sets it for all of them |
-| **Priority** | Last / Lowest / Highest | Last | Reserved for a future update. It has no effect yet (see [Playing](#playing)) |
+| **Priority** | Last / Lowest / Highest | Last | Which key sounds when several are held: the one pressed most recently, the lowest or the highest (see [Playing](#playing)) |
 
 ## Key layout
 
@@ -41,7 +41,15 @@ That's C4 to E5, a little over an octave. The top letter row plays too, in the s
 
 ## Playing
 
-Play one key at a time. While any key is held, the Keyboard stays on the note you pressed first: pressing other keys lights them on the piano display but doesn't change the pitch or retrigger the gate. Release every key and the next one you press sounds. For legato lines, note priority and retriggering, use a MIDI controller with [MIDI Note](./midi-note.md).
+The Keyboard plays legato. The first key raises the gate, and while any key is held the gate stays up: pressing another key moves **Pitch** to it without retriggering the envelope, so overlapping your key presses slurs one note into the next. To retrigger, release every key before playing the next one.
+
+When several keys are held, **Priority** picks the one that sounds:
+
+- **Last** plays the key pressed most recently. Release it and the pitch falls back to the most recent key still held, which makes trills between two fingers easy.
+- **Lowest** plays the lowest held key, so a held bass note wins over anything played above it.
+- **Highest** plays the highest held key, the classic choice for a lead line over a held drone.
+
+A change to **Priority** applies from the next key you press or release. Every held key lights on the piano display, whichever one is sounding.
 
 After you let go, **Pitch** stays on the last note, so the release tail stays in tune. Even a very quick tap holds the gate high for at least 30 ms, so every key press triggers a full envelope.
 

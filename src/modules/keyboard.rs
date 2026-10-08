@@ -33,6 +33,18 @@ impl KeyPriority {
             _ => KeyPriority::Last,
         }
     }
+
+    /// The note that sounds from `held`, listed in the order the keys went down.
+    ///
+    /// Releasing the sounding key falls back to the next one under the same
+    /// rule, because the choice is made afresh from whatever is still held.
+    pub fn select_note(self, held: &[i32]) -> Option<i32> {
+        match self {
+            KeyPriority::Last => held.last().copied(),
+            KeyPriority::Lowest => held.iter().copied().min(),
+            KeyPriority::Highest => held.iter().copied().max(),
+        }
+    }
 }
 
 /// A virtual keyboard for triggering notes from computer keyboard input.
@@ -125,8 +137,8 @@ impl KeyboardInput {
     const PARAM_GATE: usize = 1;
     const PARAM_OCTAVE: usize = 2;
     const PARAM_VELOCITY: usize = 3;
-    #[allow(dead_code)]
-    const PARAM_PRIORITY: usize = 4;
+    /// Read by the UI, which picks the sounding note from the held keys.
+    pub const PARAM_PRIORITY: usize = 4;
 
     /// Convert MIDI note number to V/Oct pitch CV.
     ///
@@ -340,6 +352,19 @@ mod tests {
         assert_eq!(KeyPriority::from_param(1.0), KeyPriority::Lowest);
         assert_eq!(KeyPriority::from_param(2.0), KeyPriority::Highest);
         assert_eq!(KeyPriority::from_param(99.0), KeyPriority::Last); // Out of range
+    }
+
+    #[test]
+    fn test_select_note_by_priority() {
+        // C, then G, then E held, in that order
+        let held = [0, 7, 4];
+        assert_eq!(KeyPriority::Last.select_note(&held), Some(4));
+        assert_eq!(KeyPriority::Lowest.select_note(&held), Some(0));
+        assert_eq!(KeyPriority::Highest.select_note(&held), Some(7));
+
+        // Releasing the sounding E falls back to G under Last
+        assert_eq!(KeyPriority::Last.select_note(&[0, 7]), Some(7));
+        assert_eq!(KeyPriority::Lowest.select_note(&[]), None);
     }
 
     #[test]
