@@ -52,7 +52,7 @@ Changing **Voices** fades voices in or out and slides the rest to their new plac
 | **Voices** | 1 – 4 | 2 | Number of voices (dropdown on the node) |
 | **Shape** | Sine / Tri | Sine | LFO waveform (dropdown on the node) |
 
-While **Rate CV** or **Depth CV** is patched, its knob dims and follows the incoming signal, and you can't turn it. The CV still works around the knob's last position, so set Rate and Depth before you patch them.
+While **Rate CV** or **Depth CV** is patched, its knob stays live and sets the center the CV works around, so you can keep turning it as the sweep plays.
 
 ## Shaping the sound
 

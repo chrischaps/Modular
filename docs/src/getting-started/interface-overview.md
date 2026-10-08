@@ -83,9 +83,7 @@ Some knobs move in whole steps, like the Oscillator's **Oct** and **Semi**: they
 
 Many parameters have both a knob and an input jack of the same name. Patch a cable into the jack and the knob sets the center while the incoming signal moves the value around it. Each module page gives the scale.
 
-On most knobs, such as a filter's **Cutoff**, the knob stays live while the cable is patched, so you can keep moving the center. A few (the LFO's **Rate**, the Chorus's **Rate** and **Depth**) lock instead: the knob dims, stops responding and turns on its own to follow the incoming signal, and the cable modulates around wherever the knob was left.
-
-Either way, a small dot appears above the knob while a cable is patched in, orange once signal arrives. Unplug the cable and the knob is yours again.
+The knob stays live while the cable is patched, so you can keep moving the center as the signal plays. A small dot appears above the knob while a cable is patched in, orange once signal arrives. Unplug the cable and the knob alone sets the value again.
 
 ## Cables
 

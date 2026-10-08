@@ -131,7 +131,7 @@ in   Phase              Control  ConstantOnly         inline=false num 0 [0..360
 in   Bipolar            Control  ConstantOnly         inline=true  toggle true "Bipolar"
 out  Out                Control
 out  Phase              Control
-knob Rate               "Rate" Exposed
+knob Rate               "Rate" Modulatable
 knob Phase              "Phase" KnobOnly
 monitor [1]
 display LfoWave
@@ -342,8 +342,8 @@ in   Mix                Control  ConstantOnly         inline=false num 0.5 [0..1
 in   Shape              Control  ConstantOnly         inline=true  select 0 ["Sine", "Tri"] "Shape"
 out  Out L              Audio
 out  Out R              Audio
-knob Rate               "Rate" Exposed
-knob Depth              "Depth" Exposed
+knob Rate               "Rate" Modulatable
+knob Depth              "Depth" Modulatable
 knob Delay              "Delay" KnobOnly
 knob Feedback           "FB" KnobOnly
 knob Mix                "Mix" KnobOnly

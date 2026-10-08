@@ -49,7 +49,7 @@ With **Bipolar** off, **Out** stays between 0 and 1: the same shape, lifted and 
 
 ## Rate CV
 
-The **Rate** input works in octaves, like V/Oct. +1 doubles the rate, +2 quadruples it, -1 halves it. Patching it dims the knob, but the rate you set stays the base the CV works from.
+The **Rate** input works in octaves, like V/Oct. +1 doubles the rate, +2 quadruples it, -1 halves it. The knob stays live while it's patched and sets the base rate the CV works from, so you can keep turning it.
 
 ```text
 [LFO 2 (slow)] ──Out──> [LFO 1 Rate]

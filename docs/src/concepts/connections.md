@@ -34,7 +34,7 @@ Many parameters have both a knob and an input jack of the same name, such as **C
 
 How far a cable moves the parameter depends on the parameter, and each module page gives the scale. On both filters, for instance, the Cutoff CV is 1 per octave: +1.0 doubles the cutoff and −1.0 halves it. With Cutoff at 1 kHz, a bipolar LFO sweeps the filter from 500 Hz to 2 kHz.
 
-A small dot above the knob shows that a cable is patched in: orange once the signal is arriving, green while it's connected but hasn't reported a value yet. On most knobs you can keep turning the knob to move the center while the cable plays. A few knobs (**Rate** on the LFO, **Rate** and **Depth** on the Chorus) dim while patched and turn by themselves to follow the incoming signal; unplug the cable to adjust them again.
+A small dot above the knob shows that a cable is patched in: orange once the signal is arriving, green while it's connected but hasn't reported a value yet. You can keep turning the knob to move the center while the cable plays.
 
 A knob mapped to a MIDI controller shows a purple **M** badge instead of the dot.
 

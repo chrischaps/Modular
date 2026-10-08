@@ -165,7 +165,7 @@ static MODULE_UI: &[ModuleUi] = &[
     },
     ModuleUi {
         module_id: "mod.lfo",
-        knobs: &[knob("Rate"), knob("Phase")],
+        knobs: &[modulatable("Rate", "Rate"), knob("Phase")],
         labels: &[("Waveform", "Wave")],
         monitor: &["Phase"],
         display: NodeDisplay::LfoWave,
@@ -266,7 +266,7 @@ static MODULE_UI: &[ModuleUi] = &[
     },
     ModuleUi {
         module_id: "fx.chorus",
-        knobs: &[knob("Rate"), knob("Depth"), knob("Delay"), knob_as("Feedback", "FB"), knob("Mix")],
+        knobs: &[modulatable("Rate", "Rate"), modulatable("Depth", "Depth"), knob("Delay"), knob_as("Feedback", "FB"), knob("Mix")],
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
