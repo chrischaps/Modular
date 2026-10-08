@@ -43,6 +43,11 @@ fn note_to_name(note: u8) -> String {
 }
 
 /// Format a MIDI event for display.
+/// Rows in the MIDI Monitor's log.
+const MIDI_LOG_ROWS: usize = 8;
+/// The longest line the log usually shows, which sets its width.
+const MIDI_LOG_WIDEST: &str = "NoteOn Ch16 C#-1 vel=127";
+
 fn format_midi_event(event: &MidiEvent) -> (String, Color32) {
     match event {
         MidiEvent::NoteOn { channel, note, velocity } => (
@@ -892,45 +897,64 @@ impl NodeDataTrait for SynthNodeData {
             // Render MIDI event log
             let midi_events = user_state.midi_events();
 
-            if midi_events.is_empty() {
-                ui.label(RichText::new("No MIDI events").small().weak().italics());
-            } else {
-                // Display events (most recent first for better visibility)
-                ui.vertical(|ui| {
-                    ui.set_min_width(180.0 * zoom);
-                    ui.set_max_height(120.0 * zoom);
+            // Newest first, after the channel and type filters
+            let visible: Vec<_> = midi_events
+                .iter()
+                .rev()
+                .filter(|event| {
+                    // Channel filter: 0 = all, 1-16 = that channel
+                    let channel_ok = channel_filter == 0
+                        || event.event.channel() as usize + 1 == channel_filter;
+                    let type_ok = match &event.event {
+                        MidiEvent::NoteOn { .. } | MidiEvent::NoteOff { .. } => show_notes,
+                        MidiEvent::ControlChange { .. } => show_cc,
+                        MidiEvent::PitchBend { .. } => show_pitch_bend,
+                        _ => true, // Always show other events
+                    };
+                    channel_ok && type_ok
+                })
+                .take(MIDI_LOG_ROWS)
+                .collect();
 
-                    for event in midi_events.iter().rev().take(8) {
-                        // Apply channel filter (0 = all, 1-16 = specific channel)
-                        if channel_filter > 0 {
-                            let event_channel = event.event.channel() as usize + 1;
-                            if event_channel != channel_filter {
-                                continue;
-                            }
-                        }
+            // A fixed panel holding exactly the rows it shows, painted at a set
+            // pitch: rows can't crowd into each other, and the node keeps its
+            // size as events arrive
+            let font = egui::FontId::monospace(egui::TextStyle::Small.resolve(ui.style()).size);
+            let row_height = ui.fonts(|f| f.row_height(&font)) + 2.0 * zoom;
+            let gap = 6.0 * zoom;
+            let (stamp_width, width) = ui.fonts(|f| {
+                let measure = |text: &str| f.layout_no_wrap(text.to_string(), font.clone(), Color32::WHITE).size().x;
+                let stamp = measure("000.0s");
+                (stamp, (stamp + gap + measure(MIDI_LOG_WIDEST)).max(180.0 * zoom))
+            });
+            let (rect, _) = ui.allocate_exact_size(
+                egui::vec2(width, MIDI_LOG_ROWS as f32 * row_height),
+                egui::Sense::hover(),
+            );
+            let painter = ui.painter_at(rect);
+            let weak = ui.visuals().weak_text_color();
 
-                        // Apply event type filters
-                        let should_show = match &event.event {
-                            MidiEvent::NoteOn { .. } | MidiEvent::NoteOff { .. } => show_notes,
-                            MidiEvent::ControlChange { .. } => show_cc,
-                            MidiEvent::PitchBend { .. } => show_pitch_bend,
-                            _ => true, // Always show other events
-                        };
-
-                        if !should_show {
-                            continue;
-                        }
-
-                        // Format and display the event
-                        let (text, color) = format_midi_event(&event.event);
-                        let timestamp = format!("{:.1}s", event.timestamp);
-
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(&timestamp).small().weak().monospace());
-                            ui.label(RichText::new(&text).small().color(color).monospace());
-                        });
-                    }
-                });
+            if visible.is_empty() {
+                let note = if midi_events.is_empty() { "No MIDI events" } else { "No matching events" };
+                painter.text(
+                    egui::pos2(rect.left(), rect.top() + row_height / 2.0),
+                    egui::Align2::LEFT_CENTER,
+                    note,
+                    font.clone(),
+                    weak,
+                );
+            }
+            for (row, event) in visible.iter().enumerate() {
+                let y = rect.top() + (row as f32 + 0.5) * row_height;
+                let (text, color) = format_midi_event(&event.event);
+                painter.text(
+                    egui::pos2(rect.left() + stamp_width, y),
+                    egui::Align2::RIGHT_CENTER,
+                    format!("{:.1}s", event.timestamp),
+                    font.clone(),
+                    weak,
+                );
+                painter.text(egui::pos2(rect.left() + stamp_width + gap, y), egui::Align2::LEFT_CENTER, text, font.clone(), color);
             }
         }
 
