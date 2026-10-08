@@ -230,6 +230,9 @@ pub enum NodeDisplay {
     StepGrid,
     /// Audio Output: output stage level meter.
     OutputMeter,
+    /// Mixer: where each channel sits in the stereo field, its meter and
+    /// mute button, and the master meter.
+    MixerStrips,
 }
 
 /// Data stored per node in the graph.
@@ -2015,6 +2018,13 @@ impl NodeDataTrait for SynthNodeData {
             });
         }
 
+        // Mixer: the stereo panorama, and a meter and mute per strip
+        if self.display == NodeDisplay::MixerStrips {
+            if let Some((param_name, value)) = super::mixer_strips::mixer_strips(ui, node_id, graph, user_state, zoom) {
+                responses.push(NodeResponse::User(SynthResponse::ParameterChanged { node_id, param_name, value }));
+            }
+        }
+
         // Render horizontal row of knobs if this node has knob parameters
         if !self.knob_params.is_empty() {
             // Add spacing before the knob row (separator removed - it was expanding to fill available width)
@@ -2118,10 +2128,10 @@ impl NodeDataTrait for SynthNodeData {
                                             Color32::from_rgb(180, 100, 200) // Purple for MIDI
                                         };
 
+                                        // Centred over the knob, which sits at the column's left
                                         let dot_size = 8.0 * zoom;
-                                        let available_width = ui.available_width();
                                         let badge_center = egui::pos2(
-                                            ui.cursor().left() + available_width / 2.0,
+                                            ui.cursor().left() + knob_size / 2.0,
                                             ui.cursor().top() + dot_size / 2.0,
                                         );
 
@@ -2153,10 +2163,9 @@ impl NodeDataTrait for SynthNodeData {
                                         };
                                         // Draw a small colored dot centered above the knob
                                         let dot_size = 6.0 * zoom;
-                                        let available_width = ui.available_width();
                                         let dot_rect = egui::Rect::from_center_size(
                                             egui::pos2(
-                                                ui.cursor().left() + available_width / 2.0,
+                                                ui.cursor().left() + knob_size / 2.0,
                                                 ui.cursor().top() + dot_size / 2.0,
                                             ),
                                             egui::vec2(dot_size, dot_size),

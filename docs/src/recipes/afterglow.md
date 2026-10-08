@@ -32,7 +32,7 @@ A patch that plays itself and sounds finished: a soft, plucked arpeggio rolls th
 | [SVF Filter](../modules/filters/svf-filter.md) | **Cutoff** 420 Hz, **Res** 15% |
 | [ADSR Envelope](../modules/modulation/adsr.md) 2 | **Atk** 80 ms, **Dec** 100 ms, **Sus** 100%, **Rel** 2.2 s, **Vel** 0% |
 | [VCA](../modules/utilities/vca.md) 2 | **Level** 75%, **CV Amt** 60% |
-| [Mixer](../modules/utilities/mixer.md) 2 | **Lv 1** 100%, **Lv 2** 65% |
+| [Mixer](../modules/utilities/mixer.md) 2 | **Lv 1** 100%, **Lv 2** 65%, **Pan 1** R 35, **Master** +3 dB |
 | [Chorus](../modules/effects/chorus.md) | **Rate** 0.3 Hz, **Depth** 35%, **Delay** 12 ms, **Voices** 2, **Mix** 35% |
 | [Stereo Delay](../modules/effects/delay.md) | **Sync** 1/8D, **FB** 45%, **Mix** 30%, **HiCut** 3.5 kHz, **LoCut** 350 Hz, **P-P** on, **Tape** on |
 | [Reverb](../modules/effects/reverb.md) | **Size** 80%, **Decay** 5 s, **PreD** 30 ms, **Mix** 35%, **Mod** 30% |
@@ -89,15 +89,15 @@ VCA 2's **CV Amt** of 60% means the envelope controls only part of the level, an
 ### Echoes and space
 
 ```text
-[VCA 1 Out] ──> [Mixer 2 Ch 1]
-[VCA 2 Out] ──> [Mixer 2 Ch 2]
-[Mixer 2 Out] ──> [Chorus In L]
+[VCA 1 Out] ──> [Mixer 2 Ch 1]       (Pan R 35)
+[VCA 2 Out] ──> [Mixer 2 Ch 2]       (Pan C)
+[Mixer 2 Out L/R] ──> [Chorus In L/R]
 [Chorus Out L/R] ──> [Stereo Delay In L/R]
 [Stereo Delay Out L/R] ──> [Reverb In L/R]
 [Reverb Out L/R] ──> [Audio Output Left/Right]
 ```
 
-The Chorus turns the mono mix into stereo. The Stereo Delay is synced to a dotted eighth, which is three sixteenths. Each echo therefore falls between the notes of the arpeggio, and **Ping-Pong** moves it to the other speaker. The arpeggio sounds busier than it is, the echoes stay in time with it, and the rhythm keeps moving. **Tape** gives the repeats a little wobble and wear. **LoCut** keeps the bass out of the echoes, so the low end stays clean. A medium reverb with a five-second tail puts everything in the same room.
+The Mixer sets the arpeggio a little to the right and keeps the pad, which carries the bass, in the middle. Its **Master** at +3 dB wins back the 3 dB that panning takes from a centred sound on each side. The Chorus widens both parts. The Stereo Delay is synced to a dotted eighth, which is three sixteenths. Each echo therefore falls between the notes of the arpeggio, and **Ping-Pong** moves it to the other speaker. The arpeggio sounds busier than it is, the echoes stay in time with it, and the rhythm keeps moving. **Tape** gives the repeats a little wobble and wear. **LoCut** keeps the bass out of the echoes, so the low end stays clean. The first echo of each note leaves from the arpeggio's side and lands on the other, so the echoes answer the notes across the room. A medium reverb with a five-second tail puts everything in the same room.
 
 ## Variations
 

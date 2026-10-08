@@ -29,6 +29,18 @@ impl Default for OutputLevels {
     }
 }
 
+/// The most readings one module's meters report.
+pub const MAX_METERS: usize = 8;
+
+/// Peak levels from a module's own meters (a mixer's channel strips, say),
+/// covering one measurement period. Fixed-size, so reporting them from the
+/// audio thread never allocates.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MeterLevels {
+    /// The peak magnitude of each meter, in the module's own order.
+    pub peaks: [f32; MAX_METERS],
+}
+
 /// Category of a DSP module, used for organization and UI coloring.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ModuleCategory {
@@ -284,6 +296,14 @@ pub trait DspModule: Send + 'static {
     ///
     /// Returns `None` for non-output modules.
     fn take_output_levels(&mut self) -> Option<OutputLevels> {
+        None
+    }
+
+    /// Returns this module's meter readings since the last call, and starts
+    /// a new measurement, for modules that meter their own signals.
+    ///
+    /// Returns `None` for modules without meters.
+    fn take_meter_levels(&mut self) -> Option<MeterLevels> {
         None
     }
 

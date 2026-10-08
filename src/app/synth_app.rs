@@ -999,6 +999,10 @@ impl SynthApp {
                         // Feed the Audio Output node's meter
                         self.user_state.output_meter.feed(levels);
                     }
+                    crate::engine::EngineEvent::MeterLevels { node_id, levels } => {
+                        // Feed a module's own meters (the Mixer's strips)
+                        self.user_state.module_meters.entry(node_id).or_default().feed(&levels);
+                    }
                     // Other events are not currently handled by the app
                     // (Started, Stopped, Error)
                     _ => {}
@@ -2525,6 +2529,12 @@ impl eframe::App for SynthApp {
         self.user_state.output_meter.tick(dt);
         if !self.user_state.output_meter.is_idle() {
             ctx.request_repaint();
+        }
+        for meters in self.user_state.module_meters.values_mut() {
+            meters.tick(dt);
+            if !meters.is_idle() {
+                ctx.request_repaint();
+            }
         }
 
         // Clear status message after it's been shown (user will see it on first frame)

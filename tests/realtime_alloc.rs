@@ -214,7 +214,7 @@ fn poly_patch_never_allocates_with_eight_voices() {
 
     // Poly MIDI -> osc -> SVF -> ladder -> VCA (opened by an envelope) ->
     // mixer -> delay -> output. Everything up to the VCA runs 8 voices; the
-    // mixer and delay hear them summed
+    // mixer spreads them across its stereo pair, and the delay hears that
     let chain: [(NodeId, &'static str); 9] = [
         (1, "input.poly_midi"),
         (2, "osc.sine"),
@@ -246,7 +246,11 @@ fn poly_patch_never_allocates_with_eight_voices() {
     connect(&mut ui, (4, "filter.ladder", "LP24"), (6, "util.vca", "In"));
     connect(&mut ui, (5, "mod.adsr", "Out"), (6, "util.vca", "CV"));
     connect(&mut ui, (6, "util.vca", "Out"), (7, "util.mixer", "Ch 1"));
-    connect(&mut ui, (7, "util.mixer", "Out"), (8, "fx.delay", "In L"));
+    connect(&mut ui, (7, "util.mixer", "Out L"), (8, "fx.delay", "In L"));
+    connect(&mut ui, (7, "util.mixer", "Out R"), (8, "fx.delay", "In R"));
+    // Full spread, and the envelope sweeping channel 1's pan
+    ui.send_command(EngineCommand::SetParameter { node_id: 7, param_index: 13, value: 1.0 });
+    connect(&mut ui, (5, "mod.adsr", "Out"), (7, "util.mixer", "Pan 1"));
     connect(&mut ui, (8, "fx.delay", "Out L"), (9, "output.audio", "Left"));
     connect(&mut ui, (8, "fx.delay", "Out R"), (9, "output.audio", "Right"));
     for node_id in 1..=9 {

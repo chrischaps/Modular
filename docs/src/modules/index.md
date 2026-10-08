@@ -58,7 +58,7 @@ The **ID** is the name a patch file uses to refer to the module.
 | [Clock](./modulation/clock.md) | `util.clock` | Steady gate pulses at a tempo |
 | [VCA](./utilities/vca.md) | `util.vca` | Voltage-controlled amplifier: sets a signal's level from a CV |
 | [Attenuverter](./utilities/attenuverter.md) | `util.attenuverter` | Scale, invert and offset a control signal |
-| [Mixer](./utilities/mixer.md) | `util.mixer` | Two-channel summing mixer |
+| [Mixer](./utilities/mixer.md) | `util.mixer` | Four-channel stereo mixer with pan, mute and poly spread |
 | [Sample & Hold](./utilities/sample-hold.md) | `util.sample_hold` | Capture a signal's value on each trigger and hold it |
 | [Quantizer](./utilities/quantizer.md) | `util.quantizer` | Snap a pitch to the nearest note of a scale |
 | [Oscilloscope](./visualization/oscilloscope.md) | `util.oscilloscope` | Draw up to two signals as waveforms |
@@ -122,7 +122,7 @@ Drive a voice from a sequence instead of a keyboard:
 | Play a pattern | [Clock](./modulation/clock.md) into the [Step Sequencer](./utilities/sequencer.md) |
 | Make random changes | [Noise](./sources/noise.md) into [Sample & Hold](./utilities/sample-hold.md) for steps, or its **Random** output for glides |
 | Keep random notes in key | [Quantizer](./utilities/quantizer.md) |
-| Combine two signals | [Mixer](./utilities/mixer.md) |
+| Combine signals, or place them left and right | [Mixer](./utilities/mixer.md) |
 | Add space and depth | [Stereo Delay](./effects/delay.md), [Reverb](./effects/reverb.md), [Chorus](./effects/chorus.md) |
 | Add grit or warmth | [Distortion](./effects/distortion.md) |
 | Balance tone and dynamics | [3-Band EQ](./effects/eq.md), [Compressor](./effects/compressor.md) |

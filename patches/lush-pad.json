@@ -143,10 +143,90 @@
       ]
     },
     {
+      "id": 10,
+      "module_id": "util.mixer",
+      "position": [
+        951.0,
+        20.0
+      ],
+      "parameters": [
+        {
+          "name": "Level 1",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Level 2",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Level 3",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Level 4",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Pan 1",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Pan 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Pan 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Pan 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 3.0
+        },
+        {
+          "name": "Spread",
+          "type": "Number",
+          "value": 0.8
+        }
+      ]
+    },
+    {
       "id": 5,
       "module_id": "fx.chorus",
       "position": [
-        951.0,
+        1271.0,
         20.0
       ],
       "parameters": [
@@ -191,7 +271,7 @@
       "id": 6,
       "module_id": "fx.reverb",
       "position": [
-        1271.0,
+        1591.0,
         20.0
       ],
       "parameters": [
@@ -236,7 +316,7 @@
       "id": 7,
       "module_id": "output.audio",
       "position": [
-        1540.0,
+        1860.0,
         60.0
       ],
       "parameters": [
@@ -370,12 +450,6 @@
       "to_port": "In"
     },
     {
-      "from_node": 4,
-      "from_port": "Out",
-      "to_node": 5,
-      "to_port": "In L"
-    },
-    {
       "from_node": 5,
       "from_port": "Out L",
       "to_node": 6,
@@ -410,6 +484,24 @@
       "from_port": "Out",
       "to_node": 3,
       "to_port": "Cutoff"
+    },
+    {
+      "from_node": 4,
+      "from_port": "Out",
+      "to_node": 10,
+      "to_port": "Ch 1"
+    },
+    {
+      "from_node": 10,
+      "from_port": "Out L",
+      "to_node": 5,
+      "to_port": "In L"
+    },
+    {
+      "from_node": 10,
+      "from_port": "Out R",
+      "to_node": 5,
+      "to_port": "In R"
     }
   ],
   "midi_mappings": []

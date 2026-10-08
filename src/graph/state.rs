@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use crate::engine::{ChannelPeaks, NodeId as EngineNodeId};
 use crate::engine::midi_engine::MidiEvent;
-use crate::widgets::LevelMeter;
+use crate::widgets::{LevelMeter, ModuleMeters};
 use super::signal_history::{OutputHistory, TraceShape};
 use super::{SynthDataType, SynthGraph, SynthNodeData, SynthValueType};
 use super::templates::SynthNodeTemplate;
@@ -150,6 +150,10 @@ pub struct SynthGraphState {
 
     /// Output stage meter, fed by OutputLevel events from the audio engine.
     pub output_meter: LevelMeter,
+
+    /// Modules' own meters (a Mixer's channel strips), fed by MeterLevels
+    /// events. Key: engine node ID.
+    pub module_meters: HashMap<EngineNodeId, ModuleMeters>,
 }
 
 impl Default for SynthGraphState {
@@ -181,6 +185,7 @@ impl Default for SynthGraphState {
             keyboard_active_notes: Vec::new(),
             midi_active_notes: Vec::new(),
             output_meter: LevelMeter::default(),
+            module_meters: HashMap::new(),
         }
     }
 }
@@ -239,6 +244,7 @@ impl SynthGraphState {
         self.keyboard_active_notes.clear();
         self.midi_active_notes.clear();
         self.output_meter = LevelMeter::default();
+        self.module_meters.clear();
     }
 
     /// Get the MIDI mapping info for a parameter, if any.
@@ -319,6 +325,7 @@ impl SynthGraphState {
         self.output_values.retain(|(node_id, _), _| *node_id != engine_node_id);
         self.output_channels.retain(|(node_id, _), _| *node_id != engine_node_id);
         self.signal_history.retain(|(node_id, _), _| *node_id != engine_node_id);
+        self.module_meters.remove(&engine_node_id);
     }
 
     /// Update an output's per-channel reading from the audio engine feedback.
@@ -343,7 +350,7 @@ impl SynthGraphState {
     }
 
     /// The last per-channel reading of a graph node's output, if any.
-    fn output_peaks(&self, graph_node_id: NodeId, output_index: usize) -> Option<&ChannelPeaks> {
+    pub fn output_peaks(&self, graph_node_id: NodeId, output_index: usize) -> Option<&ChannelPeaks> {
         let engine_node_id = self.get_engine_node_id(graph_node_id)?;
         self.output_channels.get(&(engine_node_id, output_index))
     }

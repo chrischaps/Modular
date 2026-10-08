@@ -577,7 +577,7 @@
       "module_id": "util.mixer",
       "position": [
         750.0,
-        400.0
+        360.0
       ],
       "parameters": [
         {
@@ -596,8 +596,8 @@
       "id": 11,
       "module_id": "mod.adsr",
       "position": [
-        972.0,
-        340.0
+        1070.0,
+        360.0
       ],
       "parameters": [
         {
@@ -647,7 +647,7 @@
       "module_id": "mod.adsr",
       "position": [
         450.0,
-        650.0
+        1040.0
       ],
       "parameters": [
         {
@@ -697,7 +697,7 @@
       "module_id": "source.noise",
       "position": [
         715.0,
-        670.0
+        1040.0
       ],
       "parameters": [
         {
@@ -717,7 +717,7 @@
       "module_id": "filter.svf",
       "position": [
         972.0,
-        750.0
+        1040.0
       ],
       "parameters": [
         {

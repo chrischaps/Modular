@@ -21,7 +21,7 @@ It doesn't imitate hardware panels. Every module is a node with jacks on its sid
   | Filters | SVF Filter (self-oscillating, notch), Ladder Filter (oversampled) |
   | Modulation | ADSR Envelope, LFO, Clock |
   | Effects | Stereo Delay (with tape mode), Reverb (8-line FDN), Chorus, Distortion (oversampled, wavefolder), Compressor, Parametric EQ |
-  | Utilities | VCA, Mixer, Attenuverter, Sample & Hold, Quantizer (scales, custom scale from a clickable piano), Step Sequencer |
+  | Utilities | VCA, Mixer (4 stereo channels, pan, mute, poly spread), Attenuverter, Sample & Hold, Quantizer (scales, custom scale from a clickable piano), Step Sequencer |
   | Output | Audio Output (with metering and limiter), Oscilloscope, MIDI Monitor |
 
 - **Visual feedback.** Waveform, envelope and filter-response displays sit on their modules, LEDs light on active outputs, and the scope shows what's actually there. Hover any jack or knob to see what it does.

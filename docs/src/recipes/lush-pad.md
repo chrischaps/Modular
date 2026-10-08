@@ -1,6 +1,6 @@
 # Lush Pad
 
-A wide, slow-blooming pad for holding chords. Each note fades in over most of a second, a filter breathes open and closed over ten seconds, and chorus and reverb spread it across the stereo field. This is the polyphonic example: every note you hold gets its own oscillator, filter, envelope and VCA.
+A wide, slow-blooming pad for holding chords. Each note fades in over most of a second, a filter breathes open and closed over ten seconds, the notes of a chord fan out across the stereo field, and chorus and reverb fill the space between them. This is the polyphonic example: every note you hold gets its own oscillator, filter, envelope and VCA.
 
 > **Load it:** choose **📚 Examples → Lush Pad** in the toolbar. Press **▶ Play**, then hold chords on a MIDI keyboard or on the Z to M keys.
 > The patch file is [`patches/lush-pad.json`](https://github.com/chrischaps/Modular/blob/master/patches/lush-pad.json).
@@ -12,7 +12,8 @@ A wide, slow-blooming pad for holding chords. Each note fades in over most of a 
 
 - **Polyphony.** One chain of modules plays every note of a chord, each as its own voice. See [Polyphony](../concepts/polyphony.md).
 - **Unison.** Several detuned copies of one oscillator make a single note sound wide and alive.
-- **Mono and poly together.** A mono LFO moves every voice at once, and the mono effects at the end hear all the voices summed.
+- **Mono and poly together.** A mono LFO moves every voice at once, and the effects at the end hear all the voices as one stereo pair.
+- **Spreading voices.** The Mixer gives each voice of the chord its own place between the speakers.
 
 ## Modules
 
@@ -24,6 +25,7 @@ A wide, slow-blooming pad for holding chords. Each note fades in over most of a 
 | [LFO](../modules/modulation/lfo.md) | **Rate** 0.1 Hz, **Wave** Sine, **Bipolar** on |
 | [ADSR Envelope](../modules/modulation/adsr.md) | **Atk** 800 ms, **Dec** 500 ms, **Sus** 80%, **Rel** 2 s |
 | [VCA](../modules/utilities/vca.md) | **Level** 50% |
+| [Mixer](../modules/utilities/mixer.md) | **Spread** 80%, **Master** +3 dB |
 | [Chorus](../modules/effects/chorus.md) | **Rate** 0.5 Hz, **Depth** 40%, **Delay** 10 ms, **Voices** 2, **Mix** 50% |
 | [Reverb](../modules/effects/reverb.md) | **Size** 70%, **Decay** 4 s, **Damp** 40%, **PreD** 50 ms, **Mix** 50% |
 | [Audio Output](../modules/output/audio-output.md) | **Vol** 80% |
@@ -42,7 +44,7 @@ Poly MIDI gives each held note a channel of its own, and these three cables carr
 
 ### One note, five saws
 
-The Oscillator stacks five saw waves per note with **Voices** 5, detuned 30% apart. They drift in and out of phase with each other, which gives each note its slow, chorused movement before any effect is added. Only the mono **Out** is used here; the stereo width comes later, from the chorus and reverb.
+The Oscillator stacks five saw waves per note with **Voices** 5, detuned 30% apart. They drift in and out of phase with each other, which gives each note its slow, chorused movement before any effect is added. Only the mono **Out** is used here. The stereo width comes later, from the Mixer, the chorus and the reverb.
 
 Five unison voices on each of eight notes is forty saws. If the patch strains your CPU, turn Poly MIDI's **Voices** down, or the Oscillator's.
 
@@ -66,17 +68,28 @@ The 800 ms attack makes each note swell in rather than start, and the 2-second r
 
 The VCA's **Level** sits at 50%. Voices add up, so a full chord is several times louder than one note, and the headroom keeps chords out of the limiter.
 
-### Effects, after the voices are summed
+### Spreading the chord
 
 ```text
-[VCA Out] ──> [Chorus In L]
+[VCA Out] ──> [Mixer Ch 1]
+[Mixer Out L] ──> [Chorus In L]
+[Mixer Out R] ──> [Chorus In R]
+```
+
+The Mixer hears each voice of the polyphonic cable on its own. With **Spread** at 80% it fans them out across the stereo field. Poly MIDI hands each new note the next voice, and neighbouring voices sit on opposite sides, so the notes of a chord alternate left and right. Hold a chord and watch the lights on the Mixer's panorama open out.
+
+Panning costs a centred sound 3 dB on each side, so the Mixer's **Master** sits at +3 dB to win it back. The pad is as loud as it would be summed to mono, only wider.
+
+### Effects
+
+```text
 [Chorus Out L] ──> [Reverb In L]
 [Chorus Out R] ──> [Reverb In R]
 [Reverb Out L] ──> [Audio Output Left]
 [Reverb Out R] ──> [Audio Output Right]
 ```
 
-The Chorus isn't polyphonic, so it hears the polyphonic cable summed into one signal. Its **In R** copies **In L** when nothing is patched there, and its two outputs come back with different modulation, which is where the stereo image starts. The Reverb's long, modulated tail does the rest.
+The Chorus and the Reverb aren't polyphonic: they hear the chord as one stereo pair. The Chorus modulates its two sides differently, which blurs the edges between the voices, and the Reverb's long, modulated tail does the rest.
 
 ## Variations
 
@@ -91,6 +104,8 @@ The Chorus isn't polyphonic, so it hears the polyphonic cable summed into one si
 **Each voice its own.** Replace the LFO's cable into the filter's **Cutoff** with Poly MIDI's **Velocity**. The filter is polyphonic, so each note's filter opens by up to an octave according to its own velocity, and harder notes come out brighter.
 
 **Cheaper.** Set the Oscillator's **Voices** to 1 and add more chorus **Depth**. It's thinner, but costs a fifth of the CPU.
+
+**Narrow or wide.** Turn the Mixer's **Spread** down to 0% and the chord gathers in the middle, the way it sounded before it was spread. At 100% the outer voices sit hard left and right.
 
 ## Related
 

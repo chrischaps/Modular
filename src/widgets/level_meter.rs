@@ -7,12 +7,16 @@
 //! - A faint orange "ghost" beyond it while the limiter is working, showing
 //!   how far the patch drove into the ceiling.
 //! - A ceiling tick, peak-hold marks, and a gain-reduction readout.
+//!
+//! It also has a slim upright meter, [`column_meter`], on the same scale and
+//! gradient with the same ballistics, for a module's own meters such as the
+//! Mixer's channel strips.
 
 use eframe::egui::{self, epaint::Mesh, Color32, Pos2, Rect, Response, Sense, Ui, Vec2};
 
 use crate::app::theme;
 use crate::dsp::analysis::amp_to_db;
-use crate::dsp::OutputLevels;
+use crate::dsp::{MeterLevels, OutputLevels, MAX_METERS};
 
 /// Bottom of the meter scale.
 const FLOOR_DB: f32 = -48.0;
@@ -120,6 +124,155 @@ impl LevelMeter {
     /// Displayed gain reduction, in dB.
     pub fn reduction_db(&self) -> f32 {
         self.reduction_db
+    }
+}
+
+/// One peak reading with a hardware meter's ballistics: it jumps up at once,
+/// falls at a steady rate, and leaves a peak-hold mark behind for a moment.
+#[derive(Clone, Copy, Debug)]
+pub struct PeakBallistics {
+    /// The loudest reading received since the last tick.
+    pending: f32,
+    /// Displayed level, in dBFS.
+    level_db: f32,
+    /// Peak-hold level, in dBFS.
+    hold_db: f32,
+    /// Seconds since the hold mark was last pushed up.
+    hold_age: f32,
+}
+
+impl Default for PeakBallistics {
+    fn default() -> Self {
+        Self { pending: 0.0, level_db: FLOOR_DB, hold_db: FLOOR_DB, hold_age: 0.0 }
+    }
+}
+
+impl PeakBallistics {
+    /// Adds a peak magnitude from the audio thread.
+    pub fn feed(&mut self, peak: f32) {
+        self.pending = self.pending.max(peak.abs());
+    }
+
+    /// Advances the ballistics by `dt` seconds, taking in the pending reading.
+    pub fn tick(&mut self, dt: f32) {
+        let fall = FALL_DB_PER_SEC * dt;
+        let level = amp_to_db(std::mem::take(&mut self.pending)).max(FLOOR_DB);
+        self.level_db = level.max(self.level_db - fall);
+        if level >= self.hold_db {
+            self.hold_db = level;
+            self.hold_age = 0.0;
+        } else {
+            self.hold_age += dt;
+            if self.hold_age > HOLD_SECS {
+                self.hold_db = (self.hold_db - fall).max(self.level_db);
+            }
+        }
+    }
+
+    /// Displayed level, in dBFS.
+    pub fn level_db(&self) -> f32 {
+        self.level_db
+    }
+
+    /// Peak-hold level, in dBFS.
+    pub fn hold_db(&self) -> f32 {
+        self.hold_db
+    }
+
+    /// How far up the meter the level reads, from 0 (floor) to 1 (top).
+    pub fn fraction(&self) -> f32 {
+        db_to_fraction(self.level_db)
+    }
+
+    /// True once settled at the floor with nothing pending.
+    pub fn is_idle(&self) -> bool {
+        self.pending == 0.0 && self.hold_db <= FLOOR_DB
+    }
+}
+
+/// A module's own meters, one [`PeakBallistics`] per reading it reports.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ModuleMeters {
+    meters: [PeakBallistics; MAX_METERS],
+}
+
+impl ModuleMeters {
+    /// Adds a reading from the audio thread.
+    pub fn feed(&mut self, levels: &MeterLevels) {
+        for (meter, &peak) in self.meters.iter_mut().zip(&levels.peaks) {
+            meter.feed(peak);
+        }
+    }
+
+    /// Advances every meter's ballistics by `dt` seconds.
+    pub fn tick(&mut self, dt: f32) {
+        for meter in &mut self.meters {
+            meter.tick(dt);
+        }
+    }
+
+    /// True once every meter has settled.
+    pub fn is_idle(&self) -> bool {
+        self.meters.iter().all(PeakBallistics::is_idle)
+    }
+
+    /// Meter `index`, in the module's own order.
+    pub fn get(&self, index: usize) -> &PeakBallistics {
+        &self.meters[index.min(MAX_METERS - 1)]
+    }
+}
+
+/// Draws a slim upright peak meter filling `rect`, rising from the bottom
+/// on the output meter's scale and gradient, with its peak-hold mark.
+/// A `dimmed` meter (a muted channel) draws faintly.
+pub fn column_meter(painter: &egui::Painter, rect: Rect, meter: &PeakBallistics, dimmed: bool) {
+    let rounding = rect.width() * 0.4;
+    painter.rect_filled(rect, rounding, theme::background::WIDGET);
+
+    // The gradient runs bottom to top. Each stretch of it is one quad
+    let end_y = rect.bottom() - rect.height() * meter.fraction();
+    let y_at = |db: f32| rect.bottom() - rect.height() * db_to_fraction(db);
+    let fade = if dimmed { 0.3 } else { 1.0 };
+    if end_y < rect.bottom() {
+        let mut mesh = Mesh::default();
+        let stops = gradient_stops();
+        for pair in stops.windows(2) {
+            let (db0, c0) = pair[0];
+            let (db1, c1) = pair[1];
+            let y0 = y_at(db0);
+            let y1_full = y_at(db1);
+            if y0 <= end_y {
+                break;
+            }
+            let y1 = y1_full.max(end_y);
+            let c1 = lerp_color(c0, c1, (y0 - y1) / (y0 - y1_full).max(f32::EPSILON));
+            let (c0, c1) = (c0.gamma_multiply(fade), c1.gamma_multiply(fade));
+
+            let base = mesh.vertices.len() as u32;
+            mesh.colored_vertex(Pos2::new(rect.left(), y0), c0);
+            mesh.colored_vertex(Pos2::new(rect.right(), y0), c0);
+            mesh.colored_vertex(Pos2::new(rect.right(), y1), c1);
+            mesh.colored_vertex(Pos2::new(rect.left(), y1), c1);
+            mesh.add_triangle(base, base + 1, base + 2);
+            mesh.add_triangle(base, base + 2, base + 3);
+        }
+        painter.add(egui::Shape::mesh(mesh));
+    }
+
+    // Full scale, as notches either side, so a hot channel shows how close
+    // it runs without a line that could pass for a hold mark
+    let full = y_at(0.0);
+    let notch = rect.width() * 0.5;
+    let tick = egui::Stroke::new(1.0, theme::text::SECONDARY.gamma_multiply(0.6));
+    painter.line_segment([Pos2::new(rect.left() - notch - 1.0, full), Pos2::new(rect.left() - 1.0, full)], tick);
+    painter.line_segment([Pos2::new(rect.right() + 1.0, full), Pos2::new(rect.right() + notch + 1.0, full)], tick);
+
+    if meter.hold_db() > FLOOR_DB {
+        let y = y_at(meter.hold_db());
+        painter.line_segment(
+            [Pos2::new(rect.left(), y), Pos2::new(rect.right(), y)],
+            egui::Stroke::new(1.5, theme::text::PRIMARY.gamma_multiply(0.8 * fade)),
+        );
     }
 }
 
@@ -350,6 +503,37 @@ mod tests {
             meter.tick(0.1);
         }
         assert!(meter.is_idle());
+    }
+
+    #[test]
+    fn test_peak_ballistics_rise_hold_and_settle() {
+        let mut meter = PeakBallistics::default();
+        assert!(meter.is_idle());
+        meter.feed(0.2);
+        meter.feed(-0.5);
+        meter.tick(0.016);
+        assert!((meter.level_db() - amp_to_db(0.5)).abs() < 1e-3, "loudest magnitude wins");
+
+        // The bar falls while the hold mark waits
+        meter.tick(0.5);
+        assert!(meter.level_db() < amp_to_db(0.5) - 8.0);
+        assert!((meter.hold_db() - amp_to_db(0.5)).abs() < 1e-3);
+        for _ in 0..100 {
+            meter.tick(0.1);
+        }
+        assert!(meter.is_idle());
+    }
+
+    #[test]
+    fn test_module_meters_feed_each_reading() {
+        let mut meters = ModuleMeters::default();
+        let mut levels = MeterLevels::default();
+        levels.peaks[2] = 0.25;
+        meters.feed(&levels);
+        meters.tick(0.016);
+        assert_eq!(meters.get(0).level_db(), FLOOR_DB);
+        assert!((meters.get(2).level_db() - amp_to_db(0.25)).abs() < 1e-3);
+        assert!(!meters.is_idle());
     }
 
     #[test]

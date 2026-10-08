@@ -27,6 +27,8 @@ pub enum ParamFormat {
     Decibels,
     /// Semitones.
     Semitones,
+    /// Stereo position from -1 (left) to 1 (right): "L 40", "C", "R 40".
+    Pan,
 }
 
 impl ParamFormat {
@@ -68,6 +70,16 @@ impl ParamFormat {
                     "-∞ dB".to_string()
                 } else {
                     format!("{:.1} dB", value)
+                }
+            }
+            ParamFormat::Pan => {
+                let percent = (value * 100.0).round();
+                if percent == 0.0 {
+                    "C".to_string()
+                } else if percent < 0.0 {
+                    format!("L {:.0}", -percent)
+                } else {
+                    format!("R {:.0}", percent)
                 }
             }
             ParamFormat::Semitones => {
@@ -761,6 +773,14 @@ mod tests {
         assert_eq!(ParamFormat::Decibels.format(0.0), "0.0 dB");
         assert_eq!(ParamFormat::Decibels.format(-6.0), "-6.0 dB");
         assert_eq!(ParamFormat::Decibels.format(-70.0), "-∞ dB");
+    }
+
+    #[test]
+    fn test_param_format_pan() {
+        assert_eq!(ParamFormat::Pan.format(0.0), "C");
+        assert_eq!(ParamFormat::Pan.format(-0.004), "C");
+        assert_eq!(ParamFormat::Pan.format(-0.4), "L 40");
+        assert_eq!(ParamFormat::Pan.format(1.0), "R 100");
     }
 
     #[test]

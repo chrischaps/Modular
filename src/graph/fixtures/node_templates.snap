@@ -178,11 +178,36 @@ knob Offset             "Offset" KnobOnly
 == util.mixer "Mixer" finder="Mixer" Utility
 in   Ch 1               Audio    ConnectionOnly       inline=true  port
 in   Ch 2               Audio    ConnectionOnly       inline=true  port
-in   Level 1            Control  ConstantOnly         inline=false num 1 [0..1]
-in   Level 2            Control  ConstantOnly         inline=false num 1 [0..1]
+in   Ch 3               Audio    ConnectionOnly       inline=true  port
+in   Ch 4               Audio    ConnectionOnly       inline=true  port
+in   Level 1            Control  ConnectionOrConstant inline=true  num 1 [0..1]
+in   Level 2            Control  ConnectionOrConstant inline=true  num 1 [0..1]
+in   Level 3            Control  ConnectionOrConstant inline=true  num 1 [0..1]
+in   Level 4            Control  ConnectionOrConstant inline=true  num 1 [0..1]
+in   Pan 1              Control  ConnectionOrConstant inline=true  num 0 [-1..1] pan
+in   Pan 2              Control  ConnectionOrConstant inline=true  num 0 [-1..1] pan
+in   Pan 3              Control  ConnectionOrConstant inline=true  num 0 [-1..1] pan
+in   Pan 4              Control  ConnectionOrConstant inline=true  num 0 [-1..1] pan
+in   Mute 1             Control  ConstantOnly         inline=false toggle false ""
+in   Mute 2             Control  ConstantOnly         inline=false toggle false ""
+in   Mute 3             Control  ConstantOnly         inline=false toggle false ""
+in   Mute 4             Control  ConstantOnly         inline=false toggle false ""
+in   Master             Control  ConstantOnly         inline=false num 0 [-60..6] dB
+in   Spread             Control  ConstantOnly         inline=false num 0 [0..1]
 out  Out                Audio
-knob Level 1            "Lv 1" KnobOnly
-knob Level 2            "Lv 2" KnobOnly
+out  Out L              Audio
+out  Out R              Audio
+knob Level 1            "Lv 1" Modulatable
+knob Level 2            "Lv 2" Modulatable
+knob Level 3            "Lv 3" Modulatable
+knob Level 4            "Lv 4" Modulatable
+knob Master             "Master" KnobOnly
+knob Pan 1              "Pan 1" Modulatable
+knob Pan 2              "Pan 2" Modulatable
+knob Pan 3              "Pan 3" Modulatable
+knob Pan 4              "Pan 4" Modulatable
+knob Spread             "Spread" KnobOnly
+display MixerStrips
 
 == util.sample_hold "Sample & Hold" finder="Sample & Hold" Utility
 in   In                 Control  ConnectionOnly       inline=true  port

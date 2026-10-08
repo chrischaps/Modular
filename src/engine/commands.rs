@@ -3,7 +3,7 @@
 //! Defines the messages that flow between the UI thread and the audio engine thread.
 //! All types here must be Send + 'static for safe cross-thread communication.
 
-use crate::dsp::{OutputLevels, SignalBuffer, MAX_CHANNELS};
+use crate::dsp::{MeterLevels, OutputLevels, SignalBuffer, MAX_CHANNELS};
 use crate::modules::oscilloscope::SCOPE_BUFFER_SIZE;
 
 use super::graph_plan::GraphPlan;
@@ -219,6 +219,15 @@ pub enum EngineEvent {
         /// The same reading for each channel, so the UI can draw a
         /// polyphonic cable strand by strand.
         channels: ChannelPeaks,
+    },
+
+    /// A module's own meter readings (a mixer's channel strips), for the
+    /// most recent audio callback.
+    MeterLevels {
+        /// The module metering.
+        node_id: NodeId,
+        /// Its peaks, in the module's own order.
+        levels: MeterLevels,
     },
 
     /// Oscilloscope buffer data for waveform display.

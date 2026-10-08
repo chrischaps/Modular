@@ -25,7 +25,7 @@
 
 use std::ops::Range;
 
-use crate::dsp::{DspModule, OutputLevels, ProcessContext, SignalBuffer};
+use crate::dsp::{DspModule, MeterLevels, OutputLevels, ProcessContext, SignalBuffer};
 use crate::engine::commands::{ChannelPeaks, NodeId, PortIndex};
 
 pub use crate::dsp::module_trait::MAX_INPUTS;
@@ -369,6 +369,17 @@ impl GraphPlan {
     /// module's full buffer; the first `block_size` samples are this block.
     pub fn audio_output(&self) -> Option<(&[f32], &[f32])> {
         self.output_module().and_then(|module| module.get_audio_output())
+    }
+
+    /// Calls `f` with each metering module's readings since the last call.
+    ///
+    /// REAL-TIME SAFE.
+    pub fn take_meter_levels(&mut self, mut f: impl FnMut(NodeId, MeterLevels)) {
+        for node in &mut self.nodes {
+            if let Some(levels) = node.module.as_mut().and_then(|module| module.take_meter_levels()) {
+                f(node.node_id, levels);
+            }
+        }
     }
 
     /// Calls `f` for each oscilloscope with a new capture ready.

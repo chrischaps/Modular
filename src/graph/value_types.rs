@@ -56,6 +56,7 @@ impl NumberSpec {
             "ms" => ParamFormat::Milliseconds,
             "dB" => ParamFormat::Decibels,
             "st" => ParamFormat::Semitones,
+            "pan" => ParamFormat::Pan,
             "" | "%" if unit_interval => ParamFormat::Percent,
             "%" | "BPM" => ParamFormat::RawWithUnit { decimals: 0, unit: self.unit },
             "" => ParamFormat::Raw { decimals: if self.logarithmic { 2 } else { 1 } },

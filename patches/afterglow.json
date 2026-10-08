@@ -386,7 +386,7 @@
       "id": 5,
       "module_id": "util.vca",
       "position": [
-        972.0,
+        1010.0,
         60.0
       ],
       "parameters": [
@@ -406,8 +406,8 @@
       "id": 6,
       "module_id": "mod.adsr",
       "position": [
-        972.0,
-        320.0
+        750.0,
+        340.0
       ],
       "parameters": [
         {
@@ -456,8 +456,8 @@
       "id": 7,
       "module_id": "util.mixer",
       "position": [
-        750.0,
-        440.0
+        1010.0,
+        300.0
       ],
       "parameters": [
         {
@@ -507,7 +507,7 @@
       "module_id": "seq.step",
       "position": [
         226.0,
-        700.0
+        1000.0
       ],
       "parameters": [
         {
@@ -772,7 +772,7 @@
       "module_id": "osc.sine",
       "position": [
         528.0,
-        700.0
+        1000.0
       ],
       "parameters": [
         {
@@ -832,7 +832,7 @@
       "module_id": "filter.svf",
       "position": [
         750.0,
-        700.0
+        1000.0
       ],
       "parameters": [
         {
@@ -856,8 +856,8 @@
       "id": 12,
       "module_id": "util.vca",
       "position": [
-        972.0,
-        740.0
+        1010.0,
+        1040.0
       ],
       "parameters": [
         {
@@ -876,8 +876,8 @@
       "id": 13,
       "module_id": "mod.adsr",
       "position": [
-        972.0,
-        1000.0
+        1010.0,
+        1300.0
       ],
       "parameters": [
         {
@@ -926,7 +926,7 @@
       "id": 14,
       "module_id": "util.mixer",
       "position": [
-        1135.0,
+        1330.0,
         60.0
       ],
       "parameters": [
@@ -939,6 +939,66 @@
           "name": "Level 2",
           "type": "Number",
           "value": 0.65
+        },
+        {
+          "name": "Level 3",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Level 4",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Pan 1",
+          "type": "Number",
+          "value": 0.35
+        },
+        {
+          "name": "Pan 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Pan 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Pan 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 3.0
+        },
+        {
+          "name": "Spread",
+          "type": "Number",
+          "value": 0.0
         }
       ]
     },
@@ -946,7 +1006,7 @@
       "id": 15,
       "module_id": "fx.chorus",
       "position": [
-        1298.0,
+        1650.0,
         20.0
       ],
       "parameters": [
@@ -991,7 +1051,7 @@
       "id": 16,
       "module_id": "fx.delay",
       "position": [
-        1618.0,
+        1970.0,
         20.0
       ],
       "parameters": [
@@ -1041,7 +1101,7 @@
       "id": 17,
       "module_id": "fx.reverb",
       "position": [
-        1938.0,
+        2290.0,
         20.0
       ],
       "parameters": [
@@ -1086,7 +1146,7 @@
       "id": 18,
       "module_id": "output.audio",
       "position": [
-        2207.0,
+        2560.0,
         60.0
       ],
       "parameters": [
@@ -1225,9 +1285,15 @@
     },
     {
       "from_node": 14,
-      "from_port": "Out",
+      "from_port": "Out L",
       "to_node": 15,
       "to_port": "In L"
+    },
+    {
+      "from_node": 14,
+      "from_port": "Out R",
+      "to_node": 15,
+      "to_port": "In R"
     },
     {
       "from_node": 15,

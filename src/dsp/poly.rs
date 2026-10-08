@@ -12,7 +12,7 @@
 //! pointer swap, not a copy, so the audio thread never allocates.
 
 use super::context::ProcessContext;
-use super::module_trait::{DspModule, ModuleInfo, OutputLevels, MAX_INPUTS};
+use super::module_trait::{DspModule, MeterLevels, ModuleInfo, OutputLevels, MAX_INPUTS};
 use super::parameter::ParameterDefinition;
 use super::port::PortDefinition;
 use super::signal::{SignalBuffer, MAX_CHANNELS};
@@ -150,6 +150,10 @@ impl<M: DspModule> DspModule for Poly<M> {
 
     fn take_output_levels(&mut self) -> Option<OutputLevels> {
         self.voices[0].take_output_levels()
+    }
+
+    fn take_meter_levels(&mut self) -> Option<MeterLevels> {
+        self.voices[0].take_meter_levels()
     }
 
     fn take_scope_data(&mut self) -> Option<(&[f32], &[f32], bool)> {

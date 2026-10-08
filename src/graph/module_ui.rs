@@ -196,7 +196,24 @@ static MODULE_UI: &[ModuleUi] = &[
     },
     ModuleUi {
         module_id: "util.mixer",
-        knobs: &[knob_as("Level 1", "Lv 1"), knob_as("Level 2", "Lv 2")],
+        // A column per channel strip, its level over its pan, and a fifth
+        // for the master section. The display's meters sit over the columns
+        knobs: &[
+            modulatable("Level 1", "Lv 1"),
+            modulatable("Level 2", "Lv 2"),
+            modulatable("Level 3", "Lv 3"),
+            modulatable("Level 4", "Lv 4"),
+            knob("Master"),
+            modulatable("Pan 1", "Pan 1"),
+            modulatable("Pan 2", "Pan 2"),
+            modulatable("Pan 3", "Pan 3"),
+            modulatable("Pan 4", "Pan 4"),
+            knob("Spread"),
+        ],
+        // Each strip's mute is a button under its meter
+        hidden: &["Mute *"],
+        display: NodeDisplay::MixerStrips,
+        knobs_per_row: 5,
         ..ModuleUi::DEFAULT
     },
     ModuleUi {

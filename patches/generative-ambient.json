@@ -441,7 +441,7 @@
       "id": 6,
       "module_id": "filter.svf",
       "position": [
-        1135.0,
+        1295.0,
         20.0
       ],
       "parameters": [
@@ -466,7 +466,7 @@
       "id": 7,
       "module_id": "util.vca",
       "position": [
-        1357.0,
+        1517.0,
         60.0
       ],
       "parameters": [
@@ -486,7 +486,7 @@
       "id": 8,
       "module_id": "fx.delay",
       "position": [
-        1622.0,
+        1782.0,
         20.0
       ],
       "parameters": [
@@ -536,7 +536,7 @@
       "id": 9,
       "module_id": "fx.reverb",
       "position": [
-        1942.0,
+        2102.0,
         20.0
       ],
       "parameters": [
@@ -581,7 +581,7 @@
       "id": 10,
       "module_id": "output.audio",
       "position": [
-        2211.0,
+        2371.0,
         60.0
       ],
       "parameters": [
@@ -651,7 +651,7 @@
       "id": 13,
       "module_id": "mod.adsr",
       "position": [
-        1357.0,
+        1517.0,
         300.0
       ],
       "parameters": [
@@ -701,8 +701,8 @@
       "id": 14,
       "module_id": "mod.lfo",
       "position": [
-        972.0,
-        300.0
+        750.0,
+        640.0
       ],
       "parameters": [
         {
