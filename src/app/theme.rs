@@ -185,14 +185,19 @@ pub fn title_text_style() -> egui::TextStyle {
     egui::TextStyle::Name(TITLE_FAMILY.into())
 }
 
-/// Installs the title face. Fonts take a frame to arrive, so this runs when
-/// the app is created, before anything asks for the family. The title family
-/// falls back to the default faces for any glyph its Latin subset lacks.
+/// Installs the title face, and a fallback for the filled status dot. Fonts
+/// take a frame to arrive, so this runs when the app is created, before
+/// anything asks for the family. The title family falls back to the default
+/// faces for any glyph its Latin subset lacks.
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts
         .font_data
         .insert(TITLE_FAMILY.to_owned(), std::sync::Arc::new(egui::FontData::from_static(TITLE_FONT)));
+    // None of the default proportional faces has a filled circle (●, U+25CF)
+    // used for status dots; the bundled monospace face does, so it goes last
+    let proportional = fonts.families.get_mut(&egui::FontFamily::Proportional).unwrap();
+    proportional.push("Hack".to_owned());
     let mut family = vec![TITLE_FAMILY.to_owned()];
     family.extend(fonts.families[&egui::FontFamily::Proportional].iter().cloned());
     fonts.families.insert(egui::FontFamily::Name(TITLE_FAMILY.into()), family);

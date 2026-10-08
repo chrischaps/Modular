@@ -7,6 +7,9 @@ use eframe::egui::{self, Color32, Rect, Response, Sense, Ui, Vec2};
 
 use crate::app::theme;
 
+/// Room for the "CPU:" label before the bar.
+const LABEL_WIDTH: f32 = 30.0;
+
 /// Configuration for the CPU meter widget.
 #[derive(Clone, Debug)]
 pub struct CpuMeterConfig {
@@ -82,10 +85,10 @@ pub fn cpu_load_color(load: f32, config: &CpuMeterConfig) -> Color32 {
 /// # Returns
 /// The response from the meter widget
 pub fn cpu_meter(ui: &mut Ui, cpu_load: f32, config: &CpuMeterConfig) -> Response {
-    // Calculate total size including label
-    let text_width = if config.show_text { 45.0 } else { 0.0 };
+    // Calculate total size: label, bar, then the readout and warning after it
+    let text_width = if config.show_text { 32.0 } else { 0.0 };
     let warning_width = if config.show_warning && cpu_load >= config.high_threshold { 16.0 } else { 0.0 };
-    let total_width = config.width + text_width + warning_width + 8.0; // 8px spacing
+    let total_width = LABEL_WIDTH + config.width + text_width + warning_width;
 
     let (rect, response) = ui.allocate_exact_size(
         Vec2::new(total_width, config.height),
@@ -109,7 +112,7 @@ pub fn cpu_meter(ui: &mut Ui, cpu_load: f32, config: &CpuMeterConfig) -> Respons
         );
 
         // Calculate bar rect (after label)
-        let bar_left = rect.min.x + 30.0;
+        let bar_left = rect.min.x + LABEL_WIDTH;
         let bar_rect = Rect::from_min_size(
             egui::pos2(bar_left, rect.min.y + 1.0),
             Vec2::new(config.width, config.height - 2.0),

@@ -5,7 +5,7 @@
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Host, SampleRate, Stream, StreamConfig};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::audio_processor::AudioProcessor;
@@ -62,6 +62,11 @@ struct AudioState {
     /// Current phase of the sine wave oscillator (stored as fixed-point).
     /// We store phase * 1_000_000 as u32 to avoid floating-point atomics.
     phase_fixed: AtomicU32,
+    /// Counts audio callbacks: while the device is taking audio this keeps
+    /// climbing, so the UI can tell a live stream from a stalled one.
+    callbacks: AtomicU64,
+    /// Set by the stream's error callback (device unplugged, driver reset).
+    stream_failed: AtomicBool,
 }
 
 impl AudioState {
@@ -69,6 +74,8 @@ impl AudioState {
         Self {
             test_tone_enabled: AtomicBool::new(false),
             phase_fixed: AtomicU32::new(0),
+            callbacks: AtomicU64::new(0),
+            stream_failed: AtomicBool::new(false),
         }
     }
 }
@@ -230,6 +237,8 @@ impl AudioEngine {
         }
 
         let state = Arc::clone(&self.state);
+        let error_state = Arc::clone(&self.state);
+        self.state.stream_failed.store(false, Ordering::Relaxed);
         let sample_rate = self.config.sample_rate.0 as f32;
         let channels = self.config.channels as usize;
 
@@ -246,6 +255,7 @@ impl AudioEngine {
                 &self.config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     // REAL-TIME SAFE: No allocations, no locks, no blocking
+                    state.callbacks.fetch_add(1, Ordering::Relaxed);
 
                     let test_tone = state.test_tone_enabled.load(Ordering::Relaxed);
 
@@ -283,6 +293,7 @@ impl AudioEngine {
                 },
                 move |err| {
                     eprintln!("Audio stream error: {}", err);
+                    error_state.stream_failed.store(true, Ordering::Relaxed);
                 },
                 None,
             )
@@ -308,9 +319,22 @@ impl AudioEngine {
         Ok(())
     }
 
-    /// Check if the audio stream is currently running.
+    /// Check if an audio stream has been started (it may since have failed:
+    /// see [`stream_failed`](Self::stream_failed) and
+    /// [`callback_count`](Self::callback_count)).
     pub fn is_running(&self) -> bool {
         self.stream.is_some()
+    }
+
+    /// How many times the device has asked for audio. It stops climbing when
+    /// the device stops taking audio.
+    pub fn callback_count(&self) -> u64 {
+        self.state.callbacks.load(Ordering::Relaxed)
+    }
+
+    /// Whether the stream has reported an error since it was started.
+    pub fn stream_failed(&self) -> bool {
+        self.state.stream_failed.load(Ordering::Relaxed)
     }
 
     /// Start the audio stream with an AudioProcessor for graph-based synthesis.
@@ -363,12 +387,16 @@ impl AudioEngine {
         processor: Arc<Mutex<AudioProcessor>>,
     ) -> Result<(), AudioError> {
         let channels = self.config.channels as usize;
+        let state = Arc::clone(&self.state);
+        let error_state = Arc::clone(&self.state);
+        self.state.stream_failed.store(false, Ordering::Relaxed);
 
         let stream = self
             .device
             .build_output_stream(
                 &self.config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                    state.callbacks.fetch_add(1, Ordering::Relaxed);
                     // REAL-TIME SAFE: the lock is only ever taken here, or by
                     // select_device while no stream is running, so try_lock
                     // never fails in practice. If it did, output silence
@@ -380,6 +408,7 @@ impl AudioEngine {
                 },
                 move |err| {
                     eprintln!("Audio stream error: {}", err);
+                    error_state.stream_failed.store(true, Ordering::Relaxed);
                 },
                 None,
             )

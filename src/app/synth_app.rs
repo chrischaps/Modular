@@ -40,6 +40,10 @@ type SynthGraphEditorState = GraphEditorState<SynthNodeData, SynthDataType, Synt
 /// fits only ~3 rows at the theme's padding; egui still clamps to the window.
 const DEVICE_MENU_HEIGHT: f32 = 480.0;
 
+/// How long the audio callback can go quiet before the output is shown as
+/// stalled. Devices ask for audio every few milliseconds.
+const AUDIO_STALL: std::time::Duration = std::time::Duration::from_millis(750);
+
 /// Storage key for the mark drawn along cables (Cables menu)
 const FLOW_GLYPH_KEY: &str = "cable_flow_glyph";
 
@@ -120,6 +124,14 @@ pub struct SynthApp {
 
     /// Current CPU load percentage from the audio engine (0-100).
     cpu_load: f32,
+
+    /// How wide the toolbar is with every button named, measured the last
+    /// time it was drawn that way. A narrower window gets the compact row.
+    toolbar_full_width: Option<f32>,
+
+    /// The audio callback count last seen, and when it last moved: a count
+    /// that stops moving means the device has stopped taking audio.
+    audio_heartbeat: (u64, Instant),
 
     /// MIDI engine for receiving MIDI input.
     midi_engine: Option<MidiEngine>,
@@ -273,6 +285,8 @@ impl SynthApp {
             gate_held_high: false,
             last_triggered_note: 60.0,
             cpu_load: 0.0,
+            toolbar_full_width: None,
+            audio_heartbeat: (0, Instant::now()),
             midi_engine,
             midi_event_consumer,
             midi_devices,
@@ -628,26 +642,76 @@ impl SynthApp {
         // This function is kept for potential future debug use
     }
 
-    /// Draw the top toolbar with transport controls and status
+    /// The recently opened patches, as menu items.
+    fn recent_menu(&self, ui: &mut egui::Ui, actions: &mut ToolbarActions) {
+        if self.recent_files.is_empty() {
+            ui.label(RichText::new("No recent patches").color(theme::text::DISABLED).italics());
+            return;
+        }
+        for path in self.recent_files.iter() {
+            let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("?");
+            let button = ui.add_enabled(path.exists(), egui::Button::new(name));
+            let clicked = button
+                .on_hover_text(path.display().to_string())
+                .on_disabled_hover_text(format!("Missing: {}", path.display()))
+                .clicked();
+            if clicked {
+                actions.open_recent = Some(path.to_path_buf());
+                ui.close_menu();
+            }
+        }
+        ui.separator();
+        if ui.button(RichText::new("Clear Recent").color(theme::text::SECONDARY)).clicked() {
+            actions.clear_recent = true;
+            ui.close_menu();
+        }
+    }
+
+    /// Draw the top toolbar: transport, file, edit and device controls.
+    ///
+    /// When the window is too narrow for the full row, it goes compact: the
+    /// file buttons fold into one File menu, Undo and Redo keep only their
+    /// arrows, the group labels drop away and the gaps tighten.
     fn draw_toolbar(&mut self, ui: &mut egui::Ui) -> ToolbarActions {
         let mut actions = ToolbarActions::default();
 
-        ui.horizontal(|ui| {
-            ui.add_space(8.0);
+        // A row centres each item in the height it has reached so far, and
+        // grows when a taller item arrives. Starting every row at the height
+        // of a button keeps the labels, buttons and selectors on one line.
+        let row_height = ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y;
+        ui.spacing_mut().interact_size.y = ui.spacing().interact_size.y.max(row_height);
+        // Labels whole, so a wrapped row places them like any other item
+        // instead of flowing their text onto the next line
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
 
+        let compact = self.toolbar_full_width.is_some_and(|width| width > ui.available_width());
+        let gap = if compact { 10.0 } else { 16.0 };
+        let group_break = |ui: &mut egui::Ui| {
+            ui.add_space(gap);
+            ui.separator();
+            ui.add_space(gap);
+        };
+        let group_label = |ui: &mut egui::Ui, text: &str| {
+            if !compact {
+                ui.label(RichText::new(text).color(theme::text::SECONDARY));
+                ui.add_space(8.0);
+            }
+        };
+        let named = |icon: &str, name: &str| {
+            if compact { icon.to_string() } else { format!("{icon} {name}") }
+        };
+
+        let row = |ui: &mut egui::Ui| {
             // Application title
             ui.label(RichText::new("MODULAR SYNTH")
                 .size(18.0)
                 .color(theme::text::PRIMARY)
                 .strong());
 
-            ui.add_space(20.0);
-            ui.separator();
-            ui.add_space(20.0);
+            group_break(ui);
 
             // Transport controls
-            ui.label(RichText::new("Transport").color(theme::text::SECONDARY));
-            ui.add_space(8.0);
+            group_label(ui, "Transport");
 
             // Play/Stop button - controls whether the audio graph is processing
             let play_text = if self.is_playing { "⏹ Stop" } else { "▶ Play" };
@@ -661,45 +725,46 @@ impl SynthApp {
                 actions.toggle_playing = true;
             }
 
-            ui.add_space(20.0);
-            ui.separator();
-            ui.add_space(20.0);
+            group_break(ui);
 
-            // File operations
-            ui.label(RichText::new("File").color(theme::text::SECONDARY));
-            ui.add_space(8.0);
+            // File operations: named buttons, or one menu when space is short
+            group_label(ui, "File");
 
-            if ui.button("📄 New").on_hover_text("Start an empty patch (Ctrl+N)").clicked() {
-                actions.new_patch = true;
-            }
-
-            if ui.button("📂 Open").on_hover_text("Ctrl+O").clicked() {
-                actions.load_patch = true;
-            }
-
-            ui.menu_button("🕘 Recent", |ui| {
-                if self.recent_files.is_empty() {
-                    ui.label(RichText::new("No recent patches").color(theme::text::DISABLED).italics());
-                    return;
-                }
-                for path in self.recent_files.iter() {
-                    let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("?");
-                    let button = ui.add_enabled(path.exists(), egui::Button::new(name));
-                    let clicked = button
-                        .on_hover_text(path.display().to_string())
-                        .on_disabled_hover_text(format!("Missing: {}", path.display()))
-                        .clicked();
-                    if clicked {
-                        actions.open_recent = Some(path.to_path_buf());
+            if compact {
+                ui.menu_button("📁 File", |ui| {
+                    let item = |ui: &mut egui::Ui, text: &str, shortcut: &str| {
+                        ui.add(egui::Button::new(text).shortcut_text(shortcut)).clicked()
+                    };
+                    if item(ui, "📄 New", "Ctrl+N") {
+                        actions.new_patch = true;
                         ui.close_menu();
                     }
+                    if item(ui, "📂 Open", "Ctrl+O") {
+                        actions.load_patch = true;
+                        ui.close_menu();
+                    }
+                    ui.menu_button("🕘 Recent", |ui| self.recent_menu(ui, &mut actions));
+                    ui.separator();
+                    if item(ui, "💾 Save", "Ctrl+S") {
+                        actions.save_patch = true;
+                        ui.close_menu();
+                    }
+                    if item(ui, "💾 Save As", "Ctrl+Shift+S") {
+                        actions.save_as_patch = true;
+                        ui.close_menu();
+                    }
+                });
+            } else {
+                if ui.button("📄 New").on_hover_text("Start an empty patch (Ctrl+N)").clicked() {
+                    actions.new_patch = true;
                 }
-                ui.separator();
-                if ui.button(RichText::new("Clear Recent").color(theme::text::SECONDARY)).clicked() {
-                    actions.clear_recent = true;
-                    ui.close_menu();
+
+                if ui.button("📂 Open").on_hover_text("Ctrl+O").clicked() {
+                    actions.load_patch = true;
                 }
-            });
+
+                ui.menu_button("🕘 Recent", |ui| self.recent_menu(ui, &mut actions));
+            }
 
             ui.menu_button("📚 Examples", |ui| {
                 for example in EXAMPLES {
@@ -710,36 +775,33 @@ impl SynthApp {
                 }
             });
 
-            if ui.button("💾 Save").on_hover_text("Ctrl+S").clicked() {
-                actions.save_patch = true;
+            if !compact {
+                if ui.button("💾 Save").on_hover_text("Ctrl+S").clicked() {
+                    actions.save_patch = true;
+                }
+
+                if ui.button("💾 Save As").on_hover_text("Save to a new file (Ctrl+Shift+S)").clicked() {
+                    actions.save_as_patch = true;
+                }
             }
 
-            if ui.button("💾 Save As").on_hover_text("Save to a new file (Ctrl+Shift+S)").clicked() {
-                actions.save_as_patch = true;
-            }
-
-            ui.add_space(20.0);
-            ui.separator();
-            ui.add_space(20.0);
+            group_break(ui);
 
             // Edit history
-            ui.label(RichText::new("Edit").color(theme::text::SECONDARY));
-            ui.add_space(8.0);
+            group_label(ui, "Edit");
 
             let undo_label = self.history.undo_label();
-            let undo = ui.add_enabled(undo_label.is_some(), egui::Button::new("↩ Undo"));
+            let undo = ui.add_enabled(undo_label.is_some(), egui::Button::new(named("↩", "Undo")));
             if undo.on_hover_text(history_hint("Undo", undo_label, "Ctrl+Z")).clicked() {
                 actions.undo = true;
             }
             let redo_label = self.history.redo_label();
-            let redo = ui.add_enabled(redo_label.is_some(), egui::Button::new("↪ Redo"));
+            let redo = ui.add_enabled(redo_label.is_some(), egui::Button::new(named("↪", "Redo")));
             if redo.on_hover_text(history_hint("Redo", redo_label, "Ctrl+Shift+Z")).clicked() {
                 actions.redo = true;
             }
 
-            ui.add_space(20.0);
-            ui.separator();
-            ui.add_space(20.0);
+            group_break(ui);
 
             // How the signal is drawn flowing along the cables
             ui.menu_button("〰 Cables", |ui| {
@@ -751,14 +813,10 @@ impl SynthApp {
             .response
             .on_hover_text("How signal flow is drawn along cables");
 
-            ui.add_space(20.0);
-            ui.separator();
-            ui.add_space(20.0);
-
-            // Audio output selector
+            // Device selectors (engine status lives in the status bar)
             match &self.audio_engine {
-                Ok(engine) => {
-                    let is_running = engine.is_running();
+                Ok(_) => {
+                    group_break(ui);
 
                     // Device selector
                     ui.label(RichText::new("Output").color(theme::text::SECONDARY));
@@ -803,9 +861,7 @@ impl SynthApp {
                             }
                         });
 
-                    ui.add_space(20.0);
-                    ui.separator();
-                    ui.add_space(20.0);
+                    group_break(ui);
 
                     // MIDI input selector
                     ui.label(RichText::new("MIDI In").color(theme::text::SECONDARY));
@@ -863,39 +919,25 @@ impl SynthApp {
                                 actions.refresh_midi_devices = true;
                             }
                         });
-
-                    // Status indicator (right-to-left layout: items appear from right to left)
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        // Running status (rightmost)
-                        let status_color = if is_running {
-                            theme::accent::SUCCESS
-                        } else {
-                            theme::text::DISABLED
-                        };
-                        let status_text = if is_running { "● Running" } else { "○ Stopped" };
-                        ui.label(RichText::new(status_text).color(status_color).small());
-
-                        // Sample rate info
-                        ui.label(RichText::new(format!(
-                            "{}Hz • {}ch",
-                            engine.sample_rate(),
-                            engine.channels()
-                        )).color(theme::text::SECONDARY).small());
-
-                        ui.add_space(8.0);
-
-                        // CPU meter (only show when playing)
-                        if self.is_playing {
-                            cpu_meter(ui, self.cpu_load, &CpuMeterConfig::compact());
-                        }
-                    });
                 }
                 Err(e) => {
+                    group_break(ui);
                     ui.label(RichText::new(format!("⚠ Audio unavailable: {}", e))
                         .color(theme::accent::ERROR));
                 }
             }
-        });
+        };
+
+        if compact {
+            // Too narrow even for the compact row: wrap rather than run off the edge
+            ui.horizontal_wrapped(row);
+        } else {
+            let full_width = ui.horizontal(row).response.rect.width();
+            if full_width > ui.available_width() {
+                ui.ctx().request_repaint();
+            }
+            self.toolbar_full_width = Some(full_width);
+        }
 
         actions
     }
@@ -2020,6 +2062,31 @@ impl SynthApp {
     }
 
     /// Draw the bottom status bar
+    /// What the audio output is doing: the transport's state, unless the
+    /// device has reported an error or stopped asking for audio.
+    fn audio_status(&mut self, ctx: &egui::Context) -> AudioStatus {
+        let transport = if self.is_playing { AudioStatus::Playing } else { AudioStatus::Stopped };
+        // Offline (filming, or no stream to watch): the transport is the whole story
+        let Ok(engine) = &self.audio_engine else { return transport };
+        if !engine.is_running() {
+            return transport;
+        }
+
+        let now = Instant::now();
+        let count = engine.callback_count();
+        if count != self.audio_heartbeat.0 {
+            self.audio_heartbeat = (count, now);
+        }
+        // Keep looking even when nothing else redraws, so a lost device shows
+        ctx.request_repaint_after(AUDIO_STALL);
+
+        if engine.stream_failed() || now - self.audio_heartbeat.1 > AUDIO_STALL {
+            AudioStatus::NoAudio
+        } else {
+            transport
+        }
+    }
+
     fn draw_status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
@@ -2068,6 +2135,35 @@ impl SynthApp {
             }
 
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add_space(8.0);
+
+                // Engine status at the far right: what the output is doing, format, load
+                let status = self.audio_status(ui.ctx());
+                if let Ok(engine) = &self.audio_engine {
+                    let (status_text, status_color, hint) = match status {
+                        AudioStatus::Playing => ("● Playing", theme::accent::SUCCESS, "The patch is playing"),
+                        AudioStatus::Stopped => ("○ Stopped", theme::text::DISABLED, "Press Play to hear the patch"),
+                        AudioStatus::NoAudio => (
+                            "⚠ No audio",
+                            theme::accent::ERROR,
+                            "The output device has stopped taking audio (unplugged, or taken by                              another app). Choose it again under Output to reconnect.",
+                        ),
+                    };
+                    ui.label(RichText::new(status_text).color(status_color).small())
+                        .on_hover_text(hint);
+                    ui.label(RichText::new(format!(
+                        "{}Hz • {}ch",
+                        engine.sample_rate(),
+                        engine.channels()
+                    )).color(theme::text::SECONDARY).small());
+                    if self.is_playing {
+                        cpu_meter(ui, self.cpu_load, &CpuMeterConfig::compact());
+                    }
+                    ui.label(RichText::new("|")
+                        .color(theme::text::DISABLED)
+                        .small());
+                }
+
                 // Problems from the last load stay visible until dismissed
                 if !self.load_warnings.is_empty() {
                     let count = self.load_warnings.len();
@@ -2357,6 +2453,15 @@ fn history_hint(verb: &str, label: Option<&str>, shortcut: &str) -> String {
     }
 }
 
+/// What the audio output is doing, as the status bar shows it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum AudioStatus {
+    Playing,
+    Stopped,
+    /// The device errored or stopped asking for audio.
+    NoAudio,
+}
+
 /// Actions collected from the toolbar for deferred execution
 #[derive(Default)]
 struct ToolbarActions {
@@ -2490,7 +2595,7 @@ impl eframe::App for SynthApp {
         let toolbar_actions = egui::TopBottomPanel::top("toolbar")
             .frame(egui::Frame::none()
                 .fill(theme::background::PANEL)
-                .inner_margin(egui::Margin::symmetric(0.0, 8.0)))
+                .inner_margin(egui::Margin::symmetric(8.0, 8.0)))
             .show(ctx, |ui| {
                 self.draw_toolbar(ui)
             })
