@@ -10,11 +10,12 @@
 //!
 //! The patch is Audio Input into the output at volume 0, so nothing is
 //! heard and nothing can feed back. It reports what the module's meters
-//! heard, and the jitter buffer's latency and dropouts.
+//! heard, the round-trip latency part by part (as the status bar adds it
+//! up), and the jitter buffer's dropouts.
 
 use std::time::{Duration, Instant};
 
-use modular_synth::engine::{AudioEngine, AudioProcessor, EngineChannels, EngineCommand, EngineEvent};
+use modular_synth::engine::{AudioEngine, AudioProcessor, EngineChannels, EngineCommand, EngineEvent, RoundTrip};
 
 #[test]
 #[ignore = "needs audio hardware and an input device"]
@@ -67,12 +68,23 @@ fn default_input_reaches_the_audio_input_module() {
     }
 
     let rate = engine.sample_rate() as f64;
+    let trip = RoundTrip::of(&monitor, engine.output_latency(), engine.sample_rate());
+    let ms = |delay: Option<Duration>| delay.map_or("not reported".to_string(), |d| format!("{:.1} ms", d.as_secs_f64() * 1000.0));
     println!(
-        "{readings} meter readings, input peak {:.1} dBFS; buffered {:.1} ms; underruns {:.1} ms, overflows {:.1} ms",
+        "{readings} meter readings, input peak {:.1} dBFS; underruns {:.1} ms, overflows {:.1} ms",
         20.0 * peak.max(1e-9).log10(),
-        monitor.buffered_frames() as f64 / rate * 1000.0,
         monitor.underrun_frames() as f64 / rate * 1000.0,
         monitor.overflow_frames() as f64 / rate * 1000.0,
+    );
+    println!(
+        "latency: input device {}{}, buffered {}, output device {}, limiter {}; round trip {}{}",
+        ms(trip.input_device),
+        if trip.input_estimated { " (one packet: no timestamps)" } else { "" },
+        ms(Some(trip.buffer)),
+        ms(trip.output_device),
+        ms(Some(trip.limiter)),
+        ms(Some(trip.total())),
+        if trip.complete() { "" } else { " (at least)" },
     );
     assert!(!monitor.failed(), "the input stream reported an error");
     assert!(readings > 100, "the Audio Input module ran");

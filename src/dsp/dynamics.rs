@@ -216,6 +216,12 @@ impl PeakLimiter {
         ((Self::ATTACK_MS * 0.001 * sample_rate).round() as usize).max(1)
     }
 
+    /// Delay a limiter at `sample_rate` adds, in samples: what
+    /// [`latency`](Self::latency) reports, without building one.
+    pub fn latency_at(sample_rate: f32) -> usize {
+        ((Self::ATTACK_MS * 0.001 * sample_rate.max(1.0)).round() as usize).max(1) - 1
+    }
+
     /// Sets the output ceiling in dBFS.
     pub fn set_ceiling_db(&mut self, ceiling_db: f32) {
         self.ceiling = db_to_gain(ceiling_db);
@@ -456,6 +462,7 @@ mod tests {
             let limiter = PeakLimiter::new(sr);
             let expected = (sr * 0.001).round() as usize - 1;
             assert_eq!(limiter.latency(), expected);
+            assert_eq!(PeakLimiter::latency_at(sr), expected, "the same without building one");
         }
     }
 }

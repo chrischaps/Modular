@@ -11,7 +11,7 @@ use eframe::egui::{self, RichText, Layout, Align};
 use egui_node_graph2::{FlowGlyph, GraphEditorState, NodeResponse, NodeTemplateTrait, InputParamKind};
 
 use crate::engine::{
-    AudioEngine, AudioError, AudioProcessor, DeviceInfo, EngineChannels, EngineCommand, InputMonitor, Recording,
+    AudioEngine, AudioError, AudioProcessor, DeviceInfo, EngineChannels, EngineCommand, InputMonitor, Recording, RoundTrip,
     UiHandle, MidiDeviceInfo, MidiEngine, MidiEvent, MidiReceivers, TimestampedMidiEvent,
 };
 use rtrb::Consumer;
@@ -2539,13 +2539,13 @@ impl SynthApp {
                             self.input_glitches = (glitches, now);
                         }
                         let recent = glitches > 0 && now - self.input_glitches.1 < INPUT_GLITCH_HOLD;
-                        let buffered = input_device::latency(monitor.buffered_frames(), engine.sample_rate());
+                        let trip = RoundTrip::of(monitor, engine.output_latency(), engine.sample_rate());
                         let (text, color) = if monitor.failed() {
                             ("⚠ Input lost".to_string(), theme::accent::ERROR)
                         } else if recent {
-                            (format!("In {:.0} ms", buffered.as_secs_f64() * 1000.0), theme::accent::WARNING)
+                            (input_device::round_trip_label(&trip), theme::accent::WARNING)
                         } else {
-                            (format!("In {:.0} ms", buffered.as_secs_f64() * 1000.0), theme::text::SECONDARY)
+                            (input_device::round_trip_label(&trip), theme::text::SECONDARY)
                         };
                         let rate = engine.sample_rate().max(1) as f64;
                         let details = if monitor.failed() {
@@ -2560,10 +2560,10 @@ impl SynthApp {
                                 _ => String::new(),
                             };
                             format!(
-                                "Input: {}{}\nBuffered {:.1} ms to ride out timing between the devices\nDropouts so far: {:.0} ms of silence, {:.0} ms skipped",
+                                "Input: {}{}\n{}\nDropouts so far: {:.0} ms of silence, {:.0} ms skipped",
                                 engine.input_name().unwrap_or("?"),
                                 converted,
-                                buffered.as_secs_f64() * 1000.0,
+                                input_device::round_trip_details(&trip),
                                 monitor.underrun_frames() as f64 / rate * 1000.0,
                                 monitor.overflow_frames() as f64 / rate * 1000.0,
                             )

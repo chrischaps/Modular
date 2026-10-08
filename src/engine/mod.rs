@@ -10,6 +10,7 @@ pub mod audio_processor;
 pub mod channels;
 pub mod commands;
 pub mod graph_plan;
+pub mod latency;
 pub mod midi_engine;
 pub mod midi_scheduler;
 pub mod offline;
@@ -25,6 +26,7 @@ pub use channels::{
 };
 pub use commands::{AudioMessage, ChannelPeaks, EngineCommand, EngineEvent, NodeId, PortIndex, ScopeFrame};
 pub use graph_plan::GraphPlan;
+pub use latency::{LatencyGauge, RoundTrip};
 pub use recorder::{RecordTap, Recording, RecordingSummary};
 pub use offline::{read_wav, OfflineRenderer, StereoBuffer, AUDITION};
 pub use midi_engine::{

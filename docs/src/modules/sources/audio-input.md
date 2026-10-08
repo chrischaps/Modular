@@ -49,7 +49,16 @@ Short **Attack** times catch the front of a drum hit. Longer ones, 20–50 ms, s
 
 ## Latency and devices
 
-Live input passes through two devices, each with its own clock and buffer: the input and the output. To keep the sound smooth, Modular holds a little audio between them, about one buffer of each. While an input is open, the status bar shows how much as **In** and a number of milliseconds, often around 20 ms on Windows. Hover it to see the device, and any dropouts so far. It turns amber for a few seconds after a dropout.
+Live input passes through two devices, each with its own clock and buffer: the input and the output. To keep the sound smooth, Modular holds a little audio between them, about one buffer of each. While an input is open, the status bar shows **In** and the round trip: how long a sound takes from the input jack to the speakers, often around 40 ms on Windows. Hover it for the parts that add up to it, then the device and any dropouts so far. It turns amber for a few seconds after a dropout.
+
+| Part | Typical (Windows) | What it is |
+|------|-------------------|------------|
+| **Input device** | ~10 ms | The input device's own buffer: audio waits there until a packet is full |
+| **Buffer** | ~20 ms | What Modular holds between the two devices to ride out their uneven timing |
+| **Output device** | ~10 ms | The output device's own buffer, before the speakers play it |
+| **Limiter** | 1 ms | The Audio Output limiter's look-ahead |
+
+Each device's figure comes from the timestamps it puts on its audio. Windows doesn't time captured audio usefully, so there the input is counted as one packet, the least it can be, and the hover marks it with **~**. If a device reports nothing at all, the label gets a **+** (**In 22+ ms**): the real round trip is longer than the parts Modular can count. Neither figure includes the converters inside the interface, usually another millisecond or two each way.
 
 - **Different sample rates are fine.** Windows often runs a microphone at 48 kHz and speakers at 44.1 kHz, even on one interface. Modular converts the input to the output's rate on the way in. For the cleanest sound, set both to the same rate in your system's sound settings; the status bar tooltip says when it's converting.
 - **Changing the Output device** reopens the input at the new device's rate.

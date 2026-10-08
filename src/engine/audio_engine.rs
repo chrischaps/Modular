@@ -7,9 +7,11 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, FromSample, Host, SampleFormat, SampleRate, SizedSample, Stream, StreamConfig};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use super::audio_input::{input_channel_converting, InputFeed, InputMonitor, InputSender};
 use super::audio_processor::AudioProcessor;
+use super::latency::LatencyGauge;
 use crate::dsp::{InputAudio, MidiEvent};
 
 /// Errors that can occur during audio engine operation.
@@ -85,6 +87,8 @@ struct AudioState {
     callbacks: AtomicU64,
     /// Set by the stream's error callback (device unplugged, driver reset).
     stream_failed: AtomicBool,
+    /// The output device's own delay, from callback to playback.
+    output_latency: LatencyGauge,
 }
 
 impl AudioState {
@@ -94,6 +98,7 @@ impl AudioState {
             phase_fixed: AtomicU32::new(0),
             callbacks: AtomicU64::new(0),
             stream_failed: AtomicBool::new(false),
+            output_latency: LatencyGauge::default(),
         }
     }
 }
@@ -482,6 +487,12 @@ impl AudioEngine {
         self.state.callbacks.load(Ordering::Relaxed)
     }
 
+    /// The output device's own delay, from callback to playback, or `None`
+    /// if it doesn't report timestamps (or the graph stream hasn't run yet).
+    pub fn output_latency(&self) -> Option<Duration> {
+        self.state.output_latency.get()
+    }
+
     /// Whether the stream has reported an error since it was started.
     pub fn stream_failed(&self) -> bool {
         self.state.stream_failed.load(Ordering::Relaxed)
@@ -541,13 +552,16 @@ impl AudioEngine {
         let state = Arc::clone(&self.state);
         let error_state = Arc::clone(&self.state);
         self.state.stream_failed.store(false, Ordering::Relaxed);
+        self.state.output_latency.clear();
 
         let stream = self
             .device
             .build_output_stream(
                 &self.config,
-                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                move |data: &mut [f32], info: &cpal::OutputCallbackInfo| {
                     state.callbacks.fetch_add(1, Ordering::Relaxed);
+                    let time = info.timestamp();
+                    state.output_latency.record(time.playback.duration_since(&time.callback));
                     // REAL-TIME SAFE: the lock is only ever taken here, or by
                     // select_device while no stream is running, so try_lock
                     // never fails in practice. If it did, output silence
@@ -590,8 +604,10 @@ where
     device
         .build_input_stream(
             config,
-            move |data: &[T], _: &cpal::InputCallbackInfo| {
-                // REAL-TIME SAFE: a copy into the ring, nothing else
+            move |data: &[T], info: &cpal::InputCallbackInfo| {
+                // REAL-TIME SAFE: a copy into the ring and an atomic store
+                let time = info.timestamp();
+                sender.record_latency(time.callback.duration_since(&time.capture));
                 sender.push(data, channels, |sample| sample.to_sample::<f32>());
             },
             move |err| {

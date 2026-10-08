@@ -229,7 +229,10 @@ fn audio_callback_never_allocates() {
         // The input device keeps time with the output, 480 frames at a time
         input_due += frames;
         while input_due >= 480 {
-            allocations += count_allocations(|| input.push_f32(&device_input, 2));
+            allocations += count_allocations(|| {
+                input.record_latency(Some(std::time::Duration::from_micros(10_000 + round as u64)));
+                input.push_f32(&device_input, 2)
+            });
             input_due -= 480;
         }
 
@@ -246,6 +249,7 @@ fn audio_callback_never_allocates() {
     assert!(processor.has_input());
     assert!(monitor.buffered_frames() > 0, "the second input was read");
     assert_eq!(monitor.overflow_frames(), 0);
+    assert!(monitor.device_latency().is_some(), "the input's timestamps were taken in");
     assert!(output.iter().all(|s| s.is_finite()));
     assert_eq!(allocations, 0, "audio callback allocated {allocations} times over {blocks} callbacks");
 }

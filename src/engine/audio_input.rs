@@ -27,8 +27,11 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use rtrb::{Consumer, Producer, RingBuffer};
+
+use super::latency::LatencyGauge;
 
 /// How much audio the ring can hold, in seconds. Far more than the jitter
 /// buffer ever keeps: room for the output to stall without losing input.
@@ -49,6 +52,8 @@ struct InputStats {
     target_frames: AtomicUsize,
     /// Set by the input stream's error callback (unplugged, say).
     failed: AtomicBool,
+    /// The input device's own delay, from its buffers' timestamps.
+    device_latency: LatencyGauge,
 }
 
 /// Converts a stream of stereo frames from one sample rate to another, a
@@ -183,6 +188,15 @@ impl InputSender {
     pub fn push_f32(&mut self, data: &[f32], channels: usize) {
         self.push(data, channels, |s| s);
     }
+
+    /// Takes in one callback's input device delay: from its first frame's
+    /// capture to the callback, or `None` if the timestamps ran backwards.
+    ///
+    /// REAL-TIME SAFE: see [`LatencyGauge::record`].
+    #[inline]
+    pub fn record_latency(&self, delay: Option<Duration>) {
+        self.stats.device_latency.record(delay);
+    }
 }
 
 /// The output callback's end: a jitter buffer that hands out input a block
@@ -313,10 +327,22 @@ impl InputMonitor {
         self.stats.overflow_frames.load(Ordering::Relaxed)
     }
 
+    /// The largest packet the input device has delivered, in frames at the
+    /// output's rate.
+    pub fn packet_frames(&self) -> usize {
+        self.stats.largest_input.load(Ordering::Relaxed)
+    }
+
     /// The jitter buffer's level, in frames: the latency it adds on top of
     /// the devices' own.
     pub fn buffered_frames(&self) -> usize {
         self.stats.target_frames.load(Ordering::Relaxed)
+    }
+
+    /// The input device's own delay, from capture to callback, or `None` if
+    /// it doesn't report timestamps.
+    pub fn device_latency(&self) -> Option<Duration> {
+        self.stats.device_latency.get()
     }
 
     /// Whether the input stream has reported an error.
