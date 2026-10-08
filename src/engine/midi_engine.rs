@@ -89,6 +89,19 @@ pub enum MidiEvent {
         /// Program number (0-127).
         program: u8,
     },
+    /// Timing Clock (0xF8), 24 per beat from a clock master.
+    Clock,
+    /// Start (0xFA).
+    Start,
+    /// Continue (0xFB).
+    Continue,
+    /// Stop (0xFC).
+    Stop,
+    /// Song Position Pointer (0xF2), in sixteenth notes from the top.
+    SongPosition {
+        /// Position (0-16383).
+        sixteenths: u16,
+    },
 }
 
 impl MidiEvent {
@@ -100,6 +113,9 @@ impl MidiEvent {
         }
 
         let status = data[0];
+        if status >= 0xF0 {
+            return Self::from_system_bytes(data);
+        }
         let channel = status & 0x0F;
         let msg_type = status & 0xF0;
 
@@ -200,6 +216,22 @@ impl MidiEvent {
         }
     }
 
+    /// Parses the system messages modules use: the real-time messages of a
+    /// MIDI clock, and Song Position.
+    fn from_system_bytes(data: &[u8]) -> Option<Self> {
+        match data[0] {
+            0xF8 => Some(MidiEvent::Clock),
+            0xFA => Some(MidiEvent::Start),
+            0xFB => Some(MidiEvent::Continue),
+            0xFC => Some(MidiEvent::Stop),
+            0xF2 if data.len() >= 3 => {
+                let sixteenths = (data[1] as u16 & 0x7F) | ((data[2] as u16 & 0x7F) << 7);
+                Some(MidiEvent::SongPosition { sixteenths })
+            }
+            _ => None,
+        }
+    }
+
     /// The audio-thread form of this event, placed at `sample_offset`.
     /// Returns `None` for messages no module uses (polyphonic aftertouch).
     pub fn to_dsp(&self, sample_offset: u32) -> Option<crate::dsp::MidiEvent> {
@@ -222,11 +254,17 @@ impl MidiEvent {
                 (channel, MidiMessage::ProgramChange { program })
             }
             MidiEvent::PolyPressure { .. } => return None,
+            MidiEvent::Clock => (0, MidiMessage::Clock),
+            MidiEvent::Start => (0, MidiMessage::Start),
+            MidiEvent::Continue => (0, MidiMessage::Continue),
+            MidiEvent::Stop => (0, MidiMessage::Stop),
+            MidiEvent::SongPosition { sixteenths } => (0, MidiMessage::SongPosition { sixteenths }),
         };
         Some(crate::dsp::MidiEvent::new(sample_offset, channel, message))
     }
 
-    /// Get the MIDI channel for this event.
+    /// Get the MIDI channel for this event. System messages have none, and
+    /// report channel 0.
     pub fn channel(&self) -> u8 {
         match self {
             MidiEvent::NoteOn { channel, .. } => *channel,
@@ -236,6 +274,11 @@ impl MidiEvent {
             MidiEvent::ChannelPressure { channel, .. } => *channel,
             MidiEvent::PolyPressure { channel, .. } => *channel,
             MidiEvent::ProgramChange { channel, .. } => *channel,
+            MidiEvent::Clock
+            | MidiEvent::Start
+            | MidiEvent::Continue
+            | MidiEvent::Stop
+            | MidiEvent::SongPosition { .. } => 0,
         }
     }
 }
@@ -274,9 +317,15 @@ struct MidiSenders {
 impl MidiSenders {
     /// Sends an event both ways. Lossy: a full queue drops it rather than
     /// hold up MIDI input.
+    ///
+    /// Clock ticks go to the audio thread only. They come 24 to the beat,
+    /// and the UI has no use for them; it would only scroll them through
+    /// the MIDI Monitor.
     fn send(&mut self, event: TimestampedMidiEvent) {
         let _ = self.audio.push(event);
-        let _ = self.ui.push(event);
+        if !matches!(event.event, MidiEvent::Clock) {
+            let _ = self.ui.push(event);
+        }
     }
 }
 

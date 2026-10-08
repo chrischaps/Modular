@@ -119,6 +119,9 @@ pub struct KnobConfig {
     pub label: Option<String>,
     /// Show value display.
     pub show_value: bool,
+    /// Text to show instead of the formatted value, for a knob something
+    /// else is in charge of (a synced LFO's division, say).
+    pub value_text: Option<String>,
     /// Drag sensitivity (pixels per full range).
     pub drag_sensitivity: f32,
     /// Fine control multiplier when Shift is held.
@@ -141,6 +144,7 @@ impl Default for KnobConfig {
             logarithmic: false,
             label: None,
             show_value: true,
+            value_text: None,
             drag_sensitivity: 200.0,
             fine_multiplier: 0.1,
             stepped: false,
@@ -464,7 +468,7 @@ pub fn knob(ui: &mut Ui, value: &mut f32, config: &KnobConfig) -> Response {
         // Draw value text
         let mut text_y = knob_rect.bottom() + 2.0 * scale;
         if config.show_value {
-            let value_text = config.format.format(*value);
+            let value_text = config.value_text.clone().unwrap_or_else(|| config.format.format(*value));
             painter.text(
                 Pos2::new(center.x, text_y + 6.0 * scale),
                 egui::Align2::CENTER_CENTER,
@@ -724,7 +728,7 @@ fn paint_readout(painter: &egui::Painter, knob_rect: Rect, s: f32, config: &Knob
         painter.text(
             Pos2::new(x, y + 6.5 * s),
             egui::Align2::CENTER_CENTER,
-            config.format.format(value),
+            config.value_text.clone().unwrap_or_else(|| config.format.format(value)),
             egui::FontId::new(10.0 * s, egui::FontFamily::Name(theme::TITLE_FAMILY.into())),
             theme::text::PRIMARY,
         );

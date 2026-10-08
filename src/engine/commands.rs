@@ -3,7 +3,7 @@
 //! Defines the messages that flow between the UI thread and the audio engine thread.
 //! All types here must be Send + 'static for safe cross-thread communication.
 
-use crate::dsp::{MeterLevels, OutputLevels, SignalBuffer, MAX_CHANNELS};
+use crate::dsp::{MeterLevels, OutputLevels, Readout, SignalBuffer, MAX_CHANNELS};
 use crate::modules::oscilloscope::SCOPE_BUFFER_SIZE;
 
 use super::audio_input::InputFeed;
@@ -240,6 +240,15 @@ pub enum EngineEvent {
         node_id: NodeId,
         /// Its peaks, in the module's own order.
         levels: MeterLevels,
+    },
+
+    /// A module's live readout (a Clock's tempo and beat), for its node
+    /// display, as of the most recent audio callback.
+    Readout {
+        /// The module reporting.
+        node_id: NodeId,
+        /// Its values, in the module's own order.
+        readout: Readout,
     },
 
     /// Oscilloscope buffer data for waveform display.

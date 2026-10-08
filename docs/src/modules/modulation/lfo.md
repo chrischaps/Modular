@@ -3,7 +3,7 @@
 **Module ID** `mod.lfo` · **Category** Modulation
 
 ![LFO Module](../../images/module-lfo.png)
-*A dot rides the waveform display, in step with the LFO's real phase.*
+*Synced to 1/4: the Rate knob reads the division, and the dot rides the waveform in step with the beat.*
 
 The LFO (low-frequency oscillator) makes slow, repeating shapes for moving other modules: a filter that breathes, a vibrato, a tremolo, a pulse width that drifts. It runs from one cycle every 100 seconds up to 100 Hz, so it can also be pushed into the audio range for rough, buzzy modulation.
 
@@ -31,6 +31,7 @@ The display on the node draws one cycle of the selected waveform, with a dot tha
 | **Phase** | 0 – 360° | 0° | Shifts where in the cycle the waveform starts |
 | **Wave** | Sine / Triangle / Square / Saw | Sine | Dropdown on the node |
 | **Bipolar** | On / Off | On | Checkbox on the node. On swings -1 to 1; off stays between 0 and 1 |
+| **Tempo** | Off, 4 bars – 1/32, dotted, triplet | Off | Dropdown on the node. Off runs free at **Rate**; a division locks the cycle to the [Clock](./clock.md)'s beat |
 
 ## Waveforms
 
@@ -47,6 +48,30 @@ With **Bipolar** on (the default), **Out** swings evenly around zero. Into a fil
 
 With **Bipolar** off, **Out** stays between 0 and 1: the same shape, lifted and halved. Use it where modulation should only add, as with a VCA's **CV**, where a bipolar LFO would spend half its cycle silent.
 
+## Tempo sync
+
+Set **Tempo** to a division and the LFO locks to the patch's beat: one cycle per division, in step with the [Clock](./clock.md). A 1 bar LFO sweeps once a bar; a 1/8 tremolo pulses on every eighth note. Change the Clock's tempo and the LFO follows, and if the Clock follows a MIDI clock, so does the LFO.
+
+| Tempo | One cycle every | At 120 BPM |
+|-------|-----------------|------------|
+| **4 bars**, **2 bars**, **1 bar** | 16, 8 or 4 beats | 8 s, 4 s, 2 s |
+| **1/2**, **1/4**, **1/8**, **1/16**, **1/32** | 2, 1, ½, ¼ or ⅛ of a beat | 1 s to 62.5 ms |
+| **D** (dotted) | One and a half times the plain length | 1/4D = 750 ms |
+| **T** (triplet) | Two thirds of the plain length, three in the time of two | 1/4T = 333 ms |
+
+A synced LFO doesn't count its own cycles. It reads where the Clock's beat is, so it can't drift, however long it runs, and every synced LFO in the patch moves in step with the others. The cycles start on the Clock's downbeat: when the Clock starts from the top, so does the LFO.
+
+While synced:
+
+- The **Rate** knob dims and reads the division. Its pointer shows the rate that comes to at the current tempo.
+- **Rate** CV has no effect.
+- **Sync** still restarts the cycle, and the cycles then run from that moment, at the division's length, until the Clock starts from the top again.
+- **Phase** still shifts the waveform, so a 1 bar LFO at 90° peaks on the downbeat.
+- When the Clock stops, the LFO holds where it is, and carries on when the Clock does.
+- Without a Clock in the patch, the LFO keeps its own time at 120 BPM.
+
+Set **Tempo** back to Off and the LFO runs free at **Rate**, from the point it had reached.
+
 ## Rate CV
 
 The **Rate** input works in octaves, like V/Oct. +1 doubles the rate, +2 quadruples it, -1 halves it. The knob stays live while it's patched and sets the base rate the CV works from, so you can keep turning it.
@@ -59,7 +84,7 @@ A slow LFO into another's Rate makes modulation that speeds up and slows down on
 
 ## Sync and phase
 
-Each rising edge at **Sync** restarts the cycle from the **Phase** setting. Patch a [Clock](./clock.md) into it and the LFO starts over on every pulse, so its movement lines up with the beat.
+Each rising edge at **Sync** restarts the cycle from the **Phase** setting. Patch a [Clock](./clock.md) into it and the LFO starts over on every pulse. To keep an LFO in time with the beat, though, **Tempo** is simpler and never drifts between pulses.
 
 **Phase** shifts the starting point. Two LFOs at the same rate, one at 0° and one at 180°, move in opposite directions; at 90° they chase each other.
 
@@ -92,6 +117,14 @@ Rate 4 to 8 Hz, Sine or Triangle, **Bipolar off**, so the level dips and returns
 
 The Cutoff input works in octaves, so a bipolar LFO at full level sweeps one octave either side of the knob. A slow Triangle gives a smooth wah; a Square jumps between two brightnesses. To sweep less, pass the LFO through an [Attenuverter](../utilities/attenuverter.md).
 
+### A filter that breathes with the bar
+
+```text
+[LFO Out] ──> [SVF Filter Cutoff]
+```
+
+**Tempo** 1 bar, Sine. The filter opens and closes once a bar, wherever the Clock's tempo goes. Try 2 bars for a slower swell, or a Square at 1/8 for a gated rhythm.
+
 ### Pulse-width modulation
 
 ```text
@@ -114,10 +147,11 @@ Each Clock pulse freezes wherever the LFO happens to be, and [Sample & Hold](../
 - The LFO is monophonic. One LFO patched into a polyphonic module moves every voice together. See [Polyphony](../../concepts/polyphony.md).
 - The Rate and Phase knobs are smoothed, so turning them while the LFO runs doesn't click or jump.
 - Pressing **Play** starts every LFO from the beginning of its cycle.
+- See [Tempo and Sync](../../concepts/tempo-and-sync.md) for how the patch's tempo and beat reach the LFO.
 
 ## Related modules
 
 - [ADSR Envelope](./adsr.md) for modulation that follows each note instead of repeating
-- [Clock](./clock.md) to restart the LFO on the beat
+- [Clock](./clock.md), which sets the beat a synced LFO follows
 - [Attenuverter](../utilities/attenuverter.md) to scale, invert or offset the LFO
 - [Sample & Hold](../utilities/sample-hold.md) for stepped patterns

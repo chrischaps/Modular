@@ -243,6 +243,7 @@ impl AudioProcessor {
         self.send_scope_captures();
         self.send_output_level();
         self.send_meter_levels();
+        self.send_readouts();
 
         // Calculate CPU load
         let elapsed = start_time.elapsed();
@@ -287,6 +288,7 @@ impl AudioProcessor {
         self.send_scope_captures();
         self.send_output_level();
         self.send_meter_levels();
+        self.send_readouts();
     }
 
     /// Runs the graph over a buffer in plan-sized blocks, each with the MIDI
@@ -355,6 +357,14 @@ impl AudioProcessor {
         let Self { plan, engine_handle, .. } = self;
         plan.take_meter_levels(|node_id, levels| {
             engine_handle.send_event_lossy(EngineEvent::MeterLevels { node_id, levels });
+        });
+    }
+
+    /// Sends this callback's module readouts to the UI.
+    fn send_readouts(&mut self) {
+        let Self { plan, engine_handle, .. } = self;
+        plan.readouts(|node_id, readout| {
+            engine_handle.send_event_lossy(EngineEvent::Readout { node_id, readout });
         });
     }
 

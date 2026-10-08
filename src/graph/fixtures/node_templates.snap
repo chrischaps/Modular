@@ -165,6 +165,7 @@ in   Sync               Gate     ConnectionOnly       inline=true  port
 in   Waveform           Control  ConstantOnly         inline=true  select 0 ["Sine", "Triangle", "Square", "Saw"] "Wave"
 in   Phase              Control  ConstantOnly         inline=false num 0 [0..360] °
 in   Bipolar            Control  ConstantOnly         inline=true  toggle true "Bipolar"
+in   Tempo Sync         Control  ConstantOnly         inline=true  select 0 ["Off", "4 bars", "2 bars", "1 bar", "1/2", "1/2D", "1/2T", "1/4", "1/4D", "1/4T", "1/8", "1/8D", "1/8T", "1/16", "1/16D", "1/16T", "1/32"] "Tempo"
 out  Out                Control
 out  Phase              Control
 knob Rate               "Rate" Modulatable
@@ -178,10 +179,14 @@ in   Tempo              Control  ConstantOnly         inline=false num 120 [20..
 in   Gate Length        Control  ConstantOnly         inline=false num 50 [1..99] %
 in   Division           Control  ConstantOnly         inline=true  select 2 ["1", "1/2", "1/4", "1/8", "1/16"] "Div"
 in   Run                Control  ConstantOnly         inline=true  toggle true "Run"
+in   Source             Control  ConstantOnly         inline=true  select 0 ["Internal", "MIDI"] "Source"
 out  Gate               Gate
+out  Run                Gate
+out  Reset              Gate
 knob Tempo              "BPM" KnobOnly
 knob Gate Length        "Gate" KnobOnly
-monitor [0]
+monitor [0, 1, 2]
+display ClockBeat
 
 == util.vca "VCA" finder="VCA" Utility
 in   In                 Audio    ConnectionOnly       inline=true  port

@@ -1481,6 +1481,10 @@ impl SynthApp {
                         // Feed a module's own meters (the Mixer's strips)
                         self.user_state.module_meters.entry(node_id).or_default().feed(&levels);
                     }
+                    crate::engine::EngineEvent::Readout { node_id, readout } => {
+                        // A Clock's tempo and beat, for its node
+                        self.user_state.readouts.insert(node_id, readout);
+                    }
                     // Other events are not currently handled by the app
                     // (Started, Stopped, Error)
                     _ => {}

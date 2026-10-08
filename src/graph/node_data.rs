@@ -30,6 +30,8 @@ mod midi_colors {
     pub const CC: Color32 = Color32::from_rgb(255, 165, 0);
     /// Pitch Bend events (purple)
     pub const PITCH_BEND: Color32 = Color32::from_rgb(180, 100, 200);
+    /// Transport events from a MIDI clock master: Start, Stop (pale blue)
+    pub const TRANSPORT: Color32 = Color32::from_rgb(130, 180, 230);
     /// Other events (gray)
     pub const OTHER: Color32 = Color32::from_rgb(150, 150, 150);
 }
@@ -77,6 +79,15 @@ fn format_midi_event(event: &MidiEvent) -> (String, Color32) {
         MidiEvent::ProgramChange { channel, program } => (
             format!("Program Ch{} #{}", channel + 1, program),
             midi_colors::OTHER,
+        ),
+        // Ticks never reach the UI, but name them in case one does
+        MidiEvent::Clock => ("Clock".to_string(), midi_colors::TRANSPORT),
+        MidiEvent::Start => ("Start".to_string(), midi_colors::TRANSPORT),
+        MidiEvent::Continue => ("Continue".to_string(), midi_colors::TRANSPORT),
+        MidiEvent::Stop => ("Stop".to_string(), midi_colors::TRANSPORT),
+        MidiEvent::SongPosition { sixteenths } => (
+            format!("SongPos bar {} 16th {}", sixteenths / 16 + 1, sixteenths % 16 + 1),
+            midi_colors::TRANSPORT,
         ),
     }
 }
@@ -236,6 +247,9 @@ pub enum NodeDisplay {
     /// Audio Input: the input's meters, and Follow scrolling past the
     /// Threshold.
     InputListen,
+    /// Clock: four lamps for the beats of the bar, and where the time comes
+    /// from.
+    ClockBeat,
 }
 
 /// Data stored per node in the graph.
@@ -561,7 +575,8 @@ impl SynthNodeData {
     /// When the knob is changed, emits a ParameterChanged response.
     /// If `is_connected` is true, the knob is dimmed and changes are ignored
     /// (the value is controlled externally).
-    /// If `signal_value` is Some, the knob displays that value instead of the stored value.
+    /// If `signal_value` is Some, the knob displays that value instead of the stored value,
+    /// and if `value_text` is Some, it reads that instead of its value.
     #[allow(clippy::too_many_arguments)]
     fn render_knob_for_value(
         ui: &mut egui::Ui,
@@ -573,6 +588,7 @@ impl SynthNodeData {
         param_name: &str,
         responses: &mut Vec<NodeResponse<SynthResponse, Self>>,
         signal_value: Option<f32>,
+        value_text: Option<String>,
         _midi_config: &KnobMidiConfig,
         accent: Color32,
         style: KnobStyle,
@@ -593,6 +609,7 @@ impl SynthNodeData {
                     stepped: spec.stepped,
                     label: Some(label.to_string()),
                     show_value: true,
+                    value_text,
                     accent,
                     style,
                     ..Default::default()
@@ -2021,6 +2038,11 @@ impl NodeDataTrait for SynthNodeData {
             });
         }
 
+        // Clock: the beat in the bar, and where the time comes from
+        if self.display == NodeDisplay::ClockBeat {
+            super::clock_display::clock_display(ui, node_id, graph, user_state, zoom);
+        }
+
         // Mixer: the stereo panorama, and a meter and mute per strip
         if self.display == NodeDisplay::MixerStrips {
             if let Some((param_name, value)) = super::mixer_strips::mixer_strips(ui, node_id, graph, user_state, zoom) {
@@ -2071,8 +2093,14 @@ impl NodeDataTrait for SynthNodeData {
                             let is_connected = knob_param.has_input_port() &&
                                 graph.iter_connections().any(|(input, _output)| input == *input_id);
 
+                            // Something else in charge of it: a synced LFO's division,
+                            // a MIDI clock's tempo
+                            let takeover = super::clock_display::knob_takeover(
+                                self.module_id, &knob_param.param_name, node_id, graph, user_state,
+                            );
+
                             // Should the knob be disabled? Only for Exposed mode, not for Modulatable
-                            let should_disable = is_connected && knob_param.disable_when_connected();
+                            let should_disable = takeover.is_some() || (is_connected && knob_param.disable_when_connected());
 
                             // Get input port index for this parameter (for looking up signal value)
                             let input_port_index = if knob_param.has_input_port() {
@@ -2187,7 +2215,9 @@ impl NodeDataTrait for SynthNodeData {
                                     // Note: We need to clone to render since we can't mutate through the graph reference
                                     // The actual parameter change will be handled through the normal widget flow
                                     // For modulatable params, pass None for signal_value so knob shows base value
-                                    let display_signal = if knob_param.disable_when_connected() {
+                                    let display_signal = if let Some(takeover) = &takeover {
+                                        takeover.value
+                                    } else if knob_param.disable_when_connected() {
                                         signal_value
                                     } else {
                                         None // Modulatable: show base knob value, not CV signal
@@ -2202,6 +2232,7 @@ impl NodeDataTrait for SynthNodeData {
                                         &knob_param.param_name,
                                         &mut responses,
                                         display_signal,
+                                        takeover.map(|takeover| takeover.text),
                                         &midi_config,
                                         self.category.color(),
                                         user_state.knob_style,

@@ -35,7 +35,7 @@ The **ID** is the name a patch file uses to refer to the module.
 | Module | ID | What it does |
 |--------|----|--------------|
 | [ADSR Envelope](./modulation/adsr.md) | `mod.adsr` | Attack, decay, sustain and release, with exact stage times, curve shaping and velocity |
-| [LFO](./modulation/lfo.md) | `mod.lfo` | Low-frequency oscillator for cyclic modulation |
+| [LFO](./modulation/lfo.md) | `mod.lfo` | Low-frequency oscillator for cyclic modulation, free or locked to the beat |
 
 ### Effect
 
@@ -56,7 +56,7 @@ The **ID** is the name a patch file uses to refer to the module.
 
 | Module | ID | What it does |
 |--------|----|--------------|
-| [Clock](./modulation/clock.md) | `util.clock` | Steady gate pulses at a tempo |
+| [Clock](./modulation/clock.md) | `util.clock` | Steady gate pulses at a tempo; sets the patch tempo, and can follow MIDI clock |
 | [VCA](./utilities/vca.md) | `util.vca` | Voltage-controlled amplifier: sets a signal's level from a CV |
 | [Attenuverter](./utilities/attenuverter.md) | `util.attenuverter` | Scale, invert and offset a control signal |
 | [Mixer](./utilities/mixer.md) | `util.mixer` | Four-channel stereo mixer with pan, mute and poly spread |

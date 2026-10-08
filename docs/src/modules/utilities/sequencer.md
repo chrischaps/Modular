@@ -106,6 +106,8 @@ Two sequencers on the same clock with different **Steps** settings drift against
 
 Patch a gate into **Run** to pause the pattern in place. While Run is low, clocks are ignored and the sequencer stays on its current step.
 
+The [Clock](../modulation/clock.md)'s **Run** and **Reset** outputs are made for this. Patch them into **Run** and **Reset** and the pattern stops with the Clock and starts again from step 1 when it does, including when the Clock follows a DAW's MIDI clock and you press Play there.
+
 ## Related modules
 
 - [Clock](../modulation/clock.md): drives the sequencer

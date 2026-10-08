@@ -7,6 +7,7 @@ use egui_node_graph2::{ConnectionSignalTrait, FlowGlyph, GraphEditorState, NodeI
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
+use crate::dsp::Readout;
 use crate::engine::{ChannelPeaks, NodeId as EngineNodeId};
 use crate::engine::midi_engine::MidiEvent;
 use crate::widgets::{LevelMeter, ModuleMeters};
@@ -155,6 +156,10 @@ pub struct SynthGraphState {
     /// events. Key: engine node ID.
     pub module_meters: HashMap<EngineNodeId, ModuleMeters>,
 
+    /// Modules' latest readouts (a Clock's tempo and beat), fed by Readout
+    /// events. Key: engine node ID.
+    pub readouts: HashMap<EngineNodeId, Readout>,
+
     /// The input device Audio Input modules are listening to, if one is open.
     pub audio_input_name: Option<String>,
 }
@@ -189,6 +194,7 @@ impl Default for SynthGraphState {
             midi_active_notes: Vec::new(),
             output_meter: LevelMeter::default(),
             module_meters: HashMap::new(),
+            readouts: HashMap::new(),
             audio_input_name: None,
         }
     }
@@ -249,6 +255,7 @@ impl SynthGraphState {
         self.midi_active_notes.clear();
         self.output_meter = LevelMeter::default();
         self.module_meters.clear();
+        self.readouts.clear();
     }
 
     /// Get the MIDI mapping info for a parameter, if any.
@@ -330,6 +337,7 @@ impl SynthGraphState {
         self.output_channels.retain(|(node_id, _), _| *node_id != engine_node_id);
         self.signal_history.retain(|(node_id, _), _| *node_id != engine_node_id);
         self.module_meters.remove(&engine_node_id);
+        self.readouts.remove(&engine_node_id);
     }
 
     /// Update an output's per-channel reading from the audio engine feedback.

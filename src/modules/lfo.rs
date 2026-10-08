@@ -6,7 +6,7 @@ use std::f32::consts::TAU;
 
 use crate::dsp::{
     context::ProcessContext,
-    module_trait::{DspModule, ModuleCategory, ModuleInfo},
+    module_trait::{DspModule, ModuleCategory, ModuleInfo, Readout},
     parameter::ParameterDefinition,
     port::PortDefinition,
     signal::SignalBuffer,
@@ -36,6 +36,45 @@ impl LfoWaveform {
     }
 }
 
+/// The Tempo Sync choices: a label for the dropdown and the cycle length in
+/// beats, or `None` for Off. Bars are four beats. Patches save the index, so
+/// new divisions go on the end.
+pub const SYNC_DIVISIONS: [(&str, Option<f64>); 17] = [
+    ("Off", None),
+    ("4 bars", Some(16.0)),
+    ("2 bars", Some(8.0)),
+    ("1 bar", Some(4.0)),
+    ("1/2", Some(2.0)),
+    ("1/2D", Some(3.0)),
+    ("1/2T", Some(4.0 / 3.0)),
+    ("1/4", Some(1.0)),
+    ("1/4D", Some(1.5)),
+    ("1/4T", Some(2.0 / 3.0)),
+    ("1/8", Some(0.5)),
+    ("1/8D", Some(0.75)),
+    ("1/8T", Some(1.0 / 3.0)),
+    ("1/16", Some(0.25)),
+    ("1/16D", Some(0.375)),
+    ("1/16T", Some(1.0 / 6.0)),
+    ("1/32", Some(0.125)),
+];
+
+/// The Tempo Sync dropdown's labels.
+const SYNC_LABELS: [&str; SYNC_DIVISIONS.len()] = {
+    let mut labels = [""; SYNC_DIVISIONS.len()];
+    let mut i = 0;
+    while i < labels.len() {
+        labels[i] = SYNC_DIVISIONS[i].0;
+        i += 1;
+    }
+    labels
+};
+
+/// The cycle length in beats for a Tempo Sync value, or `None` when off.
+pub fn sync_beats(value: f32) -> Option<f64> {
+    SYNC_DIVISIONS.get(value.max(0.0) as usize).and_then(|&(_, beats)| beats)
+}
+
 /// A low-frequency oscillator for modulation.
 ///
 /// Generates control-rate signals for modulating other module parameters.
@@ -56,9 +95,25 @@ impl LfoWaveform {
 /// - **Waveform** (0-3): Shape of the output (Sine, Triangle, Square, Saw).
 /// - **Phase** (0-360°): Phase offset for waveform start point.
 /// - **Bipolar** (toggle): When on, output is -1 to +1. When off, output is 0 to +1.
+/// - **Tempo Sync** (choice): Off runs free at Rate. A division (4 bars to
+///   1/32, dotted and triplet) locks the cycle to the patch's beat, so
+///   every synced LFO keeps in step with the Clock and restarts on its
+///   downbeat.
 pub struct Lfo {
     /// Current phase (0.0 to 1.0).
     phase: f32,
+    /// While synced: the beat a cycle starts on. 0, the downbeat, until the
+    /// Sync input moves it.
+    origin: f64,
+    /// While synced: the beat at the last sample, to notice the transport
+    /// jumping back to the top.
+    last_beat: f64,
+    /// While synced in a patch without a Clock: a beat of the LFO's own, at
+    /// 120 BPM.
+    free_beats: f64,
+    /// The cycle length while synced, in beats, and the tempo, as of the
+    /// last block: what the Rate knob shows.
+    synced: Option<(f64, f32)>,
     /// Previous sync state for edge detection.
     prev_sync: bool,
     /// Sample rate from last prepare() call.
@@ -79,6 +134,10 @@ impl Lfo {
         let sample_rate = 44100.0;
         Self {
             phase: 0.0,
+            origin: 0.0,
+            last_beat: 0.0,
+            free_beats: 0.0,
+            synced: None,
             prev_sync: false,
             sample_rate,
             ports: vec![
@@ -117,6 +176,13 @@ impl Lfo {
                 ).describe("Where in the cycle the waveform starts, and where Sync restarts it"),
                 // Bipolar toggle
                 ParameterDefinition::toggle("bipolar", "Bipolar", true).describe("On swings from -1 to 1; off stays between 0 and 1"),
+                // Lock to the beat
+                ParameterDefinition::choice(
+                    "tempo_sync",
+                    "Tempo Sync",
+                    &SYNC_LABELS,
+                    0, // Default Off
+                ).describe("Locks the cycle to the Clock's beat, one cycle per division; Off runs free at Rate"),
             ],
             // Initialize smoothed parameters
             rate_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
@@ -135,9 +201,18 @@ impl Lfo {
     const PARAM_WAVEFORM: usize = 1;
     const PARAM_PHASE: usize = 2;
     const PARAM_BIPOLAR: usize = 3;
+    const PARAM_TEMPO_SYNC: usize = 4;
 
     /// Sync threshold for detecting high/low states.
     const SYNC_THRESHOLD: f32 = 0.5;
+
+    /// How far the beat must step back to count as the transport starting
+    /// over: a MIDI clock tick. Smaller steps back are a block's pacing
+    /// overshooting a tick that came late, not a restart.
+    const RESTART_BEATS: f64 = 1.0 / 24.0;
+
+    /// Readout value index of the synced rate: see [`DspModule::readout`].
+    pub const READOUT_RATE: usize = 0;
 
     /// Generate a sample for the given phase (0.0-1.0) and waveform.
     /// Returns value in bipolar form (-1 to +1).
@@ -218,6 +293,12 @@ impl DspModule for Lfo {
         let waveform = LfoWaveform::from_param(params[Self::PARAM_WAVEFORM]);
         let is_bipolar = params[Self::PARAM_BIPOLAR] > 0.5;
 
+        // Locked to the beat, at a division
+        let sync_beats = sync_beats(params.get(Self::PARAM_TEMPO_SYNC).copied().unwrap_or(0.0));
+        let transport = context.transport;
+        let tempo = transport.tempo_bpm.unwrap_or(120.0);
+        self.synced = sync_beats.map(|beats| (beats, tempo));
+
         // Get input buffers
         let rate_cv = inputs.get(Self::PORT_RATE_CV);
         let sync_in = inputs.get(Self::PORT_SYNC);
@@ -236,8 +317,22 @@ impl DspModule for Lfo {
             let sync_rising = sync_high && !self.prev_sync;
             self.prev_sync = sync_high;
 
-            // Reset phase on sync rising edge
-            if sync_rising {
+            if let Some(cycle_beats) = sync_beats {
+                // The phase is where the beat is in the cycle, so it can't
+                // drift from the Clock, nor from other synced LFOs
+                let beat = transport.beat_at(i, self.sample_rate).unwrap_or(self.free_beats);
+                if beat < self.last_beat - Self::RESTART_BEATS {
+                    // The transport went back to the top: so do we
+                    self.origin = 0.0;
+                }
+                if sync_rising {
+                    // Cycles now start from this beat
+                    self.origin = beat;
+                }
+                self.last_beat = beat;
+                self.phase = ((beat - self.origin) / cycle_beats).rem_euclid(1.0) as f32;
+            } else if sync_rising {
+                // Reset phase on sync rising edge
                 self.phase = 0.0;
             }
 
@@ -256,6 +351,14 @@ impl DspModule for Lfo {
 
             // Write current phase to phase output (0-1 range)
             outputs[Self::PORT_PHASE].samples[i] = effective_phase;
+
+            if sync_beats.is_some() {
+                // Without a Clock to follow, keep a beat of our own
+                if transport.beat_position.is_none() {
+                    self.free_beats += tempo as f64 / 60.0 / self.sample_rate as f64;
+                }
+                continue;
+            }
 
             // Get rate CV modulation
             let rate_cv_value = rate_cv
@@ -281,16 +384,29 @@ impl DspModule for Lfo {
 
     fn reset(&mut self) {
         self.phase = 0.0;
+        self.origin = 0.0;
+        self.last_beat = 0.0;
+        self.free_beats = 0.0;
         self.prev_sync = false;
         // Reset smoothed parameters to their current targets
         self.rate_smooth.reset(self.rate_smooth.target());
         self.phase_offset_smooth.reset(self.phase_offset_smooth.target());
+    }
+
+    /// While synced, the rate the division comes to at the patch tempo, in
+    /// Hz, for the Rate knob to show.
+    fn readout(&self, _params: &[f32]) -> Option<Readout> {
+        let (beats, tempo) = self.synced?;
+        let mut readout = Readout::default();
+        readout.values[Self::READOUT_RATE] = (tempo as f64 / 60.0 / beats) as f32;
+        Some(readout)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dsp::TransportState;
 
     #[test]
     fn test_lfo_info() {
@@ -332,7 +448,7 @@ mod tests {
         let lfo = Lfo::new();
         let params = lfo.parameters();
 
-        assert_eq!(params.len(), 4);
+        assert_eq!(params.len(), 5);
 
         // Rate parameter
         assert_eq!(params[0].id, "rate");
@@ -660,6 +776,192 @@ mod tests {
         assert_eq!(module.info().id, "mod.lfo");
         assert_eq!(module.info().name, "LFO");
         assert_eq!(module.ports().len(), 4); // 2 inputs + 2 outputs
-        assert_eq!(module.parameters().len(), 4); // Rate, Waveform, Phase, Bipolar
+        assert_eq!(module.parameters().len(), 5); // Rate, Waveform, Phase, Bipolar, Tempo Sync
+    }
+
+    // --- Tempo sync ---
+
+    /// The Tempo Sync value of the division labelled `label`.
+    fn division(label: &str) -> f32 {
+        SYNC_DIVISIONS.iter().position(|&(l, _)| l == label).unwrap() as f32
+    }
+
+    #[test]
+    fn test_every_sync_division_has_a_label_and_length() {
+        let lfo = Lfo::new();
+        let sync = &lfo.parameters()[4];
+        assert_eq!(sync.id, "tempo_sync");
+        assert_eq!(sync.default, 0.0, "Off by default, so old patches run free");
+        assert_eq!(sync.max as usize, SYNC_DIVISIONS.len() - 1);
+        assert_eq!(sync_beats(0.0), None);
+        for i in 1..SYNC_DIVISIONS.len() {
+            assert!(sync_beats(i as f32).is_some_and(|beats| beats > 0.0), "{}", SYNC_DIVISIONS[i].0);
+        }
+        assert_eq!(sync_beats(division("1 bar")), Some(4.0));
+        assert_eq!(sync_beats(division("1/8D")), Some(0.75));
+        assert_eq!(sync_beats(99.0), None);
+    }
+
+    /// Runs a Clock at `bpm` and an LFO synced to `sync`, as a patch would:
+    /// before each block, the LFO is handed the Clock's transport. Returns
+    /// the sample of every wrap of the LFO's Phase output.
+    fn synced_wraps(bpm: f32, sync: f32, sample_rate: f32, seconds: f64) -> Vec<u64> {
+        use crate::modules::clock::Clock;
+        const BLOCK: usize = 512;
+        let clock_params = [bpm, 50.0, 2.0, 1.0, 0.0];
+        let lfo_params = [1.0, 3.0, 0.0, 1.0, sync];
+        let mut clock = Clock::new();
+        let mut lfo = Lfo::new();
+        clock.prepare(sample_rate, BLOCK);
+        lfo.prepare(sample_rate, BLOCK);
+        let mut clock_out = vec![SignalBuffer::control(BLOCK); 3];
+        let mut lfo_out = vec![SignalBuffer::control(BLOCK); 2];
+
+        let blocks = (seconds * sample_rate as f64 / BLOCK as f64).ceil() as u64;
+        let (mut wraps, mut prev) = (Vec::new(), 0.0);
+        for block in 0..blocks {
+            let transport = clock.transport(&clock_params).unwrap();
+            let ctx = ProcessContext::with_transport(sample_rate, BLOCK, transport);
+            clock.process(&[], &mut clock_out, &clock_params, &ctx);
+            lfo.process(&[], &mut lfo_out, &lfo_params, &ctx);
+            for (i, &phase) in lfo_out[1].samples.iter().enumerate() {
+                if phase < prev - 0.5 {
+                    wraps.push(block * BLOCK as u64 + i as u64);
+                }
+                prev = phase;
+            }
+        }
+        wraps
+    }
+
+    #[test]
+    fn test_synced_lfo_completes_whole_cycles_per_bar() {
+        for (bpm, label, per_bar) in [(120.0, "1 bar", 1.0), (97.0, "1/4", 4.0), (133.0, "1/16", 16.0), (90.0, "1/8T", 12.0), (140.0, "2 bars", 0.5)] {
+            let sample_rate = 48000.0;
+            let bar = 4.0 * 60.0 / bpm as f64 * sample_rate as f64;
+            let cycle = bar / per_bar;
+            // Eight bars and half a cycle more
+            let wraps = synced_wraps(bpm, division(label), sample_rate, (8.0 * bar + cycle / 2.0) / sample_rate as f64);
+            // Every wrap (cycle n + 1 starting) within a sample of where the
+            // bar says it should be
+            assert!(wraps.len() >= (8.0 * per_bar) as usize, "{label} at {bpm} BPM: {} wraps", wraps.len());
+            for (n, &wrap) in wraps.iter().enumerate() {
+                let ideal = (n + 1) as f64 * cycle;
+                assert!((wrap as f64 - ideal).abs() <= 1.0, "{label} at {bpm}: wrap {n} at {wrap}, ideal {ideal}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_synced_lfo_stays_phase_locked_for_ten_minutes() {
+        // An awkward tempo, so a bar is no whole number of samples
+        let sample_rate = 48000.0;
+        let bpm = 97.3;
+        let bar = 4.0 * 60.0 / bpm as f32 as f64 * sample_rate as f64;
+        let wraps = synced_wraps(bpm as f32, division("1 bar"), sample_rate, 600.0);
+        assert!(wraps.len() >= 240, "{} bars", wraps.len());
+        for (n, &wrap) in wraps.iter().enumerate() {
+            let ideal = (n + 1) as f64 * bar;
+            assert!((wrap as f64 - ideal).abs() <= 1.0, "bar {n}: wrap at {wrap}, ideal {ideal}");
+        }
+    }
+
+    #[test]
+    fn test_synced_lfos_share_a_phase() {
+        // Two LFOs started at different times, both synced, read the same
+        // phase from the same beat
+        let mut early = Lfo::new();
+        let mut late = Lfo::new();
+        early.prepare(48000.0, 256);
+        late.prepare(48000.0, 256);
+        let mut out_early = vec![SignalBuffer::control(256); 2];
+        let mut out_late = vec![SignalBuffer::control(256); 2];
+        let params = [1.0, 3.0, 0.0, 1.0, division("1/4")];
+        let mut transport = TransportState::playing_at(120.0);
+        for block in 0..400 {
+            transport.beat_position = Some(block as f64 * 256.0 * 2.0 / 48000.0);
+            let ctx = ProcessContext::with_transport(48000.0, 256, transport);
+            early.process(&[], &mut out_early, &params, &ctx);
+            if block >= 123 {
+                late.process(&[], &mut out_late, &params, &ctx);
+            }
+        }
+        assert_eq!(out_early[1].samples, out_late[1].samples);
+    }
+
+    #[test]
+    fn test_synced_lfo_restarts_on_the_downbeat() {
+        let mut lfo = Lfo::new();
+        lfo.prepare(48000.0, 256);
+        let mut out = vec![SignalBuffer::control(256); 2];
+        let params = [1.0, 3.0, 0.0, 1.0, division("1 bar")];
+        let mut transport = TransportState::playing_at(120.0);
+
+        // A Sync pulse at beat 1 starts cycles from there...
+        transport.beat_position = Some(1.0);
+        let mut sync = SignalBuffer::control(256);
+        sync.samples[0] = 1.0;
+        lfo.process(&[&SignalBuffer::control(256), &sync], &mut out, &params, &ProcessContext::with_transport(48000.0, 256, transport));
+        assert_eq!(out[1].samples[0], 0.0);
+
+        // ...until the transport goes back to the top
+        transport.beat_position = Some(0.0);
+        lfo.process(&[], &mut out, &params, &ProcessContext::with_transport(48000.0, 256, transport));
+        assert_eq!(out[1].samples[0], 0.0);
+        transport.beat_position = Some(2.0);
+        lfo.process(&[], &mut out, &params, &ProcessContext::with_transport(48000.0, 256, transport));
+        assert!((out[1].samples[0] - 0.5).abs() < 1e-6, "half a bar in: {}", out[1].samples[0]);
+    }
+
+    #[test]
+    fn test_synced_lfo_holds_while_the_transport_is_stopped() {
+        let mut lfo = Lfo::new();
+        lfo.prepare(48000.0, 256);
+        let mut out = vec![SignalBuffer::control(256); 2];
+        let mut transport = TransportState::playing_at(120.0);
+        transport.playing = false;
+        transport.beat_position = Some(0.5);
+        lfo.process(&[], &mut out, &[1.0, 0.0, 0.0, 1.0, division("1/2")], &ProcessContext::with_transport(48000.0, 256, transport));
+        assert!(out[1].samples.iter().all(|&phase| (phase - 0.25).abs() < 1e-6));
+    }
+
+    #[test]
+    fn test_synced_lfo_without_a_clock_runs_at_120_bpm() {
+        let mut lfo = Lfo::new();
+        lfo.prepare(48000.0, 24000);
+        let mut out = vec![SignalBuffer::control(24000); 2];
+        // Half a second at 120 BPM: one beat, half of a 1/2 cycle
+        lfo.process(&[], &mut out, &[5.0, 0.0, 0.0, 1.0, division("1/2")], &ProcessContext::new(48000.0, 24000));
+        let last = *out[1].samples.last().unwrap();
+        assert!((last - 0.5).abs() < 1e-3, "phase {last}");
+    }
+
+    #[test]
+    fn test_readout_shows_the_synced_rate() {
+        let mut lfo = Lfo::new();
+        lfo.prepare(48000.0, 256);
+        let mut out = vec![SignalBuffer::control(256); 2];
+        let ctx = ProcessContext::with_transport(48000.0, 256, TransportState::playing_at(90.0));
+
+        lfo.process(&[], &mut out, &[1.0, 0.0, 0.0, 1.0, 0.0], &ctx);
+        assert!(lfo.readout(&[]).is_none(), "free-running needs no readout");
+
+        // A dotted quarter at 90 BPM: 1.5 beats of 2/3 s, one cycle a second
+        lfo.process(&[], &mut out, &[1.0, 0.0, 0.0, 1.0, division("1/4D")], &ctx);
+        let rate = lfo.readout(&[]).unwrap().values[Lfo::READOUT_RATE];
+        assert!((rate - 1.0).abs() < 1e-6, "{rate} Hz");
+    }
+
+    #[test]
+    fn test_turning_sync_off_carries_on_from_the_same_phase() {
+        let mut lfo = Lfo::new();
+        lfo.prepare(48000.0, 256);
+        let mut out = vec![SignalBuffer::control(256); 2];
+        let mut transport = TransportState::playing_at(120.0);
+        transport.beat_position = Some(0.75);
+        lfo.process(&[], &mut out, &[1.0, 3.0, 0.0, 1.0, division("1/2")], &ProcessContext::with_transport(48000.0, 256, transport));
+        let synced_end = *out[1].samples.last().unwrap();
+        lfo.process(&[], &mut out, &[1.0, 3.0, 0.0, 1.0, 0.0], &ProcessContext::with_transport(48000.0, 256, transport));
+        assert!((out[1].samples[0] - synced_end).abs() < 1e-3, "{} then {}", synced_end, out[1].samples[0]);
     }
 }

@@ -30,6 +30,8 @@
 //! 0.5  type osc 0.1                 # type text, a letter every 0.1 s
 //! 1.0  note 60 100 2.0              # MIDI note, velocity, length
 //! 1.0  chord 60,64,67 90 3.0
+//! 1.0  midi start                   # MIDI Start, Stop or Continue
+//! 1.0  midiclock 120 8.0            # MIDI clock ticks at 120 BPM for 8 s
 //! 2.0  param osc.sine Detune 12 1.5 # module (#n for the nth), input, value, ramp
 //! 2.0  param filter.svf#2 Cutoff 800
 //! 3.0  cursor on                    # draw a pointer over the picture
@@ -124,6 +126,8 @@ enum Cue {
     KeyUp(egui::Key),
     Text(String),
     Note { note: u8, velocity: u8, on: bool },
+    /// Any other MIDI message, such as a clock tick.
+    Midi(MidiEvent),
     Param { module: String, nth: usize, input: String, value: f32, dur: f64 },
     Cursor(bool),
     Move { to: Pos2, dur: f64 },
@@ -442,6 +446,7 @@ impl Capture {
                     };
                     self.actions.push(CaptureAction::Midi { event, offset });
                 }
+                Cue::Midi(event) => self.actions.push(CaptureAction::Midi { event, offset }),
                 Cue::Param { module, nth, input, value, dur } => self.ramps.push(Ramp {
                     module,
                     nth,
@@ -796,6 +801,26 @@ fn parse_script(text: &str) -> Result<Vec<(f64, Cue)>, String> {
                     cues.push((t + len, Cue::Note { note, velocity, on: false }));
                 }
             }
+            "midi" => {
+                let event = match words.get(2).copied() {
+                    Some("start") => MidiEvent::Start,
+                    Some("stop") => MidiEvent::Stop,
+                    Some("continue") => MidiEvent::Continue,
+                    _ => return Err(err("expected start, stop or continue")),
+                };
+                cues.push((t, Cue::Midi(event)));
+            }
+            "midiclock" => {
+                // A clock master's ticks, 24 to the beat
+                let bpm = num(2)?;
+                let len = num(3)?;
+                if bpm <= 0.0 {
+                    return Err(err("tempo must be positive"));
+                }
+                let spacing = 60.0 / (bpm * 24.0);
+                let ticks = (len / spacing).floor() as usize;
+                cues.extend((0..ticks).map(|n| (t + n as f64 * spacing, Cue::Midi(MidiEvent::Clock))));
+            }
             "param" => {
                 let target = words.get(2).ok_or_else(|| err("missing module"))?;
                 let (module, nth) = match target.split_once('#') {
@@ -857,6 +882,17 @@ mod tests {
             }
             other => panic!("expected a param cue, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn script_plays_a_midi_clock() {
+        let cues = parse_script("0.5 midi start\n0.5 midiclock 120 1.0\n2 midi stop\n3 end").unwrap();
+        let ticks: Vec<f64> = cues.iter().filter(|c| matches!(c.1, Cue::Midi(MidiEvent::Clock))).map(|c| c.0).collect();
+        // Two beats of ticks, 1/48 s apart
+        assert_eq!(ticks.len(), 48);
+        assert!((ticks[1] - ticks[0] - 1.0 / 48.0).abs() < 1e-12);
+        assert!(matches!(cues[0].1, Cue::Midi(MidiEvent::Start)));
+        assert!(parse_script("0 midi pause\n1 end").is_err());
     }
 
     #[test]

@@ -25,7 +25,7 @@
 
 use std::ops::Range;
 
-use crate::dsp::{DspModule, MeterLevels, OutputLevels, ProcessContext, SignalBuffer};
+use crate::dsp::{DspModule, MeterLevels, OutputLevels, ProcessContext, Readout, SignalBuffer, TransportState};
 use crate::engine::commands::{ChannelPeaks, NodeId, PortIndex};
 
 pub use crate::dsp::module_trait::MAX_INPUTS;
@@ -220,11 +220,11 @@ impl GraphPlan {
         debug_assert!(context.block_size <= self.max_block_size);
         self.set_block_len(context.block_size.min(self.max_block_size));
 
-        // Every module in the block sees the same tempo, whatever its place
-        // in the processing order
+        // Every module in the block sees the same tempo and beat, whatever
+        // its place in the processing order
         let mut context = *context;
-        if let Some(bpm) = self.tempo_bpm() {
-            context.transport.tempo_bpm = Some(bpm);
+        if let Some(transport) = self.transport() {
+            context.transport = transport;
         }
         let context = &context;
         let fade_step = 1.0 / (BYPASS_FADE_SECONDS * context.sample_rate).max(1.0);
@@ -298,14 +298,30 @@ impl GraphPlan {
         self.nodes.iter().find(|node| node.node_id == node_id).map(|node| node.bypassed)
     }
 
-    /// The patch tempo: set by the first tempo source (a Clock) in processing
-    /// order, or `None` if the patch has none.
+    /// The patch transport: its tempo and beat, set by the first tempo source
+    /// (a Clock) in processing order, or `None` if the patch has none.
     ///
     /// REAL-TIME SAFE.
-    pub fn tempo_bpm(&self) -> Option<f32> {
+    pub fn transport(&self) -> Option<TransportState> {
         self.nodes.iter().find_map(|node| {
-            node.module.as_ref().and_then(|module| module.tempo_bpm(&node.params))
+            node.module.as_ref().and_then(|module| module.transport(&node.params))
         })
+    }
+
+    /// The patch tempo, from its [`transport`](Self::transport).
+    pub fn tempo_bpm(&self) -> Option<f32> {
+        self.transport().and_then(|transport| transport.tempo_bpm)
+    }
+
+    /// Calls `f` with the readout of every module that has one.
+    ///
+    /// REAL-TIME SAFE.
+    pub fn readouts(&self, mut f: impl FnMut(NodeId, Readout)) {
+        for node in &self.nodes {
+            if let Some(readout) = node.module.as_ref().and_then(|module| module.readout(&node.params)) {
+                f(node.node_id, readout);
+            }
+        }
     }
 
     /// Sets every buffer's length to `len`, within its allocated capacity.

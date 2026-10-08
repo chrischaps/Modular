@@ -4,6 +4,7 @@
 //! Handles data types, node templates, connection validation, and custom rendering.
 
 pub mod catalog;
+mod clock_display;
 mod data_types;
 pub mod hints;
 pub mod input_display;

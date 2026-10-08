@@ -481,6 +481,82 @@ mod tests {
         assert!((beat - 0.75).abs() < 0.002, "echo after {beat} s at 80 BPM");
     }
 
+    /// A Clock and an LFO (square, synced to 1/4) playing into the output,
+    /// so each beat is a rising edge. The Clock is unpatched: the LFO
+    /// follows it through the patch's transport alone.
+    fn synced_lfo_patch(r: &mut OfflineRenderer, clock_source: f32) {
+        const CLOCK: u64 = 1;
+        const LFO: u64 = 2;
+        const OUT: u64 = 3;
+        for command in [
+            EngineCommand::AddModule { node_id: CLOCK, module_id: "util.clock" },
+            EngineCommand::AddModule { node_id: LFO, module_id: "mod.lfo" },
+            EngineCommand::AddModule { node_id: OUT, module_id: "output.audio" },
+            EngineCommand::Connect { from_node: LFO, from_port: 2, to_node: OUT, to_port: 2 },
+            EngineCommand::SetParameter { node_id: CLOCK, param_index: 0, value: 120.0 },
+            EngineCommand::SetParameter { node_id: CLOCK, param_index: 4, value: clock_source },
+            EngineCommand::SetParameter { node_id: LFO, param_index: 0, value: 7.3 }, // ignored while synced
+            EngineCommand::SetParameter { node_id: LFO, param_index: 1, value: 2.0 }, // square
+            EngineCommand::SetParameter { node_id: LFO, param_index: 4, value: 7.0 }, // 1/4
+        ] {
+            r.apply(command);
+        }
+    }
+
+    #[test]
+    fn test_synced_lfo_follows_the_clock_through_the_patch() {
+        let sr = 48000.0;
+        let mut r = OfflineRenderer::new(sr, 256);
+        synced_lfo_patch(&mut r, 0.0);
+
+        // A beat every half second, each on its sample, for a minute
+        // The downbeat opens the first edge as playing starts, after the
+        // output stage's latency
+        let edges = onsets(&r.render_seconds(60.0).left, 0.5, sr);
+        assert_eq!(edges.len(), 120, "{edges:?}");
+        let latency = edges[0];
+        for (n, &edge) in edges.iter().enumerate() {
+            let beat = n as f32 * 0.5;
+            assert!((edge - latency - beat).abs() * sr <= 1.0, "beat {n} at {edge} s");
+        }
+    }
+
+    #[test]
+    fn test_synced_lfo_follows_a_midi_clock() {
+        // A master at 100 BPM, Start then ticks: a tick every 1200 frames.
+        // Halfway it speeds up to 130 BPM
+        let sr = 48000.0;
+        let mut r = OfflineRenderer::new(sr, 256);
+        synced_lfo_patch(&mut r, 1.0);
+        r.queue_midi(100, 0, MidiMessage::Start);
+        let mut tick_frames = Vec::new();
+        let mut frame = 1000.0;
+        for n in 0..24 * 40 {
+            let bpm = if n < 24 * 20 { 100.0 } else { 130.0 };
+            tick_frames.push(frame as u64);
+            frame += 60.0 * sr as f64 / (bpm * 24.0);
+        }
+        for &tick in &tick_frames {
+            r.queue_midi(tick, 0, MidiMessage::Clock);
+        }
+
+        // The LFO waits on the downbeat (its square high) until the first
+        // tick, so the first edge is the output stage's latency
+        let edges = onsets(&r.render(*tick_frames.last().unwrap() as usize).left, 0.5, sr);
+        assert_eq!(edges.len(), 40, "{edges:?}");
+        let latency = edges[0];
+        // Every beat after it lands with its tick, before and after the
+        // tempo change. The first beat after a sudden change can come up to
+        // a block late: the LFO paces the block from the tempo it knew at
+        // the block's start
+        let block = 256.0 / sr;
+        for (n, &edge) in edges.iter().enumerate().skip(1) {
+            let tick = tick_frames[n * 24] as f32 / sr;
+            let allowed = if n == 21 { block } else { 0.0001 };
+            assert!((edge - latency - tick).abs() <= allowed, "beat {n} at {edge} s, its tick at {tick} s");
+        }
+    }
+
     /// A 1 kHz tone at -12 dBFS from `start` for `length` seconds, in
     /// `seconds` of silence.
     fn tone_burst(sr: f32, seconds: f32, start: f32, length: f32) -> StereoBuffer {

@@ -310,6 +310,19 @@ pub enum MidiMessage {
     Aftertouch { pressure: u8 },
     /// Program Change: (program number 0-127)
     ProgramChange { program: u8 },
+    /// Timing Clock (0xF8): 24 ticks per beat while a MIDI clock master runs.
+    /// Real-time messages have no channel; they arrive on channel 0.
+    Clock,
+    /// Start (0xFA): play from the top. The next Clock tick is the downbeat.
+    Start,
+    /// Continue (0xFB): play on from where Stop left off, or from the last
+    /// Song Position.
+    Continue,
+    /// Stop (0xFC).
+    Stop,
+    /// Song Position Pointer (0xF2): where the next Continue plays from, in
+    /// sixteenth notes from the top.
+    SongPosition { sixteenths: u16 },
 }
 
 impl MidiMessage {

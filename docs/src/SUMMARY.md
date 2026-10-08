@@ -13,6 +13,7 @@
 - [Signal Types](./concepts/signal-types.md)
 - [Connections](./concepts/connections.md)
 - [Polyphony](./concepts/polyphony.md)
+- [Tempo and Sync](./concepts/tempo-and-sync.md)
 
 # Modules
 

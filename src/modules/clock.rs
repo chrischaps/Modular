@@ -1,13 +1,16 @@
 //! Clock module.
 //!
-//! Generates periodic gate triggers for driving envelopes and creating rhythmic patterns.
+//! Generates periodic gate triggers for driving envelopes and creating
+//! rhythmic patterns. The first Clock in a patch is also its transport: the
+//! tempo and beat that tempo-synced modules (the LFO, the Delay) follow. It
+//! keeps its own time, or follows a MIDI clock from a DAW or drum machine.
 
 use crate::dsp::{
-    context::ProcessContext,
-    module_trait::{DspModule, ModuleCategory, ModuleInfo},
+    context::{ProcessContext, TransportState},
+    module_trait::{DspModule, ModuleCategory, ModuleInfo, Readout},
     parameter::ParameterDefinition,
     port::PortDefinition,
-    signal::SignalBuffer,
+    signal::{MidiMessage, SignalBuffer},
     ParameterDisplay, SignalType,
 };
 
@@ -52,6 +55,219 @@ impl ClockDivision {
     }
 }
 
+/// Where the Clock gets its time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClockSource {
+    /// Its own Tempo knob.
+    Internal = 0,
+    /// A MIDI clock master, through the MIDI input.
+    Midi = 1,
+}
+
+impl ClockSource {
+    /// Convert from parameter value (0-1) to source.
+    pub fn from_param(value: f32) -> Self {
+        if value >= 0.5 {
+            ClockSource::Midi
+        } else {
+            ClockSource::Internal
+        }
+    }
+}
+
+/// MIDI clock ticks per beat (quarter note).
+pub const MIDI_TICKS_PER_BEAT: u64 = 24;
+
+/// Tick intervals the tempo is fitted over: two beats' worth.
+const TEMPO_WINDOW: usize = 48;
+
+/// A gap between ticks longer than this, in seconds, means the master
+/// stopped sending clock for a while, and the tempo fit starts over. A tick
+/// at the Clock's slowest tempo (20 BPM) is 125 ms.
+const TICK_GAP_SECONDS: f64 = 0.25;
+
+/// What a MIDI message did to the transport.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MidiClockChange {
+    /// Nothing the Clock needs to act on.
+    None,
+    /// A tick while playing: the beat is now exactly this.
+    Beat(f64),
+    /// Start: back to the top, where the next tick is the downbeat.
+    Restart,
+    /// Song Position: the beat to hold at until playing resumes.
+    Locate(f64),
+}
+
+/// Follows a MIDI clock master: its tempo from the spacing of its ticks, and
+/// its position from counting them.
+///
+/// Counting keeps the Clock's beat on the master's: every tick puts it
+/// exactly where the master says, so it can never drift, however rough the
+/// tempo estimate. The tempo only paces the beat between ticks.
+#[derive(Clone, Debug)]
+pub struct MidiClockFollower {
+    /// Samples counted since the follower started: its own time line.
+    now: u64,
+    /// When recent ticks arrived, on `now`, in a ring.
+    arrivals: [u64; TEMPO_WINDOW + 1],
+    /// How many entries of `arrivals` hold ticks.
+    count: usize,
+    /// Where the next arrival goes in `arrivals`.
+    head: usize,
+    /// Samples per tick, fitted over the window, once two ticks have come.
+    samples_per_tick: Option<f64>,
+    /// Whether the master is playing: after Start or Continue, before Stop.
+    /// `None` until the master sends any of these, as simple clock sources
+    /// never do; their ticks alone run the clock.
+    playing: Option<bool>,
+    /// The position the next tick marks, in ticks from the top.
+    next_tick: u64,
+    /// Whether a tick has come since playing (re)started. Until one does, the
+    /// position holds where Start, Continue or Song Position left it.
+    ticked: bool,
+}
+
+impl Default for MidiClockFollower {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MidiClockFollower {
+    /// A follower that has heard nothing yet.
+    pub fn new() -> Self {
+        Self {
+            now: 0,
+            arrivals: [0; TEMPO_WINDOW + 1],
+            count: 0,
+            head: 0,
+            samples_per_tick: None,
+            playing: None,
+            next_tick: 0,
+            ticked: false,
+        }
+    }
+
+    /// Handles one MIDI message at the current sample.
+    pub fn handle(&mut self, message: MidiMessage, sample_rate: f32) -> MidiClockChange {
+        match message {
+            MidiMessage::Clock => {
+                self.time_tick(sample_rate);
+                if !self.playing.unwrap_or(true) {
+                    return MidiClockChange::None;
+                }
+                let beat = self.next_tick as f64 / MIDI_TICKS_PER_BEAT as f64;
+                self.next_tick += 1;
+                self.ticked = true;
+                MidiClockChange::Beat(beat)
+            }
+            MidiMessage::Start => {
+                self.playing = Some(true);
+                self.next_tick = 0;
+                self.ticked = false;
+                MidiClockChange::Restart
+            }
+            MidiMessage::Continue => {
+                self.playing = Some(true);
+                self.ticked = false;
+                MidiClockChange::None
+            }
+            MidiMessage::Stop => {
+                self.playing = Some(false);
+                MidiClockChange::None
+            }
+            MidiMessage::SongPosition { sixteenths } => {
+                self.next_tick = sixteenths as u64 * (MIDI_TICKS_PER_BEAT / 4);
+                self.ticked = false;
+                MidiClockChange::Locate(self.next_beat())
+            }
+            _ => MidiClockChange::None,
+        }
+    }
+
+    /// Moves on one sample.
+    #[inline]
+    pub fn advance(&mut self) {
+        self.now += 1;
+    }
+
+    /// Whether the beat is moving: the master is playing and has ticked.
+    pub fn is_running(&self) -> bool {
+        self.playing.unwrap_or(true) && self.ticked
+    }
+
+    /// Whether ticks are coming in.
+    pub fn is_receiving(&self, sample_rate: f32) -> bool {
+        self.count > 0 && ((self.now - self.newest()) as f64) < TICK_GAP_SECONDS * sample_rate as f64
+    }
+
+    /// The beat the next tick marks. The beat never runs past it between
+    /// ticks.
+    pub fn next_beat(&self) -> f64 {
+        self.next_tick as f64 / MIDI_TICKS_PER_BEAT as f64
+    }
+
+    /// Samples per tick, once two ticks have come.
+    pub fn samples_per_tick(&self) -> Option<f64> {
+        self.samples_per_tick
+    }
+
+    /// The master's tempo, once two ticks have come.
+    pub fn tempo_bpm(&self, sample_rate: f32) -> Option<f32> {
+        self.samples_per_tick
+            .map(|spt| (60.0 * sample_rate as f64 / (spt * MIDI_TICKS_PER_BEAT as f64)) as f32)
+    }
+
+    /// The most recent arrival. Only meaningful while `count > 0`.
+    fn newest(&self) -> u64 {
+        self.arrivals[(self.head + self.arrivals.len() - 1) % self.arrivals.len()]
+    }
+
+    /// Notes a tick's arrival and refits the tempo.
+    fn time_tick(&mut self, sample_rate: f32) {
+        if self.count > 0 {
+            let gap = (self.now - self.newest()) as f64;
+            // A long gap, or a tick far off the beat the fit expects, means
+            // the master paused or jumped tempo: fit afresh from here, as
+            // the old ticks only pull the estimate towards a stale tempo
+            let paused = gap > TICK_GAP_SECONDS * sample_rate as f64;
+            let jumped = self.samples_per_tick.is_some_and(|spt| !(0.5..=2.0).contains(&(gap / spt)));
+            if paused || jumped {
+                self.count = 0;
+            }
+        }
+
+        self.arrivals[self.head] = self.now;
+        self.head = (self.head + 1) % self.arrivals.len();
+        self.count = (self.count + 1).min(self.arrivals.len());
+
+        if self.count >= 2 {
+            self.samples_per_tick = Some(self.fit_interval());
+        }
+    }
+
+    /// The least-squares slope of arrival time over tick number across the
+    /// window: the tick interval, with each tick's own timing jitter mostly
+    /// averaged out (the two end ticks alone would carry all of theirs).
+    fn fit_interval(&self) -> f64 {
+        let n = self.count;
+        let len = self.arrivals.len();
+        let oldest = (self.head + len - n) % len;
+        let origin = self.arrivals[oldest];
+        let mean_x = (n - 1) as f64 / 2.0;
+        let mean_y = (0..n).map(|k| (self.arrivals[(oldest + k) % len] - origin) as f64).sum::<f64>() / n as f64;
+        let (mut covariance, mut variance) = (0.0, 0.0);
+        for k in 0..n {
+            let dx = k as f64 - mean_x;
+            let dy = (self.arrivals[(oldest + k) % len] - origin) as f64 - mean_y;
+            covariance += dx * dy;
+            variance += dx * dx;
+        }
+        covariance / variance
+    }
+}
+
 /// A clock module that generates periodic gate triggers.
 ///
 /// Essential for testing envelope modules and creating rhythmic patterns
@@ -59,8 +275,12 @@ impl ClockDivision {
 ///
 /// # Ports
 ///
-/// - **Sync** (Gate, Input): External clock sync input (resets phase on rising edge).
+/// - **Sync** (Gate, Input): External clock sync input (resets the beat on
+///   rising edge).
 /// - **Gate** (Gate, Output): Periodic gate output (0.0 or 1.0).
+/// - **Run** (Gate, Output): High while the clock runs.
+/// - **Reset** (Gate, Output): A short pulse when the clock starts from the
+///   top: Run switched on, or a MIDI Start.
 ///
 /// # Parameters
 ///
@@ -69,11 +289,23 @@ impl ClockDivision {
 /// - **Gate Length** (1-99%): Duration of the gate high as percentage of beat.
 /// - **Division** (0-4): Note division (whole, half, quarter, eighth, sixteenth).
 /// - **Run** (toggle): Whether the clock is running.
+/// - **Source** (choice): Internal keeps its own time at Tempo; MIDI follows
+///   the MIDI clock coming in (its ticks, Start, Continue and Stop).
 pub struct Clock {
-    /// Current phase within the beat cycle (0.0 to 1.0).
-    phase: f32,
+    /// Beats since the clock started. Kept in `f64` and counted from the
+    /// start, so even the slowest clock lands every edge on its sample.
+    beats: f64,
+    /// Whether the beat moved in the last sample: the transport is playing.
+    running: bool,
     /// Previous sync state for edge detection.
     prev_sync: bool,
+    /// Run as the last block saw it, to notice it switching on. `None`
+    /// before the first block, so loading a running clock isn't a start.
+    prev_run: Option<bool>,
+    /// Samples left in the Reset pulse.
+    reset_left: usize,
+    /// Follows the MIDI clock, when Source is MIDI.
+    midi: MidiClockFollower,
     /// Sample rate from last prepare() call.
     sample_rate: f32,
     /// Port definitions.
@@ -86,14 +318,20 @@ impl Clock {
     /// Creates a new Clock.
     pub fn new() -> Self {
         Self {
-            phase: 0.0,
+            beats: 0.0,
+            running: false,
             prev_sync: false,
+            prev_run: None,
+            reset_left: 0,
+            midi: MidiClockFollower::new(),
             sample_rate: 44100.0,
             ports: vec![
                 // Input port
                 PortDefinition::input_with_default("sync", "Sync", SignalType::Gate, 0.0).describe("A rising edge restarts the beat; patch another clock or trigger"),
-                // Output port
+                // Output ports
                 PortDefinition::output("gate", "Gate", SignalType::Gate).describe("Pulse on every beat division; patch into a sequencer or envelope"),
+                PortDefinition::output("run", "Run", SignalType::Gate).describe("High while the clock runs; patch into a sequencer's Run"),
+                PortDefinition::output("reset", "Reset", SignalType::Gate).describe("Pulses when the clock starts from the top; patch into a sequencer's Reset"),
             ],
             parameters: vec![
                 // Tempo in BPM
@@ -122,7 +360,14 @@ impl Clock {
                     2, // Default to quarter note
                 ).describe("Pulse rate relative to the beat; 1/4 is one per beat"),
                 // Run toggle
-                ParameterDefinition::toggle("run", "Run", true).describe("Starts and stops the clock"),
+                ParameterDefinition::toggle("run", "Run", true).describe("Starts and stops the clock; starting begins from the top"),
+                // Where the time comes from
+                ParameterDefinition::choice(
+                    "source",
+                    "Source",
+                    &["Internal", "MIDI"],
+                    0,
+                ).describe("Internal keeps time at Tempo; MIDI follows the clock of a DAW or drum machine on the MIDI input"),
             ],
         }
     }
@@ -130,15 +375,59 @@ impl Clock {
     /// Port index constants.
     const PORT_SYNC: usize = 0;
     const PORT_GATE: usize = 0;
+    const PORT_RUN: usize = 1;
+    const PORT_RESET: usize = 2;
 
     /// Parameter index constants.
     const PARAM_TEMPO: usize = 0;
     const PARAM_GATE_LENGTH: usize = 1;
     const PARAM_DIVISION: usize = 2;
     const PARAM_RUN: usize = 3;
+    const PARAM_SOURCE: usize = 4;
 
     /// Sync threshold for detecting high/low states.
     const SYNC_THRESHOLD: f32 = 0.5;
+
+    /// How long the Reset pulse stays high: long enough to see on its jack,
+    /// short enough to be over before the next sixteenth at any tempo.
+    const RESET_PULSE_SECONDS: f32 = 0.005;
+
+    /// Readout value indices: see [`DspModule::readout`].
+    pub const READOUT_TEMPO: usize = 0;
+    pub const READOUT_BEAT: usize = 1;
+    pub const READOUT_RUNNING: usize = 2;
+    pub const READOUT_RECEIVING: usize = 3;
+
+    /// The tempo this clock keeps: the master's, when following MIDI and
+    /// it has been heard, otherwise the Tempo knob's.
+    fn tempo(&self, params: &[f32]) -> f32 {
+        let knob = params.get(Self::PARAM_TEMPO).copied().unwrap_or(120.0);
+        match Self::source(params) {
+            ClockSource::Midi => self.midi.tempo_bpm(self.sample_rate).unwrap_or(knob),
+            ClockSource::Internal => knob,
+        }
+    }
+
+    fn source(params: &[f32]) -> ClockSource {
+        ClockSource::from_param(params.get(Self::PARAM_SOURCE).copied().unwrap_or(0.0))
+    }
+
+    /// Whether the gate is high at `beats`, for pulses `division` beats apart
+    /// that stay high for `gate_length` (0-1) of each.
+    #[inline]
+    fn gate_at(beats: f64, division: f64, gate_length: f64) -> bool {
+        let cycles = beats / division;
+        // A beat a hair under a whole number of cycles, after rounding, is
+        // on the edge, not a whole cycle before it
+        let phase = cycles - (cycles + 1e-9).floor();
+        phase < gate_length
+    }
+
+    /// Restarts from the top and fires Reset.
+    fn restart(&mut self) {
+        self.beats = 0.0;
+        self.reset_left = (Self::RESET_PULSE_SECONDS * self.sample_rate).round().max(1.0) as usize;
+    }
 }
 
 impl Default for Clock {
@@ -177,26 +466,22 @@ impl DspModule for Clock {
         params: &[f32],
         context: &ProcessContext,
     ) {
-        let tempo = params[Self::PARAM_TEMPO];
-        let gate_length_percent = params[Self::PARAM_GATE_LENGTH] / 100.0;
-        let division = ClockDivision::from_param(params[Self::PARAM_DIVISION]);
-        let is_running = params[Self::PARAM_RUN] > 0.5;
+        let tempo = params[Self::PARAM_TEMPO] as f64;
+        let gate_length = params[Self::PARAM_GATE_LENGTH] as f64 / 100.0;
+        let division = ClockDivision::from_param(params[Self::PARAM_DIVISION]).beat_multiplier() as f64;
+        let run = params[Self::PARAM_RUN] > 0.5;
+        let source = Self::source(params);
 
-        // Get sync input
+        // Switching Run on starts from the top, as a drum machine's Play does
+        if source == ClockSource::Internal && run && self.prev_run == Some(false) {
+            self.restart();
+        }
+        self.prev_run = Some(run);
+
         let sync_in = inputs.get(Self::PORT_SYNC);
+        let beats_per_sample = tempo / 60.0 / self.sample_rate as f64;
+        let mut midi = context.midi.iter().peekable();
 
-        // Get output buffer
-        let output = &mut outputs[Self::PORT_GATE];
-
-        // Calculate timing
-        // Beats per second = BPM / 60
-        // Samples per beat = sample_rate / beats_per_second = sample_rate * 60 / BPM
-        // Apply division multiplier
-        let beats_per_second = tempo / 60.0;
-        let samples_per_cycle = self.sample_rate / beats_per_second * division.beat_multiplier();
-        let phase_increment = 1.0 / samples_per_cycle;
-
-        // Process each sample
         for i in 0..context.block_size {
             // Check for sync reset
             let sync_value = sync_in
@@ -205,45 +490,100 @@ impl DspModule for Clock {
             let sync_high = sync_value > Self::SYNC_THRESHOLD;
             let sync_rising = sync_high && !self.prev_sync;
             self.prev_sync = sync_high;
-
-            // Reset phase on sync rising edge
-            if sync_rising {
-                self.phase = 0.0;
+            // Following MIDI, the master's ticks place the beat instead
+            if sync_rising && source == ClockSource::Internal {
+                self.beats = 0.0;
             }
 
-            // Generate gate output
-            let gate_out = if is_running && self.phase < gate_length_percent {
-                1.0
-            } else {
-                0.0
-            };
-            output.samples[i] = gate_out;
-
-            // Advance phase if running
-            if is_running {
-                self.phase += phase_increment;
-
-                // Wrap phase
-                if self.phase >= 1.0 {
-                    self.phase -= 1.0;
+            // MIDI lands on its sample, whatever the source, so the follower
+            // already knows the tempo when Source is switched to MIDI
+            while let Some(event) = midi.next_if(|event| event.sample_offset as usize <= i) {
+                match self.midi.handle(event.message, self.sample_rate) {
+                    _ if source == ClockSource::Internal => {}
+                    MidiClockChange::Beat(beat) | MidiClockChange::Locate(beat) => self.beats = beat,
+                    MidiClockChange::Restart => self.restart(),
+                    MidiClockChange::None => {}
                 }
             }
+
+            self.running = run
+                && match source {
+                    ClockSource::Internal => true,
+                    ClockSource::Midi => self.midi.is_running(),
+                };
+
+            let gate = self.running && Self::gate_at(self.beats, division, gate_length);
+            outputs[Self::PORT_GATE].samples[i] = if gate { 1.0 } else { 0.0 };
+            if let Some(out) = outputs.get_mut(Self::PORT_RUN) {
+                out.samples[i] = if self.running { 1.0 } else { 0.0 };
+            }
+            if let Some(out) = outputs.get_mut(Self::PORT_RESET) {
+                out.samples[i] = if self.reset_left > 0 { 1.0 } else { 0.0 };
+            }
+            self.reset_left = self.reset_left.saturating_sub(1);
+
+            // Advance the beat
+            if self.running {
+                match source {
+                    ClockSource::Internal => self.beats += beats_per_sample,
+                    // Between ticks, at the master's pace, but never past the
+                    // next tick: that beat is the tick's to set
+                    ClockSource::Midi => {
+                        if let Some(spt) = self.midi.samples_per_tick() {
+                            let step = 1.0 / (spt * MIDI_TICKS_PER_BEAT as f64);
+                            self.beats = (self.beats + step).min(self.midi.next_beat() - 1e-9);
+                        }
+                    }
+                }
+            }
+            self.midi.advance();
         }
     }
 
     fn reset(&mut self) {
-        self.phase = 0.0;
+        self.beats = 0.0;
+        self.running = false;
         self.prev_sync = false;
+        self.prev_run = None;
+        self.reset_left = 0;
+        self.midi = MidiClockFollower::new();
     }
 
-    fn tempo_bpm(&self, params: &[f32]) -> Option<f32> {
-        params.get(Self::PARAM_TEMPO).copied()
+    fn transport(&self, params: &[f32]) -> Option<TransportState> {
+        // Before the first block, a running clock is about to play
+        let playing = match self.prev_run {
+            None => params.get(Self::PARAM_RUN).is_some_and(|&run| run > 0.5) && Self::source(params) == ClockSource::Internal,
+            Some(_) => self.running,
+        };
+        Some(TransportState {
+            playing,
+            tempo_bpm: Some(self.tempo(params)),
+            beat_position: Some(self.beats),
+            ..TransportState::new()
+        })
+    }
+
+    /// The tempo it keeps, its beat within the bar, whether it's running,
+    /// and whether MIDI clock is coming in.
+    fn readout(&self, params: &[f32]) -> Option<Readout> {
+        let mut readout = Readout::default();
+        readout.values[Self::READOUT_TEMPO] = self.tempo(params);
+        readout.values[Self::READOUT_BEAT] = self.beats.rem_euclid(4.0) as f32;
+        readout.values[Self::READOUT_RUNNING] = if self.running { 1.0 } else { 0.0 };
+        readout.values[Self::READOUT_RECEIVING] = if self.midi.is_receiving(self.sample_rate) { 1.0 } else { 0.0 };
+        Some(readout)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dsp::MidiEvent;
+
+    /// Buffers for the Clock's Gate, Run and Reset outputs.
+    fn outputs(frames: usize) -> Vec<SignalBuffer> {
+        vec![SignalBuffer::control(frames); 3]
+    }
 
     #[test]
     fn test_clock_info() {
@@ -258,7 +598,7 @@ mod tests {
         let clock = Clock::new();
         let ports = clock.ports();
 
-        assert_eq!(ports.len(), 2);
+        assert_eq!(ports.len(), 4);
 
         // Sync input
         assert!(ports[0].is_input());
@@ -276,7 +616,7 @@ mod tests {
         let clock = Clock::new();
         let params = clock.parameters();
 
-        assert_eq!(params.len(), 4);
+        assert_eq!(params.len(), 5);
 
         // Tempo
         assert_eq!(params[0].id, "tempo");
@@ -323,14 +663,14 @@ mod tests {
         let mut clock = Clock::new();
         clock.prepare(44100.0, 256);
 
-        let mut outputs = vec![SignalBuffer::control(256)];
+        let mut outs = outputs(256);
         let ctx = ProcessContext::new(44100.0, 256);
 
         // Run = false (0.0)
-        clock.process(&[], &mut outputs, &[120.0, 50.0, 2.0, 0.0], &ctx);
+        clock.process(&[], &mut outs, &[120.0, 50.0, 2.0, 0.0, 0.0], &ctx);
 
         // All outputs should be zero when stopped
-        assert!(outputs[0].samples.iter().all(|&s| s == 0.0));
+        assert!(outs[0].samples.iter().all(|&s| s == 0.0));
     }
 
     #[test]
@@ -339,12 +679,12 @@ mod tests {
         let sample_rate = 44100.0;
         clock.prepare(sample_rate, 44100);
 
-        let mut outputs = vec![SignalBuffer::control(44100)];
+        let mut outputs = outputs(44100);
         let ctx = ProcessContext::new(sample_rate, 44100);
 
         // 120 BPM, 50% gate, quarter note, running
         // At 120 BPM: 2 beats per second, so 22050 samples per beat
-        clock.process(&[], &mut outputs, &[120.0, 50.0, 2.0, 1.0], &ctx);
+        clock.process(&[], &mut outputs, &[120.0, 50.0, 2.0, 1.0, 0.0], &ctx);
 
         // Should have both high and low values
         let has_high = outputs[0].samples.iter().any(|&s| s == 1.0);
@@ -368,13 +708,13 @@ mod tests {
         let sample_rate = 44100.0;
         clock.prepare(sample_rate, 44100);
 
-        let mut outputs = vec![SignalBuffer::control(44100)];
+        let mut outputs = outputs(44100);
         let ctx = ProcessContext::new(sample_rate, 44100);
 
         // 60 BPM = 1 beat per second = 44100 samples per beat
         // Quarter note division, 50% gate length
         // So gate should be high for ~22050 samples, then low for ~22050
-        clock.process(&[], &mut outputs, &[60.0, 50.0, 2.0, 1.0], &ctx);
+        clock.process(&[], &mut outputs, &[60.0, 50.0, 2.0, 1.0, 0.0], &ctx);
 
         // Count high samples in first beat
         let high_count = outputs[0].samples[..44100]
@@ -400,11 +740,11 @@ mod tests {
         clock.prepare(sample_rate, 44100);
 
         // Test with 25% gate length
-        let mut outputs = vec![SignalBuffer::control(44100)];
+        let mut outputs = outputs(44100);
         let ctx = ProcessContext::new(sample_rate, 44100);
 
         // 60 BPM, 25% gate, quarter note
-        clock.process(&[], &mut outputs, &[60.0, 25.0, 2.0, 1.0], &ctx);
+        clock.process(&[], &mut outputs, &[60.0, 25.0, 2.0, 1.0, 0.0], &ctx);
 
         let high_count = outputs[0].samples[..44100]
             .iter()
@@ -428,13 +768,13 @@ mod tests {
         let sample_rate = 44100.0;
         clock.prepare(sample_rate, 88200); // 2 seconds
 
-        let mut outputs = vec![SignalBuffer::control(88200)];
+        let mut outputs = outputs(88200);
         let ctx = ProcessContext::new(sample_rate, 88200);
 
         // 60 BPM, eighth notes (0.5 beats)
         // At 60 BPM: 1 beat/sec, eighth = 0.5 beats = 0.5 sec = 22050 samples per cycle
         // In 2 seconds, should get 4 complete cycles
-        clock.process(&[], &mut outputs, &[60.0, 50.0, 3.0, 1.0], &ctx);
+        clock.process(&[], &mut outputs, &[60.0, 50.0, 3.0, 1.0, 0.0], &ctx);
 
         // Count rising edges (transitions from 0 to 1)
         let mut rising_edges = 0;
@@ -462,17 +802,17 @@ mod tests {
         clock.prepare(sample_rate, 1000);
 
         // Run clock to advance phase
-        let mut outputs = vec![SignalBuffer::control(1000)];
+        let mut outs = outputs(1000);
         let ctx = ProcessContext::new(sample_rate, 1000);
-        clock.process(&[], &mut outputs, &[120.0, 50.0, 2.0, 1.0], &ctx);
+        clock.process(&[], &mut outs, &[120.0, 50.0, 2.0, 1.0, 0.0], &ctx);
 
         // Now send a sync pulse
         let mut sync = SignalBuffer::control(100);
         sync.samples[50] = 1.0; // Rising edge at sample 50
 
-        let mut outputs2 = vec![SignalBuffer::control(100)];
+        let mut outputs2 = outputs(100);
         let ctx2 = ProcessContext::new(sample_rate, 100);
-        clock.process(&[&sync], &mut outputs2, &[120.0, 50.0, 2.0, 1.0], &ctx2);
+        clock.process(&[&sync], &mut outputs2, &[120.0, 50.0, 2.0, 1.0, 0.0], &ctx2);
 
         // After sync, the gate should be high (phase reset to 0, which is < gate_length)
         assert_eq!(
@@ -487,17 +827,17 @@ mod tests {
         clock.prepare(44100.0, 256);
 
         // Advance the clock
-        let mut outputs = vec![SignalBuffer::control(256)];
+        let mut outs = outputs(256);
         let ctx = ProcessContext::new(44100.0, 256);
-        clock.process(&[], &mut outputs, &[120.0, 50.0, 2.0, 1.0], &ctx);
+        clock.process(&[], &mut outs, &[120.0, 50.0, 2.0, 1.0, 0.0], &ctx);
 
         // Reset
         clock.reset();
 
         // Phase should be back to 0, so first output should be high (0 < 0.5 gate length)
-        let mut outputs2 = vec![SignalBuffer::control(1)];
+        let mut outputs2 = outputs(1);
         let ctx2 = ProcessContext::new(44100.0, 1);
-        clock.process(&[], &mut outputs2, &[120.0, 50.0, 2.0, 1.0], &ctx2);
+        clock.process(&[], &mut outputs2, &[120.0, 50.0, 2.0, 1.0, 0.0], &ctx2);
 
         assert_eq!(
             outputs2[0].samples[0], 1.0,
@@ -532,8 +872,8 @@ mod tests {
         let module = module.unwrap();
         assert_eq!(module.info().id, "util.clock");
         assert_eq!(module.info().name, "Clock");
-        assert_eq!(module.ports().len(), 2);
-        assert_eq!(module.parameters().len(), 4);
+        assert_eq!(module.ports().len(), 4);
+        assert_eq!(module.parameters().len(), 5);
     }
 
     #[test]
@@ -542,11 +882,11 @@ mod tests {
         let sample_rate = 44100.0;
         clock.prepare(sample_rate, 44100);
 
-        let mut outputs = vec![SignalBuffer::control(44100)];
+        let mut outputs = outputs(44100);
         let ctx = ProcessContext::new(sample_rate, 44100);
 
         // 300 BPM = 5 beats per second, sixteenth notes = 20 triggers per second
-        clock.process(&[], &mut outputs, &[300.0, 50.0, 4.0, 1.0], &ctx);
+        clock.process(&[], &mut outputs, &[300.0, 50.0, 4.0, 1.0, 0.0], &ctx);
 
         // Count rising edges
         let mut rising_edges = 0;
@@ -572,12 +912,12 @@ mod tests {
         let sample_rate = 44100.0;
         clock.prepare(sample_rate, 88200); // 2 seconds
 
-        let mut outputs = vec![SignalBuffer::control(88200)];
+        let mut outputs = outputs(88200);
         let ctx = ProcessContext::new(sample_rate, 88200);
 
         // 30 BPM = 0.5 beats per second, whole notes = 1 trigger per 8 seconds
         // In 2 seconds, should see only partial first cycle
-        clock.process(&[], &mut outputs, &[30.0, 50.0, 0.0, 1.0], &ctx);
+        clock.process(&[], &mut outputs, &[30.0, 50.0, 0.0, 1.0, 0.0], &ctx);
 
         // Count rising edges - should be just 1 (the initial start)
         let mut rising_edges = 0;
@@ -594,5 +934,290 @@ mod tests {
             "Expected 1-2 triggers at 30 BPM whole notes in 2 seconds, got {}",
             rising_edges
         );
+    }
+
+    // --- Timing over long runs (#96) ---
+
+    /// Renders `seconds` in 512-sample blocks and returns the sample of
+    /// every rising edge on the Gate.
+    fn rising_edges(params: &[f32], sample_rate: f32, seconds: f64) -> Vec<u64> {
+        const BLOCK: usize = 512;
+        let mut clock = Clock::new();
+        clock.prepare(sample_rate, BLOCK);
+        let mut outs = outputs(BLOCK);
+        let ctx = ProcessContext::new(sample_rate, BLOCK);
+        let blocks = (seconds * sample_rate as f64 / BLOCK as f64).ceil() as u64;
+        let (mut edges, mut prev) = (Vec::new(), 0.0);
+        for block in 0..blocks {
+            clock.process(&[], &mut outs, params, &ctx);
+            for (i, &gate) in outs[0].samples.iter().enumerate() {
+                if gate > 0.5 && prev < 0.5 {
+                    edges.push(block * BLOCK as u64 + i as u64);
+                }
+                prev = gate;
+            }
+        }
+        edges
+    }
+
+    /// Every edge within one sample of `n × period`.
+    fn assert_edges_on_grid(edges: &[u64], period: f64, expected: usize) {
+        assert!(edges.len() >= expected, "{} edges, expected {expected}", edges.len());
+        for (n, &edge) in edges.iter().enumerate() {
+            let ideal = n as f64 * period;
+            assert!((edge as f64 - ideal).abs() <= 1.0, "edge {n} at {edge}, ideal {ideal}");
+        }
+    }
+
+    #[test]
+    fn test_slow_clock_keeps_every_edge_on_its_sample_for_ten_minutes() {
+        // 24 BPM whole notes: one edge every 10 s
+        let edges = rising_edges(&[24.0, 50.0, 0.0, 1.0, 0.0], 48000.0, 600.0);
+        assert_edges_on_grid(&edges, 480_000.0, 60);
+    }
+
+    #[test]
+    fn test_fast_clock_keeps_every_edge_on_its_sample_for_ten_minutes() {
+        // 300 BPM sixteenths: one edge every 50 ms
+        let edges = rising_edges(&[300.0, 50.0, 4.0, 1.0, 0.0], 48000.0, 600.0);
+        assert_edges_on_grid(&edges, 2400.0, 12_000);
+    }
+
+    // --- Run and Reset ---
+
+    #[test]
+    fn test_switching_run_on_starts_from_the_top_and_fires_reset() {
+        let mut clock = Clock::new();
+        clock.prepare(44100.0, 1000);
+        let mut outs = outputs(1000);
+        let ctx = ProcessContext::new(44100.0, 1000);
+
+        // Running from the load fires no Reset
+        clock.process(&[], &mut outs, &[120.0, 50.0, 2.0, 1.0, 0.0], &ctx);
+        assert!(outs[2].samples.iter().all(|&s| s == 0.0));
+        assert!(outs[1].samples.iter().all(|&s| s == 1.0), "Run is high while running");
+
+        // Stopped: everything low, the beat holds
+        clock.process(&[], &mut outs, &[120.0, 50.0, 2.0, 0.0, 0.0], &ctx);
+        assert!(outs.iter().all(|out| out.samples.iter().all(|&s| s == 0.0)));
+        let held = clock.transport(&[120.0, 50.0, 2.0, 0.0, 0.0]).unwrap();
+        assert!(!held.playing);
+        assert!(held.beat_position.unwrap() > 0.0);
+
+        // Back on: from the downbeat, with a Reset pulse
+        clock.process(&[], &mut outs, &[120.0, 50.0, 2.0, 1.0, 0.0], &ctx);
+        assert_eq!(outs[0].samples[0], 1.0, "the gate opens on the downbeat");
+        assert_eq!(outs[2].samples[0], 1.0, "Reset fires");
+        let pulse = outs[2].samples.iter().filter(|&&s| s == 1.0).count();
+        assert_eq!(pulse, (0.005f32 * 44100.0).round() as usize);
+    }
+
+    #[test]
+    fn test_transport_reports_the_beat() {
+        let mut clock = Clock::new();
+        clock.prepare(48000.0, 24000);
+        let params = [120.0, 50.0, 2.0, 1.0, 0.0];
+        let before = clock.transport(&params).unwrap();
+        assert!(before.playing);
+        assert_eq!(before.beat_position, Some(0.0));
+        assert_eq!(before.tempo_bpm, Some(120.0));
+
+        // Half a second at 120 BPM is one beat
+        clock.process(&[], &mut outputs(24000), &params, &ProcessContext::new(48000.0, 24000));
+        let after = clock.transport(&params).unwrap();
+        assert!((after.beat_position.unwrap() - 1.0).abs() < 1e-9);
+    }
+
+    // --- Following MIDI clock ---
+
+    const MIDI: [f32; 5] = [120.0, 50.0, 2.0, 1.0, 1.0];
+
+    /// Feeds a clock `events` (frame, message) over `frames` frames in
+    /// 256-sample blocks, with `params`. Returns its Gate, Run and Reset.
+    fn feed(clock: &mut Clock, params: &[f32], events: &[(u64, MidiMessage)], frames: u64, sample_rate: f32) -> [Vec<f32>; 3] {
+        const BLOCK: u64 = 256;
+        let mut outs = outputs(BLOCK as usize);
+        let mut recorded: [Vec<f32>; 3] = Default::default();
+        let mut start = 0;
+        while start < frames {
+            let block: Vec<MidiEvent> = events
+                .iter()
+                .filter(|(frame, _)| (start..start + BLOCK).contains(frame))
+                .map(|&(frame, message)| MidiEvent::new((frame - start) as u32, 0, message))
+                .collect();
+            let ctx = ProcessContext::new(sample_rate, BLOCK as usize).with_midi(&block);
+            clock.process(&[], &mut outs, params, &ctx);
+            for (out, record) in outs.iter().zip(&mut recorded) {
+                record.extend_from_slice(&out.samples);
+            }
+            start += BLOCK;
+        }
+        recorded
+    }
+
+    /// A clock following MIDI, fed `events`: see [`feed`].
+    fn follow(clock: &mut Clock, events: &[(u64, MidiMessage)], frames: u64, sample_rate: f32) -> [Vec<f32>; 3] {
+        feed(clock, &MIDI, events, frames, sample_rate)
+    }
+
+    /// `count` ticks at `bpm`, from `from`, each nudged by `jitter(n)` frames.
+    fn ticks(bpm: f64, sample_rate: f64, from: u64, count: u64, jitter: impl Fn(u64) -> f64) -> Vec<(u64, MidiMessage)> {
+        let spacing = 60.0 * sample_rate / (bpm * MIDI_TICKS_PER_BEAT as f64);
+        (0..count)
+            .map(|n| ((from as f64 + n as f64 * spacing + jitter(n)).round().max(0.0) as u64, MidiMessage::Clock))
+            .collect()
+    }
+
+    fn rises(signal: &[f32]) -> Vec<usize> {
+        (1..signal.len()).filter(|&i| signal[i] > 0.5 && signal[i - 1] < 0.5).collect()
+    }
+
+    #[test]
+    fn test_midi_ticks_at_120_bpm_read_as_120() {
+        for sample_rate in [44100.0, 48000.0] {
+            let mut clock = Clock::new();
+            clock.prepare(sample_rate, 256);
+            let events = ticks(120.0, sample_rate as f64, 100, 24 * 8, |_| 0.0);
+            follow(&mut clock, &events, sample_rate as u64 * 4, sample_rate);
+            let tempo = clock.transport(&MIDI).unwrap().tempo_bpm.unwrap();
+            assert!((tempo - 120.0).abs() <= 0.1, "{tempo} BPM at {sample_rate} Hz");
+        }
+    }
+
+    #[test]
+    fn test_midi_tempo_reads_through_timing_jitter() {
+        // Ticks scattered by up to half a millisecond either way, as USB
+        // MIDI from a DAW can be
+        let mut seed = 12345u64;
+        let mut offsets = Vec::new();
+        for _ in 0..24 * 8 {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            offsets.push(((seed >> 33) as f64 / (1u64 << 31) as f64 - 0.5) * 48.0);
+        }
+        for bpm in [90.0, 120.0, 174.0] {
+            let mut clock = Clock::new();
+            clock.prepare(48000.0, 256);
+            let events = ticks(bpm, 48000.0, 500, 24 * 8, |n| offsets[n as usize]);
+            follow(&mut clock, &events, events.last().unwrap().0 + 10, 48000.0);
+            let tempo = clock.transport(&MIDI).unwrap().tempo_bpm.unwrap() as f64;
+            assert!((tempo - bpm).abs() <= 0.1, "{tempo} BPM, sent {bpm}");
+        }
+    }
+
+    #[test]
+    fn test_midi_tempo_follows_a_change() {
+        let mut clock = Clock::new();
+        clock.prepare(48000.0, 256);
+        let mut events = ticks(120.0, 48000.0, 0, 24 * 4, |_| 0.0);
+        let switch = events.last().unwrap().0 + 1000;
+        events.extend(ticks(90.0, 48000.0, switch, 24 * 4, |_| 0.0));
+        // Two beats at the new tempo fill the fit window
+        let settled = switch + 2 * 32_000 + 100;
+        follow(&mut clock, &events, settled, 48000.0);
+        let tempo = clock.transport(&MIDI).unwrap().tempo_bpm.unwrap();
+        assert!((tempo - 90.0).abs() <= 0.1, "{tempo} BPM after slowing to 90");
+    }
+
+    #[test]
+    fn test_midi_start_and_stop_drive_run_and_reset() {
+        let mut clock = Clock::new();
+        clock.prepare(48000.0, 256);
+        // At 120 BPM a tick is 1000 frames at 48 kHz, and a beat 24000
+        let mut events = vec![(500, MidiMessage::Start)];
+        events.extend(ticks(120.0, 48000.0, 1000, 48, |_| 0.0));
+        events.push((48_500, MidiMessage::Stop));
+        let [gate, run, reset] = follow(&mut clock, &events, 60_000, 48000.0);
+
+        // Reset fires at Start; Run rises with the first tick, the downbeat
+        assert_eq!(rises(&reset), vec![500]);
+        assert_eq!(rises(&run), vec![1000]);
+        // A gate on each of the two beats, each on its tick
+        assert_eq!(rises(&gate), vec![1000, 25_000]);
+        // Stop drops Run and the gate, and they stay down
+        assert!(run[48_500..].iter().all(|&s| s == 0.0));
+        assert!(gate[48_500..].iter().all(|&s| s == 0.0));
+        assert!(!clock.transport(&MIDI).unwrap().playing);
+    }
+
+    #[test]
+    fn test_midi_continue_and_song_position_resume_where_told() {
+        let mut clock = Clock::new();
+        clock.prepare(48000.0, 256);
+        let mut events = vec![(0, MidiMessage::Start)];
+        events.extend(ticks(120.0, 48000.0, 1000, 30, |_| 0.0));
+        events.push((31_000, MidiMessage::Stop));
+        // Locate to bar 2 (sixteenth 16), then play on from there
+        events.push((40_000, MidiMessage::SongPosition { sixteenths: 16 }));
+        events.push((41_000, MidiMessage::Continue));
+        events.extend(ticks(120.0, 48000.0, 42_000, 2, |_| 0.0));
+        follow(&mut clock, &events, 43_500, 48000.0);
+        // The first tick after Continue is beat 4, the second a tick on
+        let beat = clock.transport(&MIDI).unwrap().beat_position.unwrap();
+        assert!((beat - (4.0 + 1.0 / 24.0)).abs() < 0.03, "beat {beat}");
+    }
+
+    #[test]
+    fn test_midi_ticks_without_start_run_the_clock() {
+        // Simple clock sources send only ticks
+        let mut clock = Clock::new();
+        clock.prepare(48000.0, 256);
+        let events = ticks(120.0, 48000.0, 1000, 48, |_| 0.0);
+        let [gate, run, _] = follow(&mut clock, &events, 48_000, 48000.0);
+        assert_eq!(rises(&run), vec![1000]);
+        assert_eq!(rises(&gate), vec![1000, 25_000]);
+    }
+
+    #[test]
+    fn test_midi_beat_glides_between_ticks_without_passing_them() {
+        let mut events = vec![(0, MidiMessage::Start)];
+        events.extend(ticks(120.0, 48000.0, 1000, 24, |_| 0.0));
+
+        // 576 frames (whole blocks) after the 24th tick: beat 23/24 plus
+        // 0.576 of a tick
+        let mut clock = Clock::new();
+        clock.prepare(48000.0, 256);
+        follow(&mut clock, &events, 24_576, 48000.0);
+        let beat = clock.transport(&MIDI).unwrap().beat_position.unwrap();
+        assert!((beat - 23.576 / 24.0).abs() < 1e-4, "beat {beat}");
+
+        // With no more ticks, it waits at the next one rather than run on
+        let mut clock = Clock::new();
+        clock.prepare(48000.0, 256);
+        follow(&mut clock, &events, 40_000, 48000.0);
+        let waiting = clock.transport(&MIDI).unwrap().beat_position.unwrap();
+        assert!(waiting < 1.0 && waiting > 0.999, "beat {waiting}");
+    }
+
+    #[test]
+    fn test_internal_clock_ignores_midi_but_hears_its_tempo() {
+        let mut clock = Clock::new();
+        clock.prepare(48000.0, 256);
+        let internal = [100.0, 50.0, 2.0, 1.0, 0.0];
+        let mut events = vec![(0, MidiMessage::Start)];
+        events.extend(ticks(140.0, 48000.0, 1000, 48, |_| 0.0));
+        let [_, _, reset] = feed(&mut clock, &internal, &events, 48_000, 48000.0);
+        assert!(reset.iter().all(|&s| s == 0.0), "MIDI Start doesn't reset an internal clock");
+
+        // Its own tempo while Internal, the master's as soon as it's MIDI
+        assert_eq!(clock.transport(&internal).unwrap().tempo_bpm, Some(100.0));
+        let tempo = clock.transport(&MIDI).unwrap().tempo_bpm.unwrap();
+        assert!((tempo - 140.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_readout_shows_tempo_beat_and_reception() {
+        let mut clock = Clock::new();
+        clock.prepare(48000.0, 256);
+        let events = ticks(120.0, 48000.0, 0, 60, |_| 0.0);
+        follow(&mut clock, &events, 50_000, 48000.0);
+        let readout = clock.readout(&MIDI).unwrap().values;
+        assert!((readout[Clock::READOUT_TEMPO] - 120.0).abs() < 0.1);
+        assert!(readout[Clock::READOUT_BEAT] > 2.0 && readout[Clock::READOUT_BEAT] < 2.1);
+        assert_eq!(readout[Clock::READOUT_RUNNING], 1.0);
+        assert_eq!(readout[Clock::READOUT_RECEIVING], 1.0);
+
+        // A second of silence: no longer receiving
+        follow(&mut clock, &[], 48_000, 48000.0);
+        assert_eq!(clock.readout(&MIDI).unwrap().values[Clock::READOUT_RECEIVING], 0.0);
     }
 }

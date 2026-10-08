@@ -3,7 +3,7 @@
 //! This module defines the interface that all synthesizer modules must implement,
 //! enabling both built-in and user-created modules to work within the audio graph.
 
-use super::context::ProcessContext;
+use super::context::{ProcessContext, TransportState};
 use super::parameter::ParameterDefinition;
 use super::port::PortDefinition;
 use super::SignalBuffer;
@@ -39,6 +39,18 @@ pub const MAX_METERS: usize = 8;
 pub struct MeterLevels {
     /// The peak magnitude of each meter, in the module's own order.
     pub peaks: [f32; MAX_METERS],
+}
+
+/// How many values a [`Readout`] carries.
+pub const MAX_READOUT: usize = 4;
+
+/// Live values a module shows on its node that aren't signals or meters: a
+/// Clock's received tempo and where it is in the bar, say. Fixed-size, so
+/// reporting them from the audio thread never allocates.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Readout {
+    /// The values, in the module's own order.
+    pub values: [f32; MAX_READOUT],
 }
 
 /// Category of a DSP module, used for organization and UI coloring.
@@ -319,12 +331,20 @@ pub trait DspModule: Send + 'static {
         None
     }
 
-    /// The tempo this module sets for the whole patch, for tempo sources such
-    /// as a clock. Read from `params` before each block and published to every
-    /// module as `context.transport.tempo_bpm`.
+    /// The transport this module sets for the whole patch, for tempo sources
+    /// such as a clock: its tempo, its beat position and whether it's playing.
+    /// Read before each block, from `params` and the state the last block
+    /// left, and published to every module as `context.transport`.
     ///
     /// Returns `None` for modules that don't set the tempo.
-    fn tempo_bpm(&self, _params: &[f32]) -> Option<f32> {
+    fn transport(&self, _params: &[f32]) -> Option<TransportState> {
+        None
+    }
+
+    /// Live values for the module's node display, read after each callback.
+    ///
+    /// Returns `None` for modules without any.
+    fn readout(&self, _params: &[f32]) -> Option<Readout> {
         None
     }
 

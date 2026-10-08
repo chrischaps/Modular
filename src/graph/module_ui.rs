@@ -183,7 +183,7 @@ static MODULE_UI: &[ModuleUi] = &[
     ModuleUi {
         module_id: "mod.lfo",
         knobs: &[modulatable("Rate", "Rate"), knob("Phase")],
-        labels: &[("Waveform", "Wave")],
+        labels: &[("Waveform", "Wave"), ("Tempo Sync", "Tempo")],
         monitor: &["Phase"],
         display: NodeDisplay::LfoWave,
         ..ModuleUi::DEFAULT
@@ -192,7 +192,8 @@ static MODULE_UI: &[ModuleUi] = &[
         module_id: "util.clock",
         knobs: &[knob_as("Tempo", "BPM"), knob_as("Gate Length", "Gate")],
         labels: &[("Division", "Div")],
-        monitor: &["Gate"],
+        monitor: &["Gate", "Run", "Reset"],
+        display: NodeDisplay::ClockBeat,
         ..ModuleUi::DEFAULT
     },
     ModuleUi {

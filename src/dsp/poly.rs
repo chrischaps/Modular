@@ -11,8 +11,8 @@
 //! output channel, which is swapped in as their own one-channel buffer: a
 //! pointer swap, not a copy, so the audio thread never allocates.
 
-use super::context::ProcessContext;
-use super::module_trait::{DspModule, MeterLevels, ModuleInfo, OutputLevels, MAX_INPUTS};
+use super::context::{ProcessContext, TransportState};
+use super::module_trait::{DspModule, MeterLevels, ModuleInfo, OutputLevels, Readout, MAX_INPUTS};
 use super::parameter::ParameterDefinition;
 use super::port::PortDefinition;
 use super::signal::{SignalBuffer, MAX_CHANNELS};
@@ -160,8 +160,12 @@ impl<M: DspModule> DspModule for Poly<M> {
         self.voices[0].take_scope_data()
     }
 
-    fn tempo_bpm(&self, params: &[f32]) -> Option<f32> {
-        self.voices[0].tempo_bpm(params)
+    fn transport(&self, params: &[f32]) -> Option<TransportState> {
+        self.voices[0].transport(params)
+    }
+
+    fn readout(&self, params: &[f32]) -> Option<Readout> {
+        self.voices[0].readout(params)
     }
 
     fn polyphonic(&self) -> bool {

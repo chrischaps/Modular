@@ -7,15 +7,21 @@ use super::signal::MidiEvent;
 /// Transport state information for synchronization.
 ///
 /// Provides tempo and playback state for modules that need to sync
-/// to a timeline (e.g., tempo-synced LFOs, sequencers).
+/// to a timeline (e.g., tempo-synced LFOs, sequencers). A patch's transport
+/// is its first Clock: see [`DspModule::transport`](super::DspModule::transport).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TransportState {
-    /// Whether playback is currently active.
+    /// Whether playback is currently active: the beat position is moving.
     pub playing: bool,
     /// Current position in samples from the start.
     pub sample_position: u64,
     /// Current tempo in beats per minute (if available).
     pub tempo_bpm: Option<f32>,
+    /// Beats since the transport started, at the first sample of the block,
+    /// or `None` with no transport (a patch without a Clock). Beat 0 is the
+    /// first downbeat; bars are [`time_sig_numerator`](Self::time_sig_numerator)
+    /// beats long.
+    pub beat_position: Option<f64>,
     /// Time signature numerator (beats per bar).
     pub time_sig_numerator: u8,
     /// Time signature denominator (beat unit).
@@ -31,6 +37,7 @@ impl TransportState {
             playing: false,
             sample_position: 0,
             tempo_bpm: None,
+            beat_position: None,
             time_sig_numerator: 4,
             time_sig_denominator: 4,
         }
@@ -42,6 +49,7 @@ impl TransportState {
             playing: true,
             sample_position: 0,
             tempo_bpm: Some(tempo_bpm),
+            beat_position: None,
             time_sig_numerator: 4,
             time_sig_denominator: 4,
         }
@@ -60,6 +68,19 @@ impl TransportState {
     pub fn position_in_bars(&self, sample_rate: f32) -> Option<f64> {
         self.position_in_beats(sample_rate)
             .map(|beats| beats / self.time_sig_numerator as f64)
+    }
+
+    /// The beat position `sample` samples into the block, or `None` with no
+    /// transport. It moves on at the tempo while playing and holds while
+    /// stopped.
+    #[inline]
+    pub fn beat_at(&self, sample: usize, sample_rate: f32) -> Option<f64> {
+        let start = self.beat_position?;
+        if !self.playing {
+            return Some(start);
+        }
+        let beats_per_sample = self.tempo_bpm.unwrap_or(120.0) as f64 / 60.0 / sample_rate as f64;
+        Some(start + sample as f64 * beats_per_sample)
     }
 
     /// Returns the duration of one beat in samples (if tempo is known).
@@ -234,6 +255,19 @@ mod tests {
         // 120 BPM = 2 beats/sec, so 48000/2 = 24000 samples/beat
         let spb = transport.samples_per_beat(sample_rate).unwrap();
         assert!((spb - 24000.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_beat_at_moves_only_while_playing() {
+        let mut transport = TransportState::playing_at(120.0);
+        assert_eq!(transport.beat_at(100, 48000.0), None);
+
+        transport.beat_position = Some(3.0);
+        // 120 BPM at 48 kHz: a beat every 24000 samples
+        assert!((transport.beat_at(12000, 48000.0).unwrap() - 3.5).abs() < 1e-12);
+
+        transport.playing = false;
+        assert_eq!(transport.beat_at(12000, 48000.0), Some(3.0));
     }
 
     #[test]
