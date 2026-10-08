@@ -82,6 +82,15 @@ impl SequenceDirection {
             _ => SequenceDirection::Forward,
         }
     }
+
+    /// The step a pattern starts from: the last one when playing backward,
+    /// otherwise the first.
+    fn start_step(self, num_steps: usize) -> usize {
+        match self {
+            SequenceDirection::Backward => num_steps - 1,
+            _ => 0,
+        }
+    }
 }
 
 /// Convert a MIDI note number (0-127) to V/Oct control signal.
@@ -129,6 +138,9 @@ pub struct StepSequencer {
     current_step: usize,
     /// Direction for ping-pong mode (+1 or -1).
     ping_pong_direction: i32,
+    /// Set by a reset (and at the start): the next clock plays the start step
+    /// instead of advancing past it.
+    reset_pending: bool,
     /// Previous clock state for edge detection.
     prev_clock: bool,
     /// Previous reset state for edge detection.
@@ -222,6 +234,7 @@ impl StepSequencer {
         Self {
             current_step: 0,
             ping_pong_direction: 1,
+            reset_pending: true,
             prev_clock: false,
             prev_reset: false,
             gate_timer: 0,
@@ -401,14 +414,23 @@ impl DspModule for StepSequencer {
 
             // Handle reset
             if reset_rising {
-                self.current_step = 0;
+                self.current_step = direction.start_step(num_steps);
                 self.ping_pong_direction = 1;
+                self.reset_pending = true;
                 self.gate_timer = 0;
             }
 
-            // Handle clock advance
+            // Handle clock advance. The first clock after a reset plays the
+            // start step rather than moving past it, so a reset on the
+            // downbeat puts step 1 on the downbeat
             if clock_rising && is_running {
-                let hit_end = self.advance_step(num_steps, direction);
+                let hit_end = if self.reset_pending {
+                    self.reset_pending = false;
+                    self.current_step = direction.start_step(num_steps);
+                    false
+                } else {
+                    self.advance_step(num_steps, direction)
+                };
 
                 // Start gate timer based on gate length
                 // We don't know the actual step duration, so use a fixed gate time
@@ -465,6 +487,7 @@ impl DspModule for StepSequencer {
     fn reset(&mut self) {
         self.current_step = 0;
         self.ping_pong_direction = 1;
+        self.reset_pending = true;
         self.prev_clock = false;
         self.prev_reset = false;
         self.gate_timer = 0;
@@ -581,11 +604,50 @@ mod tests {
             params.push(100.0); // velocity
         }
 
-        // Process with clock pulse
+        // The first clock plays the first step rather than moving past it
         seq.process(&[&clock], &mut outputs, &params, &ctx);
+        assert_eq!(seq.current_step(), 0);
+        assert_eq!(outputs[1].samples[60], 1.0, "step 1's gate fires");
 
-        // After clock pulse, should have advanced to step 1
+        // The next clock advances
+        seq.process(&[&clock], &mut outputs, &params, &ctx);
         assert_eq!(seq.current_step(), 1);
+    }
+
+    /// One sample of clock and reset into a one-sample block.
+    fn tick(seq: &mut StepSequencer, params: &[f32], clock: bool, reset: bool) -> f32 {
+        let mut clock_buf = SignalBuffer::control(1);
+        clock_buf.samples[0] = if clock { 1.0 } else { 0.0 };
+        let mut reset_buf = SignalBuffer::control(1);
+        reset_buf.samples[0] = if reset { 1.0 } else { 0.0 };
+        let mut outputs: Vec<SignalBuffer> = (0..5).map(|_| SignalBuffer::control(1)).collect();
+        seq.process(&[&clock_buf, &reset_buf], &mut outputs, params, &ProcessContext::new(44100.0, 1));
+        outputs[1].samples[0]
+    }
+
+    #[test]
+    fn test_first_clock_after_reset_plays_start_step() {
+        for (direction, start) in [(0.0, 0), (1.0, 3), (2.0, 0), (3.0, 0)] {
+            let mut seq = StepSequencer::new();
+            seq.prepare(44100.0, 1);
+            let mut params = vec![4.0, direction, 50.0];
+            for _ in 0..MAX_STEPS {
+                params.extend([60.0, 1.0, 100.0]);
+            }
+
+            // Run a few steps in, then reset
+            for _ in 0..3 {
+                tick(&mut seq, &params, true, false);
+                tick(&mut seq, &params, false, false);
+            }
+            tick(&mut seq, &params, false, true);
+            tick(&mut seq, &params, false, false);
+
+            // The next clock sounds the start step
+            let gate = tick(&mut seq, &params, true, false);
+            assert_eq!(seq.current_step(), start, "direction {direction}");
+            assert_eq!(gate, 1.0, "direction {direction}");
+        }
     }
 
     #[test]
@@ -653,7 +715,7 @@ mod tests {
         // Initial state: step 0
         assert_eq!(seq.current_step(), 0);
 
-        // First clock pulse: backward from 0 wraps to 3
+        // First clock pulse: backward starts from the last step
         seq.process(&[&clock_high], &mut outputs, &params, &ctx);
         assert_eq!(seq.current_step(), 3);
 

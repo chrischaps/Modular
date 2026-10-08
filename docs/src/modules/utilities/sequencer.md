@@ -58,7 +58,9 @@ The sequencer has no tempo of its own. It moves on each rising edge at **Clock**
 
 ### Reset and the first step
 
-The pattern advances *before* it plays, so each clock moves to the next step and then sounds it. After a **Reset**, the sequencer sits on step 1 and the next clock plays step 2. If you want step 1 on the downbeat, send the reset just after the last step of the bar instead of on the downbeat, or treat step 2 as the start of the phrase.
+Each clock moves to the next step and sounds it, except the first clock after a **Reset**, which sounds the step the pattern starts from without moving past it. So a reset on the downbeat puts step 1 on the downbeat. The same goes for the first clock after the patch starts playing.
+
+The start step is step 1 in every direction but **Bwd**, which starts from the last step. **Rnd** starts on step 1 too, then picks at random from the next clock on.
 
 ### Directions
 
