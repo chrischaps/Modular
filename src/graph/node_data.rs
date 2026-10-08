@@ -643,6 +643,73 @@ impl SynthNodeData {
     }
 }
 
+/// An output's label, held back until the node's width is known so it can
+/// sit against its port on the right edge rather than at the left
+#[derive(Clone)]
+struct DeferredOutputLabel {
+    name: String,
+    slot: egui::layers::ShapeIdx,
+    rect: egui::Rect,
+    shapes: Vec<egui::Shape>,
+}
+
+fn deferred_labels_id(node_id: egui_node_graph2::NodeId) -> egui::Id {
+    egui::Id::new((node_id, "deferred_output_labels"))
+}
+
+/// Reserves the label's place in the paint order now, and its shapes for
+/// [`place_output_labels`] to move once the node's width is settled. The
+/// label is laid out at its natural width, so it never widens the node.
+fn defer_output_label(
+    ui: &mut egui::Ui,
+    node_id: egui_node_graph2::NodeId,
+    name: &str,
+    rect: egui::Rect,
+    shapes: Vec<egui::Shape>,
+) {
+    let label = DeferredOutputLabel {
+        name: name.to_owned(),
+        slot: ui.painter().add(egui::Shape::Noop),
+        rect,
+        shapes,
+    };
+    ui.ctx().data_mut(|data| {
+        data.get_temp_mut_or_default::<Vec<DeferredOutputLabel>>(deferred_labels_id(node_id))
+            .push(label);
+    });
+}
+
+/// Slides each deferred output label flush with the node's right edge,
+/// beside its port, and gives it its hover hint there
+fn place_output_labels(
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    node_id: egui_node_graph2::NodeId,
+    module_id: &str,
+) {
+    let labels = ui
+        .ctx()
+        .data_mut(|data| data.remove_temp::<Vec<DeferredOutputLabel>>(deferred_labels_id(node_id)))
+        .unwrap_or_default();
+    let right = ui.min_rect().right();
+    for label in labels {
+        let offset = egui::vec2((right - label.rect.right()).max(0.0), 0.0);
+        let shapes = label
+            .shapes
+            .into_iter()
+            .map(|mut shape| {
+                shape.translate(offset);
+                shape
+            })
+            .collect::<Vec<_>>();
+        painter.set(label.slot, egui::Shape::Vec(shapes));
+
+        let id = ui.id().with((node_id, "output_label", &label.name));
+        let response = ui.interact(label.rect.translate(offset), id, egui::Sense::hover());
+        hints::attach(response, Hint::output(module_id, &label.name));
+    }
+}
+
 impl NodeDataTrait for SynthNodeData {
     type Response = SynthResponse;
     type UserState = super::SynthGraphState;
@@ -727,6 +794,9 @@ impl NodeDataTrait for SynthNodeData {
         Self::Response: UserResponseTrait,
     {
         let mut responses = Vec::new();
+
+        // Output labels keep the full opacity they had before the fade below
+        let label_painter = ui.painter().clone();
 
         // A bypassed module's controls fade back but stay adjustable
         if self.bypassed {
@@ -1982,6 +2052,9 @@ impl NodeDataTrait for SynthNodeData {
             });
         }
 
+        // Everything that sets the node's width has been laid out now
+        place_output_labels(ui, &label_painter, node_id, self.module_id);
+
         responses
     }
 
@@ -2011,12 +2084,9 @@ impl NodeDataTrait for SynthNodeData {
         });
         let Some((channels, color)) = poly else {
             // Allocate exactly the text size, not the full available width
-            let (rect, response) = ui.allocate_exact_size(text_size, egui::Sense::hover());
-            hints::attach(response, Hint::output(self.module_id, param_name));
-
-            // Draw text at the allocated position
-            ui.painter().galley(rect.min, galley, text_color);
-
+            let (_, rect) = ui.allocate_space(text_size);
+            let shapes = vec![egui::Shape::galley(rect.min, galley, text_color)];
+            defer_output_label(ui, node_id, param_name, rect, shapes);
             return Vec::new();
         };
 
@@ -2030,22 +2100,18 @@ impl NodeDataTrait for SynthNodeData {
         let gap = font_id.size * 0.3;
 
         let size = egui::vec2(text_size.x + gap + badge_size.x, text_size.y.max(badge_size.y));
-        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
-        hints::attach(response, Hint::output(self.module_id, param_name));
-        let painter = ui.painter();
-        painter.galley(egui::pos2(rect.min.x, rect.center().y - text_size.y / 2.0), galley, text_color);
-
+        let (_, rect) = ui.allocate_space(size);
         let badge = egui::Rect::from_min_size(
             egui::pos2(rect.max.x - badge_size.x, rect.center().y - badge_size.y / 2.0),
             badge_size,
         );
-        painter.rect(
-            badge,
-            badge_size.y / 2.0,
-            color.gamma_multiply(0.22),
-            egui::Stroke::new(1.0, color.gamma_multiply(0.7)),
-        );
-        painter.galley(badge.min + pad, badge_galley, badge_text);
+        let shapes = vec![
+            egui::Shape::galley(egui::pos2(rect.min.x, rect.center().y - text_size.y / 2.0), galley, text_color),
+            egui::Shape::rect_filled(badge, badge_size.y / 2.0, color.gamma_multiply(0.22)),
+            egui::Shape::rect_stroke(badge, badge_size.y / 2.0, egui::Stroke::new(1.0, color.gamma_multiply(0.7))),
+            egui::Shape::galley(badge.min + pad, badge_galley, badge_text),
+        ];
+        defer_output_label(ui, node_id, param_name, rect, shapes);
 
         Vec::new()
     }
