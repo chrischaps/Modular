@@ -37,7 +37,9 @@ Both levels are smoothed, so you can ride them while the patch plays without cli
 Out = Ch 1 × Level 1 + Ch 2 × Level 2
 ```
 
-At the default levels, two full-scale signals add up to twice full scale. Anything past ±1 is clipped hard, so when you mix two loud sources, bring the levels down to around 50–70% each.
+At the default levels, two full-scale signals add up to twice full scale. Anything within ±1 passes through untouched. Past that the Mixer soft-clips: the sum bends smoothly over and eases toward ±1.5 without ever reaching it, so two full-scale signals come out at about 1.48. The bend rounds off the peaks of loud audio, so when you mix two loud sources and want them clean, bring the levels down to around 50–70% each.
+
+The headroom above 1 is deliberate. Summing two envelopes for a filter's **Cutoff**, as the [Rhythmic Sequence](../../recipes/rhythmic-sequence.md) example does, opens the filter further than one envelope can.
 
 ### Polyphonic cables
 

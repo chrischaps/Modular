@@ -172,18 +172,25 @@ impl DspModule for Mixer {
     }
 }
 
-/// Soft clipping function to prevent harsh digital clipping.
-/// Uses tanh-style saturation for natural-sounding limiting.
+/// Where soft clipping starts: anything within ±1 passes untouched.
+const CLIP_KNEE: f32 = 1.0;
+/// The level the clipped sum eases toward but never reaches. Above 1 so two
+/// envelopes summed for a wider filter sweep still open it further than one.
+const CLIP_CEILING: f32 = 1.5;
+
+/// Soft clipping to keep hot sums from clipping harshly.
+///
+/// Unity up to the knee, then a tanh curve that meets it with the same value
+/// and slope and eases toward the ceiling, so a signal crossing full scale
+/// bends instead of jumping.
 #[inline]
 fn soft_clip(x: f32) -> f32 {
-    if x.abs() <= 1.0 {
+    let over = x.abs() - CLIP_KNEE;
+    if over <= 0.0 {
         x
     } else {
-        x.signum() * (1.0 + (1.0 - (x.abs() - 1.0).min(1.0) * 0.5))
-            .min(1.5)
-            .max(1.0)
-            * (2.0 / 3.0)
-            + x.signum() * (1.0 / 3.0)
+        let room = CLIP_CEILING - CLIP_KNEE;
+        x.signum() * (CLIP_KNEE + room * (over / room).tanh())
     }
 }
 
@@ -373,6 +380,29 @@ mod tests {
                 outputs[0].samples[i]
             );
         }
+    }
+
+    #[test]
+    fn test_soft_clip_is_continuous_and_eases() {
+        // Unity inside full scale
+        assert_eq!(soft_clip(0.7), 0.7);
+        assert_eq!(soft_clip(-1.0), -1.0);
+
+        // No step at the knee: just past it, still just past 1
+        assert!((soft_clip(1.001) - 1.001).abs() < 1e-4);
+        assert!((soft_clip(-1.001) + 1.001).abs() < 1e-4);
+
+        // Never falls back as the input grows, and stays under the ceiling
+        let mut prev = soft_clip(1.0);
+        for i in 1..=400 {
+            let y = soft_clip(1.0 + i as f32 * 0.01);
+            assert!(y >= prev, "falls at {}", 1.0 + i as f32 * 0.01);
+            assert!(y <= CLIP_CEILING);
+            prev = y;
+        }
+
+        // Two full-scale signals land a little under the ceiling
+        assert!((soft_clip(2.0) - 1.482).abs() < 0.001);
     }
 
     #[test]

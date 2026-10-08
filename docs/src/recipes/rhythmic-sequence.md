@@ -59,7 +59,7 @@ A dash is a step with its gate off: a rest. The line sits on the root, C2, and m
 
 The filter sits low, at 300 Hz, with **Res** at 70%. The filter envelope kicks it open on every step with a gate, then drops it back in 200 ms. That fast sweep of a sharp resonant peak is the acid sound.
 
-The filter's **Cutoff** input works in octaves, and an envelope peaks at 1.0, so one envelope on its own opens the filter by one octave. The patch sends the envelope into both inputs of a Mixer to add two copies together, which opens it further. The Mixer softly limits anything over 1.0, so in practice the peak is about an octave and a third, up to roughly 750 Hz.
+The filter's **Cutoff** input works in octaves, and an envelope peaks at 1.0, so one envelope on its own opens the filter by one octave. The patch sends the envelope into both inputs of a Mixer to add two copies together, which opens it further. The Mixer soft-clips anything over 1.0, easing it toward 1.5, so in practice the peak is nearly an octave and a half, up to roughly 840 Hz.
 
 ### Volume, drive and echo
 
