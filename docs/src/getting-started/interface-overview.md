@@ -35,7 +35,7 @@ If a patch loads with problems (a module this version doesn't know, a cable to a
 | Zoom | Scroll the mouse wheel |
 | Pan | Drag with the middle mouse button, or hold `Ctrl` and drag empty canvas |
 | Select a module | Click it |
-| Select several | Drag a box across empty canvas |
+| Select several | Drag a box across empty canvas. It also takes in any frames and notes wholly inside it |
 | Move modules | Drag a module by its body; a selection moves together |
 
 The background grid moves and zooms with the patch, with a brighter line every five squares.
@@ -44,7 +44,7 @@ The background grid moves and zooms with the patch, with a brighter line every f
 
 ### The add menu
 
-Right-click empty canvas to open the add menu. It lists the six categories in their header colors; hover or click one to see its modules, then click a module to place it where you right-clicked. Hover a module's name to read what it does.
+Right-click empty canvas to open the add menu. It lists the six categories in their header colors; hover or click one to see its modules, then click a module to place it where you right-clicked. Hover a module's name to read what it does. Below the categories, **Frame** and **Note** add a [frame or a note](#frames-and-notes).
 
 ![The add menu, showing the Effect category](../images/interface-context-menu.png)
 *Right-click empty canvas, pick a category, then a module.*
@@ -128,9 +128,37 @@ The clipboard holds modules as patch text, so you can paste between two Modular 
 
 Filters and effects can be bypassed: their audio inputs pass straight to their outputs, as if the module weren't there. Click the power switch at the left of the header, choose **Bypass** from the module menu, or select modules and press `Ctrl + B`. A bypassed module's header fades to gray and its controls dim. Switching takes a 20 ms crossfade, so it never clicks, and a bypassed module uses no CPU.
 
+## Frames and notes
+
+A patch can explain itself. A **frame** is a titled, tinted backdrop behind a group of modules, like a section printed on a synth's front panel: *Voice*, *Modulation*, *Echoes*. A **note** is a card of text on the canvas. Neither makes a sound. Every example patch uses them, so you can read how it works while you play it.
+
+![The First Sound example, with its Shape frame's menu open](../images/interface-frames-and-notes.png)
+*Two frames and two notes. Right-click a frame's title to rename or recolor it.*
+
+### Frames
+
+- **To frame some modules,** select them and press `Ctrl + Shift + F`, or right-click empty canvas and choose **Frame**. The frame is drawn around the selection and takes the color most of its modules share. Type its name and press `Enter`.
+- **To add an empty frame,** right-click empty canvas with nothing selected and choose **Frame**.
+- **To move a frame,** drag its title. Every module and note inside it moves with it, along with any smaller frame inside it. Its body lets clicks through to the canvas, so you can still add modules inside it or drag a selection box across it.
+- **To resize it,** drag any edge or corner.
+- **To rename it,** double-click its title.
+- **To change its color,** right-click its title and pick a swatch. The same menu can **Select modules inside** it, or **Delete frame**. Deleting a frame leaves its modules where they are.
+
+### Notes
+
+- **To add a note,** right-click empty canvas, choose **Note**, and type. Click away or press `Escape` when you're done. A note left empty disappears.
+- **To edit it,** double-click it. Plain text, with `**bold**` for emphasis.
+- **To move it,** drag it. **To change where its lines wrap,** drag its right edge.
+
+### Selecting, copying and undoing
+
+Click a frame's title or a note to select it, and `Shift`-click to add to the selection. `Delete`, `Ctrl + C`, `Ctrl + X`, `Ctrl + D` and `Ctrl + V` work on selected frames and notes along with any selected modules, so a framed section copies and pastes as a whole. Undo covers adding, moving, resizing, renaming, recoloring, editing and deleting them; typing a frame's name or a note is one step.
+
+Frames and notes are saved with the patch. Versions of Modular Synth from before frames and notes existed open the patch without them.
+
 ## Undo and redo
 
-**Undo** (`Ctrl + Z`) and **Redo** (`Ctrl + Shift + Z` or `Ctrl + Y`) cover adding, deleting, moving and bypassing modules, patching and unpatching cables, and turning knobs. Hover the toolbar buttons to see which edit is next, such as *Move Oscillator* or *Set SVF Filter Cutoff*.
+**Undo** (`Ctrl + Z`) and **Redo** (`Ctrl + Shift + Z` or `Ctrl + Y`) cover adding, deleting, moving and bypassing modules, patching and unpatching cables, turning knobs, and every change to [frames and notes](#frames-and-notes). Hover the toolbar buttons to see which edit is next, such as *Move Oscillator*, *Set SVF Filter Cutoff* or *Move frame Voice*.
 
 A whole drag is one step: turning a knob from 200 Hz to 2 kHz and back undoes in one go. A deleted module comes back with its settings, its cables and its MIDI mappings. Knobs moved by a MIDI controller aren't recorded, and opening a patch starts a fresh history.
 
@@ -197,7 +225,7 @@ Patches are saved as `.json` files holding every module, setting, cable and MIDI
 
 ### Examples
 
-The **📚 Examples** menu holds nine ready-made patches: **First Sound**, which opens when the app starts, and one for each [recipe](../recipes/basic-subtractive.md) in this manual. Hover an example to read what it is. Saving an example always asks for a file name, so you save a copy and the original stays intact.
+The **📚 Examples** menu holds nine ready-made patches: **First Sound**, which opens when the app starts, and one for each [recipe](../recipes/basic-subtractive.md) in this manual. Hover an example to read what it is. Each one is laid out in frames, with notes on how it works and what to try. Saving an example always asks for a file name, so you save a copy and the original stays intact.
 
 ### Recent patches
 
@@ -232,10 +260,11 @@ Recent files, the autosave, your cable style and the window's size and position 
 | Shortcut | Action |
 |----------|--------|
 | `Space` or `Tab` | Quick add a module at the cursor |
-| `Delete` or `Backspace` | Delete the selected modules |
-| `Ctrl + D` | Duplicate the selected modules |
-| `Ctrl + C` / `Ctrl + X` | Copy / cut the selected modules |
+| `Delete` or `Backspace` | Delete the selected modules, frames and notes |
+| `Ctrl + D` | Duplicate the selected modules, frames and notes |
+| `Ctrl + C` / `Ctrl + X` | Copy / cut the selected modules, frames and notes |
 | `Ctrl + V` | Paste at the cursor |
+| `Ctrl + Shift + F` | Frame the selected modules |
 | `Ctrl + B` | Bypass or switch on the selected filters and effects |
 | `Ctrl + Z` | Undo |
 | `Ctrl + Shift + Z` or `Ctrl + Y` | Redo |
@@ -243,6 +272,6 @@ Recent files, the autosave, your cable style and the window's size and position 
 | `Ctrl + O` | Open a patch |
 | `Ctrl + S` | Save |
 | `Ctrl + Shift + S` | Save as |
-| `Escape` | Close the add menu or quick-add box, or cancel MIDI Learn |
+| `Escape` | Close the add menu or quick-add box, cancel MIDI Learn, or finish typing a frame's name or a note |
 | `Shift` + drag | Fine knob adjustment |
 | Double-click a knob | Reset it to its default |

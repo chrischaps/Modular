@@ -9,9 +9,10 @@ Screenshots for the manual. This file isn't part of the book; it's a note for wh
 | `interface-overview.png` | The whole window, Lush Pad playing a chord | Introduction, Interface Overview |
 | `interface-context-menu.png` | The right-click add menu | Interface Overview |
 | `interface-quick-add.png` | The quick-add palette | Interface Overview |
+| `interface-frames-and-notes.png` | First Sound playing, with its Shape frame's menu open | Interface Overview |
 | `tutorial-complete-patch.png` | The finished First Patch, playing a note | Your First Patch |
 | `module-<page>.png` | One module, playing, cropped with a margin of grid | Each module page (`module-svf-filter.png` for `svf-filter.md`) |
-| `recipe-<page>.png` | The whole example patch, playing | Each recipe (`recipe-lush-pad.png` for `lush-pad.md`) |
+| `recipe-<page>.png` | The whole example patch, playing, frames and notes included | Each recipe (`recipe-lush-pad.png` for `lush-pad.md`) |
 
 ## Guidelines
 

@@ -93,6 +93,18 @@ The `egui-snarl` library is another node graph option that may offer more custom
 
 ---
 
+## Backdrop Layer (done)
+
+Frames and notes (#88) are drawn under the nodes through
+`ConnectionSignalTrait::backdrop_ui`. The fork calls it once a frame, after
+the editor background has claimed its clicks and before any node is drawn, so
+whatever it paints sits under nodes and cables, and its widgets win clicks
+over empty canvas but not over nodes. It gets a `Backdrop` with the editor's
+origin, zoom, node positions, node selection and pan, so a frame dragged by
+its title can carry its modules in the same frame.
+
+---
+
 ## Implementation Priority
 
 If we decide to fork `egui_node_graph2`:

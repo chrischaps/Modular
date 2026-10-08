@@ -14,6 +14,11 @@ web clips.
 Coordinates are in points at the shot's ppp (1.55 by default, which shows
 the toolbar up to the Edit section in a 1920x1080 frame). Find them from a
 still: pixel / ppp.
+
+The shots film copies of the examples in tools/showcase/patches/, laid out
+as they were when the shots were aimed. The examples in patches/ have since
+been laid out in frames, which moved their modules; a shot moved over to
+one has to be aimed again.
 """
 
 import subprocess
@@ -83,7 +88,7 @@ class Script:
 
 # --- Shots -----------------------------------------------------------------
 
-@shot("patches/basic-subtractive.json")
+@shot("tools/showcase/patches/basic-subtractive.json")
 def filter_sweep(s):
     """A bassline through the SVF while a hand opens the filter and adds
     resonance: the response curve and the sound move together."""
@@ -105,7 +110,7 @@ def filter_sweep(s):
     s.at(t, "end")
 
 
-@shot("patches/lush-pad.json")
+@shot("tools/showcase/patches/lush-pad.json")
 def chords(s):
     """Held chords on Poly MIDI: each voice is its own strand in the cable
     bundles, lit only while its note sounds."""
@@ -130,7 +135,7 @@ def chords(s):
     s.at(t + 2.5, "end")
 
 
-@shot("patches/fm-synthesis.json")
+@shot("tools/showcase/patches/fm-synthesis.json")
 def fm_bell(s):
     """One sine bending another's pitch: turning up the FM depth takes a
     pure tone to a bell to a clang."""
@@ -152,7 +157,7 @@ def fm_bell(s):
     s.at(t + 2.0, "end")
 
 
-@shot("patches/rhythmic-sequence.json")
+@shot("tools/showcase/patches/rhythmic-sequence.json")
 def footswitch(s):
     """The sequence plays itself; a hand stomps the distortion out and back
     in, puts the delay on tape and feeds it back."""
@@ -180,7 +185,7 @@ def footswitch(s):
     s.at(end + 4.5, "end")
 
 
-@shot("patches/generative-ambient.json")
+@shot("tools/showcase/patches/generative-ambient.json")
 def hero(s):
     """Generative Ambient plays itself while the camera follows the signal
     from the clock to the reverb, pulls back to the whole patch, and comes
@@ -258,7 +263,7 @@ def from_nothing(s):
     s.at(t + 1.2, "end")
 
 
-@shot("patches/lush-pad.json")
+@shot("tools/showcase/patches/lush-pad.json")
 def cover(s):
     """A macro of the poly bundles leaving Poly MIDI while a chord rings:
     candidates for the page's cover."""

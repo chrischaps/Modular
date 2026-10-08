@@ -26,6 +26,7 @@ It doesn't imitate hardware panels. Every module is a node with jacks on its sid
 
 - **Visual feedback.** Waveform, envelope and filter-response displays sit on their modules, LEDs light on active outputs, and the scope shows what's actually there. Hover any jack or knob to see what it does.
 - **Fast editing.** Space opens a fuzzy quick-add palette at the cursor. Undo and redo cover every edit. Copy, paste and duplicate work across windows, because the clipboard holds patch JSON.
+- **Patches that explain themselves.** Frames group modules under a title, like sections of a front panel, and drag as one. Notes put a word of explanation beside them. Every example is laid out this way, so it reads as a lesson you can play.
 - **Record what you hear.** **● Rec** (`Ctrl+R`) writes the output to a WAV, sample for sample, while you play and tweak. It never gets in the audio's way, and every take is saved with the patch that made it.
 - **Live input.** Put a microphone, guitar or line source through the filters and effects. Audio Input follows its level and opens a gate on loud hits, so a drum loop can play a synth.
 - **MIDI.** Play from any MIDI controller, map any knob to a CC with MIDI Learn, or play the computer keyboard.
@@ -59,7 +60,8 @@ cargo run --release --bin render -- patches/lush-pad.json out.wav --audition  # 
 | `Space` / `Tab` | Quick-add a module at the cursor |
 | `Ctrl+Z`, `Ctrl+Shift+Z` | Undo, redo |
 | `Ctrl+C` / `X` / `V`, `Ctrl+D` | Copy, cut, paste, duplicate |
-| `Delete` | Delete the selected modules |
+| `Delete` | Delete the selected modules, frames and notes |
+| `Ctrl+Shift+F` | Frame the selected modules |
 | `Ctrl+B` | Bypass the selected effects |
 | `Ctrl+N`, `Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S` | New, open, save, save as |
 | `Ctrl+R` | Record, or stop recording |

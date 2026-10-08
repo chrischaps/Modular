@@ -4,8 +4,9 @@
 //! patch as of the last step, and once a gesture is over (no mouse button
 //! held) compares the editor with it. Whatever differs becomes one [`Step`]:
 //! adding, deleting, connecting, disconnecting, moving and bypassing modules,
-//! and turning their knobs. Nothing is compared while a button is down, so a
-//! whole knob turn, node drag or cable repatch is a single step.
+//! turning their knobs, and adding, moving, resizing, renaming and deleting
+//! frames and notes. Nothing is compared while a button is down, so a whole
+//! knob turn, node drag or cable repatch is a single step.
 //!
 //! A step holds both sides of what it changed, so it can be applied in either
 //! direction. Applying one edits the editor graph and returns the engine
@@ -19,6 +20,7 @@ use egui::{Pos2, Vec2};
 use egui_node_graph2::{NodeId, PanZoom};
 
 use crate::engine::{EngineCommand, NodeId as EngineNodeId};
+use crate::graph::annotations::{self, Annotation, AnnotationId};
 use crate::graph::{port_mapping, SynthGraphEditorState, SynthGraphState, SynthNodeTemplate};
 use super::{editing, engine_sync};
 
@@ -65,6 +67,8 @@ struct Cable {
 pub struct Snapshot {
     nodes: BTreeMap<NodeKey, NodeState>,
     cables: BTreeSet<Cable>,
+    /// Frames and notes, which are already in zoom-free patch space.
+    annotations: BTreeMap<AnnotationId, Annotation>,
 }
 
 /// Where the editor's node positions put the origin.
@@ -96,7 +100,7 @@ impl ViewAnchor {
         }
         let scale = pan_zoom.zoom / zoom_before;
         let half_size = pan_zoom.clip_rect.size() / 2.0;
-        self.origin = (self.origin - half_size + pan_before) * scale + half_size - pan_before;
+        self.origin = annotations::follow_zoom(self.origin, scale, half_size, pan_before);
     }
 }
 
@@ -137,6 +141,7 @@ impl Snapshot {
             }))();
             snapshot.cables.extend(cable);
         }
+        snapshot.annotations = user_state.annotations.items().clone();
         snapshot
     }
 
@@ -163,11 +168,20 @@ struct CableDiff {
     added: bool,
 }
 
+/// How a frame or note changed in a step. `None` is one that isn't there.
+#[derive(Clone, Debug)]
+struct AnnotationDiff {
+    id: AnnotationId,
+    before: Option<Annotation>,
+    after: Option<Annotation>,
+}
+
 /// One undoable edit, which may touch several modules and cables.
 #[derive(Clone, Debug)]
 pub struct Step {
     nodes: Vec<NodeDiff>,
     cables: Vec<CableDiff>,
+    annotations: Vec<AnnotationDiff>,
     label: String,
 }
 
@@ -225,12 +239,26 @@ impl Step {
             .map(|&cable| CableDiff { cable, added: false })
             .chain(after.cables.difference(&before.cables).map(|&cable| CableDiff { cable, added: true }))
             .collect();
+        let ids: BTreeSet<AnnotationId> = before.annotations.keys().chain(after.annotations.keys()).copied().collect();
+        let annotations: Vec<AnnotationDiff> = ids
+            .into_iter()
+            .map(|id| AnnotationDiff {
+                id,
+                before: before.annotations.get(&id).cloned(),
+                after: after.annotations.get(&id).cloned(),
+            })
+            .filter(|diff| diff.before != diff.after)
+            .collect();
 
-        if nodes.is_empty() && cables.is_empty() {
+        if nodes.is_empty() && cables.is_empty() && annotations.is_empty() {
             return None;
         }
-        let label = describe(&nodes, &cables, before, after);
-        Some(Self { nodes, cables, label })
+        let label = if annotations.is_empty() {
+            describe(&nodes, &cables, before, after)
+        } else {
+            describe_annotations(&annotations, &nodes, &cables)
+        };
+        Some(Self { nodes, cables, annotations, label })
     }
 
     /// What the step did, for the Edit buttons and status bar,
@@ -246,6 +274,9 @@ impl Step {
                 .map(|diff| NodeDiff { key: diff.key, before: diff.after.clone(), after: diff.before.clone() })
                 .collect(),
             cables: self.cables.iter().map(|diff| CableDiff { added: !diff.added, ..*diff }).collect(),
+            annotations: self.annotations.iter()
+                .map(|diff| AnnotationDiff { id: diff.id, before: diff.after.clone(), after: diff.before.clone() })
+                .collect(),
             label: self.label.clone(),
         }
     }
@@ -254,6 +285,8 @@ impl Step {
     fn absorb(&mut self, next: &Step) -> bool {
         let same_knobs = self.cables.is_empty()
             && next.cables.is_empty()
+            && self.annotations.is_empty()
+            && next.annotations.is_empty()
             && self.nodes.len() == next.nodes.len()
             && self.nodes.iter().zip(&next.nodes).all(|(a, b)| {
                 a.key == b.key && a.params_only().is_some() && a.params_only() == b.params_only()
@@ -328,6 +361,18 @@ impl Step {
             if let Some((output, input)) = cable_ports(graph, &graph_ids, diff.cable) {
                 graph.add_connection(output, input, 0);
                 commands.extend(engine_sync::cable_connected(graph, user_state, output, input));
+            }
+        }
+
+        // Frames and notes make no sound, so the engine hears nothing of them
+        let annotations = &mut user_state.annotations;
+        annotations.editing = None;
+        for diff in &self.annotations {
+            match &diff.after {
+                Some(after) => annotations.restore(diff.id, after.clone()),
+                None => {
+                    annotations.remove(diff.id);
+                }
             }
         }
         commands
@@ -429,6 +474,56 @@ fn describe(nodes: &[NodeDiff], cables: &[CableDiff], before: &Snapshot, after: 
     "Change modules".to_string()
 }
 
+/// Names a step that changed frames or notes: "Move frame Voice" (with the
+/// modules inside it), "Resize frame Voice", "Edit note", "Add note".
+fn describe_annotations(annotations: &[AnnotationDiff], nodes: &[NodeDiff], cables: &[CableDiff]) -> String {
+    // Modules moving along with a frame dragged by its title
+    let modules_only_moved = cables.is_empty()
+        && nodes.iter().all(|d| match (&d.before, &d.after) {
+            (Some(a), Some(b)) => a.bypassed == b.bypassed && changed_params(a, b).next().is_none(),
+            _ => false,
+        });
+    if !modules_only_moved {
+        return "Edit patch".to_string();
+    }
+    let [diff] = annotations else {
+        let what = format!("{} frames and notes", annotations.len());
+        return if annotations.iter().all(|d| d.before.is_none()) {
+            format!("Add {what}")
+        } else if annotations.iter().all(|d| d.after.is_none()) {
+            format!("Delete {what}")
+        } else {
+            format!("Change {what}")
+        };
+    };
+    match (&diff.before, &diff.after) {
+        (None, Some(after)) => format!("Add {}", after.describe()),
+        (Some(before), None) => format!("Delete {}", before.describe()),
+        (Some(Annotation::Frame(a)), Some(after @ Annotation::Frame(b))) => {
+            let what = after.describe();
+            if a.title != b.title {
+                format!("Rename {what}")
+            } else if a.tint != b.tint {
+                format!("Color {what}")
+            } else if a.rect.size() != b.rect.size() {
+                format!("Resize {what}")
+            } else {
+                format!("Move {what}")
+            }
+        }
+        (Some(Annotation::Note(a)), Some(Annotation::Note(b))) => {
+            if a.text != b.text {
+                "Edit note".to_string()
+            } else if a.width != b.width {
+                "Resize note".to_string()
+            } else {
+                "Move note".to_string()
+            }
+        }
+        _ => "Edit patch".to_string(),
+    }
+}
+
 /// What undo or redo did: the step's label, and the engine commands that
 /// make the audio graph match.
 pub struct Applied {
@@ -495,6 +590,17 @@ impl History {
     /// same zoomed points as node positions. The background grid hangs off it.
     pub fn view_origin(&self) -> Vec2 {
         self.anchor.origin
+    }
+
+    /// A node's editor position as a zoom-free patch position: what patches
+    /// save, and what frames and notes are kept in.
+    pub fn to_patch(&self, position: Pos2, zoom: f32) -> Pos2 {
+        self.anchor.unzoomed(position, zoom).to_pos2()
+    }
+
+    /// The editor position of a patch position, at the given zoom.
+    pub fn from_patch(&self, position: Pos2, zoom: f32) -> Pos2 {
+        self.anchor.zoomed(position.to_vec2(), zoom)
     }
 
     /// Follows a zoom of the editor. See [`ViewAnchor::follow_zoom`].
@@ -591,6 +697,7 @@ mod tests {
     use super::*;
     use egui::{pos2, vec2, Rect};
     use egui_node_graph2::GraphEditorState;
+    use crate::graph::annotations::Annotation;
 
     /// An editor without a window: the graph, its user state and undo
     /// history, edited the way the editor and its responses edit them.
@@ -999,6 +1106,92 @@ mod tests {
         assert!(same(&rig.snapshot(), &full));
     }
 
+    fn add_frame(rig: &mut Rig, title: &str, rect: egui::Rect) -> AnnotationId {
+        use crate::graph::annotations::{Frame, Tint};
+        rig.user_state.annotations.add(Annotation::Frame(Frame { title: title.into(), rect, tint: Tint::Blue }))
+    }
+
+    fn frame(rig: &Rig, id: AnnotationId) -> crate::graph::annotations::Frame {
+        match rig.user_state.annotations.get(id) {
+            Some(Annotation::Frame(frame)) => frame.clone(),
+            other => panic!("expected a frame, found {other:?}"),
+        }
+    }
+
+    fn frame_mut(rig: &mut Rig, id: AnnotationId) -> &mut crate::graph::annotations::Frame {
+        match rig.user_state.annotations.get_mut(id) {
+            Some(Annotation::Frame(frame)) => frame,
+            _ => panic!("expected a frame"),
+        }
+    }
+
+    #[test]
+    fn test_frames_added_moved_resized_and_deleted_undo() {
+        let mut rig = Rig::new();
+        let (osc, filter, _) = voice(&mut rig);
+        let rect = egui::Rect::from_min_size(pos2(60.0, 40.0), vec2(600.0, 300.0));
+
+        let (undone, _) = round_trip(&mut rig, |rig| {
+            add_frame(rig, "Voice", rect);
+        });
+        assert_eq!(undone.label, "Add frame Voice");
+        assert!(undone.commands.is_empty(), "frames make no sound");
+        let id = rig.user_state.annotations.iter().next().unwrap().0;
+
+        // Dragged by its title, with the modules inside it: one step
+        let (undone, _) = round_trip(&mut rig, |rig| {
+            frame_mut(rig, id).rect = rect.translate(vec2(40.0, 25.0));
+            rig.drag(osc, vec2(40.0, 25.0));
+            rig.drag(filter, vec2(40.0, 25.0));
+        });
+        assert_eq!(undone.label, "Move frame Voice");
+        rig.undo();
+        assert_eq!(frame(&rig, id).rect, rect);
+        assert_eq!(rig.editor.node_positions[osc], pos2(100.0, 100.0));
+        rig.redo();
+
+        let (undone, _) = round_trip(&mut rig, |rig| frame_mut(rig, id).rect.max += vec2(80.0, 0.0));
+        assert_eq!(undone.label, "Resize frame Voice");
+        let (undone, _) = round_trip(&mut rig, |rig| frame_mut(rig, id).title = "Lead".into());
+        assert_eq!(undone.label, "Rename frame Lead");
+
+        // Deleted and brought back under its own ID, where it was
+        let before = frame(&rig, id);
+        let (undone, _) = round_trip(&mut rig, |rig| {
+            rig.user_state.annotations.remove(id);
+        });
+        assert_eq!(undone.label, "Delete frame Lead");
+        rig.undo();
+        assert_eq!(frame(&rig, id), before);
+    }
+
+    #[test]
+    fn test_notes_undo_and_zooming_leaves_frames_alone() {
+        use crate::graph::annotations::Note;
+        let mut rig = Rig::new();
+        let note = rig.user_state.annotations.add(Annotation::Note(Note {
+            text: "Hold a chord".into(),
+            position: pos2(10.0, 10.0),
+            width: 240.0,
+        }));
+        rig.record();
+        let edit_text = |rig: &mut Rig, text: &str| {
+            if let Some(Annotation::Note(n)) = rig.user_state.annotations.get_mut(note) {
+                n.text = text.into();
+            }
+        };
+        let (undone, _) = round_trip(&mut rig, |rig| edit_text(rig, "Hold a **long** chord"));
+        assert_eq!(undone.label, "Edit note");
+
+        // Frames and notes are kept in patch space, so zooming isn't an edit
+        add_frame(&mut rig, "Voice", egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(300.0, 200.0)));
+        rig.record();
+        rig.history.mark_saved();
+        rig.zoom(1.6);
+        rig.record();
+        assert!(!rig.history.has_unsaved_changes());
+    }
+
     #[test]
     fn test_duplicate_is_one_named_step() {
         let mut rig = Rig::new();
@@ -1006,7 +1199,7 @@ mod tests {
         rig.record();
         let before = rig.snapshot();
 
-        let pasted = editing::duplicate(&mut rig.editor, &mut rig.user_state, &[osc, filter]).unwrap();
+        let pasted = editing::duplicate(&mut rig.editor, &mut rig.user_state, &editing::Selection::modules(&[osc, filter])).unwrap();
         rig.history.name_next("Duplicate 2 modules");
         rig.record();
         assert_eq!(rig.history.undo_label(), Some("Duplicate 2 modules"));

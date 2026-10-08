@@ -12,6 +12,6 @@ pub use examples::{Example, EXAMPLES};
 pub use graph_io::{capture_patch, merge_patch, stage_patch, StagedNode, StagedPatch};
 
 pub use patch::{
-    ConnectionData, MidiMapping, NamedParameter, NodeData, ParameterValue, Patch, PatchError,
+    ConnectionData, FrameData, MidiMapping, NamedParameter, NodeData, NoteData, ParameterValue, Patch, PatchError,
     load_from_file, migrate_v2_to_v3, patch_from_json, save_to_file, PATCH_VERSION,
 };

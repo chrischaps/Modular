@@ -2,8 +2,8 @@
 //!
 //! Contains the user state passed to egui_node_graph2 callbacks.
 
-use egui::{Color32, Pos2};
-use egui_node_graph2::{ConnectionSignalTrait, FlowGlyph, GraphEditorState, NodeId, SignalTrace};
+use egui::{Color32, Pos2, Vec2};
+use egui_node_graph2::{Backdrop, ConnectionSignalTrait, FlowGlyph, GraphEditorState, NodeId, SignalTrace};
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
@@ -11,6 +11,8 @@ use crate::dsp::Readout;
 use crate::engine::{ChannelPeaks, NodeId as EngineNodeId};
 use crate::engine::midi_engine::MidiEvent;
 use crate::widgets::{LevelMeter, ModuleMeters};
+use super::annotation_ui::{self, View};
+use super::annotations::{self, Annotations};
 use super::signal_history::{OutputHistory, TraceShape};
 use super::{SynthDataType, SynthGraph, SynthNodeData, SynthValueType};
 use super::templates::SynthNodeTemplate;
@@ -137,6 +139,18 @@ pub struct SynthGraphState {
     /// Set by the graph editor before rendering.
     pub zoom: f32,
 
+    /// Where patch (0, 0) is in editor node coordinates, at [`Self::zoom`]:
+    /// a node at patch position `p` sits at `view_origin + p * zoom`. Set by
+    /// the app before rendering, from its undo history's view anchor.
+    pub view_origin: Vec2,
+
+    /// The patch's frames and notes.
+    pub annotations: Annotations,
+
+    /// Whether the pointer is over a frame's or note's handle, where a
+    /// right-click opens its menu rather than the add-module menu.
+    pub over_annotation: bool,
+
     /// Whether the transport is playing.
     /// When false, cable animations are stopped.
     pub is_playing: bool,
@@ -189,6 +203,9 @@ impl Default for SynthGraphState {
             widget_context_menu_open: false,
             scope_data: HashMap::new(),
             zoom: 1.0,
+            view_origin: Vec2::ZERO,
+            annotations: Annotations::default(),
+            over_annotation: false,
             is_playing: false,
             keyboard_active_notes: Vec::new(),
             midi_active_notes: Vec::new(),
@@ -256,6 +273,8 @@ impl SynthGraphState {
         self.output_meter = LevelMeter::default();
         self.module_meters.clear();
         self.readouts.clear();
+        self.annotations.clear();
+        self.over_annotation = false;
     }
 
     /// Get the MIDI mapping info for a parameter, if any.
@@ -485,6 +504,18 @@ impl ConnectionSignalTrait for SynthGraphState {
 
     fn flow_glyph(&self) -> FlowGlyph {
         self.flow_glyph
+    }
+
+    fn backdrop_ui(&mut self, ui: &mut egui::Ui, backdrop: Backdrop<'_>) {
+        // A scroll this frame has already zoomed the nodes, after the app set
+        // the view origin, so the origin follows them here
+        let mut view_origin = self.view_origin;
+        if backdrop.zoom != self.zoom {
+            let half_size = ui.clip_rect().size() / 2.0;
+            view_origin = annotations::follow_zoom(view_origin, backdrop.zoom / self.zoom, half_size, *backdrop.pan);
+        }
+        let view = View { origin: backdrop.origin + view_origin, zoom: backdrop.zoom };
+        self.over_annotation = annotation_ui::show(ui, &mut self.annotations, backdrop, view);
     }
 
     fn output_port_color(

@@ -93,6 +93,13 @@ pub struct Patch {
     /// MIDI CC mappings (optional for backwards compatibility).
     #[serde(default)]
     pub midi_mappings: Vec<MidiMapping>,
+    /// Titled backdrops behind groups of modules. Only written when there
+    /// are some; versions that predate them ignore the field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub frames: Vec<FrameData>,
+    /// Text cards on the canvas. Only written when there are some.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<NoteData>,
 }
 
 impl Patch {
@@ -104,6 +111,8 @@ impl Patch {
             nodes: Vec::new(),
             connections: Vec::new(),
             midi_mappings: Vec::new(),
+            frames: Vec::new(),
+            notes: Vec::new(),
         }
     }
 
@@ -150,6 +159,30 @@ impl NodeData {
             bypassed: false,
         }
     }
+}
+
+/// A frame: a titled, tinted backdrop drawn behind a group of modules.
+/// Positions and sizes are in the same units as node positions.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FrameData {
+    pub title: String,
+    /// Top-left corner.
+    pub position: (f32, f32),
+    /// Width and height.
+    pub size: (f32, f32),
+    /// The tint's name, e.g. "blue". An unknown name reads as the default.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub color: String,
+}
+
+/// A note: a card of text on the canvas. `**bold**` marks emphasis.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NoteData {
+    pub text: String,
+    /// Top-left corner, in the same units as node positions.
+    pub position: (f32, f32),
+    /// Width the text wraps at. Its height follows from the text.
+    pub width: f32,
 }
 
 /// A parameter value together with the name of the parameter it belongs to.
@@ -351,6 +384,8 @@ pub fn migrate_v2_to_v3(old: PatchV2) -> Patch {
         nodes,
         connections: old.connections,
         midi_mappings: old.midi_mappings,
+        frames: Vec::new(),
+        notes: Vec::new(),
     }
 }
 
@@ -476,6 +511,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_frames_and_notes_survive_save_and_load() {
+        let mut patch = Patch::new("Annotated");
+        patch.frames.push(FrameData {
+            title: "Voice".to_string(),
+            position: (-40.0, 20.5),
+            size: (420.0, 310.0),
+            color: "teal".to_string(),
+        });
+        patch.notes.push(NoteData {
+            text: "Turn **Resonance** up slowly.\nListen for the whistle.".to_string(),
+            position: (400.0, -12.0),
+            width: 260.0,
+        });
+        let path = std::env::temp_dir().join(format!("modular-annotated-{}.json", std::process::id()));
+        save_to_file(&patch, &path).unwrap();
+        let loaded = load_from_file(&path);
+        std::fs::remove_file(&path).ok();
+        assert_eq!(loaded.unwrap(), patch);
+    }
+
+    #[test]
+    fn test_patches_without_frames_or_notes_read_and_write_as_before() {
+        // A patch saved before frames and notes existed loads with none
+        let old = r#"{"name": "Old", "version": 5, "nodes": [], "connections": []}"#;
+        let patch = patch_from_json(old).unwrap();
+        assert!(patch.frames.is_empty() && patch.notes.is_empty());
+
+        // and saves without the fields, so its file doesn't change
+        let json = serde_json::to_string(&patch).unwrap();
+        assert!(!json.contains("frames") && !json.contains("notes"), "{json}");
+    }
+
+    #[test]
+    fn test_fields_this_version_does_not_know_are_ignored() {
+        // How an older version reads a patch with frames and notes: the same
+        // way this one reads a field from the future
+        let newer = r#"{"name": "New", "version": 5, "nodes": [], "connections": [],
+            "frames": [], "groups": [{"title": "Later"}]}"#;
+        assert!(patch_from_json(newer).is_ok());
+    }
+
+    #[test]
     fn test_patch_creation() {
         let patch = Patch::new("Test Patch");
         assert_eq!(patch.name, "Test Patch");
@@ -518,6 +595,8 @@ mod tests {
             nodes: vec![],
             connections: vec![],
             midi_mappings: vec![],
+            frames: vec![],
+            notes: vec![],
         };
         assert!(!future_patch.is_compatible());
     }

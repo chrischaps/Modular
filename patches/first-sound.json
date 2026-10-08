@@ -6,8 +6,8 @@
       "id": 1,
       "module_id": "input.keyboard",
       "position": [
-        30.0,
-        40.0
+        40.0,
+        94.0
       ],
       "parameters": [
         {
@@ -41,8 +41,8 @@
       "id": 2,
       "module_id": "osc.sine",
       "position": [
-        262.0,
-        20.0
+        272.0,
+        74.0
       ],
       "parameters": [
         {
@@ -101,8 +101,8 @@
       "id": 3,
       "module_id": "mod.adsr",
       "position": [
-        494.0,
-        300.0
+        564.0,
+        354.0
       ],
       "parameters": [
         {
@@ -151,8 +151,8 @@
       "id": 4,
       "module_id": "util.vca",
       "position": [
-        770.0,
-        60.0
+        840.0,
+        114.0
       ],
       "parameters": [
         {
@@ -171,8 +171,8 @@
       "id": 5,
       "module_id": "output.audio",
       "position": [
-        943.0,
-        60.0
+        1070.0,
+        114.0
       ],
       "parameters": [
         {
@@ -231,5 +231,49 @@
       "to_port": "Mono"
     }
   ],
-  "midi_mappings": []
+  "midi_mappings": [],
+  "frames": [
+    {
+      "title": "Tone",
+      "position": [
+        16.0,
+        16.0
+      ],
+      "size": [
+        465.0,
+        626.0
+      ],
+      "color": "blue"
+    },
+    {
+      "title": "Shape",
+      "position": [
+        540.0,
+        56.0
+      ],
+      "size": [
+        450.0,
+        658.0
+      ],
+      "color": "amber"
+    }
+  ],
+  "notes": [
+    {
+      "text": "Press **▶ Play**, then play the **Z** to **M** keys. Each key sends the oscillator a pitch and the envelope a gate.",
+      "position": [
+        16.0,
+        666.0
+      ],
+      "width": 300.0
+    },
+    {
+      "text": "The envelope draws each note's shape: up when a key goes down, away when it's let go. The VCA turns that shape into volume.",
+      "position": [
+        540.0,
+        738.0
+      ],
+      "width": 300.0
+    }
+  ]
 }

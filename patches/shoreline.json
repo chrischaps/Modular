@@ -6,8 +6,8 @@
       "id": 1,
       "module_id": "util.clock",
       "position": [
-        20.0,
-        40.0
+        264.0,
+        94.0
       ],
       "parameters": [
         {
@@ -36,8 +36,8 @@
       "id": 2,
       "module_id": "source.noise",
       "position": [
-        20.0,
-        300.0
+        24.0,
+        524.0
       ],
       "parameters": [
         {
@@ -56,8 +56,8 @@
       "id": 3,
       "module_id": "util.sample_hold",
       "position": [
-        270.0,
-        190.0
+        456.0,
+        244.0
       ],
       "parameters": [
         {
@@ -71,8 +71,8 @@
       "id": 4,
       "module_id": "osc.sine",
       "position": [
-        490.0,
-        20.0
+        655.0,
+        74.0
       ],
       "parameters": [
         {
@@ -131,8 +131,8 @@
       "id": 5,
       "module_id": "mod.adsr",
       "position": [
-        740.0,
-        20.0
+        870.0,
+        74.0
       ],
       "parameters": [
         {
@@ -181,8 +181,8 @@
       "id": 6,
       "module_id": "util.vca",
       "position": [
-        1000.0,
-        60.0
+        1130.0,
+        114.0
       ],
       "parameters": [
         {
@@ -201,8 +201,8 @@
       "id": 7,
       "module_id": "fx.reverb",
       "position": [
-        1190.0,
-        20.0
+        1286.0,
+        74.0
       ],
       "parameters": [
         {
@@ -246,8 +246,8 @@
       "id": 8,
       "module_id": "output.audio",
       "position": [
-        1450.0,
-        300.0
+        1294.0,
+        734.0
       ],
       "parameters": [
         {
@@ -271,8 +271,8 @@
       "id": 9,
       "module_id": "mod.lfo",
       "position": [
-        270.0,
-        470.0
+        804.0,
+        954.0
       ],
       "parameters": [
         {
@@ -301,8 +301,8 @@
       "id": 10,
       "module_id": "util.mixer",
       "position": [
-        270.0,
-        880.0
+        264.0,
+        734.0
       ],
       "parameters": [
         {
@@ -321,8 +321,8 @@
       "id": 11,
       "module_id": "filter.svf",
       "position": [
-        740.0,
-        590.0
+        584.0,
+        734.0
       ],
       "parameters": [
         {
@@ -346,8 +346,8 @@
       "id": 12,
       "module_id": "util.vca",
       "position": [
-        490.0,
-        660.0
+        804.0,
+        734.0
       ],
       "parameters": [
         {
@@ -479,5 +479,57 @@
       "to_port": "Mono"
     }
   ],
-  "midi_mappings": []
+  "midi_mappings": [],
+  "frames": [
+    {
+      "title": "Chime",
+      "position": [
+        240.0,
+        16.0
+      ],
+      "size": [
+        1300.0,
+        626.0
+      ],
+      "color": "cyan"
+    },
+    {
+      "title": "Surf",
+      "position": [
+        240.0,
+        676.0
+      ],
+      "size": [
+        773.0,
+        705.0
+      ],
+      "color": "blue"
+    }
+  ],
+  "notes": [
+    {
+      "text": "One Noise module does it all. Pink and brown are the water, white picks the chime's notes, and **Random** is the wind.",
+      "position": [
+        16.0,
+        844.0
+      ],
+      "width": 210.0
+    },
+    {
+      "text": "Each rise of the LFO is a wave arriving: louder, and brighter as the filter opens.",
+      "position": [
+        1037.0,
+        1154.0
+      ],
+      "width": 240.0
+    },
+    {
+      "text": "On each pulse the S&H holds a sample of white noise as a pitch. It's unquantized, like a real wind chime.",
+      "position": [
+        1564.0,
+        94.0
+      ],
+      "width": 250.0
+    }
+  ]
 }

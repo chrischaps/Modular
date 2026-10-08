@@ -6,8 +6,8 @@
       "id": 1,
       "module_id": "util.clock",
       "position": [
-        20.0,
-        40.0
+        40.0,
+        94.0
       ],
       "parameters": [
         {
@@ -36,8 +36,8 @@
       "id": 2,
       "module_id": "seq.step",
       "position": [
-        183.0,
-        20.0
+        203.0,
+        74.0
       ],
       "parameters": [
         {
@@ -301,8 +301,8 @@
       "id": 3,
       "module_id": "osc.sine",
       "position": [
-        528.0,
-        20.0
+        548.0,
+        74.0
       ],
       "parameters": [
         {
@@ -361,8 +361,8 @@
       "id": 4,
       "module_id": "filter.ladder",
       "position": [
-        750.0,
-        20.0
+        770.0,
+        74.0
       ],
       "parameters": [
         {
@@ -386,8 +386,8 @@
       "id": 5,
       "module_id": "util.vca",
       "position": [
-        1010.0,
-        60.0
+        1030.0,
+        114.0
       ],
       "parameters": [
         {
@@ -406,8 +406,8 @@
       "id": 6,
       "module_id": "mod.adsr",
       "position": [
-        750.0,
-        340.0
+        770.0,
+        394.0
       ],
       "parameters": [
         {
@@ -456,8 +456,8 @@
       "id": 7,
       "module_id": "util.mixer",
       "position": [
-        1010.0,
-        300.0
+        1030.0,
+        354.0
       ],
       "parameters": [
         {
@@ -476,8 +476,8 @@
       "id": 8,
       "module_id": "mod.lfo",
       "position": [
-        20.0,
-        440.0
+        40.0,
+        494.0
       ],
       "parameters": [
         {
@@ -506,8 +506,8 @@
       "id": 9,
       "module_id": "seq.step",
       "position": [
-        226.0,
-        1000.0
+        246.0,
+        1094.0
       ],
       "parameters": [
         {
@@ -771,8 +771,8 @@
       "id": 10,
       "module_id": "osc.sine",
       "position": [
-        528.0,
-        1000.0
+        548.0,
+        1094.0
       ],
       "parameters": [
         {
@@ -831,8 +831,8 @@
       "id": 11,
       "module_id": "filter.svf",
       "position": [
-        750.0,
-        1000.0
+        770.0,
+        1094.0
       ],
       "parameters": [
         {
@@ -856,8 +856,8 @@
       "id": 12,
       "module_id": "util.vca",
       "position": [
-        1010.0,
-        1040.0
+        1030.0,
+        1134.0
       ],
       "parameters": [
         {
@@ -876,8 +876,8 @@
       "id": 13,
       "module_id": "mod.adsr",
       "position": [
-        1010.0,
-        1300.0
+        1030.0,
+        1394.0
       ],
       "parameters": [
         {
@@ -926,8 +926,8 @@
       "id": 14,
       "module_id": "util.mixer",
       "position": [
-        1330.0,
-        60.0
+        1410.0,
+        114.0
       ],
       "parameters": [
         {
@@ -1006,8 +1006,8 @@
       "id": 15,
       "module_id": "fx.chorus",
       "position": [
-        1650.0,
-        20.0
+        1730.0,
+        74.0
       ],
       "parameters": [
         {
@@ -1051,8 +1051,8 @@
       "id": 16,
       "module_id": "fx.delay",
       "position": [
-        1970.0,
-        20.0
+        2050.0,
+        74.0
       ],
       "parameters": [
         {
@@ -1101,8 +1101,8 @@
       "id": 17,
       "module_id": "fx.reverb",
       "position": [
-        2290.0,
-        20.0
+        2370.0,
+        74.0
       ],
       "parameters": [
         {
@@ -1146,8 +1146,8 @@
       "id": 18,
       "module_id": "output.audio",
       "position": [
-        2560.0,
-        60.0
+        2680.0,
+        114.0
       ],
       "parameters": [
         {
@@ -1332,5 +1332,69 @@
       "to_port": "Right"
     }
   ],
-  "midi_mappings": []
+  "midi_mappings": [],
+  "frames": [
+    {
+      "title": "Arpeggio",
+      "position": [
+        16.0,
+        16.0
+      ],
+      "size": [
+        1320.0,
+        987.0
+      ],
+      "color": "blue"
+    },
+    {
+      "title": "Bass and pad",
+      "position": [
+        222.0,
+        1036.0
+      ],
+      "size": [
+        1062.0,
+        718.0
+      ],
+      "color": "violet"
+    },
+    {
+      "title": "Space",
+      "position": [
+        1386.0,
+        16.0
+      ],
+      "size": [
+        1238.0,
+        747.0
+      ],
+      "color": "cyan"
+    }
+  ],
+  "notes": [
+    {
+      "text": "Sequencer 2 steps once a bar, on Sequencer 1's **EOC**. Its pitch moves the whole arpeggio: F, C, G, A. One shape, four chords.",
+      "position": [
+        1320.0,
+        1036.0
+      ],
+      "width": 300.0
+    },
+    {
+      "text": "**CV Amt** at 60% leaves 40% of the pad always sounding. Each chord change swells it.",
+      "position": [
+        222.0,
+        1770.0
+      ],
+      "width": 300.0
+    },
+    {
+      "text": "The delay is a dotted eighth, so each echo falls between the arpeggio's notes and answers from the other speaker.",
+      "position": [
+        1386.0,
+        779.0
+      ],
+      "width": 320.0
+    }
+  ]
 }

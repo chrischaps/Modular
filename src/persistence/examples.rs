@@ -124,6 +124,20 @@ mod tests {
     }
 
     #[test]
+    fn test_every_example_explains_itself() {
+        for example in EXAMPLES {
+            let patch = example.patch().unwrap();
+            assert!(!patch.frames.is_empty(), "{}: no frames", example.name);
+            assert!((1..=3).contains(&patch.notes.len()), "{}: {} notes", example.name, patch.notes.len());
+            for frame in &patch.frames {
+                assert!(!frame.title.is_empty(), "{}: an untitled frame", example.name);
+                let tint = crate::graph::annotations::Tint::from_key(&frame.color);
+                assert_eq!(tint.key(), frame.color, "{}: frame {} has an unknown color", example.name, frame.title);
+            }
+        }
+    }
+
+    #[test]
     fn test_examples_make_sound() {
         for example in EXAMPLES {
             let patch = example.patch().unwrap();

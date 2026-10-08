@@ -27,7 +27,9 @@
 //! ```text
 //! 0.0  play                         # start the transport
 //! 0.5  key Z 0.4                    # tap a QWERTY key, held 0.4 s
+//! 0.5  key Ctrl+Shift+F 0.1         # a shortcut, with its modifiers held
 //! 0.5  type osc 0.1                 # type text, a letter every 0.1 s
+//! 0.5  type "two words" 0.05        # quoted, for text with spaces
 //! 1.0  note 60 100 2.0              # MIDI note, velocity, length
 //! 1.0  chord 60,64,67 90 3.0
 //! 1.0  midi start                   # MIDI Start, Stop or Continue
@@ -45,6 +47,8 @@
 //!                                   # first framed, scaled 0.5 about the
 //!                                   # centre and shifted (-300, 0), over 3 s
 //! 5.0  still filter-opens           # save this frame as filter-opens.ppm
+//! 5.0  layout voice                 # save where each module is drawn, in
+//!                                   # patch space, as voice.json
 //! 5.0  input voice.wav              # Audio Input modules hear this WAV
 //!                                   # from now on, in place of a device
 //! 9.0  end
@@ -122,8 +126,8 @@ impl CaptureConfig {
 #[derive(Debug, Clone)]
 enum Cue {
     Play(bool),
-    KeyDown(egui::Key),
-    KeyUp(egui::Key),
+    KeyDown(egui::Key, egui::Modifiers),
+    KeyUp(egui::Key, egui::Modifiers),
     Text(String),
     Note { note: u8, velocity: u8, on: bool },
     /// Any other MIDI message, such as a clock tick.
@@ -138,6 +142,8 @@ enum Cue {
     Zoom { factor: f32, dur: f64 },
     Camera { offset: Vec2, scale: f32, dur: f64 },
     Still(String),
+    /// Save where the modules are drawn, under this name.
+    Layout(String),
     /// Play a WAV file into Audio Input modules.
     Input(PathBuf),
     End,
@@ -153,6 +159,8 @@ pub enum CaptureAction {
     SetParam { module: String, nth: usize, input: String, value: f32 },
     /// Audio Input modules are now hearing this file.
     InputFile(String),
+    /// Write where each module is drawn, in patch space, to this file.
+    Layout(PathBuf),
 }
 
 /// A value easing from one point to another over a span of time.
@@ -245,6 +253,8 @@ pub struct Capture {
     pointer: Option<Pos2>,
     pointer_glide: Option<Glide<Vec2>>,
     button_down: bool,
+    /// Modifier keys held with the last key pressed.
+    modifiers: egui::Modifiers,
     ramps: Vec<Ramp>,
     pan_glide: Option<Glide<Vec2>>,
     /// Zoom still to apply: (log of the factor left, frames left).
@@ -315,6 +325,7 @@ impl Capture {
             pointer: None,
             pointer_glide: None,
             button_down: false,
+            modifiers: egui::Modifiers::default(),
             ramps: Vec::new(),
             pan_glide: None,
             zoom_left: None,
@@ -407,6 +418,7 @@ impl Capture {
         }
 
         self.fire_cues(raw);
+        raw.modifiers = self.modifiers;
         self.animate(raw);
     }
 
@@ -427,14 +439,15 @@ impl Capture {
             let offset = (((at - t).max(0.0)) * self.config.sample_rate as f64).round() as u32;
             match cue {
                 Cue::Play(on) => self.actions.push(CaptureAction::Play(on)),
-                Cue::KeyDown(key) | Cue::KeyUp(key) => {
-                    let pressed = matches!(cue, Cue::KeyDown(_));
+                Cue::KeyDown(key, modifiers) | Cue::KeyUp(key, modifiers) => {
+                    let pressed = matches!(cue, Cue::KeyDown(..));
+                    self.modifiers = if pressed { modifiers } else { egui::Modifiers::default() };
                     raw.events.push(egui::Event::Key {
                         key,
                         physical_key: None,
                         pressed,
                         repeat: false,
-                        modifiers: egui::Modifiers::default(),
+                        modifiers,
                     });
                 }
                 Cue::Text(text) => raw.events.push(egui::Event::Text(text)),
@@ -496,6 +509,9 @@ impl Capture {
                     self.zoom_left = Some((factor.ln(), at, dur.max(self.dt())));
                 }
                 Cue::Still(name) => self.stills.push(name),
+                Cue::Layout(name) => {
+                    self.actions.push(CaptureAction::Layout(self.config.out_dir.join(format!("{name}.json"))));
+                }
                 Cue::Input(path) => match read_wav(&path) {
                     Ok((audio, rate)) if rate == self.config.sample_rate => {
                         let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
@@ -767,24 +783,49 @@ fn parse_script(text: &str) -> Result<Vec<(f64, Cue)>, String> {
         let opt = |i: usize| -> Result<f64, String> { if words.len() > i { num(i) } else { Ok(0.0) } };
         let t = num(0)?;
         let cue = *words.get(1).ok_or_else(|| err("missing cue"))?;
-        let key = |i: usize| -> Result<egui::Key, String> {
+        // A key, with any modifiers before it: `Z`, `Ctrl+Shift+F`
+        let key = |i: usize| -> Result<(egui::Key, egui::Modifiers), String> {
             let name = words.get(i).ok_or_else(|| err("missing key"))?;
-            egui::Key::from_name(name).ok_or_else(|| err("unknown key"))
+            let mut parts: Vec<&str> = name.split('+').collect();
+            let key = egui::Key::from_name(parts.pop().unwrap_or_default()).ok_or_else(|| err("unknown key"))?;
+            let mut modifiers = egui::Modifiers::default();
+            for part in parts {
+                match part {
+                    "Ctrl" => modifiers = modifiers | egui::Modifiers::COMMAND,
+                    "Shift" => modifiers.shift = true,
+                    "Alt" => modifiers.alt = true,
+                    _ => return Err(err("unknown modifier")),
+                }
+            }
+            Ok((key, modifiers))
         };
         match cue {
             "play" => cues.push((t, Cue::Play(true))),
             "stop" => cues.push((t, Cue::Play(false))),
             "key" => {
-                let k = key(2)?;
-                cues.push((t, Cue::KeyDown(k)));
-                cues.push((t + num(3)?, Cue::KeyUp(k)));
+                let (k, m) = key(2)?;
+                cues.push((t, Cue::KeyDown(k, m)));
+                cues.push((t + num(3)?, Cue::KeyUp(k, m)));
             }
-            "keydown" => cues.push((t, Cue::KeyDown(key(2)?))),
-            "keyup" => cues.push((t, Cue::KeyUp(key(2)?))),
+            "keydown" => {
+                let (k, m) = key(2)?;
+                cues.push((t, Cue::KeyDown(k, m)));
+            }
+            "keyup" => {
+                let (k, m) = key(2)?;
+                cues.push((t, Cue::KeyUp(k, m)));
+            }
             "type" => {
-                // A word typed a letter at a time, as a person would
-                let text = words.get(2).ok_or_else(|| err("missing text"))?;
-                let gap = if words.len() > 3 { num(3)? } else { 0.09 };
+                // Text typed a letter at a time, as a person would: a word, or
+                // a "quoted phrase" with spaces
+                let (text, gap) = match line.split_once('"') {
+                    Some((_, rest)) => {
+                        let (text, after) = rest.split_once('"').ok_or_else(|| err("unclosed quote"))?;
+                        let gap = after.trim();
+                        (text, if gap.is_empty() { 0.09 } else { gap.parse().map_err(|_| err("not a number"))? })
+                    }
+                    None => (*words.get(2).ok_or_else(|| err("missing text"))?, if words.len() > 3 { num(3)? } else { 0.09 }),
+                };
                 for (i, c) in text.chars().enumerate() {
                     cues.push((t + i as f64 * gap, Cue::Text(c.to_string())));
                 }
@@ -854,6 +895,7 @@ fn parse_script(text: &str) -> Result<Vec<(f64, Cue)>, String> {
                 dur: opt(5)?,
             })),
             "still" => cues.push((t, Cue::Still(words.get(2).ok_or_else(|| err("missing name"))?.to_string()))),
+            "layout" => cues.push((t, Cue::Layout(words.get(2).ok_or_else(|| err("missing name"))?.to_string()))),
             "input" => cues.push((t, Cue::Input(PathBuf::from(words.get(2).ok_or_else(|| err("missing file"))?)))),
             "end" => cues.push((t, Cue::End)),
             _ => return Err(err("unknown cue")),

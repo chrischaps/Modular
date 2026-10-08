@@ -15,6 +15,8 @@ use crate::engine::{
     UiHandle, MidiDeviceInfo, MidiEngine, MidiEvent, MidiReceivers, TimestampedMidiEvent,
 };
 use rtrb::Consumer;
+use crate::graph::annotation_ui;
+use crate::graph::annotations::{Annotation, AnnotationId, Frame, Note, Tint, DEFAULT_NOTE_WIDTH};
 use crate::graph::{
     port_mapping, validate_connection, AllNodeTemplates, AnyParameterId, SynthDataType, SynthGraphState,
     SynthNodeData, SynthNodeTemplate, SynthValueType,
@@ -26,7 +28,7 @@ use crate::persistence::{
 };
 use crate::widgets::{cpu_meter, CpuMeterConfig, KnobStyle};
 use super::capture::{Capture, CaptureAction, CaptureConfig};
-use super::editing;
+use super::editing::{self, Selection};
 use super::engine_sync;
 use super::input_device;
 use super::palette::{PaletteAction, QuickAdd};
@@ -230,6 +232,20 @@ pub struct SynthApp {
 }
 
 /// What a module's right-click menu asked for, handled once the graph is drawn.
+/// What the canvas menu's annotation items add.
+#[derive(Clone, Copy)]
+enum NewAnnotation {
+    Frame,
+    Note,
+}
+
+/// Space left between a new frame and the modules it's drawn around, in
+/// patch points. The title band goes above that.
+const FRAME_PADDING: f32 = 24.0;
+
+/// A new empty frame's size, in patch points.
+const NEW_FRAME_SIZE: egui::Vec2 = egui::Vec2::new(380.0, 260.0);
+
 enum NodeMenuAction {
     Select(egui_node_graph2::NodeId),
     Duplicate(egui_node_graph2::NodeId),
@@ -373,7 +389,7 @@ impl SynthApp {
 
     /// Runs the capture's cues for a new frame, then renders the audio the
     /// frame covers, so this frame's picture shows what it sounds like.
-    fn step_capture(&mut self) {
+    fn step_capture(&mut self, ctx: &egui::Context) {
         let Some(capture) = self.capture.as_mut() else { return };
         if !capture.is_fresh() {
             return;
@@ -403,6 +419,7 @@ impl SynthApp {
                     midi.extend(event.to_dsp(offset));
                 }
                 CaptureAction::InputFile(name) => self.user_state.audio_input_name = Some(name),
+                CaptureAction::Layout(path) => self.write_layout(ctx, &path),
                 CaptureAction::SetParam { module, nth, input, value } => {
                     match find_input(&self.graph_state.graph, &module, nth, &input) {
                         Some(id) => self.graph_state.graph.inputs[id].value.set_actual_value(value),
@@ -422,6 +439,27 @@ impl SynthApp {
         let (buffer, input) = capture.audio_and_input();
         engine.render_offline(buffer, 2, &mut midi, input);
         capture.commit_audio();
+    }
+
+    /// Writes where each module was last drawn, in patch space, for a
+    /// capture's `layout` cue: what frames around them need to clear.
+    fn write_layout(&self, ctx: &egui::Context, path: &Path) {
+        let zoom = self.graph_state.pan_zoom.zoom;
+        let to_patch = |screen: egui::Pos2| self.history.to_patch(self.screen_to_node(screen), zoom);
+        let modules: Vec<serde_json::Value> = self.graph_state.node_order.iter().filter_map(|&node_id| {
+            let rect = annotation_ui::module_rect(ctx, node_id)?;
+            let position = self.history.to_patch(*self.graph_state.node_positions.get(node_id)?, zoom);
+            let (min, max) = (to_patch(rect.min), to_patch(rect.max));
+            Some(serde_json::json!({
+                "module_id": self.graph_state.graph.nodes.get(node_id)?.user_data.module_id,
+                "position": [position.x, position.y],
+                "rect": [min.x, min.y, max.x, max.y],
+            }))
+        }).collect();
+        let json = serde_json::to_string_pretty(&modules).unwrap_or_default();
+        if let Err(e) = std::fs::write(path, json) {
+            eprintln!("capture: couldn't write {}: {}", path.display(), e);
+        }
     }
 
     /// Refresh the list of available audio devices
@@ -1518,8 +1556,9 @@ impl SynthApp {
                 // Reset widget context menu flag before drawing
                 self.user_state.widget_context_menu_open = false;
 
-                // Update zoom for widget scaling
+                // Update zoom for widget scaling, and where frames and notes go
                 self.user_state.zoom = self.graph_state.pan_zoom.zoom;
+                self.user_state.view_origin = self.history.view_origin();
 
                 // The grid sits under the patch and moves with it
                 let grid_origin = editor_rect.min + self.graph_state.pan_zoom.pan + self.history.view_origin();
@@ -1545,6 +1584,14 @@ impl SynthApp {
                 );
                 // Zooming moves every node; undo keeps positions that don't
                 self.history.follow_zoom(zoom_before, pan_before, &self.graph_state.pan_zoom);
+                self.user_state.view_origin = self.history.view_origin();
+
+                // A selection box takes in the frames and notes wholly inside it
+                if let Some(start) = self.graph_state.ongoing_box_selection {
+                    if let Some(pointer) = ctx.input(|i| i.pointer.hover_pos()) {
+                        self.user_state.annotations.select_within(egui::Rect::from_two_pos(start, pointer));
+                    }
+                }
 
                 cursor_in_editor = graph_response.cursor_in_editor;
 
@@ -1665,15 +1712,20 @@ impl SynthApp {
             });
 
         // Detect right-click in editor to open context menu
+        let mut menu_just_opened = false;
         // Only show "add node" menu when clicking on empty canvas, not on nodes/widgets
         if ctx.input(|i| i.pointer.secondary_clicked()) && cursor_in_editor {
             // Only open if not already showing a menu and no widget context menu is open
-            if self.user_state.context_menu_pos.is_none() && !self.user_state.widget_context_menu_open {
+            if self.user_state.context_menu_pos.is_none()
+                && !self.user_state.widget_context_menu_open
+                && !self.user_state.over_annotation
+            {
                 let click_pos = ctx.input(|i| i.pointer.interact_pos());
                 // A module has its own menu, and its knobs theirs. Neither says
                 // so on the frame of the click, so go by where the click was
                 if let Some(click_pos) = click_pos.filter(|pos| !self.is_over_module(ctx, *pos)) {
                     self.user_state.context_menu_pos = Some(click_pos);
+                    menu_just_opened = true;
                 }
             }
         }
@@ -1682,6 +1734,7 @@ impl SynthApp {
         if let Some(menu_pos) = self.user_state.context_menu_pos {
             let mut close_menu = false;
             let mut template_to_create: Option<SynthNodeTemplate> = None;
+            let mut annotation_to_create: Option<NewAnnotation> = None;
 
             // Hover delay before switching submenus (in seconds)
             const SUBMENU_HOVER_DELAY: f32 = 0.15;
@@ -1739,6 +1792,30 @@ impl SynthApp {
                                 self.user_state.context_menu_hover_intent = None;
                             }
                         }
+
+                        // Frames and notes, to explain the patch
+                        ui.separator();
+                        let framing = !self.graph_state.selected_nodes.is_empty();
+                        for (label, kind, hint) in [
+                            ("Frame", NewAnnotation::Frame,
+                                if framing { "A titled backdrop around the selected modules (Ctrl+Shift+F)" }
+                                else { "A titled backdrop to group modules under (Ctrl+Shift+F frames the selection)" }),
+                            ("Note", NewAnnotation::Note, "A card of text. **Bold** for emphasis"),
+                        ] {
+                            let response = ui.add(
+                                egui::Button::new(RichText::new(label).color(theme::text::SECONDARY))
+                                    .min_size(egui::vec2(110.0, 0.0))
+                                    .frame(false),
+                            );
+                            if response.hovered() {
+                                self.user_state.context_menu_open_category = None;
+                                self.user_state.context_menu_hover_intent = None;
+                            }
+                            if response.on_hover_text(hint).clicked() {
+                                annotation_to_create = Some(kind);
+                                close_menu = true;
+                            }
+                        }
                     });
                 });
 
@@ -1779,12 +1856,14 @@ impl SynthApp {
 
             // Close menu on click outside
             let menu_rect = menu_response.response.rect;
-            if ctx.input(|i| i.pointer.any_click()) {
+            // Near the bottom of the window the menu is moved up to fit, off the
+            // click that opened it, which mustn't count as a click outside
+            if ctx.input(|i| i.pointer.any_click()) && !menu_just_opened {
                 if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
                     // Check if click was outside both main menu and submenu
                     let in_main_menu = menu_rect.contains(pos);
                     let in_submenu = submenu_rect.map_or(false, |r| r.contains(pos));
-                    if !in_main_menu && !in_submenu && template_to_create.is_none() {
+                    if !in_main_menu && !in_submenu && template_to_create.is_none() && annotation_to_create.is_none() {
                         close_menu = true;
                     }
                 }
@@ -1799,6 +1878,12 @@ impl SynthApp {
             if let Some(template) = template_to_create {
                 self.add_module_at(template, menu_pos);
                 close_menu = true;
+            }
+            match annotation_to_create {
+                Some(NewAnnotation::Frame) if !self.graph_state.selected_nodes.is_empty() => self.frame_selection(ctx),
+                Some(NewAnnotation::Frame) => self.add_frame_at(menu_pos),
+                Some(NewAnnotation::Note) => self.add_note_at(menu_pos),
+                None => {}
             }
 
             if close_menu {
@@ -1919,14 +2004,79 @@ impl SynthApp {
         self.quick_add = Some(QuickAdd::new(anchor));
     }
 
-    /// The nodes a right-click menu action applies to: the whole selection
-    /// if the node is part of it, otherwise just the node.
-    fn menu_targets(&self, node_id: egui_node_graph2::NodeId) -> Vec<egui_node_graph2::NodeId> {
-        if self.graph_state.selected_nodes.contains(&node_id) {
-            self.graph_state.selected_nodes.clone()
-        } else {
-            vec![node_id]
+    /// The patch position of a point on screen.
+    fn screen_to_patch(&self, screen: egui::Pos2) -> egui::Pos2 {
+        self.history.to_patch(self.screen_to_node(screen), self.graph_state.pan_zoom.zoom)
+    }
+
+    /// What's selected: modules, frames and notes.
+    fn selection(&self) -> Selection {
+        Selection {
+            nodes: self.graph_state.selected_nodes.clone(),
+            annotations: self.user_state.annotations.selection(),
         }
+    }
+
+    /// Selects exactly these, and nothing else.
+    fn select(&mut self, nodes: Vec<egui_node_graph2::NodeId>, annotations: Vec<AnnotationId>) {
+        self.graph_state.selected_nodes = nodes;
+        self.user_state.annotations.selected = annotations.into_iter().collect();
+    }
+
+    /// What a right-click menu action applies to: the whole selection if
+    /// the node is part of it, otherwise just the node.
+    fn menu_targets(&self, node_id: egui_node_graph2::NodeId) -> Selection {
+        if self.graph_state.selected_nodes.contains(&node_id) {
+            self.selection()
+        } else {
+            Selection::modules(&[node_id])
+        }
+    }
+
+    /// Adds a frame around the selected modules, tinted for what they are,
+    /// and opens its title for naming.
+    fn frame_selection(&mut self, ctx: &egui::Context) {
+        let nodes = self.graph_state.selected_nodes.clone();
+        let Some(screen) = nodes.iter().filter_map(|&id| annotation_ui::module_rect(ctx, id)).reduce(|a, b| a.union(b)) else {
+            self.status_message = Some("Select modules to frame them (Ctrl+Shift+F)".to_string());
+            return;
+        };
+        let around = egui::Rect::from_min_max(self.screen_to_patch(screen.min), self.screen_to_patch(screen.max));
+        let rect = egui::Rect::from_min_max(
+            around.min - egui::vec2(FRAME_PADDING, FRAME_PADDING + annotation_ui::FRAME_TITLE_BAND),
+            around.max + egui::vec2(FRAME_PADDING, FRAME_PADDING),
+        );
+        let graph = &self.graph_state.graph;
+        let tint = Tint::for_contents(nodes.iter().filter_map(|&id| graph.nodes.get(id)).map(|n| n.user_data.category));
+        self.add_frame(rect, tint);
+        let what = editing::describe_modules(&self.graph_state, &nodes);
+        self.status_message = Some(format!("Framed {what}: name the frame, then press Enter"));
+    }
+
+    /// Adds an empty frame with its top-left corner at a point on screen.
+    fn add_frame_at(&mut self, screen: egui::Pos2) {
+        let rect = egui::Rect::from_min_size(self.screen_to_patch(screen), NEW_FRAME_SIZE);
+        self.add_frame(rect, Tint::default());
+        self.status_message = Some("Name the frame, then press Enter".to_string());
+    }
+
+    /// Adds a frame, selects it, and opens its title for naming. Naming it
+    /// is part of the same undo step.
+    fn add_frame(&mut self, rect: egui::Rect, tint: Tint) {
+        let annotations = &mut self.user_state.annotations;
+        let id = annotations.add(Annotation::Frame(Frame { title: String::new(), rect, tint }));
+        annotations.start_editing(id, true);
+        self.select(Vec::new(), vec![id]);
+    }
+
+    /// Adds a note at a point on screen, open for writing. A note left
+    /// empty goes away again.
+    fn add_note_at(&mut self, screen: egui::Pos2) {
+        let position = self.screen_to_patch(screen);
+        let annotations = &mut self.user_state.annotations;
+        let id = annotations.add(Annotation::Note(Note { text: String::new(), position, width: DEFAULT_NOTE_WIDTH }));
+        annotations.start_editing(id, false);
+        self.select(Vec::new(), vec![id]);
     }
 
     fn handle_node_menu(&mut self, ctx: &egui::Context, action: NodeMenuAction) {
@@ -1936,31 +2086,33 @@ impl SynthApp {
                     self.graph_state.selected_nodes = vec![node_id];
                 }
             }
-            NodeMenuAction::Duplicate(node_id) => self.duplicate_modules(&self.menu_targets(node_id)),
-            NodeMenuAction::Copy(node_id) => self.copy_modules(ctx, &self.menu_targets(node_id)),
-            NodeMenuAction::Reset(node_id) => self.reset_modules(&self.menu_targets(node_id)),
-            NodeMenuAction::Delete(node_id) => self.delete_modules(&self.menu_targets(node_id), "Delete", "Deleted"),
+            NodeMenuAction::Duplicate(node_id) => self.duplicate_selection(&self.menu_targets(node_id)),
+            NodeMenuAction::Copy(node_id) => self.copy_selection(ctx, &self.menu_targets(node_id)),
+            NodeMenuAction::Reset(node_id) => self.reset_modules(&self.menu_targets(node_id).nodes),
+            NodeMenuAction::Delete(node_id) => self.delete_selection(&self.menu_targets(node_id), "Delete", "Deleted"),
         }
     }
 
-    /// Deletes modules with their cables. `verb` names the undo step and
-    /// `done` the status message: "Delete" and "Deleted", or "Cut" and "Cut".
-    fn delete_modules(&mut self, nodes: &[egui_node_graph2::NodeId], verb: &str, done: &str) {
-        if nodes.is_empty() {
+    /// Deletes modules with their cables, and frames and notes. `verb` names
+    /// the undo step and `done` the status message: "Delete" and "Deleted",
+    /// or "Cut" and "Cut".
+    fn delete_selection(&mut self, selection: &Selection, verb: &str, done: &str) {
+        if selection.is_empty() {
             return;
         }
-        let what = editing::describe_modules(&self.graph_state, nodes);
-        for cmd in editing::delete_modules(&mut self.graph_state, &mut self.user_state, nodes) {
+        let what = editing::describe(&self.graph_state, &self.user_state, selection);
+        for cmd in editing::delete_selection(&mut self.graph_state, &mut self.user_state, selection) {
             self.send_command(cmd);
         }
         self.history.name_next(format!("{verb} {what}"));
         self.status_message = Some(format!("{done} {what}"));
     }
 
-    /// Duplicates modules, with the cables between them, and selects the copies.
-    fn duplicate_modules(&mut self, nodes: &[egui_node_graph2::NodeId]) {
-        let what = editing::describe_modules(&self.graph_state, nodes);
-        let Some(pasted) = editing::duplicate(&mut self.graph_state, &mut self.user_state, nodes) else {
+    /// Duplicates modules, with the cables between them, and frames and
+    /// notes, and selects the copies.
+    fn duplicate_selection(&mut self, selection: &Selection) {
+        let what = editing::describe(&self.graph_state, &self.user_state, selection);
+        let Some(pasted) = editing::duplicate(&mut self.graph_state, &mut self.user_state, selection) else {
             return;
         };
         self.finish_paste(pasted, &format!("Duplicate {what}"));
@@ -1982,17 +2134,18 @@ impl SynthApp {
         }
     }
 
-    /// Puts modules and the cables between them on the clipboard, as patch
-    /// JSON. They paste back into this window or another one.
-    fn copy_modules(&mut self, ctx: &egui::Context, nodes: &[egui_node_graph2::NodeId]) {
-        let Some(patch) = editing::copy_modules(&self.graph_state, &self.user_state, nodes) else {
+    /// Puts modules and the cables between them, and frames and notes, on
+    /// the clipboard as patch JSON. They paste back into this window or
+    /// another one.
+    fn copy_selection(&mut self, ctx: &egui::Context, selection: &Selection) {
+        let Some(patch) = editing::copy_selection(&self.graph_state, &self.user_state, selection) else {
             return;
         };
         match serde_json::to_string_pretty(&patch) {
             Ok(json) => {
                 ctx.copy_text(json);
                 self.last_paste = None;
-                let what = editing::describe_modules(&self.graph_state, nodes);
+                let what = editing::describe(&self.graph_state, &self.user_state, selection);
                 self.status_message = Some(format!("Copied {what}"));
             }
             Err(e) => self.status_message = Some(format!("Couldn't copy: {e}")),
@@ -2014,9 +2167,10 @@ impl SynthApp {
             _ => aim,
         };
         match editing::paste(&mut self.graph_state, &mut self.user_state, &patch, at) {
-            Ok(pasted) if !pasted.nodes.is_empty() => {
+            Ok(pasted) if !pasted.nodes.is_empty() || !pasted.annotations.is_empty() => {
                 self.last_paste = Some((aim, at));
-                let what = editing::describe_modules(&self.graph_state, &pasted.nodes);
+                let pasted_selection = Selection { nodes: pasted.nodes.clone(), annotations: pasted.annotations.clone() };
+                let what = editing::describe(&self.graph_state, &self.user_state, &pasted_selection);
                 if !pasted.warnings.is_empty() {
                     self.load_warnings = pasted.warnings.clone();
                 }
@@ -2033,7 +2187,7 @@ impl SynthApp {
         for cmd in pasted.commands {
             self.send_command(cmd);
         }
-        self.graph_state.selected_nodes = pasted.nodes;
+        self.select(pasted.nodes, pasted.annotations);
         self.history.name_next(label);
     }
 
@@ -2118,44 +2272,33 @@ impl SynthApp {
 
     /// Create a Patch from the current graph state.
     fn create_patch(&self, name: &str) -> Patch {
-        let pan_zoom = &self.graph_state.pan_zoom;
-
-        // Get node positions normalized to zoom=1.0 coordinates for persistence.
-        // The library's update_node_positions_after_zoom modifies positions when zooming,
-        // so we need to reverse that transformation to get zoom-independent positions.
-        // On load, we reset to zoom=1.0 and pan=0, so positions saved this way will match.
+        // Zooming rescales every node position in the editor, so positions are
+        // saved in patch space, which doesn't move with the view. A patch
+        // opens at zoom 1 with patch (0, 0) at the editor's origin, so they
+        // come back exactly where they were, along with the frames and notes
+        // that are kept in the same space.
+        let zoom = self.graph_state.pan_zoom.zoom;
         let position = |node_id| {
             self.graph_state.node_positions
                 .get(node_id)
-                .map(|pos| {
-                    let zoom = pan_zoom.zoom;
-                    let pan = pan_zoom.pan;
-                    let clip_rect = pan_zoom.clip_rect;
-
-                    // If zoom is ~1.0 or clip_rect is invalid, use position as-is
-                    if (zoom - 1.0).abs() < 0.001 || clip_rect.is_negative() {
-                        (pos.x, pos.y)
-                    } else {
-                        // Reverse the zoom transformation to get canonical position
-                        // This inverts what update_node_positions_after_zoom does
-                        let half_size = clip_rect.size() / 2.0;
-                        let local_pos = pos.to_vec2() - half_size + pan;
-                        let unscaled = local_pos / zoom;
-                        // For loading with pan=0, canonical position is:
-                        let canonical = (unscaled + half_size).to_pos2();
-                        (canonical.x, canonical.y)
-                    }
+                .map(|&pos| {
+                    let p = self.history.to_patch(pos, zoom);
+                    (p.x, p.y)
                 })
                 .unwrap_or((0.0, 0.0))
         };
 
-        capture_patch(
+        let mut patch = capture_patch(
             name,
             &self.graph_state.graph,
             |node_id| self.user_state.get_engine_node_id(node_id),
             position,
             &self.midi_mappings,
-        )
+        );
+        let annotations = &self.user_state.annotations;
+        let all: Vec<AnnotationId> = annotations.iter().map(|(id, _)| id).collect();
+        (patch.frames, patch.notes) = annotations.to_patch(&all, egui::Vec2::ZERO);
+        patch
     }
 
     /// Load a patch, replacing the current graph.
@@ -2202,6 +2345,9 @@ impl SynthApp {
                 self.send_command(cmd);
             }
         }
+
+        // Frames and notes are already in patch space
+        self.user_state.annotations.add_from_patch(&patch.frames, &patch.notes, egui::Vec2::ZERO);
 
         // Send the staged connections to the engine
         let connections: Vec<_> = self.graph_state.graph.iter_connections().collect();
@@ -2798,8 +2944,9 @@ impl SynthApp {
         });
     }
 
-    /// Delete, duplicate, copy, cut, paste, Space or Tab for the quick-add
-    /// palette, and Escape to leave MIDI Learn.
+    /// Delete, duplicate, copy, cut, paste, Ctrl+Shift+F to frame the
+    /// selection, Space or Tab for the quick-add palette, and Escape to leave
+    /// MIDI Learn.
     fn handle_editing_shortcuts(&mut self, ctx: &egui::Context) {
         use egui::{Event, Key, KeyboardShortcut, Modifiers};
         if self.is_midi_learning() && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
@@ -2808,9 +2955,10 @@ impl SynthApp {
         let mut copy = false;
         let mut cut = false;
         let mut paste = None;
-        let (delete, duplicate, palette) = ctx.input_mut(|i| {
+        let (delete, duplicate, palette, frame) = ctx.input_mut(|i| {
             let delete = i.consume_key(Modifiers::NONE, Key::Delete) || i.consume_key(Modifiers::NONE, Key::Backspace);
             let duplicate = i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::D));
+            let frame = i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::F));
             let palette = i.consume_key(Modifiers::NONE, Key::Space) || i.consume_key(Modifiers::NONE, Key::Tab);
             // The window turns Ctrl+C, Ctrl+X and Ctrl+V into these, not key presses
             i.events.retain(|event| match event {
@@ -2821,20 +2969,23 @@ impl SynthApp {
                 Event::Text(text) if palette && text == " " => false,
                 _ => true,
             });
-            (delete, duplicate, palette)
+            (delete, duplicate, palette, frame)
         });
 
-        let selected = self.graph_state.selected_nodes.clone();
+        let selected = self.selection();
         if copy || cut {
-            self.copy_modules(ctx, &selected);
+            self.copy_selection(ctx, &selected);
         }
         if cut {
-            self.delete_modules(&selected, "Cut", "Cut");
+            self.delete_selection(&selected, "Cut", "Cut");
         } else if delete {
-            self.delete_modules(&selected, "Delete", "Deleted");
+            self.delete_selection(&selected, "Delete", "Deleted");
         }
         if duplicate {
-            self.duplicate_modules(&selected);
+            self.duplicate_selection(&selected);
+        }
+        if frame {
+            self.frame_selection(ctx);
         }
         if let Some(text) = paste {
             self.paste_modules(ctx, &text);
@@ -3088,7 +3239,7 @@ impl eframe::App for SynthApp {
         }
 
         // A capture renders this frame's audio before anything is drawn
-        self.step_capture();
+        self.step_capture(ctx);
 
         // Process events from the audio engine
         self.process_engine_events();
@@ -3339,7 +3490,8 @@ impl eframe::App for SynthApp {
 
         // Whatever this frame changed becomes an undo step, once the mouse
         // button is up: a knob turn or a drag is one step, not one per frame
-        let gesture_held = ctx.input(|i| i.pointer.any_down());
+        // Typing a frame's title or a note is one step too, once it's done
+        let gesture_held = ctx.input(|i| i.pointer.any_down()) || self.user_state.annotations.is_editing();
         self.history.record(&self.graph_state, &self.user_state, gesture_held, Instant::now());
 
         // Ship this frame's graph edits to the audio thread as one compiled plan

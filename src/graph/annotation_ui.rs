@@ -1,0 +1,678 @@
+//! Drawing frames and notes under the modules, and handling the mouse on them.
+//!
+//! A frame is lettered like a section of a synth's front panel: its title
+//! set in capitals, spaced out, with a hairline running on to the edge. Its
+//! title band is its handle: drag it to move the frame and every module and
+//! note inside, double-click it to rename the frame, right-click it for
+//! colours. Its edges and corners resize it. Its body passes clicks through
+//! to the canvas, so modules can be added and box-selected inside it.
+//!
+//! A note is a soft card with a margin mark. Drag it to move it, double-click
+//! to edit its text, and drag its right edge to change where it wraps.
+
+use egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};
+use egui::{
+    pos2, vec2, Color32, CursorIcon, FontFamily, FontId, Id, PointerButton, Pos2, Rect, Rounding, Sense,
+    Shape, Stroke, Ui, UiBuilder, Vec2,
+};
+use egui_node_graph2::{Backdrop, NodeId};
+
+use crate::app::theme;
+use super::annotations::{Annotation, AnnotationId, Annotations, Frame, Tint, MIN_FRAME_SIZE, NOTE_WIDTHS};
+use super::annotations::emphasis_runs;
+
+/// Maps patch space onto the screen.
+#[derive(Clone, Copy, Debug)]
+pub struct View {
+    /// Where patch (0, 0) is on screen.
+    pub origin: Pos2,
+    pub zoom: f32,
+}
+
+impl View {
+    pub fn to_screen(&self, p: Pos2) -> Pos2 {
+        self.origin + p.to_vec2() * self.zoom
+    }
+
+    pub fn rect_to_screen(&self, r: Rect) -> Rect {
+        Rect::from_min_max(self.to_screen(r.min), self.to_screen(r.max))
+    }
+
+    pub fn to_patch(&self, s: Pos2) -> Pos2 {
+        ((s - self.origin) / self.zoom).to_pos2()
+    }
+}
+
+// Measurements in patch points, drawn scaled by the zoom
+const FRAME_ROUNDING: f32 = 12.0;
+/// The height of a frame's title band, its handle.
+pub const FRAME_TITLE_BAND: f32 = 34.0;
+const FRAME_TITLE_SIZE: f32 = 13.0;
+/// Extra space between the title's capitals, as on a printed panel
+const FRAME_TITLE_TRACKING: f32 = 1.8;
+const FRAME_TITLE_INSET: f32 = 14.0;
+const NOTE_TEXT_SIZE: f32 = 13.5;
+const NOTE_PADDING: Vec2 = Vec2::new(14.0, 10.0);
+const NOTE_ROUNDING: f32 = 7.0;
+const NOTE_MARK_WIDTH: f32 = 3.0;
+
+/// How near an edge the pointer can grab it, in screen points.
+const GRAB: f32 = 5.0;
+
+/// A note's ink, and the warmer ink its bold words are set in.
+const NOTE_INK: Color32 = Color32::from_rgb(196, 198, 212);
+const NOTE_EMPHASIS: Color32 = theme::text::PRIMARY;
+/// The note card: paper-warm, barely there.
+const NOTE_FILL: Color32 = Color32::from_rgba_premultiplied(15, 14, 12, 15);
+/// The mark down a note's left side, like a pencil line in a margin.
+const NOTE_MARK: Color32 = theme::accent::WARNING;
+
+/// What a drag on a frame or note is doing. Kept in egui's memory while the
+/// button is held.
+#[derive(Clone, Debug)]
+enum Drag {
+    /// Moving a frame or note, with the modules and annotations inside a frame.
+    Move { members: Vec<NodeId>, riders: Vec<AnnotationId> },
+    /// Resizing a frame from the edges marked, from where it started.
+    Resize { edges: Edges, start: Rect, pointer: Pos2 },
+    /// Changing where a note wraps.
+    Widen { start: f32, pointer: Pos2 },
+}
+
+/// Which edges of a frame a handle moves.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Edges {
+    left: bool,
+    right: bool,
+    top: bool,
+    bottom: bool,
+}
+
+impl Edges {
+    const fn new(left: bool, right: bool, top: bool, bottom: bool) -> Self {
+        Self { left, right, top, bottom }
+    }
+
+    fn cursor(self) -> CursorIcon {
+        match (self.left || self.right, self.top || self.bottom) {
+            (true, false) => CursorIcon::ResizeHorizontal,
+            (false, true) => CursorIcon::ResizeVertical,
+            _ if (self.left && self.top) || (self.right && self.bottom) => CursorIcon::ResizeNwSe,
+            _ => CursorIcon::ResizeNeSw,
+        }
+    }
+
+    /// `start` with these edges moved by `delta` patch points, no smaller
+    /// than a frame can be.
+    fn resize(self, start: Rect, delta: Vec2) -> Rect {
+        let mut rect = start;
+        if self.left {
+            rect.min.x = (start.min.x + delta.x).min(start.max.x - MIN_FRAME_SIZE.x);
+        }
+        if self.right {
+            rect.max.x = (start.max.x + delta.x).max(start.min.x + MIN_FRAME_SIZE.x);
+        }
+        if self.top {
+            rect.min.y = (start.min.y + delta.y).min(start.max.y - MIN_FRAME_SIZE.y);
+        }
+        if self.bottom {
+            rect.max.y = (start.max.y + delta.y).max(start.min.y + MIN_FRAME_SIZE.y);
+        }
+        rect
+    }
+}
+
+/// The eight handles round a frame: four edges, then the corners over them.
+const HANDLES: [Edges; 8] = [
+    Edges::new(true, false, false, false),
+    Edges::new(false, true, false, false),
+    Edges::new(false, false, true, false),
+    Edges::new(false, false, false, true),
+    Edges::new(true, false, true, false),
+    Edges::new(false, true, true, false),
+    Edges::new(true, false, false, true),
+    Edges::new(false, true, false, true),
+];
+
+/// What a frame's or note's right-click menu asked for.
+enum MenuAction {
+    Edit(AnnotationId),
+    Tint(AnnotationId, Tint),
+    SelectInside(AnnotationId),
+    Delete(AnnotationId),
+}
+
+fn drag_id(id: AnnotationId) -> Id {
+    Id::new(("annotation drag", id))
+}
+
+fn edit_id(id: AnnotationId) -> Id {
+    Id::new(("annotation edit", id))
+}
+
+/// The face frame titles and bold note words are set in.
+fn title_font(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(theme::TITLE_FAMILY.into()))
+}
+
+/// A frame's title ink: its tint, lifted toward white so it reads on the
+/// dark canvas.
+fn title_ink(tint: Tint) -> Color32 {
+    tint.color().lerp_to_gamma(Color32::WHITE, 0.4)
+}
+
+/// Where a module was last drawn, on screen.
+pub fn module_rect(ctx: &egui::Context, node_id: NodeId) -> Option<Rect> {
+    ctx.read_response(Id::new((node_id, "window"))).map(|r| r.rect)
+}
+
+/// Modules whose middle lies inside a rectangle on screen.
+pub fn modules_inside(ctx: &egui::Context, screen: Rect, nodes: impl IntoIterator<Item = NodeId>) -> Vec<NodeId> {
+    nodes
+        .into_iter()
+        .filter(|&node_id| module_rect(ctx, node_id).is_some_and(|r| screen.contains(r.center())))
+        .collect()
+}
+
+/// Frames and notes lying inside a frame, which move with it.
+fn riders(annotations: &Annotations, frame_id: AnnotationId, area: Rect) -> Vec<AnnotationId> {
+    annotations
+        .iter()
+        .filter(|&(id, a)| {
+            id != frame_id
+                && match a {
+                    Annotation::Frame(inner) => area.contains_rect(inner.rect) && inner.rect != area,
+                    Annotation::Note(note) => area.contains(note.position),
+                }
+        })
+        .map(|(id, _)| id)
+        .collect()
+}
+
+/// Draws every frame, then every note, and handles the mouse on them.
+/// Larger frames go first, so a frame inside another sits on top of it.
+/// Returns whether the pointer is over one of their handles, where a
+/// right-click is theirs rather than the canvas's.
+pub fn show(ui: &mut Ui, annotations: &mut Annotations, mut backdrop: Backdrop<'_>, view: View) -> bool {
+    let mut frames: Vec<(AnnotationId, f32)> = annotations
+        .iter()
+        .filter_map(|(id, a)| match a {
+            Annotation::Frame(f) => Some((id, f.rect.area())),
+            Annotation::Note(_) => None,
+        })
+        .collect();
+    frames.sort_by(|a, b| b.1.total_cmp(&a.1));
+    let notes: Vec<AnnotationId> =
+        annotations.iter().filter(|(_, a)| matches!(a, Annotation::Note(_))).map(|(id, _)| id).collect();
+
+    let mut over_handle = false;
+    let mut menu_actions = Vec::new();
+    for (id, _) in frames {
+        over_handle |= frame_ui(ui, annotations, id, &mut backdrop, view, &mut menu_actions);
+    }
+    for id in notes {
+        over_handle |= note_ui(ui, annotations, id, &mut backdrop, view, &mut menu_actions);
+    }
+
+    for action in menu_actions {
+        match action {
+            MenuAction::Edit(id) => annotations.start_editing(id, matches!(annotations.get(id), Some(Annotation::Frame(_)))),
+            MenuAction::Tint(id, tint) => {
+                if let Some(Annotation::Frame(frame)) = annotations.get_mut(id) {
+                    frame.tint = tint;
+                }
+            }
+            MenuAction::SelectInside(id) => {
+                if let Some(Annotation::Frame(frame)) = annotations.get(id) {
+                    let screen = view.rect_to_screen(frame.rect);
+                    *backdrop.selected_nodes = modules_inside(ui.ctx(), screen, backdrop.node_positions.keys());
+                    annotations.selected.clear();
+                }
+            }
+            MenuAction::Delete(id) => {
+                annotations.remove(id);
+            }
+        }
+    }
+
+    // A click anywhere else on the canvas lets go of the selection, as it
+    // does for modules
+    let clicked_elsewhere = ui.input(|i| i.pointer.primary_clicked() && !i.modifiers.shift)
+        && !over_handle
+        && ui
+            .input(|i| i.pointer.interact_pos())
+            .is_some_and(|pos| ui.clip_rect().contains(pos) && ui.ctx().layer_id_at(pos) == Some(ui.layer_id()));
+    if clicked_elsewhere {
+        annotations.selected.clear();
+    }
+    over_handle
+}
+
+/// Selects a frame or note clicked on: alone, or added to (or taken from)
+/// the selection with Shift held.
+fn select(ui: &Ui, annotations: &mut Annotations, id: AnnotationId, backdrop: &mut Backdrop<'_>) {
+    if ui.input(|i| i.modifiers.shift) {
+        if !annotations.selected.remove(&id) {
+            annotations.selected.insert(id);
+        }
+    } else {
+        annotations.selected = [id].into();
+        backdrop.selected_nodes.clear();
+    }
+}
+
+/// The view pans when a handle is dragged with the middle button, or with
+/// Ctrl, as it does when the canvas is.
+fn pans_view(ui: &Ui, response: &egui::Response) -> bool {
+    response.dragged() && ui.input(|i| i.pointer.middle_down() || i.modifiers.command_only())
+}
+
+fn frame_ui(
+    ui: &mut Ui,
+    annotations: &mut Annotations,
+    id: AnnotationId,
+    backdrop: &mut Backdrop<'_>,
+    view: View,
+    menu_actions: &mut Vec<MenuAction>,
+) -> bool {
+    let Some(Annotation::Frame(frame)) = annotations.get(id).cloned() else { return false };
+    let zoom = view.zoom;
+    let screen = view.rect_to_screen(frame.rect);
+    let band = Rect::from_min_size(screen.min, vec2(screen.width(), FRAME_TITLE_BAND * zoom));
+    let selected = annotations.selected.contains(&id);
+    let editing = annotations.editing.as_ref().is_some_and(|e| e.id == id);
+
+    // The body and band are painted first; the handles are sensed over them
+    let body_slot = ui.painter().add(Shape::Noop);
+
+    // The title band: a handle to move the frame by
+    let handle_rect = Rect::from_min_max(band.min + vec2(GRAB, GRAB), pos2(band.max.x - GRAB, band.max.y));
+    let title = ui.interact(handle_rect, Id::new(("frame title", id)), Sense::click_and_drag());
+    let mut over = title.hovered();
+
+    if title.drag_started_by(PointerButton::Primary) && !pans_view(ui, &title) {
+        let members = modules_inside(ui.ctx(), screen, backdrop.node_positions.keys());
+        let riders = riders(annotations, id, frame.rect);
+        ui.ctx().data_mut(|d| d.insert_temp(drag_id(id), Drag::Move { members, riders }));
+        if !selected {
+            select(ui, annotations, id, backdrop);
+        }
+    }
+    if pans_view(ui, &title) {
+        *backdrop.pan += title.drag_delta();
+    } else if title.dragged_by(PointerButton::Primary) {
+        if let Some(Drag::Move { members, riders }) = ui.ctx().data(|d| d.get_temp::<Drag>(drag_id(id))) {
+            let delta = title.drag_delta();
+            for node_id in members {
+                if let Some(position) = backdrop.node_positions.get_mut(node_id) {
+                    *position += delta;
+                }
+            }
+            for rider in riders.into_iter().chain([id]) {
+                if let Some(annotation) = annotations.get_mut(rider) {
+                    annotation.translate(delta / zoom);
+                }
+            }
+        }
+    }
+    if title.drag_stopped() {
+        ui.ctx().data_mut(|d| d.remove::<Drag>(drag_id(id)));
+    }
+    if title.clicked_by(PointerButton::Primary) {
+        select(ui, annotations, id, backdrop);
+    }
+    if title.double_clicked() {
+        annotations.start_editing(id, true);
+    }
+    if title.secondary_clicked() && !selected {
+        select(ui, annotations, id, backdrop);
+    }
+    if title.dragged() {
+        ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+    } else if title.hovered() && !editing {
+        ui.ctx().set_cursor_icon(CursorIcon::Grab);
+    }
+    title.context_menu(|ui| {
+        ui.set_min_width(180.0);
+        if ui.add(egui::Button::new("Rename").shortcut_text("Double-click")).clicked() {
+            menu_actions.push(MenuAction::Edit(id));
+            ui.close_menu();
+        }
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            for tint in Tint::ALL {
+                if swatch(ui, tint, tint == frame.tint).clicked() {
+                    menu_actions.push(MenuAction::Tint(id, tint));
+                }
+            }
+        });
+        if ui.button("Select modules inside").clicked() {
+            menu_actions.push(MenuAction::SelectInside(id));
+            ui.close_menu();
+        }
+        ui.separator();
+        if ui.add(egui::Button::new("Delete frame").shortcut_text("Del")).clicked() {
+            menu_actions.push(MenuAction::Delete(id));
+            ui.close_menu();
+        }
+    });
+
+    // The edges and corners resize it
+    let mut resizing = false;
+    for edges in HANDLES {
+        let x = if edges.left { Some(screen.left()) } else if edges.right { Some(screen.right()) } else { None };
+        let y = if edges.top { Some(screen.top()) } else if edges.bottom { Some(screen.bottom()) } else { None };
+        let rect = match (x, y) {
+            (Some(x), Some(y)) => Rect::from_center_size(pos2(x, y), Vec2::splat(GRAB * 2.5)),
+            (Some(x), None) => Rect::from_x_y_ranges(x - GRAB..=x + GRAB, screen.top() + GRAB..=screen.bottom() - GRAB),
+            (None, Some(y)) => Rect::from_x_y_ranges(screen.left() + GRAB..=screen.right() - GRAB, y - GRAB..=y + GRAB),
+            (None, None) => continue,
+        };
+        let handle = ui.interact(rect, Id::new(("frame edge", id, x.is_some(), edges.left, edges.top, y.is_some())), Sense::drag());
+        over |= handle.hovered();
+        if handle.hovered() || handle.dragged() {
+            ui.ctx().set_cursor_icon(edges.cursor());
+        }
+        if handle.drag_started_by(PointerButton::Primary) {
+            let pointer = handle.interact_pointer_pos().unwrap_or(rect.center());
+            ui.ctx().data_mut(|d| d.insert_temp(drag_id(id), Drag::Resize { edges, start: frame.rect, pointer }));
+        }
+        if handle.dragged_by(PointerButton::Primary) {
+            let held = ui.ctx().data(|d| d.get_temp::<Drag>(drag_id(id)));
+            if let (Some(Drag::Resize { edges, start, pointer }), Some(now)) = (held, handle.interact_pointer_pos()) {
+                if let Some(Annotation::Frame(frame)) = annotations.get_mut(id) {
+                    frame.rect = edges.resize(start, (now - pointer) / zoom);
+                }
+            }
+            resizing = true;
+        }
+        if handle.drag_stopped() {
+            ui.ctx().data_mut(|d| d.remove::<Drag>(drag_id(id)));
+        }
+    }
+
+    // Drawn where it is now, after any drag this frame
+    let Some(Annotation::Frame(frame)) = annotations.get(id).cloned() else {
+        ui.painter().set(body_slot, Shape::Noop);
+        return over;
+    };
+    let screen = view.rect_to_screen(frame.rect);
+    let band = Rect::from_min_size(screen.min, vec2(screen.width(), FRAME_TITLE_BAND * zoom));
+    let hovered = title.hovered() || title.dragged() || resizing;
+    paint_frame(ui, body_slot, &frame, screen, band, zoom, selected, hovered, editing);
+
+    if editing {
+        title_editor(ui, annotations, id, band, zoom, title_ink(frame.tint));
+    }
+    annotations.drawn.insert(id, screen);
+    over
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_frame(
+    ui: &Ui,
+    slot: egui::layers::ShapeIdx,
+    frame: &Frame,
+    screen: Rect,
+    band: Rect,
+    zoom: f32,
+    selected: bool,
+    hovered: bool,
+    editing: bool,
+) {
+    let tint = frame.tint.color();
+    let rounding = FRAME_ROUNDING * zoom;
+    let mut shapes = Vec::new();
+
+    // A faint wash of the tint, a little deeper across the title band
+    shapes.push(Shape::rect_filled(screen, rounding, tint.gamma_multiply(if selected { 0.095 } else { 0.07 })));
+    let band_rounding = Rounding { nw: rounding, ne: rounding, sw: 0.0, se: 0.0 };
+    let band_alpha = if hovered { 0.12 } else { 0.07 };
+    shapes.push(Shape::rect_filled(band, band_rounding, tint.gamma_multiply(band_alpha)));
+    let outline = if selected {
+        Stroke::new(1.5, tint.gamma_multiply(0.9))
+    } else if hovered {
+        Stroke::new(1.0, tint.gamma_multiply(0.5))
+    } else {
+        Stroke::new(1.0, tint.gamma_multiply(0.28))
+    };
+    shapes.push(Shape::rect_stroke(screen, rounding, outline));
+
+    // The title, in spaced capitals, and a hairline ruled on from it to the
+    // edge, as sections are marked out on a printed panel
+    let ink = title_ink(frame.tint);
+    let inset = FRAME_TITLE_INSET * zoom;
+    let mut rule_from = band.left() + inset;
+    if !editing && !frame.title.is_empty() {
+        let galley = ui.painter().layout_job(title_job(&frame.title, zoom, ink));
+        let at = pos2(band.left() + inset, band.center().y - galley.size().y / 2.0);
+        rule_from = at.x + galley.size().x + 10.0 * zoom;
+        shapes.push(Shape::galley(at, galley, ink));
+    } else if editing {
+        rule_from = band.right();
+    }
+    let rule_to = band.right() - inset;
+    if rule_to > rule_from {
+        let y = band.center().y;
+        shapes.push(Shape::line_segment([pos2(rule_from, y), pos2(rule_to, y)], Stroke::new(1.0, tint.gamma_multiply(0.35))));
+    }
+    ui.painter().set(slot, Shape::Vec(shapes));
+}
+
+/// A frame title as lettered: capitals, spaced out.
+fn title_job(title: &str, zoom: f32, ink: Color32) -> LayoutJob {
+    let mut job = LayoutJob::default();
+    job.append(
+        &title.to_uppercase(),
+        0.0,
+        TextFormat {
+            font_id: title_font(FRAME_TITLE_SIZE * zoom),
+            extra_letter_spacing: FRAME_TITLE_TRACKING * zoom,
+            color: ink,
+            ..Default::default()
+        },
+    );
+    job
+}
+
+/// A colour swatch in a frame's menu. The current colour wears a ring.
+fn swatch(ui: &mut Ui, tint: Tint, current: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(16.0), Sense::click());
+    let center = rect.center();
+    let fill = if response.hovered() { tint.color() } else { tint.color().gamma_multiply(0.85) };
+    ui.painter().circle_filled(center, 6.0, fill);
+    if current {
+        ui.painter().circle_stroke(center, 8.0, Stroke::new(1.5, theme::text::PRIMARY));
+    }
+    response.on_hover_text(tint.label())
+}
+
+/// The field a frame's title is renamed in, over the title band.
+fn title_editor(ui: &mut Ui, annotations: &mut Annotations, id: AnnotationId, band: Rect, zoom: f32, ink: Color32) {
+    let inset = FRAME_TITLE_INSET * zoom;
+    let height = FRAME_TITLE_SIZE * zoom * 1.6;
+    let rect = Rect::from_min_size(
+        pos2(band.left() + inset, band.center().y - height / 2.0),
+        vec2((band.width() - 2.0 * inset).max(40.0), height),
+    );
+    let Some(editing) = annotations.editing.as_mut() else { return };
+    ui.painter().rect_filled(rect.expand(3.0 * zoom), 4.0 * zoom, theme::background::MAIN.gamma_multiply(0.8));
+    let output = ui
+        .allocate_new_ui(UiBuilder::new().max_rect(rect), |ui| {
+            egui::TextEdit::singleline(&mut editing.draft)
+                .id(edit_id(id))
+                .font(title_font(FRAME_TITLE_SIZE * zoom))
+                .text_color(ink)
+                .hint_text("Name this frame")
+                .frame(false)
+                .desired_width(rect.width())
+                .show(ui)
+        })
+        .inner;
+    finish_frame_of_editing(ui, annotations, id, output);
+}
+
+/// Opens a text field the first frame it's shown, and closes the edit once
+/// it lets go of the keyboard: on Enter for a title, Escape, or a click away.
+fn finish_frame_of_editing(ui: &Ui, annotations: &mut Annotations, id: AnnotationId, mut output: egui::text_edit::TextEditOutput) {
+    let Some(editing) = annotations.editing.as_mut() else { return };
+    if !editing.opened {
+        editing.opened = true;
+        output.response.request_focus();
+        if editing.select_all {
+            let all = CCursorRange::two(CCursor::new(0), CCursor::new(editing.draft.chars().count()));
+            output.state.cursor.set_char_range(Some(all));
+            output.state.store(ui.ctx(), edit_id(id));
+        }
+    } else if output.response.lost_focus() || !output.response.has_focus() {
+        annotations.finish_editing();
+    }
+}
+
+/// A note's text as set: plain runs in the body face, bold ones in the
+/// title face and a brighter ink.
+fn note_job(text: &str, zoom: f32, wrap: f32) -> LayoutJob {
+    let mut job = LayoutJob::default();
+    job.wrap.max_width = wrap;
+    for (run, bold) in emphasis_runs(text) {
+        let format = if bold {
+            TextFormat { font_id: title_font(NOTE_TEXT_SIZE * zoom * 0.96), color: NOTE_EMPHASIS, ..Default::default() }
+        } else {
+            TextFormat { font_id: FontId::proportional(NOTE_TEXT_SIZE * zoom), color: NOTE_INK, ..Default::default() }
+        };
+        job.append(run, 0.0, format);
+    }
+    job
+}
+
+fn note_ui(
+    ui: &mut Ui,
+    annotations: &mut Annotations,
+    id: AnnotationId,
+    backdrop: &mut Backdrop<'_>,
+    view: View,
+    menu_actions: &mut Vec<MenuAction>,
+) -> bool {
+    let Some(Annotation::Note(note)) = annotations.get(id).cloned() else { return false };
+    let zoom = view.zoom;
+    let selected = annotations.selected.contains(&id);
+    let editing = annotations.editing.as_ref().is_some_and(|e| e.id == id);
+    let padding = NOTE_PADDING * zoom;
+    let wrap = (note.width * zoom - 2.0 * padding.x).max(1.0);
+    let text_height = if editing {
+        // The field grows as lines are typed; it's measured as it was last drawn
+        annotations.drawn.get(&id).map_or(NOTE_TEXT_SIZE * zoom * 1.4, |r| r.height() - 2.0 * padding.y)
+    } else {
+        ui.painter().layout_job(note_job(&note.text, zoom, wrap)).size().y
+    };
+    let card = Rect::from_min_size(view.to_screen(note.position), vec2(note.width * zoom, text_height + 2.0 * padding.y));
+    let card_slot = ui.painter().add(Shape::Noop);
+
+    // The card moves the note; while editing, the text field has the mouse
+    let body = ui.interact(card, Id::new(("note", id)), if editing { Sense::hover() } else { Sense::click_and_drag() });
+    let mut over = body.hovered();
+    if pans_view(ui, &body) {
+        *backdrop.pan += body.drag_delta();
+    } else if body.dragged_by(PointerButton::Primary) {
+        if !selected && body.drag_started() {
+            select(ui, annotations, id, backdrop);
+        }
+        if let Some(Annotation::Note(note)) = annotations.get_mut(id) {
+            note.position += body.drag_delta() / zoom;
+        }
+        ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+    }
+    if body.clicked_by(PointerButton::Primary) {
+        select(ui, annotations, id, backdrop);
+    }
+    if body.double_clicked() {
+        annotations.start_editing(id, false);
+    }
+    if body.secondary_clicked() && !selected {
+        select(ui, annotations, id, backdrop);
+    }
+    body.context_menu(|ui| {
+        ui.set_min_width(160.0);
+        if ui.add(egui::Button::new("Edit").shortcut_text("Double-click")).clicked() {
+            menu_actions.push(MenuAction::Edit(id));
+            ui.close_menu();
+        }
+        ui.separator();
+        if ui.add(egui::Button::new("Delete note").shortcut_text("Del")).clicked() {
+            menu_actions.push(MenuAction::Delete(id));
+            ui.close_menu();
+        }
+    });
+
+    // The right edge sets where the text wraps
+    let edge = Rect::from_x_y_ranges(card.right() - GRAB..=card.right() + GRAB, card.top()..=card.bottom());
+    let widen = ui.interact(edge, Id::new(("note edge", id)), Sense::drag());
+    over |= widen.hovered();
+    if widen.hovered() || widen.dragged() {
+        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+    }
+    if widen.drag_started_by(PointerButton::Primary) {
+        let pointer = widen.interact_pointer_pos().unwrap_or(edge.center());
+        ui.ctx().data_mut(|d| d.insert_temp(drag_id(id), Drag::Widen { start: note.width, pointer }));
+    }
+    if widen.dragged_by(PointerButton::Primary) {
+        let held = ui.ctx().data(|d| d.get_temp::<Drag>(drag_id(id)));
+        if let (Some(Drag::Widen { start, pointer }), Some(now)) = (held, widen.interact_pointer_pos()) {
+            if let Some(Annotation::Note(note)) = annotations.get_mut(id) {
+                note.width = (start + (now.x - pointer.x) / zoom).clamp(*NOTE_WIDTHS.start(), *NOTE_WIDTHS.end());
+            }
+        }
+    }
+    if widen.drag_stopped() {
+        ui.ctx().data_mut(|d| d.remove::<Drag>(drag_id(id)));
+    }
+
+    // Drawn where it is now
+    let Some(Annotation::Note(note)) = annotations.get(id).cloned() else {
+        return over;
+    };
+    let wrap = (note.width * zoom - 2.0 * padding.x).max(1.0);
+    let at = view.to_screen(note.position);
+    let text_rect = if editing {
+        let rect = Rect::from_min_size(at + padding, vec2(wrap, text_height));
+        let Some(editing) = annotations.editing.as_mut() else { return over };
+        let output = ui
+            .allocate_new_ui(UiBuilder::new().max_rect(rect), |ui| {
+                egui::TextEdit::multiline(&mut editing.draft)
+                    .id(edit_id(id))
+                    .font(FontId::proportional(NOTE_TEXT_SIZE * zoom))
+                    .text_color(NOTE_INK)
+                    .hint_text("Write a note. **Bold** for emphasis")
+                    .frame(false)
+                    .desired_width(wrap)
+                    .desired_rows(1)
+                    .show(ui)
+            })
+            .inner;
+        let rect = output.response.rect;
+        finish_frame_of_editing(ui, annotations, id, output);
+        rect
+    } else {
+        let galley = ui.painter().layout_job(note_job(&note.text, zoom, wrap));
+        let rect = Rect::from_min_size(at + padding, galley.size());
+        ui.painter().galley(rect.min, galley, NOTE_INK);
+        rect
+    };
+    let card = Rect::from_min_max(at, pos2(at.x + note.width * zoom, text_rect.bottom() + padding.y));
+
+    let rounding = NOTE_ROUNDING * zoom;
+    let mut shapes = vec![Shape::rect_filled(card, rounding, NOTE_FILL)];
+    let mark = Rect::from_min_size(
+        card.min + vec2(0.0, rounding),
+        vec2(NOTE_MARK_WIDTH * zoom, (card.height() - 2.0 * rounding).max(0.0)),
+    );
+    shapes.push(Shape::rect_filled(mark, NOTE_MARK_WIDTH * zoom * 0.5, NOTE_MARK.gamma_multiply(0.55)));
+    if selected || editing {
+        shapes.push(Shape::rect_stroke(card, rounding, Stroke::new(1.0, NOTE_MARK.gamma_multiply(0.7))));
+    } else if body.hovered() || widen.hovered() {
+        shapes.push(Shape::rect_stroke(card, rounding, Stroke::new(1.0, NOTE_INK.gamma_multiply(0.18))));
+    }
+    ui.painter().set(card_slot, Shape::Vec(shapes));
+    annotations.drawn.insert(id, card);
+    over
+}

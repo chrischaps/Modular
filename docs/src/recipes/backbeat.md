@@ -6,7 +6,7 @@ A whole drum kit with no samples in it: a kick that drops in pitch, a snare with
 > The patch file is [`patches/backbeat.json`](https://github.com/chrischaps/Modular/blob/master/patches/backbeat.json).
 
 ![The Backbeat patch](../images/recipe-backbeat.png)
-*One lane per drum, from the top: kick, snare, hi-hats, toms, crash. The clock is at the top left. The phrase clock and bar counter that schedule the fill sit lower down in the same column. Kick and snare mix to the centre at the top right. Everything else mixes through a small room at the bottom right.*
+*One lane per drum, from the top: kick, snare, hi-hats, toms, crash. The clock is at the top left. The phrase clock and bar counter that schedule the fill sit lower down in the same column. Kick and snare mix to the centre at the top right. Everything else mixes through a small room to the right of the hi-hats.*
 
 ## What it teaches
 

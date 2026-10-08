@@ -6,8 +6,8 @@
       "id": 1,
       "module_id": "util.clock",
       "position": [
-        20.0,
-        40.0
+        40.0,
+        114.0
       ],
       "parameters": [
         {
@@ -36,8 +36,8 @@
       "id": 2,
       "module_id": "seq.step",
       "position": [
-        420.0,
-        0.0
+        440.0,
+        74.0
       ],
       "parameters": [
         {
@@ -301,8 +301,8 @@
       "id": 3,
       "module_id": "mod.adsr",
       "position": [
-        790.0,
-        0.0
+        810.0,
+        74.0
       ],
       "parameters": [
         {
@@ -351,8 +351,8 @@
       "id": 4,
       "module_id": "mod.adsr",
       "position": [
-        790.0,
-        300.0
+        810.0,
+        434.0
       ],
       "parameters": [
         {
@@ -401,8 +401,8 @@
       "id": 5,
       "module_id": "osc.sine",
       "position": [
-        1050.0,
-        0.0
+        1070.0,
+        74.0
       ],
       "parameters": [
         {
@@ -461,8 +461,8 @@
       "id": 6,
       "module_id": "util.vca",
       "position": [
-        1510.0,
-        40.0
+        1530.0,
+        114.0
       ],
       "parameters": [
         {
@@ -481,8 +481,8 @@
       "id": 7,
       "module_id": "seq.step",
       "position": [
-        420.0,
-        700.0
+        440.0,
+        876.0
       ],
       "parameters": [
         {
@@ -746,8 +746,8 @@
       "id": 8,
       "module_id": "mod.adsr",
       "position": [
-        790.0,
-        700.0
+        810.0,
+        876.0
       ],
       "parameters": [
         {
@@ -796,8 +796,8 @@
       "id": 9,
       "module_id": "mod.adsr",
       "position": [
-        790.0,
-        1000.0
+        810.0,
+        1236.0
       ],
       "parameters": [
         {
@@ -846,8 +846,8 @@
       "id": 10,
       "module_id": "osc.sine",
       "position": [
-        1050.0,
-        700.0
+        1070.0,
+        876.0
       ],
       "parameters": [
         {
@@ -906,8 +906,8 @@
       "id": 11,
       "module_id": "source.noise",
       "position": [
-        1280.0,
-        1000.0
+        1300.0,
+        1176.0
       ],
       "parameters": [
         {
@@ -926,8 +926,8 @@
       "id": 12,
       "module_id": "filter.svf",
       "position": [
-        1510.0,
-        1000.0
+        1530.0,
+        1176.0
       ],
       "parameters": [
         {
@@ -951,8 +951,8 @@
       "id": 13,
       "module_id": "util.vca",
       "position": [
-        1510.0,
-        740.0
+        1530.0,
+        916.0
       ],
       "parameters": [
         {
@@ -971,8 +971,8 @@
       "id": 14,
       "module_id": "seq.step",
       "position": [
-        420.0,
-        1400.0
+        440.0,
+        1678.0
       ],
       "parameters": [
         {
@@ -1236,8 +1236,8 @@
       "id": 15,
       "module_id": "mod.adsr",
       "position": [
-        790.0,
-        1400.0
+        810.0,
+        1678.0
       ],
       "parameters": [
         {
@@ -1286,8 +1286,8 @@
       "id": 16,
       "module_id": "mod.adsr",
       "position": [
-        790.0,
-        1700.0
+        810.0,
+        2038.0
       ],
       "parameters": [
         {
@@ -1336,8 +1336,8 @@
       "id": 17,
       "module_id": "util.vca",
       "position": [
-        1050.0,
-        1730.0
+        1070.0,
+        2008.0
       ],
       "parameters": [
         {
@@ -1356,8 +1356,8 @@
       "id": 18,
       "module_id": "source.noise",
       "position": [
-        1050.0,
-        1400.0
+        1070.0,
+        1678.0
       ],
       "parameters": [
         {
@@ -1376,8 +1376,8 @@
       "id": 19,
       "module_id": "source.noise",
       "position": [
-        1280.0,
-        1730.0
+        1300.0,
+        2008.0
       ],
       "parameters": [
         {
@@ -1396,8 +1396,8 @@
       "id": 20,
       "module_id": "filter.svf",
       "position": [
-        1280.0,
-        1400.0
+        1300.0,
+        1678.0
       ],
       "parameters": [
         {
@@ -1421,8 +1421,8 @@
       "id": 21,
       "module_id": "filter.svf",
       "position": [
-        1510.0,
-        1730.0
+        1530.0,
+        2008.0
       ],
       "parameters": [
         {
@@ -1446,8 +1446,8 @@
       "id": 22,
       "module_id": "seq.step",
       "position": [
-        20.0,
-        2100.0
+        40.0,
+        2840.0
       ],
       "parameters": [
         {
@@ -1711,8 +1711,8 @@
       "id": 23,
       "module_id": "util.clock",
       "position": [
-        20.0,
-        1820.0
+        40.0,
+        2480.0
       ],
       "parameters": [
         {
@@ -1741,8 +1741,8 @@
       "id": 24,
       "module_id": "seq.step",
       "position": [
-        420.0,
-        2100.0
+        440.0,
+        2480.0
       ],
       "parameters": [
         {
@@ -2006,8 +2006,8 @@
       "id": 25,
       "module_id": "mod.adsr",
       "position": [
-        790.0,
-        2100.0
+        810.0,
+        2480.0
       ],
       "parameters": [
         {
@@ -2056,8 +2056,8 @@
       "id": 26,
       "module_id": "osc.sine",
       "position": [
-        1050.0,
-        2100.0
+        1070.0,
+        2480.0
       ],
       "parameters": [
         {
@@ -2116,8 +2116,8 @@
       "id": 27,
       "module_id": "util.vca",
       "position": [
-        1510.0,
-        2140.0
+        1530.0,
+        2520.0
       ],
       "parameters": [
         {
@@ -2136,8 +2136,8 @@
       "id": 28,
       "module_id": "mod.adsr",
       "position": [
-        790.0,
-        2700.0
+        810.0,
+        3154.0
       ],
       "parameters": [
         {
@@ -2186,8 +2186,8 @@
       "id": 29,
       "module_id": "source.noise",
       "position": [
-        1050.0,
-        2700.0
+        1070.0,
+        3154.0
       ],
       "parameters": [
         {
@@ -2206,8 +2206,8 @@
       "id": 30,
       "module_id": "filter.svf",
       "position": [
-        1280.0,
-        2700.0
+        1300.0,
+        3154.0
       ],
       "parameters": [
         {
@@ -2231,8 +2231,8 @@
       "id": 31,
       "module_id": "util.attenuverter",
       "position": [
-        1760.0,
-        1500.0
+        2150.0,
+        1988.0
       ],
       "parameters": [
         {
@@ -2251,8 +2251,8 @@
       "id": 32,
       "module_id": "util.mixer",
       "position": [
-        1760.0,
-        0.0
+        1820.0,
+        74.0
       ],
       "parameters": [
         {
@@ -2331,8 +2331,8 @@
       "id": 33,
       "module_id": "fx.compressor",
       "position": [
-        2090.0,
-        0.0
+        2150.0,
+        74.0
       ],
       "parameters": [
         {
@@ -2381,8 +2381,8 @@
       "id": 34,
       "module_id": "util.mixer",
       "position": [
-        1760.0,
-        1750.0
+        1820.0,
+        1678.0
       ],
       "parameters": [
         {
@@ -2461,8 +2461,8 @@
       "id": 35,
       "module_id": "fx.reverb",
       "position": [
-        2090.0,
-        1750.0
+        2150.0,
+        1678.0
       ],
       "parameters": [
         {
@@ -2506,8 +2506,8 @@
       "id": 36,
       "module_id": "output.audio",
       "position": [
-        2560.0,
-        900.0
+        2640.0,
+        974.0
       ],
       "parameters": [
         {
@@ -2908,5 +2908,141 @@
       "to_port": "Right"
     }
   ],
-  "midi_mappings": []
+  "midi_mappings": [],
+  "frames": [
+    {
+      "title": "Clock",
+      "position": [
+        16.0,
+        56.0
+      ],
+      "size": [
+        210.0,
+        404.0
+      ],
+      "color": "green"
+    },
+    {
+      "title": "Kick",
+      "position": [
+        416.0,
+        16.0
+      ],
+      "size": [
+        1264.0,
+        778.0
+      ],
+      "color": "slate"
+    },
+    {
+      "title": "Snare",
+      "position": [
+        416.0,
+        818.0
+      ],
+      "size": [
+        1323.0,
+        777.9999389648438
+      ],
+      "color": "slate"
+    },
+    {
+      "title": "Hi-hats",
+      "position": [
+        416.0,
+        1620.0
+      ],
+      "size": [
+        1323.0,
+        778.0
+      ],
+      "color": "slate"
+    },
+    {
+      "title": "Toms",
+      "position": [
+        416.0,
+        2422.0
+      ],
+      "size": [
+        1264.0,
+        626.0
+      ],
+      "color": "slate"
+    },
+    {
+      "title": "Crash",
+      "position": [
+        786.0,
+        3096.0
+      ],
+      "size": [
+        723.0,
+        418.0
+      ],
+      "color": "slate"
+    },
+    {
+      "title": "Phrase",
+      "position": [
+        16.0,
+        2422.0
+      ],
+      "size": [
+        298.0,
+        802.0
+      ],
+      "color": "green"
+    },
+    {
+      "title": "Kick and snare",
+      "position": [
+        1796.0,
+        16.0
+      ],
+      "size": [
+        764.0,
+        705.0
+      ],
+      "color": "cyan"
+    },
+    {
+      "title": "Room",
+      "position": [
+        1796.0,
+        1620.0
+      ],
+      "size": [
+        608.0,
+        721.0
+      ],
+      "color": "cyan"
+    }
+  ],
+  "notes": [
+    {
+      "text": "Ghost notes are the same snare at a third of the level. Velocity does it: both envelopes have **Vel** at 85%.",
+      "position": [
+        16.0,
+        818.0
+      ],
+      "width": 300.0
+    },
+    {
+      "text": "A hat step on **C5** opens the hat, and the next one on C4 chokes it shut, the way a drummer's foot does.",
+      "position": [
+        16.0,
+        1620.0
+      ],
+      "width": 300.0
+    },
+    {
+      "text": "A slow clock at a quarter of the tempo lets the toms fill every fourth bar. The bar counter keeps it in step.",
+      "position": [
+        16.0,
+        3314.0
+      ],
+      "width": 300.0
+    }
+  ]
 }

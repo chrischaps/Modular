@@ -1,5 +1,6 @@
 //! Edits made from the keyboard and menus: adding, deleting, resetting,
-//! copying, pasting and duplicating modules.
+//! copying, pasting and duplicating modules, and the frames and notes
+//! selected with them.
 //!
 //! Each edit changes the editor graph and returns the engine commands that
 //! make the same change to the audio graph. None of them records an undo
@@ -7,7 +8,8 @@
 //! over, the same way it notices edits made with the mouse.
 //!
 //! Positions here are editor node positions, which are in zoomed points:
-//! a node is drawn at `position + pan + editor_rect.min`.
+//! a node is drawn at `position + pan + editor_rect.min`. Frames and notes
+//! are kept in patch space instead (see [`crate::graph::annotations`]).
 
 use std::collections::HashSet;
 
@@ -15,6 +17,7 @@ use egui::{Pos2, Vec2};
 use egui_node_graph2::{NodeId, NodeTemplateTrait};
 
 use crate::engine::EngineCommand;
+use crate::graph::annotations::{Annotation, AnnotationId};
 use crate::graph::{port_mapping, SynthGraphEditorState, SynthGraphState, SynthNodeTemplate};
 use crate::persistence::{capture_patch, merge_patch, Patch, PatchError};
 use super::engine_sync;
@@ -24,6 +27,41 @@ pub const DUPLICATE_OFFSET: Vec2 = Vec2::new(32.0, 32.0);
 
 /// The name copied modules travel under on the clipboard.
 const CLIPBOARD_NAME: &str = "Copied modules";
+
+/// Modules, and frames and notes, that an edit acts on together.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Selection {
+    pub nodes: Vec<NodeId>,
+    pub annotations: Vec<AnnotationId>,
+}
+
+impl Selection {
+    /// Just these modules.
+    pub fn modules(nodes: &[NodeId]) -> Self {
+        Self { nodes: nodes.to_vec(), annotations: Vec::new() }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty() && self.annotations.is_empty()
+    }
+}
+
+/// A node's editor position in patch space.
+fn to_patch(editor: &SynthGraphEditorState, user_state: &SynthGraphState, position: Pos2) -> Pos2 {
+    ((position.to_vec2() - user_state.view_origin) / editor.pan_zoom.zoom).to_pos2()
+}
+
+/// The editor position of a point in patch space.
+fn from_patch(editor: &SynthGraphEditorState, user_state: &SynthGraphState, position: Pos2) -> Pos2 {
+    (user_state.view_origin + position.to_vec2() * editor.pan_zoom.zoom).to_pos2()
+}
+
+/// The top-left corner of a selection, in patch space.
+fn patch_top_left(editor: &SynthGraphEditorState, user_state: &SynthGraphState, selection: &Selection) -> Option<Pos2> {
+    let nodes = top_left(editor, &selection.nodes).map(|p| to_patch(editor, user_state, p));
+    let annotations = user_state.annotations.top_left(&selection.annotations);
+    nodes.into_iter().chain(annotations).reduce(|a, b| a.min(b))
+}
 
 /// Builds a node from a template and puts it at `position`, on top of the
 /// others. It has no engine ID yet.
@@ -87,6 +125,19 @@ pub fn delete_modules(
     nodes.iter().flat_map(|&node_id| remove_module(editor, user_state, node_id)).collect()
 }
 
+/// Removes a selection: modules with their cables, frames and notes.
+/// Modules inside a deleted frame stay.
+pub fn delete_selection(
+    editor: &mut SynthGraphEditorState,
+    user_state: &mut SynthGraphState,
+    selection: &Selection,
+) -> Vec<EngineCommand> {
+    for &id in &selection.annotations {
+        user_state.annotations.remove(id);
+    }
+    delete_modules(editor, user_state, &selection.nodes)
+}
+
 /// Sets a node's parameters back to their defaults, and says whether any
 /// changed. Live parameters (a Keyboard's Note and Gate) are the player's,
 /// so they stay. The engine hears the new values with the next parameter sync.
@@ -116,34 +167,39 @@ pub fn top_left(editor: &SynthGraphEditorState, nodes: &[NodeId]) -> Option<Pos2
         .reduce(|a, b| a.min(b))
 }
 
-/// Captures some modules and the cables between them as a patch, ready to
-/// paste. Positions are in unzoomed points from the nodes' top-left corner,
-/// so the copies keep their layout at any zoom. MIDI mappings stay behind.
-pub fn copy_modules(editor: &SynthGraphEditorState, user_state: &SynthGraphState, nodes: &[NodeId]) -> Option<Patch> {
-    let origin = top_left(editor, nodes)?;
-    let zoom = editor.pan_zoom.zoom;
+/// Captures a selection as a patch, ready to paste: modules with the cables
+/// between them, frames and notes. Positions are in unzoomed points from
+/// the selection's top-left corner, so the copies keep their layout at any
+/// zoom. MIDI mappings stay behind.
+pub fn copy_selection(editor: &SynthGraphEditorState, user_state: &SynthGraphState, selection: &Selection) -> Option<Patch> {
+    let corner = patch_top_left(editor, user_state, selection)?;
+    let nodes = &selection.nodes;
     let position = |node_id| {
-        let offset = (editor.node_positions.get(node_id).copied().unwrap_or(origin) - origin) / zoom;
-        (offset.x, offset.y)
+        let at = editor.node_positions.get(node_id).map_or(corner, |&p| to_patch(editor, user_state, p));
+        ((at - corner).x, (at - corner).y)
     };
     let engine_id = |node_id| nodes.contains(&node_id).then(|| user_state.get_engine_node_id(node_id)).flatten();
-    let patch = capture_patch(CLIPBOARD_NAME, &editor.graph, engine_id, position, &[]);
-    (!patch.nodes.is_empty()).then_some(patch)
+    let mut patch = capture_patch(CLIPBOARD_NAME, &editor.graph, engine_id, position, &[]);
+    (patch.frames, patch.notes) = user_state.annotations.to_patch(&selection.annotations, -corner.to_vec2());
+    let empty = patch.nodes.is_empty() && patch.frames.is_empty() && patch.notes.is_empty();
+    (!empty).then_some(patch)
 }
 
 /// What a paste or duplicate added.
 pub struct Pasted {
     /// The new nodes, in patch order.
     pub nodes: Vec<NodeId>,
+    /// The new frames and notes.
+    pub annotations: Vec<AnnotationId>,
     /// Engine commands for the new modules and their cables.
     pub commands: Vec<EngineCommand>,
     /// Anything in the patch that couldn't be added.
     pub warnings: Vec<String>,
 }
 
-/// Adds a patch's modules, and the cables between them, with their
-/// top-left corner at `at`. Any patch works, not only copied modules: its
-/// layout is kept, scaled to the current zoom.
+/// Adds a patch's modules, the cables between them, and its frames and
+/// notes, with their top-left corner at `at`. Any patch works, not only
+/// copied modules: its layout is kept, scaled to the current zoom.
 pub fn paste(
     editor: &mut SynthGraphEditorState,
     user_state: &mut SynthGraphState,
@@ -155,8 +211,12 @@ pub fn paste(
     let corner = staged
         .iter()
         .map(|node| Vec2::new(node.position.0, node.position.1))
+        .chain(patch.frames.iter().map(|frame| Vec2::new(frame.position.0, frame.position.1)))
+        .chain(patch.notes.iter().map(|note| Vec2::new(note.position.0, note.position.1)))
         .reduce(|a, b| a.min(b))
         .unwrap_or_default();
+    let offset = to_patch(editor, user_state, at).to_vec2() - corner;
+    let annotations = user_state.annotations.add_from_patch(&patch.frames, &patch.notes, offset);
 
     let mut commands = Vec::new();
     let mut nodes = Vec::with_capacity(staged.len());
@@ -178,18 +238,19 @@ pub fn paste(
     for (input, output) in cables {
         commands.extend(engine_sync::cable_connected(&editor.graph, user_state, output, input));
     }
-    Ok(Pasted { nodes, commands, warnings })
+    Ok(Pasted { nodes, annotations, commands, warnings })
 }
 
-/// Copies some modules and pastes them a little down and to the right, with
-/// the cables between them. The clipboard is left alone.
+/// Copies a selection and pastes it a little down and to the right, with
+/// the cables between its modules. The clipboard is left alone.
 pub fn duplicate(
     editor: &mut SynthGraphEditorState,
     user_state: &mut SynthGraphState,
-    nodes: &[NodeId],
+    selection: &Selection,
 ) -> Option<Pasted> {
-    let patch = copy_modules(editor, user_state, nodes)?;
-    let at = top_left(editor, nodes)? + DUPLICATE_OFFSET * editor.pan_zoom.zoom;
+    let patch = copy_selection(editor, user_state, selection)?;
+    let corner = from_patch(editor, user_state, patch_top_left(editor, user_state, selection)?);
+    let at = corner + DUPLICATE_OFFSET * editor.pan_zoom.zoom;
     paste(editor, user_state, &patch, at).ok()
 }
 
@@ -200,6 +261,37 @@ pub fn describe_modules(editor: &SynthGraphEditorState, nodes: &[NodeId]) -> Str
             .and_then(|node| SynthNodeTemplate::from_module_id(node.user_data.module_id))
             .map_or_else(|| "module".to_string(), |t| t.name().to_string()),
         many => format!("{} modules", many.len()),
+    }
+}
+
+/// Names a selection for the status bar and undo: "Oscillator", "frame
+/// Voice", "3 modules and 1 frame", "2 notes".
+pub fn describe(editor: &SynthGraphEditorState, user_state: &SynthGraphState, selection: &Selection) -> String {
+    let annotations: Vec<&Annotation> =
+        selection.annotations.iter().filter_map(|&id| user_state.annotations.get(id)).collect();
+    match (selection.nodes.as_slice(), annotations.as_slice()) {
+        (nodes, []) => describe_modules(editor, nodes),
+        ([], [one]) => one.describe(),
+        (nodes, annotations) => {
+            let count = |n: usize, what: &str| match n {
+                0 => None,
+                1 => Some(format!("1 {what}")),
+                n => Some(format!("{n} {what}s")),
+            };
+            let frames = annotations.iter().filter(|a| matches!(a, Annotation::Frame(_))).count();
+            let parts: Vec<String> = [
+                count(nodes.len(), "module"),
+                count(frames, "frame"),
+                count(annotations.len() - frames, "note"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            match parts.as_slice() {
+                [.., last] if parts.len() > 1 => format!("{} and {last}", parts[..parts.len() - 1].join(", ")),
+                _ => parts.concat(),
+            }
+        }
     }
 }
 
@@ -286,7 +378,7 @@ mod tests {
     fn duplicate_copies_values_and_inner_cables_only() {
         let mut rig = Rig::new();
         let (osc, filter, out) = chain(&mut rig);
-        let pasted = duplicate(&mut rig.editor, &mut rig.user_state, &[osc, filter]).unwrap();
+        let pasted = duplicate(&mut rig.editor, &mut rig.user_state, &Selection::modules(&[osc, filter])).unwrap();
 
         let [osc2, filter2] = pasted.nodes[..] else { panic!("expected two copies") };
         assert_eq!((rig.module(osc2), rig.module(filter2)), ("osc.sine", "filter.svf"));
@@ -314,7 +406,7 @@ mod tests {
     fn copies_paste_through_json_at_any_zoom() {
         let mut rig = Rig::new();
         let (osc, filter, _) = chain(&mut rig);
-        let patch = copy_modules(&rig.editor, &rig.user_state, &[osc, filter]).unwrap();
+        let patch = copy_selection(&rig.editor, &rig.user_state, &Selection::modules(&[osc, filter])).unwrap();
         // The clipboard carries text
         let patch = patch_from_json(&serde_json::to_string(&patch).unwrap()).unwrap();
 
@@ -343,6 +435,76 @@ mod tests {
     #[test]
     fn nothing_to_copy_is_none() {
         let rig = Rig::new();
-        assert!(copy_modules(&rig.editor, &rig.user_state, &[]).is_none());
+        assert!(copy_selection(&rig.editor, &rig.user_state, &Selection::default()).is_none());
+    }
+
+    /// A frame around the oscillator and filter, with a note under them.
+    fn annotate(rig: &mut Rig) -> (AnnotationId, AnnotationId) {
+        use crate::graph::annotations::{Frame, Note, Tint};
+        let annotations = &mut rig.user_state.annotations;
+        let frame = annotations.add(Annotation::Frame(Frame {
+            title: "Voice".into(),
+            rect: egui::Rect::from_min_size(pos2(80.0, 60.0), vec2(420.0, 300.0)),
+            tint: Tint::Blue,
+        }));
+        let note = annotations.add(Annotation::Note(Note { text: "Saw in".into(), position: pos2(100.0, 380.0), width: 200.0 }));
+        (frame, note)
+    }
+
+    #[test]
+    fn frames_and_notes_copy_with_their_modules_and_keep_their_places() {
+        let mut rig = Rig::new();
+        let (osc, filter, _) = chain(&mut rig);
+        let (frame, note) = annotate(&mut rig);
+        let selection = Selection { nodes: vec![osc, filter], annotations: vec![frame, note] };
+        let patch = copy_selection(&rig.editor, &rig.user_state, &selection).unwrap();
+        // The frame is the top-left corner of the copy
+        assert_eq!(patch.frames[0].position, (0.0, 0.0));
+        assert_eq!(patch.nodes[0].position, (20.0, 40.0));
+        assert_eq!(patch.notes[0].position, (20.0, 320.0));
+        let patch = patch_from_json(&serde_json::to_string(&patch).unwrap()).unwrap();
+
+        // Pasted at twice the zoom, the frame still holds the oscillator
+        rig.editor.pan_zoom.zoom = 2.0;
+        rig.user_state.view_origin = vec2(30.0, -10.0);
+        let pasted = paste(&mut rig.editor, &mut rig.user_state, &patch, pos2(1000.0, 1000.0)).unwrap();
+        let [frame2, note2] = pasted.annotations[..] else { panic!("expected a frame and a note") };
+        let Some(Annotation::Frame(copy)) = rig.user_state.annotations.get(frame2) else { panic!() };
+        let osc2 = rig.editor.node_positions[pasted.nodes[0]];
+        assert_eq!(from_patch(&rig.editor, &rig.user_state, copy.rect.min), pos2(1000.0, 1000.0));
+        assert_eq!(osc2, pos2(1040.0, 1080.0));
+        assert_eq!(copy.rect.size(), vec2(420.0, 300.0));
+        assert!(matches!(rig.user_state.annotations.get(note2), Some(Annotation::Note(n)) if n.text == "Saw in"));
+    }
+
+    #[test]
+    fn a_frame_or_note_alone_copies_duplicates_and_deletes() {
+        let mut rig = Rig::new();
+        let (frame, note) = annotate(&mut rig);
+        let selection = Selection { nodes: vec![], annotations: vec![note] };
+        assert!(copy_selection(&rig.editor, &rig.user_state, &selection).is_some());
+
+        let pasted = duplicate(&mut rig.editor, &mut rig.user_state, &Selection { nodes: vec![], annotations: vec![frame] }).unwrap();
+        let Some(Annotation::Frame(copy)) = rig.user_state.annotations.get(pasted.annotations[0]) else { panic!() };
+        assert_eq!(copy.rect.min, pos2(80.0, 60.0) + DUPLICATE_OFFSET);
+        assert_eq!(describe(&rig.editor, &rig.user_state, &Selection { nodes: vec![], annotations: vec![frame] }), "frame Voice");
+
+        delete_selection(&mut rig.editor, &mut rig.user_state, &Selection { nodes: vec![], annotations: vec![frame, note] });
+        assert!(rig.user_state.annotations.get(frame).is_none());
+        assert!(rig.user_state.annotations.get(note).is_none());
+    }
+
+    #[test]
+    fn mixed_selections_are_described_by_count() {
+        let mut rig = Rig::new();
+        let (osc, filter, _) = chain(&mut rig);
+        let (frame, note) = annotate(&mut rig);
+        let describe = |nodes: Vec<NodeId>, annotations: Vec<AnnotationId>| {
+            describe(&rig.editor, &rig.user_state, &Selection { nodes, annotations })
+        };
+        assert_eq!(describe(vec![osc], vec![]), "Oscillator");
+        assert_eq!(describe(vec![osc, filter], vec![frame]), "2 modules and 1 frame");
+        assert_eq!(describe(vec![osc], vec![frame, note]), "1 module, 1 frame and 1 note");
+        assert_eq!(describe(vec![], vec![frame, note]), "1 frame and 1 note");
     }
 }

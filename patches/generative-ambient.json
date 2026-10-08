@@ -6,8 +6,8 @@
       "id": 1,
       "module_id": "util.clock",
       "position": [
-        20.0,
-        40.0
+        40.0,
+        94.0
       ],
       "parameters": [
         {
@@ -36,8 +36,8 @@
       "id": 2,
       "module_id": "seq.step",
       "position": [
-        183.0,
-        20.0
+        223.0,
+        74.0
       ],
       "parameters": [
         {
@@ -301,8 +301,8 @@
       "id": 3,
       "module_id": "osc.sine",
       "position": [
-        528.0,
-        20.0
+        588.0,
+        74.0
       ],
       "parameters": [
         {
@@ -361,8 +361,8 @@
       "id": 4,
       "module_id": "osc.sine",
       "position": [
-        750.0,
-        20.0
+        965.0,
+        854.0
       ],
       "parameters": [
         {
@@ -421,8 +421,8 @@
       "id": 5,
       "module_id": "util.mixer",
       "position": [
-        972.0,
-        60.0
+        892.0,
+        114.0
       ],
       "parameters": [
         {
@@ -441,8 +441,8 @@
       "id": 6,
       "module_id": "filter.svf",
       "position": [
-        1295.0,
-        20.0
+        1215.0,
+        74.0
       ],
       "parameters": [
         {
@@ -466,8 +466,8 @@
       "id": 7,
       "module_id": "util.vca",
       "position": [
-        1517.0,
-        60.0
+        1437.0,
+        114.0
       ],
       "parameters": [
         {
@@ -486,8 +486,8 @@
       "id": 8,
       "module_id": "fx.delay",
       "position": [
-        1782.0,
-        20.0
+        1762.0,
+        74.0
       ],
       "parameters": [
         {
@@ -536,8 +536,8 @@
       "id": 9,
       "module_id": "fx.reverb",
       "position": [
-        2102.0,
-        20.0
+        2082.0,
+        74.0
       ],
       "parameters": [
         {
@@ -581,8 +581,8 @@
       "id": 10,
       "module_id": "output.audio",
       "position": [
-        2371.0,
-        60.0
+        2391.0,
+        114.0
       ],
       "parameters": [
         {
@@ -606,8 +606,8 @@
       "id": 11,
       "module_id": "mod.lfo",
       "position": [
-        20.0,
-        410.0
+        40.0,
+        854.0
       ],
       "parameters": [
         {
@@ -636,8 +636,8 @@
       "id": 12,
       "module_id": "util.sample_hold",
       "position": [
-        242.0,
-        430.0
+        262.0,
+        874.0
       ],
       "parameters": [
         {
@@ -651,8 +651,8 @@
       "id": 13,
       "module_id": "mod.adsr",
       "position": [
-        1517.0,
-        300.0
+        1437.0,
+        354.0
       ],
       "parameters": [
         {
@@ -701,8 +701,8 @@
       "id": 14,
       "module_id": "mod.lfo",
       "position": [
-        750.0,
-        640.0
+        1246.0,
+        854.0
       ],
       "parameters": [
         {
@@ -731,8 +731,8 @@
       "id": 15,
       "module_id": "source.noise",
       "position": [
-        242.0,
-        640.0
+        503.0,
+        854.0
       ],
       "parameters": [
         {
@@ -751,8 +751,8 @@
       "id": 16,
       "module_id": "util.quantizer",
       "position": [
-        528.0,
-        650.0
+        725.0,
+        864.0
       ],
       "parameters": [
         {
@@ -900,5 +900,105 @@
       "to_port": "V/Oct"
     }
   ],
-  "midi_mappings": []
+  "midi_mappings": [],
+  "frames": [
+    {
+      "title": "Melody",
+      "position": [
+        16.0,
+        16.0
+      ],
+      "size": [
+        781.0,
+        626.0
+      ],
+      "color": "blue"
+    },
+    {
+      "title": "Tone",
+      "position": [
+        868.0,
+        16.0
+      ],
+      "size": [
+        823.0,
+        747.0
+      ],
+      "color": "teal"
+    },
+    {
+      "title": "Echoes",
+      "position": [
+        1738.0,
+        16.0
+      ],
+      "size": [
+        598.0,
+        401.0
+      ],
+      "color": "cyan"
+    },
+    {
+      "title": "Brightness",
+      "position": [
+        16.0,
+        796.0
+      ],
+      "size": [
+        439.0,
+        431.0
+      ],
+      "color": "amber"
+    },
+    {
+      "title": "Second voice",
+      "position": [
+        479.0,
+        796.0
+      ],
+      "size": [
+        695.0,
+        626.0
+      ],
+      "color": "violet"
+    },
+    {
+      "title": "Drift",
+      "position": [
+        1222.0,
+        796.0
+      ],
+      "size": [
+        233.0,
+        431.00006103515625
+      ],
+      "color": "amber"
+    }
+  ],
+  "notes": [
+    {
+      "text": "The Clock steps the sequencer once a beat through C D E G A G E D. The pentatonic scale has no half steps, so no two notes clash.",
+      "position": [
+        16.0,
+        660.0
+      ],
+      "width": 520.0
+    },
+    {
+      "text": "The S&H catches the LFO on every beat, so each note gets its own brightness. The cycles don't line up, so no two passes sound alike.",
+      "position": [
+        16.0,
+        1243.0
+      ],
+      "width": 300.0
+    },
+    {
+      "text": "Noise picks a pitch every few seconds and the Quantizer snaps it to the melody's scale: chance, without a wrong note.",
+      "position": [
+        479.0,
+        1438.0
+      ],
+      "width": 360.0
+    }
+  ]
 }

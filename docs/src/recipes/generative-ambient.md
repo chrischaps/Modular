@@ -6,7 +6,7 @@ A patch that plays itself. A slow pentatonic melody repeats every twelve seconds
 > The patch file is [`patches/generative-ambient.json`](https://github.com/chrischaps/Modular/blob/master/patches/generative-ambient.json).
 
 ![The Generative Ambient patch](../images/recipe-generative-ambient.png)
-*Clock and sequencer play the melody; Noise and the Quantizer, bottom left, sing the second voice.*
+*Clock and sequencer play the melody, top left. Below, Noise and the Quantizer sing the second voice.*
 
 ## What it teaches
 

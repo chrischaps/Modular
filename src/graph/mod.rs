@@ -3,6 +3,8 @@
 //! Node graph integration with egui_node_graph2.
 //! Handles data types, node templates, connection validation, and custom rendering.
 
+pub mod annotation_ui;
+pub mod annotations;
 pub mod catalog;
 mod clock_display;
 mod data_types;

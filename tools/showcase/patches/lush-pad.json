@@ -6,8 +6,8 @@
       "id": 1,
       "module_id": "input.poly_midi",
       "position": [
-        16.0,
-        94.0
+        20.0,
+        40.0
       ],
       "parameters": [
         {
@@ -41,8 +41,8 @@
       "id": 2,
       "module_id": "osc.sine",
       "position": [
-        278.0,
-        74.0
+        242.0,
+        20.0
       ],
       "parameters": [
         {
@@ -101,8 +101,8 @@
       "id": 3,
       "module_id": "filter.svf",
       "position": [
-        500.0,
-        74.0
+        464.0,
+        20.0
       ],
       "parameters": [
         {
@@ -126,8 +126,8 @@
       "id": 4,
       "module_id": "util.vca",
       "position": [
-        722.0,
-        114.0
+        686.0,
+        60.0
       ],
       "parameters": [
         {
@@ -146,8 +146,8 @@
       "id": 10,
       "module_id": "util.mixer",
       "position": [
-        1047.0,
-        74.0
+        951.0,
+        20.0
       ],
       "parameters": [
         {
@@ -226,8 +226,8 @@
       "id": 5,
       "module_id": "fx.chorus",
       "position": [
-        1367.0,
-        74.0
+        1271.0,
+        20.0
       ],
       "parameters": [
         {
@@ -271,8 +271,8 @@
       "id": 6,
       "module_id": "fx.reverb",
       "position": [
-        1687.0,
-        74.0
+        1591.0,
+        20.0
       ],
       "parameters": [
         {
@@ -316,8 +316,8 @@
       "id": 7,
       "module_id": "output.audio",
       "position": [
-        2006.0,
-        114.0
+        1860.0,
+        60.0
       ],
       "parameters": [
         {
@@ -341,8 +341,8 @@
       "id": 8,
       "module_id": "mod.adsr",
       "position": [
-        722.0,
-        354.0
+        686.0,
+        300.0
       ],
       "parameters": [
         {
@@ -391,8 +391,8 @@
       "id": 9,
       "module_id": "mod.lfo",
       "position": [
-        500.0,
-        444.0
+        464.0,
+        390.0
       ],
       "parameters": [
         {
@@ -504,49 +504,5 @@
       "to_port": "In R"
     }
   ],
-  "midi_mappings": [],
-  "frames": [
-    {
-      "title": "Every voice",
-      "position": [
-        254.0,
-        16.0
-      ],
-      "size": [
-        722.0,
-        801.0
-      ],
-      "color": "blue"
-    },
-    {
-      "title": "Space",
-      "position": [
-        1023.0,
-        16.0
-      ],
-      "size": [
-        918.0,
-        707.0
-      ],
-      "color": "cyan"
-    }
-  ],
-  "notes": [
-    {
-      "text": "Each module in this frame plays once for every note you hold. The bundled cables carry one strand per voice.",
-      "position": [
-        254.0,
-        841.0
-      ],
-      "width": 340.0
-    },
-    {
-      "text": "The Mixer fans the chord out between the speakers. Chorus and reverb hear it as one stereo pair.",
-      "position": [
-        1023.0,
-        747.0
-      ],
-      "width": 320.0
-    }
-  ]
+  "midi_mappings": []
 }
