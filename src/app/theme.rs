@@ -173,6 +173,32 @@ pub const ROUNDING_SMALL: Rounding = Rounding {
     se: 4.0,
 };
 
+/// Module titles are set in Space Grotesk SemiBold: heavy enough to hold its
+/// own on a bright header, with a little of an instrument panel's character
+const TITLE_FONT: &[u8] = include_bytes!("../../assets/fonts/SpaceGrotesk-SemiBold.ttf");
+
+/// The family module titles are set in
+pub const TITLE_FAMILY: &str = "Title";
+
+/// The text style module titles are set in
+pub fn title_text_style() -> egui::TextStyle {
+    egui::TextStyle::Name(TITLE_FAMILY.into())
+}
+
+/// Installs the title face. Fonts take a frame to arrive, so this runs when
+/// the app is created, before anything asks for the family. The title family
+/// falls back to the default faces for any glyph its Latin subset lacks.
+pub fn install_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts
+        .font_data
+        .insert(TITLE_FAMILY.to_owned(), std::sync::Arc::new(egui::FontData::from_static(TITLE_FONT)));
+    let mut family = vec![TITLE_FAMILY.to_owned()];
+    family.extend(fonts.families[&egui::FontFamily::Proportional].iter().cloned());
+    fonts.families.insert(egui::FontFamily::Name(TITLE_FAMILY.into()), family);
+    ctx.set_fonts(fonts);
+}
+
 /// Apply the dark synth theme to an egui context
 pub fn apply_theme(ctx: &egui::Context) {
     let mut style = (*ctx.style()).clone();
@@ -231,6 +257,11 @@ pub fn apply_theme(ctx: &egui::Context) {
     style.spacing.item_spacing = Vec2::new(8.0, 6.0);
     style.spacing.button_padding = Vec2::new(12.0, 6.0);
     style.spacing.window_margin = egui::Margin::same(12.0);
+
+    style.text_styles.insert(
+        title_text_style(),
+        egui::FontId::new(14.0, egui::FontFamily::Name(TITLE_FAMILY.into())),
+    );
 
     ctx.set_style(style);
 }

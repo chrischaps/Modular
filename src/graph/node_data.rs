@@ -353,20 +353,35 @@ impl SynthNodeData {
         Color32::from_rgb(mix(color.r()), mix(color.g()), mix(color.b()))
     }
 
+    /// The ink the header is lettered in, which its title, icon, switch and
+    /// close button share: a deep shade of the header's own colour, or near
+    /// white, whichever stands out more. Bright headers get the dark ink, so
+    /// "ADSR Envelope" reads on orange; deep ones like Output keep white.
+    /// A bypassed module's ink sinks a little toward its greyed header.
+    pub fn titlebar_ink(&self) -> Color32 {
+        let fill = self.titlebar_fill();
+        let deep = |c: u8| (c as f32 * 0.2).round() as u8;
+        let dark = Color32::from_rgb(deep(fill.r()), deep(fill.g()), deep(fill.b()));
+        let light = Color32::from_gray(250);
+        let ink = if contrast_ratio(fill, dark) >= contrast_ratio(fill, light) { dark } else { light };
+        if self.bypassed {
+            ink.lerp_to_gamma(fill, 0.3)
+        } else {
+            ink
+        }
+    }
+
     /// Draws the bypass switch: the power symbol, lit while the module is in
     /// the signal path and dark when it's bypassed, like a pedal's LED.
     fn draw_power_switch(&self, painter: &egui::Painter, center: egui::Pos2, size: f32, hovered: bool) {
-        let color = match (self.bypassed, hovered) {
-            (false, _) => Color32::WHITE,
-            (true, true) => Color32::from_gray(205),
-            (true, false) => Color32::from_gray(150),
-        };
+        let ink = self.titlebar_ink();
+        let color = if self.bypassed && !hovered { ink.gamma_multiply(0.7) } else { ink };
         let radius = size * 0.4;
         let stroke = egui::Stroke::new((size * 0.13).max(1.0), color);
 
         if !self.bypassed {
-            // A soft halo, so the switch reads as lit against the header
-            painter.circle_filled(center, radius * 1.45, Color32::from_white_alpha(28));
+            // A soft disc behind the symbol, so the switch reads as engaged
+            painter.circle_filled(center, radius * 1.45, ink.gamma_multiply(0.12));
         }
 
         // The ring, open at the top where the stem passes through
@@ -643,6 +658,17 @@ impl SynthNodeData {
     }
 }
 
+/// How far apart two colours sit in lightness, as WCAG measures legibility:
+/// 1 for the same colour, 21 for black on white, 4.5 or more for body text
+fn contrast_ratio(a: Color32, b: Color32) -> f32 {
+    let luminance = |c: Color32| {
+        let linear = egui::Rgba::from(c);
+        0.2126 * linear.r() + 0.7152 * linear.g() + 0.0722 * linear.b()
+    };
+    let (la, lb) = (luminance(a), luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
 /// An output's label, held back until the node's width is known so it can
 /// sit against its port on the right edge rather than at the left
 #[derive(Clone)]
@@ -776,8 +802,7 @@ impl NodeDataTrait for SynthNodeData {
             icon_rect.left() + icon_size * 0.5,
             icon_rect.center().y,
         );
-        let icon_color = if self.bypassed { Color32::from_gray(170) } else { Color32::WHITE };
-        self.draw_category_icon(ui.painter(), icon_center, icon_size, icon_color);
+        self.draw_category_icon(ui.painter(), icon_center, icon_size, self.titlebar_ink());
 
         responses
     }
@@ -2126,6 +2151,20 @@ impl NodeDataTrait for SynthNodeData {
         // Return the category-based header color
         Some(self.titlebar_fill())
     }
+
+    fn titlebar_text_color(
+        &self,
+        _ui: &egui::Ui,
+        _node_id: egui_node_graph2::NodeId,
+        _graph: &egui_node_graph2::Graph<Self, Self::DataType, Self::ValueType>,
+        _user_state: &mut Self::UserState,
+    ) -> Option<Color32> {
+        Some(self.titlebar_ink())
+    }
+
+    fn titlebar_text_style(&self) -> egui::TextStyle {
+        crate::app::theme::title_text_style()
+    }
 }
 
 #[cfg(test)]
@@ -2155,6 +2194,35 @@ mod tests {
         assert_eq!(source.header_color(), ModuleCategory::Source.color());
         assert_eq!(filter.header_color(), ModuleCategory::Filter.color());
         assert_eq!(output.header_color(), ModuleCategory::Output.color());
+    }
+
+    #[test]
+    fn titles_are_legible_on_every_header() {
+        let categories = [
+            ModuleCategory::Source,
+            ModuleCategory::Filter,
+            ModuleCategory::Modulation,
+            ModuleCategory::Effect,
+            ModuleCategory::Utility,
+            ModuleCategory::Output,
+        ];
+        for category in categories {
+            let mut node = SynthNodeData::new("test", "Test", category);
+            // Live headers hold WCAG's 4.5:1 for text
+            let contrast = contrast_ratio(node.titlebar_fill(), node.titlebar_ink());
+            assert!(contrast >= 4.5, "{:?} title contrast {:.1}", category, contrast);
+
+            // A bypassed one is quieter on purpose, but still readable
+            node.bypassed = true;
+            let contrast = contrast_ratio(node.titlebar_fill(), node.titlebar_ink());
+            assert!(contrast >= 3.0, "{:?} bypassed title contrast {:.1}", category, contrast);
+        }
+    }
+
+    #[test]
+    fn contrast_ratio_spans_one_to_twenty_one() {
+        assert!((contrast_ratio(Color32::WHITE, Color32::WHITE) - 1.0).abs() < 0.01);
+        assert!((contrast_ratio(Color32::BLACK, Color32::WHITE) - 21.0).abs() < 0.1);
     }
 
     #[test]

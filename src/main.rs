@@ -47,6 +47,7 @@ fn main() -> eframe::Result<()> {
         "Modular Synth",
         options,
         Box::new(move |cc| {
+            modular_synth::app::theme::install_fonts(&cc.egui_ctx);
             let mut app = SynthApp::new(test_tone);
             app.open_on_launch(patch_path.as_deref());
             match capture {
