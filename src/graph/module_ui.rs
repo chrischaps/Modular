@@ -247,7 +247,8 @@ static MODULE_UI: &[ModuleUi] = &[
         knobs: &[knob("Steps"), knob_as("Gate Length", "Gate")],
         labels: &[("Direction", "Dir")],
         hidden: &["Step *"],
-        monitor: &["Gate", "EOC"],
+        // Step drives the grid's playhead, patched or not
+        monitor: &["Gate", "Step", "EOC"],
         display: NodeDisplay::StepGrid,
         ..ModuleUi::DEFAULT
     },
