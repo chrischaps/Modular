@@ -50,15 +50,17 @@ Short slews (a few tens of milliseconds) take the click off stepped modulation w
 
 ### Stepped random modulation
 
-Modular Synth has no noise module, but a fast oscillator sampled by a slower clock does the job. Tune the oscillator to a frequency with no simple relation to the clock and every sample lands at an unrelated point in its cycle:
+Sample [Noise](../sources/noise.md) on every clock and each step lands on a value with no relation to the last:
 
 ```text
-[Oscillator Out] ──> [Sample & Hold In]        (Saw, Oct +2, Fine a few cents off)
+[Noise White] ──> [Sample & Hold In]
 [Clock Gate] ──> [Sample & Hold Trig]
 [Sample & Hold Out] ──> [SVF Filter Cutoff]
 ```
 
-The filter jumps to a new brightness on every clock. Add a little **Slew** to smooth the jumps.
+The filter jumps to a new brightness on every clock. Add a little **Slew** to smooth the jumps. Patch **Out** into an [Oscillator](../sources/oscillator.md)'s **V/Oct** instead and you have the classic random melody; the Noise **Level** knob sets how far it wanders.
+
+A fast oscillator sampled by a slower clock does a similar job with a pattern you can hear. Tune it to a frequency with no simple relation to the clock (Saw, **Oct** +2, **Fine** a few cents off) and every sample lands at a different point in its cycle.
 
 ### Stepped LFO
 
@@ -90,6 +92,7 @@ Raise **Slew** to 0.1–0.3 s on any of the patches above and the steps become s
 
 ## Related modules
 
+- [Noise](../sources/noise.md): the classic signal to sample
 - [Clock](../modulation/clock.md): steady triggers
 - [LFO](../modulation/lfo.md): a slow signal to sample
 - [Attenuverter](./attenuverter.md): scale the held values to a useful range

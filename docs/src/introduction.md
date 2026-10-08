@@ -25,11 +25,11 @@ A cable can also carry up to eight voices at once, which is how Modular Synth pl
 
 ## Modules
 
-There are 23 modules in six categories. A module's header takes its category's color:
+There are 24 modules in six categories. A module's header takes its category's color:
 
 | Category | Header | Modules |
 |----------|--------|---------|
-| Source | <span class="swatch bar source"></span>Blue | Oscillator, Keyboard, MIDI Note, Poly MIDI |
+| Source | <span class="swatch bar source"></span>Blue | Oscillator, Noise, Keyboard, MIDI Note, Poly MIDI |
 | Filter | <span class="swatch bar filter"></span>Teal | SVF Filter, Ladder Filter |
 | Modulation | <span class="swatch bar modulation"></span>Orange | ADSR Envelope, LFO |
 | Effect | <span class="swatch bar effect"></span>Cyan | Stereo Delay, Reverb, 3-Band EQ, Distortion, Chorus, Compressor |

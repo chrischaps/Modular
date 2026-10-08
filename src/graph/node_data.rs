@@ -16,7 +16,7 @@ use egui_node_graph2::{ConnectionSignalTrait, NodeDataTrait, NodeResponse, UserR
 use crate::dsp::ModuleCategory;
 use crate::engine::midi_engine::MidiEvent;
 use crate::modules::{LadderFilter, SvfFilter};
-use crate::widgets::{knob, led, KnobStyle, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, FrequencyPoint, SpectrumConfig, SpectrumStyle, piano, PianoConfig, PianoData};
+use crate::widgets::{knob, led, KnobStyle, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, FrequencyPoint, SpectrumConfig, SpectrumStyle, piano, PianoConfig, PianoData, noise_display, NoiseDisplayConfig};
 use super::hints::{self, Hint};
 use super::{SynthResponse, SynthValueType};
 
@@ -206,6 +206,8 @@ pub enum NodeDisplay {
     None,
     /// Oscillator: one cycle of the selected waveform.
     OscillatorWave,
+    /// Noise: the white, pink and brown slopes, shimmering.
+    NoiseSpectrum,
     /// LFO: waveform with a live phase marker.
     LfoWave,
     /// ADSR: envelope shape.
@@ -1441,6 +1443,57 @@ impl NodeDataTrait for SynthNodeData {
             ui.horizontal(|ui| {
                 ui.add_space((ui.available_width() - 140.0 * zoom) / 2.0); // Center the display
                 waveform_display(ui, &samples, &config);
+            });
+        }
+
+        // Noise: the three slopes, with the patched ones lit
+        if self.display == NodeDisplay::NoiseSpectrum {
+            ui.add_space(4.0 * zoom);
+            let category_color = self.category.color();
+            let separator_color = Color32::from_rgba_unmultiplied(
+                category_color.r(),
+                category_color.g(),
+                category_color.b(),
+                64,
+            );
+            let margin = 4.0 * zoom;
+            let rect = ui.available_rect_before_wrap();
+            ui.painter().hline(
+                (rect.left() + margin)..=(rect.right() - margin),
+                ui.cursor().top(),
+                egui::Stroke::new(1.0 * zoom, separator_color),
+            );
+            ui.add_space(4.0 * zoom);
+
+            let (level, patched) = if let Some(node) = graph.nodes.get(node_id) {
+                let level = node
+                    .inputs
+                    .iter()
+                    .find(|(name, _)| name == "Level")
+                    .and_then(|(_, id)| match graph.get_input(*id).value {
+                        SynthValueType::Number { value, .. } => Some(value),
+                        _ => None,
+                    })
+                    .unwrap_or(0.5);
+                let is_patched = |port: &str| {
+                    node.outputs
+                        .iter()
+                        .find(|(name, _)| name == port)
+                        .is_some_and(|(_, id)| graph.iter_connections().any(|(_, output)| output == *id))
+                };
+                (level, [is_patched("White"), is_patched("Pink"), is_patched("Brown")])
+            } else {
+                (0.5, [false; 3])
+            };
+
+            let config = NoiseDisplayConfig {
+                size: egui::vec2(140.0 * zoom, 50.0 * zoom),
+                level,
+                patched,
+            };
+            ui.horizontal(|ui| {
+                ui.add_space((ui.available_width() - 140.0 * zoom) / 2.0); // Center the display
+                noise_display(ui, &config);
             });
         }
 

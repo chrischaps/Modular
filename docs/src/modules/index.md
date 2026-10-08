@@ -1,6 +1,6 @@
 # Module Overview
 
-Modular Synth has 23 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
+Modular Synth has 24 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
 
 The **ID** is the name a patch file uses to refer to the module.
 
@@ -8,11 +8,12 @@ The **ID** is the name a patch file uses to refer to the module.
 
 ### Source
 
-<span class="swatch bar source"></span>Blue header. Modules that start a sound or a note: the oscillator, and the modules that turn your playing into pitch and gate signals.
+<span class="swatch bar source"></span>Blue header. Modules that start a sound or a note: the oscillator and noise source, and the modules that turn your playing into pitch and gate signals.
 
 | Module | ID | What it does |
 |--------|----|--------------|
 | [Oscillator](./sources/oscillator.md) | `osc.sine` | Band-limited VCO with a tune section, hard sync, through-zero FM, a sub-oscillator and unison |
+| [Noise](./sources/noise.md) | `source.noise` | White, pink and brown noise, and a smooth random voltage |
 | [Keyboard](./midi/keyboard.md) | `input.keyboard` | Play notes from your computer keyboard |
 | [MIDI Note](./midi/midi-note.md) | `input.midi_note` | One voice of pitch, gate, velocity and aftertouch from a MIDI controller |
 | [Poly MIDI](./midi/poly-midi.md) | `input.poly_midi` | Up to eight voices from a MIDI controller, for chords |
@@ -75,7 +76,7 @@ Header colors describe what a module *is*. The colors of its jacks and cables de
 
 ## Polyphonic modules
 
-The Oscillator, both filters, the ADSR Envelope, the VCA, the Attenuverter and Sample & Hold run one voice per channel when a polyphonic cable reaches them. Everything else treats a polyphonic cable as one signal. See [Polyphony](../concepts/polyphony.md).
+The Oscillator, Noise, both filters, the ADSR Envelope, the VCA, the Attenuverter and Sample & Hold run one voice per channel when a polyphonic cable reaches them. Everything else treats a polyphonic cable as one signal. See [Polyphony](../concepts/polyphony.md).
 
 ## Common signal chains
 
@@ -111,13 +112,14 @@ Drive a voice from a sequence instead of a keyboard:
 | To… | Reach for |
 |-----|-----------|
 | Make a tone | [Oscillator](./sources/oscillator.md) |
+| Make drums, wind or breath | [Noise](./sources/noise.md) through a filter and an envelope |
 | Play notes | [Keyboard](./midi/keyboard.md), [MIDI Note](./midi/midi-note.md), or [Poly MIDI](./midi/poly-midi.md) for chords |
 | Darken or brighten a sound | [SVF Filter](./filters/svf-filter.md) or [Ladder Filter](./filters/ladder-filter.md) |
 | Give each note a shape in time | [ADSR Envelope](./modulation/adsr.md) into a [VCA](./utilities/vca.md) |
 | Add slow, repeating movement | [LFO](./modulation/lfo.md) |
 | Tame or flip a modulation signal | [Attenuverter](./utilities/attenuverter.md) |
 | Play a pattern | [Clock](./modulation/clock.md) into the [Step Sequencer](./utilities/sequencer.md) |
-| Make stepped random changes | [Sample & Hold](./utilities/sample-hold.md) |
+| Make random changes | [Noise](./sources/noise.md) into [Sample & Hold](./utilities/sample-hold.md) for steps, or its **Random** output for glides |
 | Combine two signals | [Mixer](./utilities/mixer.md) |
 | Add space and depth | [Stereo Delay](./effects/delay.md), [Reverb](./effects/reverb.md), [Chorus](./effects/chorus.md) |
 | Add grit or warmth | [Distortion](./effects/distortion.md) |

@@ -29,6 +29,17 @@ knob Detune             "Detune" KnobOnly
 knob Spread             "Spread" KnobOnly
 display OscillatorWave
 
+== source.noise "Noise" finder="Noise" Source
+in   Level              Control  ConnectionOrConstant inline=true  num 0.5 [0..1]
+in   Rate               Control  ConnectionOrConstant inline=true  num 1 [0.01..20] Hz log
+out  White              Audio
+out  Pink               Audio
+out  Brown              Audio
+out  Random             Control
+knob Level              "Level" Modulatable
+knob Rate               "Rate" Modulatable
+display NoiseSpectrum
+
 == input.keyboard "Keyboard" finder="Keyboard" Source
 in   Note               Control  ConstantOnly         inline=false num 60 [0..127]
 in   Gate               Control  ConstantOnly         inline=false toggle false ""

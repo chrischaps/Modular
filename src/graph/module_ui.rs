@@ -109,6 +109,12 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "source.noise",
+        knobs: &[modulatable("Level", "Level"), modulatable("Rate", "Rate")],
+        display: NodeDisplay::NoiseSpectrum,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "input.keyboard",
         knobs: &[knob_as("Octave", "Oct"), knob_as("Velocity", "Vel")],
         hidden: &["Note", "Gate"],
