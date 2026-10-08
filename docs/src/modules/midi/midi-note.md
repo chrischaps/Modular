@@ -77,6 +77,8 @@ Any knob in the patch can follow a MIDI controller (a mod wheel, a fader, a knob
 1. Right-click the knob and choose **Learn MIDI CC**. A purple **M** badge blinks above it, and the status bar asks you to move a control.
 2. Move the knob or fader on your controller. The badge stops blinking: the knob is mapped.
 
+Changed your mind, or no controller to hand? Press `Escape`, or right-click the blinking knob and choose **Cancel MIDI Learn**, and nothing is mapped. Starting learn on another knob moves it there instead.
+
 The controller sweeps the knob's whole range, on any MIDI channel. Right-click a mapped knob to see its CC number, to **Re-learn MIDI CC**, or to **Clear MIDI**. Mappings are saved with the patch. Moves made by a controller aren't added to the undo history.
 
 ## Patch examples

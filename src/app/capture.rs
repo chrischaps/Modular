@@ -36,6 +36,7 @@
 //! 3.0  move 400 300 0.6             # glide the pointer
 //! 3.5  drag 500 340 0.8             # press, glide, release
 //! 3.5  press / release
+//! 3.5  rclick                       # right-click, for context menus
 //! 4.0  view 120 -40 2.0             # pan the graph to an offset over 2 s
 //! 4.0  zoom 1.4 2.0                 # zoom the graph by a factor over 2 s
 //! 4.0  camera -300 0 0.5 3.0        # move a virtual camera: the view as
@@ -124,6 +125,8 @@ enum Cue {
     Cursor(bool),
     Move { to: Pos2, dur: f64 },
     Button(bool),
+    /// The secondary button, pressed or released.
+    SecondaryButton(bool),
     View { pan: Vec2, dur: f64 },
     Zoom { factor: f32, dur: f64 },
     Camera { offset: Vec2, scale: f32, dur: f64 },
@@ -451,6 +454,14 @@ impl Capture {
                         modifiers: egui::Modifiers::default(),
                     });
                 }
+                Cue::SecondaryButton(down) => {
+                    raw.events.push(egui::Event::PointerButton {
+                        pos: self.pointer.unwrap_or_default(),
+                        button: egui::PointerButton::Secondary,
+                        pressed: down,
+                        modifiers: egui::Modifiers::default(),
+                    });
+                }
                 Cue::View { pan, dur } => {
                     // `from` is filled in by the app, which knows the pan
                     self.pan_glide = Some(Glide { from: Vec2::NAN, to: pan, start: at, dur });
@@ -765,6 +776,10 @@ fn parse_script(text: &str) -> Result<Vec<(f64, Cue)>, String> {
             "move" => cues.push((t, Cue::Move { to: Pos2::new(num(2)? as f32, num(3)? as f32), dur: opt(4)? })),
             "press" => cues.push((t, Cue::Button(true))),
             "release" => cues.push((t, Cue::Button(false))),
+            "rclick" => {
+                cues.push((t, Cue::SecondaryButton(true)));
+                cues.push((t + 0.05, Cue::SecondaryButton(false)));
+            }
             "drag" => {
                 let dur = num(4)?;
                 cues.push((t, Cue::Button(true)));

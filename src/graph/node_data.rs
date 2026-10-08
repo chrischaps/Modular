@@ -2003,7 +2003,15 @@ impl NodeDataTrait for SynthNodeData {
                             // Handle right-click context menu for MIDI Learn
                             if let Some(engine_id) = engine_node_id {
                                 let menu_response = interact_response.context_menu(|ui| {
-                                    if midi_config.has_midi_mapping {
+                                    // The menu is as wide as its longest entry, not wrapped to the knob
+                                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                                    if is_learn_target {
+                                        // Already waiting for a CC: the way out
+                                        if ui.button("Cancel MIDI Learn").clicked() {
+                                            responses.push(NodeResponse::User(SynthResponse::MidiLearnCancel));
+                                            ui.close_menu();
+                                        }
+                                    } else if midi_config.has_midi_mapping {
                                         let cc_text = midi_config.cc_number
                                             .map(|cc| format!("CC #{}", cc))
                                             .unwrap_or_else(|| "MIDI".to_string());

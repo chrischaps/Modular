@@ -44,6 +44,8 @@ pub enum SynthResponse {
         engine_node_id: u64,
         param_index: usize,
     },
+    /// Request to leave MIDI Learn mode without mapping anything.
+    MidiLearnCancel,
 }
 
 impl SynthResponse {

@@ -164,6 +164,8 @@ Any knob can follow a MIDI controller's knob or fader:
 
 The badge stops blinking and stays, and the knob now follows that control across its full range. Right-click it again to **Re-learn MIDI CC** or **Clear MIDI**. Mappings are saved with the patch.
 
+To back out before moving a control, press `Escape`, or right-click the blinking knob and choose **Cancel MIDI Learn**. Choosing **Learn MIDI CC** on a different knob moves learn mode to that knob instead.
+
 ## Patches
 
 Patches are saved as `.json` files holding every module, setting, cable and MIDI mapping.
@@ -221,6 +223,6 @@ Recent files, the autosave, your cable style and the window's size and position 
 | `Ctrl + O` | Open a patch |
 | `Ctrl + S` | Save |
 | `Ctrl + Shift + S` | Save as |
-| `Escape` | Close the add menu or quick-add box |
+| `Escape` | Close the add menu or quick-add box, or cancel MIDI Learn |
 | `Shift` + drag | Fine knob adjustment |
 | Double-click a knob | Reset it to its default |

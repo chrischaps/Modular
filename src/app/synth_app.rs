@@ -563,9 +563,13 @@ impl SynthApp {
     }
 
     /// Start MIDI Learn mode for a parameter.
+    ///
+    /// Starting on another knob while learning moves learn mode to that knob.
     pub fn start_midi_learn(&mut self, target: MidiLearnTarget) {
+        self.status_message = Some(format!("Move a MIDI CC to map {}... (Esc to cancel)", target.param_name));
+        self.user_state.midi_learn_active = true;
+        self.user_state.midi_learn_target = Some((target.node_id, target.param_index));
         self.midi_learn_target = Some(target);
-        self.status_message = Some("Move a MIDI CC to map it...".to_string());
     }
 
     /// Cancel MIDI Learn mode.
@@ -1123,9 +1127,9 @@ impl SynthApp {
                                 min_value,
                                 max_value,
                             });
-                            // Update the user state to show visual feedback
-                            self.user_state.midi_learn_active = true;
-                            self.user_state.midi_learn_target = Some((engine_node_id, param_index));
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::MidiLearnCancel) => {
+                            self.cancel_midi_learn();
                         }
                         NodeResponse::User(crate::graph::SynthResponse::MidiLearnClear {
                             engine_node_id,
@@ -2210,10 +2214,13 @@ impl SynthApp {
         });
     }
 
-    /// Delete, duplicate, copy, cut, paste, and Space or Tab for the
-    /// quick-add palette.
+    /// Delete, duplicate, copy, cut, paste, Space or Tab for the quick-add
+    /// palette, and Escape to leave MIDI Learn.
     fn handle_editing_shortcuts(&mut self, ctx: &egui::Context) {
         use egui::{Event, Key, KeyboardShortcut, Modifiers};
+        if self.is_midi_learning() && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            self.cancel_midi_learn();
+        }
         let mut copy = false;
         let mut cut = false;
         let mut paste = None;
