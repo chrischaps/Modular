@@ -131,6 +131,7 @@ pub struct Noise {
     random_from: f32,
     random_to: f32,
     random_phase: f32,
+    /// The Level knob, smoothed. Level CV is added after, unsmoothed.
     level: SmoothedValue,
     sample_rate: f32,
     ports: Vec<PortDefinition>,
@@ -265,15 +266,12 @@ impl DspModule for Noise {
         let step_for = |rate: f32| rate.clamp(0.0, Self::MAX_RATE_HZ) / sample_rate;
         let steady_step = step_for(rate_knob);
 
-        if level_cv.is_none() {
-            self.level.set_target(level_knob.clamp(0.0, 1.0));
-        }
+        // Only the knob is smoothed. CV is already a signal, and an envelope
+        // patched in to shape a drum hit needs its sharp attack kept
+        self.level.set_target(level_knob.clamp(0.0, 1.0));
 
         for i in 0..context.block_size {
-            if level_cv.is_some() {
-                self.level.set_target((level_knob + cv_at(level_cv, i)).clamp(0.0, 1.0));
-            }
-            let level = self.level.next();
+            let level = (self.level.next() + cv_at(level_cv, i)).clamp(0.0, 1.0);
 
             let white = self.rng.bipolar();
             let pink = self.pink.next(white) * Self::PINK_GAIN;
@@ -488,6 +486,25 @@ mod tests {
         let settled = &white[white.len() / 2..];
         let expected = 0.75 / 3f32.sqrt();
         assert!((rms(settled) / expected - 1.0).abs() < 0.05, "white rms {}", rms(settled));
+    }
+
+    #[test]
+    fn test_level_cv_is_not_smoothed() {
+        // A drum envelope through Level: the noise must start at once
+        let mut noise = Noise::new();
+        noise.prepare(SAMPLE_RATE, BLOCK);
+        noise.level.set_immediate(0.0);
+        let mut level_cv = SignalBuffer::control(BLOCK);
+        level_cv.samples[BLOCK / 2..].fill(1.0);
+        let rate = SignalBuffer::unconnected(BLOCK, SignalType::Control);
+        let mut outputs: Vec<SignalBuffer> = (0..4).map(|_| SignalBuffer::audio(BLOCK)).collect();
+        let ctx = ProcessContext::new(SAMPLE_RATE, BLOCK);
+        noise.process(&[&level_cv, &rate], &mut outputs, &[0.0, 1.0], &ctx);
+        let white = &outputs[0].samples;
+        assert!(white[..BLOCK / 2].iter().all(|&s| s == 0.0));
+        // Uniform ±1 at full level from the very first sample
+        let onset = &white[BLOCK / 2..BLOCK / 2 + 48];
+        assert!(rms(onset) > 0.4, "onset rms {}", rms(onset));
     }
 
     #[test]

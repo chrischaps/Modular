@@ -112,3 +112,4 @@ The envelope's 300 ms attack takes the edge off each note and its 2-second relea
 - [Sample & Hold](../modules/utilities/sample-hold.md) – stepped modulation
 - [Step Sequencer](../modules/utilities/sequencer.md) – editing steps
 - [Rhythmic Sequence](./rhythmic-sequence.md) – the same clock and sequencer, at dance tempo
+- [Shoreline](./shoreline.md) – another patch that plays itself, where chance does the varying

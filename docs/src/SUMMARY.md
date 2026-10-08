@@ -48,5 +48,6 @@
 - [FM Synthesis](./recipes/fm-synthesis.md)
 - [Lush Pad](./recipes/lush-pad.md)
 - [Generative Ambient](./recipes/generative-ambient.md)
+- [Shoreline](./recipes/shoreline.md)
 - [Rhythmic Sequence](./recipes/rhythmic-sequence.md)
 - [Afterglow](./recipes/afterglow.md)

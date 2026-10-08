@@ -1,18 +1,19 @@
 # Rhythmic Sequence
 
-A 16-step acid bassline at 120 BPM: a saw through a resonant lowpass that snaps open on every note, warmed with distortion and pushed along by a dotted-eighth echo. It plays itself, and it's built to be tweaked while it runs. Grab the filter's **Cutoff** and **Res** knobs and play them like a 303.
+A 16-step acid bassline at 120 BPM: a saw through a resonant lowpass that snaps open on every note, warmed with distortion and pushed along by a dotted-eighth echo, over a ticking line of noise hi-hats. It plays itself, and it's built to be tweaked while it runs. Grab the filter's **Cutoff** and **Res** knobs and play them like a 303.
 
 > **Load it:** choose **📚 Examples → Rhythmic Sequence** in the toolbar and press **▶ Play**. It needs no keyboard.
 > The patch file is [`patches/rhythmic-sequence.json`](https://github.com/chrischaps/Modular/blob/master/patches/rhythmic-sequence.json).
 
 ![The Rhythmic Sequence patch](../images/recipe-rhythmic-sequence.png)
-*Two envelopes from the sequencer's gate: one squelches the filter, one shapes the volume.*
+*Two envelopes from the sequencer's gate: one squelches the filter, one shapes the volume. Along the bottom, the clock plays noise hi-hats.*
 
 ## What it teaches
 
 - **Sequencing a bassline.** Pitches, rests and an octave jump, all in one 16-step pattern.
 - **The filter envelope as the instrument.** Short decay and high resonance are the sound of acid.
 - **Tempo sync.** The delay locks to the Clock's tempo, so its echoes land on the beat.
+- **Noise as a drum.** An envelope into a Noise module's **Level** turns hiss into a hi-hat, with no VCA needed.
 
 ## Modules
 
@@ -28,6 +29,9 @@ A 16-step acid bassline at 120 BPM: a saw through a resonant lowpass that snaps 
 | [VCA](../modules/utilities/vca.md) | Defaults |
 | [Distortion](../modules/effects/distortion.md) | **Type** Soft, **Drive** 30%, **Mix** 70% |
 | [Stereo Delay](../modules/effects/delay.md) | **Sync** 1/8D, **FB** 30%, **Mix** 25%, **HiCut** 10 kHz, **LoCut** 300 Hz |
+| [ADSR Envelope](../modules/modulation/adsr.md) (hats) | **Atk** 1 ms, **Dec** 45 ms, **Sus** 0%, **Rel** 40 ms, **A Crv** 0% |
+| [Noise](../modules/sources/noise.md) | **Level** 0%, **Rate** 0.25 Hz |
+| [SVF Filter](../modules/filters/svf-filter.md) (hats) | **Cutoff** 4.5 kHz, **Res** 55% |
 | [Audio Output](../modules/output/audio-output.md) | **Vol** 55% |
 
 ## How it's built
@@ -79,6 +83,22 @@ Soft distortion at 30% drive, mixed at 70%, rounds and thickens the bass and mak
 
 The Stereo Delay's **Sync** is set to 1/8D, a dotted eighth. It takes its tempo from the Clock, so at 120 BPM each echo comes 375 ms after its note: three sixteenths later, falling between the notes and filling the gaps. Its **LoCut** keeps the echoes out of the bass register, so they don't muddy the line.
 
+### Hi-hats
+
+```text
+[Clock Gate] ──> [ADSR (hats) Gate]
+[ADSR (hats) Out] ──> [Noise Level]
+[Noise Pink] ──> [SVF Filter (hats) In]
+[Noise Random] ──> [SVF Filter (hats) Cutoff]
+[SVF Filter (hats) HighPass] ──> [Audio Output Mono]
+```
+
+The hats take the Clock's pulse directly, so they tick on every sixteenth whether or not the bassline plays. That steady pulse under the rests is what makes the line swing.
+
+The Noise module's **Level** knob is at 0, so it is silent until the envelope opens it. Each pulse snaps it to full in 1 ms and lets it die away in 45 ms: a short burst of noise, which is all a closed hi-hat is. An envelope into **Level** does the job of a VCA, and Level follows CV instantly, so the attack stays sharp.
+
+The highpass filter at 4.5 kHz keeps only the sizzle. Pink noise rather than white keeps the hats from getting harsh and sitting on top of the bass. Noise's **Random** output drifts the filter's cutoff an octave either way, over several seconds, so the hats darken and brighten as if a drummer were working the pedal. The hats go to **Mono**, past the delay, so they stay dry and tight in the middle.
+
 ## Variations
 
 **Play the filter.** While it runs, sweep **Cutoff** between 150 Hz and 1 kHz and push **Res** toward 90%. Lengthen the filter envelope's **Dec** to 400 ms for longer squelches.
@@ -93,8 +113,12 @@ The Stereo Delay's **Sync** is set to 1/8D, a dotted eighth. It takes its tempo 
 
 **Harder.** Set the Distortion's **Type** to Hard or Fold and raise **Drive**. Turn **Out** down to keep the level in check.
 
+**Open hats.** Raise the hat envelope's **Dec** to 250 ms, so each hat rings into the next and the line turns to a shimmering wash. Switch the filter to **BandPass** for a trashier, more metallic hat.
+
 ## Related
 
 - [Clock](../modules/modulation/clock.md) – tempo and divisions
 - [Step Sequencer](../modules/utilities/sequencer.md) – editing steps
+- [Noise](../modules/sources/noise.md) – the hi-hats' source, and what else it can do
 - [Generative Ambient](./generative-ambient.md) – the same clock and sequencer, slowed right down
+- [Shoreline](./shoreline.md) – noise as surf, and as the chooser of notes

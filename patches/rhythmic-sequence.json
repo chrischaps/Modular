@@ -501,8 +501,8 @@
       "id": 8,
       "module_id": "output.audio",
       "position": [
-        1677.0,
-        60.0
+        1700.0,
+        420.0
       ],
       "parameters": [
         {
@@ -641,6 +641,101 @@
           "value": 0.5
         }
       ]
+    },
+    {
+      "id": 12,
+      "module_id": "mod.adsr",
+      "position": [
+        450.0,
+        650.0
+      ],
+      "parameters": [
+        {
+          "name": "Attack",
+          "type": "Number",
+          "value": 0.001
+        },
+        {
+          "name": "Decay",
+          "type": "Number",
+          "value": 0.045
+        },
+        {
+          "name": "Sustain",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Release",
+          "type": "Number",
+          "value": 0.04
+        },
+        {
+          "name": "Attack Curve",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Decay Curve",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "Release Curve",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "Velocity Amount",
+          "type": "Number",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "module_id": "source.noise",
+      "position": [
+        715.0,
+        670.0
+      ],
+      "parameters": [
+        {
+          "name": "Level",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Rate",
+          "type": "Number",
+          "value": 0.25
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "module_id": "filter.svf",
+      "position": [
+        972.0,
+        750.0
+      ],
+      "parameters": [
+        {
+          "name": "Cutoff",
+          "type": "Number",
+          "value": 4500.0
+        },
+        {
+          "name": "Resonance",
+          "type": "Number",
+          "value": 0.55
+        },
+        {
+          "name": "Drive",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
     }
   ],
   "connections": [
@@ -727,6 +822,36 @@
       "from_port": "Out",
       "to_node": 5,
       "to_port": "CV"
+    },
+    {
+      "from_node": 1,
+      "from_port": "Gate",
+      "to_node": 12,
+      "to_port": "Gate"
+    },
+    {
+      "from_node": 12,
+      "from_port": "Out",
+      "to_node": 13,
+      "to_port": "Level"
+    },
+    {
+      "from_node": 13,
+      "from_port": "Pink",
+      "to_node": 14,
+      "to_port": "In"
+    },
+    {
+      "from_node": 13,
+      "from_port": "Random",
+      "to_node": 14,
+      "to_port": "Cutoff"
+    },
+    {
+      "from_node": 14,
+      "from_port": "HighPass",
+      "to_node": 8,
+      "to_port": "Mono"
     }
   ],
   "midi_mappings": []

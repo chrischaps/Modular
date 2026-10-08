@@ -20,7 +20,7 @@ Noise is polyphonic. Patch a polyphonic cable into **Level** or **Rate** and eac
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Level** | Control (Orange) | Added to the **Level** knob. An envelope here, with the knob at 0, shapes the noise into a hit |
+| **Level** | Control (Orange) | Added to the **Level** knob, and followed instantly. An envelope here, with the knob at 0, shapes the noise into a hit |
 | **Rate** | Control (Orange) | Speeds up or slows down **Random**. Each +1 doubles the rate; -1 halves it |
 
 ## Outputs
@@ -75,13 +75,12 @@ Each pulse catches a new value of the noise and holds it as a note. **Level** se
 ### Hi-hat
 
 ```text
-[Noise White] ──> [SVF Filter In]               (Cutoff 8 kHz, take HighPass)
-[SVF Filter HighPass] ──> [VCA In]
-[Clock Gate] ──> [ADSR Gate]                    (Atk 1 ms, Dec 40 ms, Sus 0, Rel 40 ms)
-[ADSR Out] ──> [VCA CV]
+[Clock Gate] ──> [ADSR Gate]                    (Atk 1 ms, Dec 45 ms, Sus 0, Rel 40 ms)
+[ADSR Out] ──> [Noise Level]                    (Level knob at 0)
+[Noise Pink] ──> [SVF Filter In]                (Cutoff 4.5 kHz, take HighPass)
 ```
 
-A short decay gives a closed hat; lengthen **Dec** and **Rel** to 300 ms for an open one.
+The envelope opens **Level** for each hit, so no VCA is needed. Only the knob is smoothed; CV at **Level** is followed sample by sample, so a 1 ms attack stays a 1 ms attack. A short decay gives a closed hat; lengthen **Dec** to 250 ms for an open one. The [Rhythmic Sequence](../../recipes/rhythmic-sequence.md) example plays exactly this under its bassline.
 
 ### Snare
 
@@ -95,6 +94,8 @@ Mix a short burst of noise with a pitched body. Patch Pink through a bandpass ar
 ```
 
 Random sweeps a resonant band slowly through the noise, so it rises and falls like gusts. Use Brown for a deeper, more distant wind. Put a slow LFO on a VCA after it, at about 0.1 Hz, and the swell of waves comes and goes.
+
+The [Shoreline](../../recipes/shoreline.md) example builds a whole beach this way, using every output of one Noise module: Pink and Brown for the surf, Random to vary the waves, and White, through a Sample & Hold, to play a wind chime.
 
 ## Related modules
 

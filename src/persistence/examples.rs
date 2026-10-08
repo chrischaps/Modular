@@ -60,9 +60,15 @@ pub const EXAMPLES: &[Example] = &[
         json: include_str!("../../patches/generative-ambient.json"),
     },
     Example {
+        name: "Shoreline",
+        file_name: "shoreline.json",
+        description: "Plays itself: one Noise module makes the surf, varies every wave, and picks the notes of a glassy chime",
+        json: include_str!("../../patches/shoreline.json"),
+    },
+    Example {
         name: "Rhythmic Sequence",
         file_name: "rhythmic-sequence.json",
-        description: "Plays itself: a 16-step acid bassline with a resonant filter, drive and delay",
+        description: "Plays itself: a 16-step acid bassline with a resonant filter, drive and delay, over noise hi-hats",
         json: include_str!("../../patches/rhythmic-sequence.json"),
     },
     Example {

@@ -1466,15 +1466,17 @@ impl NodeDataTrait for SynthNodeData {
             ui.add_space(4.0 * zoom);
 
             let (level, patched) = if let Some(node) = graph.nodes.get(node_id) {
-                let level = node
-                    .inputs
-                    .iter()
-                    .find(|(name, _)| name == "Level")
-                    .and_then(|(_, id)| match graph.get_input(*id).value {
-                        SynthValueType::Number { value, .. } => Some(value),
-                        _ => None,
-                    })
-                    .unwrap_or(0.5);
+                // With Level patched, the CV sets the level (often an envelope
+                // over a knob at 0), so draw the slopes at full scale
+                let level_input = node.inputs.iter().find(|(name, _)| name == "Level").map(|(_, id)| *id);
+                let level = match level_input {
+                    Some(id) if graph.iter_connections().any(|(input, _)| input == id) => 1.0,
+                    Some(id) => match graph.get_input(id).value {
+                        SynthValueType::Number { value, .. } => value,
+                        _ => 0.5,
+                    },
+                    None => 0.5,
+                };
                 let is_patched = |port: &str| {
                     node.outputs
                         .iter()
