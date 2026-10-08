@@ -24,7 +24,7 @@ use crate::persistence::{
     capture_patch, examples, load_from_file, save_to_file, stage_patch, Example, MidiMapping, Patch, PatchError,
     EXAMPLES,
 };
-use crate::widgets::{cpu_meter, CpuMeterConfig};
+use crate::widgets::{cpu_meter, CpuMeterConfig, KnobStyle};
 use super::capture::{Capture, CaptureAction, CaptureConfig};
 use super::editing;
 use super::engine_sync;
@@ -46,6 +46,9 @@ const AUDIO_STALL: std::time::Duration = std::time::Duration::from_millis(750);
 
 /// Storage key for the mark drawn along cables (Cables menu)
 const FLOW_GLYPH_KEY: &str = "cable_flow_glyph";
+
+/// Storage key for how knobs are drawn (Knobs menu)
+const KNOB_STYLE_KEY: &str = "knob_style";
 
 /// Target parameter for MIDI Learn mode.
 ///
@@ -812,6 +815,16 @@ impl SynthApp {
             })
             .response
             .on_hover_text("How signal flow is drawn along cables");
+
+            // How the modules' knobs are drawn
+            ui.menu_button("◉ Knobs", |ui| {
+                ui.label(RichText::new("Knob style").color(theme::text::SECONDARY));
+                for style in KnobStyle::ALL {
+                    ui.radio_value(&mut self.user_state.knob_style, style, style.name());
+                }
+            })
+            .response
+            .on_hover_text("How knobs are drawn");
 
             // Device selectors (engine status lives in the status bar)
             match &self.audio_engine {
@@ -2012,6 +2025,12 @@ impl SynthApp {
                 .find(|g| g.name() == glyph)
                 .unwrap_or_default();
         }
+        if let Some(style) = storage.and_then(|s| s.get_string(KNOB_STYLE_KEY)) {
+            self.user_state.knob_style = KnobStyle::ALL
+                .into_iter()
+                .find(|k| k.name() == style)
+                .unwrap_or_default();
+        }
     }
 
     /// Validate a connection and return an error message if invalid.
@@ -2736,6 +2755,7 @@ impl eframe::App for SynthApp {
         }
         self.recent_files.store(storage);
         storage.set_string(FLOW_GLYPH_KEY, self.user_state.flow_glyph.name().to_string());
+        storage.set_string(KNOB_STYLE_KEY, self.user_state.knob_style.name().to_string());
         let autosave = if let Some(recovery) = &self.recovery {
             // Not answered yet: keep it for next time
             Some(recovery.clone())

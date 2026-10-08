@@ -104,6 +104,9 @@ pub struct SynthGraphState {
     /// The mark that rides the signal along every cable.
     pub flow_glyph: FlowGlyph,
 
+    /// How knobs are drawn.
+    pub knob_style: crate::widgets::KnobStyle,
+
     /// Recent MIDI events for display in MIDI Monitor modules.
     pub midi_events: VecDeque<DisplayMidiEvent>,
 
@@ -165,6 +168,7 @@ impl Default for SynthGraphState {
             output_channels: HashMap::new(),
             signal_history: HashMap::new(),
             flow_glyph: FlowGlyph::default(),
+            knob_style: crate::widgets::KnobStyle::default(),
             midi_events: VecDeque::new(),
             midi_first_event_time: None,
             midi_mappings: HashMap::new(),

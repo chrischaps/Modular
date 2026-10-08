@@ -16,7 +16,7 @@ pub mod piano;
 pub mod level_meter;
 
 // Re-export commonly used items
-pub use knob::{knob, mini_knob, KnobConfig, ParamFormat};
+pub use knob::{knob, mini_knob, KnobConfig, KnobStyle, ParamFormat};
 pub use fader::{fader, horizontal_fader, FaderConfig};
 pub use waveform_display::{
     waveform_display, WaveformConfig, WaveformMode, WaveformBuffer,

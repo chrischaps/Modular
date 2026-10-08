@@ -110,6 +110,10 @@ pub struct KnobConfig {
     pub fine_multiplier: f32,
     /// Click between whole numbers.
     pub stepped: bool,
+    /// Colour of the value arc, usually the module's category colour.
+    pub accent: Color32,
+    /// How the knob is drawn.
+    pub style: KnobStyle,
 }
 
 impl Default for KnobConfig {
@@ -125,6 +129,46 @@ impl Default for KnobConfig {
             drag_sensitivity: 200.0,
             fine_multiplier: 0.1,
             stepped: false,
+            accent: theme::accent::PRIMARY,
+            style: KnobStyle::default(),
+        }
+    }
+}
+
+/// How knobs are drawn, chosen from the toolbar's Knobs menu.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum KnobStyle {
+    /// A dark encoder inside a ring of LEDs that light up to the value.
+    #[default]
+    LedRing,
+    /// The Arc's track and value, around a shaded cap with a long pointer.
+    Hybrid,
+    /// Flat cap inside a full-range track, the value arc on the track.
+    Arc,
+    /// A turned-metal cap with knurled edge, inside a ring of scale ticks.
+    Machined,
+    /// The original: shaded ball, inner arc, short notch.
+    Classic,
+}
+
+impl KnobStyle {
+    /// Every style, in menu order.
+    pub const ALL: [KnobStyle; 5] = [
+        KnobStyle::LedRing,
+        KnobStyle::Hybrid,
+        KnobStyle::Arc,
+        KnobStyle::Machined,
+        KnobStyle::Classic,
+    ];
+
+    /// The name shown in the menu, and kept in app storage.
+    pub fn name(self) -> &'static str {
+        match self {
+            KnobStyle::LedRing => "LED ring",
+            KnobStyle::Hybrid => "Hybrid",
+            KnobStyle::Arc => "Arc",
+            KnobStyle::Machined => "Machined",
+            KnobStyle::Classic => "Classic",
         }
     }
 }
@@ -284,6 +328,32 @@ pub fn knob(ui: &mut Ui, value: &mut f32, config: &KnobConfig) -> Response {
         let end_angle = 45.0_f32.to_radians();
         let angle = start_angle + normalized * (end_angle - start_angle);
 
+        let style = config.style;
+        if style != KnobStyle::Classic {
+            let (min, max) = (*config.range.start(), *config.range.end());
+            // A range either side of zero sweeps out from its middle
+            let zero = (!config.logarithmic && min < 0.0 && max > 0.0).then(|| -min / (max - min));
+            let face = Face {
+                center,
+                radius: config.size / 2.0 - config.size / 36.0,
+                s: config.size / 36.0,
+                value: normalized.clamp(0.0, 1.0),
+                zero,
+                accent: config.accent,
+                hot: response.hovered() || response.dragged(),
+                dragged: response.dragged(),
+            };
+            match style {
+                KnobStyle::Arc => paint_arc(painter, &face),
+                KnobStyle::Machined => paint_machined(painter, &face),
+                KnobStyle::LedRing => paint_led_ring(painter, &face),
+                KnobStyle::Hybrid => paint_hybrid(painter, &face),
+                KnobStyle::Classic => unreachable!(),
+            }
+            paint_readout(painter, knob_rect, face.s, config, *value);
+            return response;
+        }
+
         // Draw outer ring (shadow)
         painter.circle(
             center + Vec2::new(1.0 * scale, 2.0 * scale),
@@ -420,6 +490,226 @@ fn draw_value_arc(
         for i in 0..points.len().saturating_sub(1) {
             painter.line_segment([points[i], points[i + 1]], Stroke::new(3.0 * scale, color));
         }
+    }
+}
+
+/// What a knob face needs to know to draw itself
+struct Face {
+    center: Pos2,
+    /// Outer radius, inside the widget's square
+    radius: f32,
+    /// Scale against a 36 pt knob, the size a node draws at zoom 1
+    s: f32,
+    /// Position in the range, 0 to 1
+    value: f32,
+    /// Where zero sits in a range either side of it
+    zero: Option<f32>,
+    accent: Color32,
+    hot: bool,
+    dragged: bool,
+}
+
+impl Face {
+    /// Where the sweep starts: bottom left, 135° clockwise from 3 o'clock
+    const START: f32 = 0.75 * std::f32::consts::PI;
+    /// The sweep covers 270°
+    const SWEEP: f32 = 1.5 * std::f32::consts::PI;
+
+    fn angle(&self, t: f32) -> f32 {
+        Self::START + t * Self::SWEEP
+    }
+
+    fn at(&self, t: f32, radius: f32) -> Pos2 {
+        polar(self.center, self.angle(t), radius)
+    }
+
+    /// The lit part of the range: from zero out to the value
+    fn span(&self) -> (f32, f32) {
+        let from = self.zero.unwrap_or(0.0);
+        (from.min(self.value), from.max(self.value))
+    }
+
+    /// The value arc, glowing while the knob is under the pointer
+    fn paint_value(&self, painter: &egui::Painter, radius: f32, width: f32) {
+        let (from, to) = self.span();
+        if to - from < 1e-3 {
+            return;
+        }
+        if self.hot {
+            let glow = self.accent.gamma_multiply(if self.dragged { 0.28 } else { 0.16 });
+            stroke_arc(painter, self.center, radius, self.angle(from), self.angle(to), width * 2.6, glow);
+        }
+        stroke_arc(painter, self.center, radius, self.angle(from), self.angle(to), width, self.accent);
+    }
+
+    /// The pointer, from near the middle of the cap to just inside its edge
+    fn paint_pointer(&self, painter: &egui::Painter, inner: f32, outer: f32, width: f32, color: Color32) {
+        let a = self.angle(self.value);
+        painter.line_segment([polar(self.center, a, inner), polar(self.center, a, outer)], Stroke::new(width, color));
+        painter.circle_filled(polar(self.center, a, outer), width / 2.0, color);
+        painter.circle_filled(polar(self.center, a, inner), width / 2.0, color);
+    }
+}
+
+fn polar(center: Pos2, angle: f32, radius: f32) -> Pos2 {
+    center + Vec2::angled(angle) * radius
+}
+
+fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
+    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    Color32::from_rgba_premultiplied(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()), l(a.a(), b.a()))
+}
+
+/// An arc with round ends
+fn stroke_arc(painter: &egui::Painter, center: Pos2, radius: f32, from: f32, to: f32, width: f32, color: Color32) {
+    let span = to - from;
+    let steps = ((span.abs() * radius / 2.0).ceil() as usize).max(2);
+    let points: Vec<Pos2> = (0..=steps)
+        .map(|i| polar(center, from + span * i as f32 / steps as f32, radius))
+        .collect();
+    painter.circle_filled(points[0], width / 2.0, color);
+    painter.circle_filled(points[steps], width / 2.0, color);
+    if span.abs() > 1e-3 {
+        painter.add(egui::Shape::line(points, Stroke::new(width, color)));
+    }
+}
+
+/// A disc lit from above: `top` at its upper edge, fading to `bottom`
+fn shaded_disc(painter: &egui::Painter, center: Pos2, radius: f32, top: Color32, bottom: Color32) {
+    let mut mesh = egui::Mesh::default();
+    let n = 48;
+    mesh.colored_vertex(center, mix(top, bottom, 0.5));
+    for i in 0..n {
+        let a = i as f32 / n as f32 * std::f32::consts::TAU;
+        mesh.colored_vertex(polar(center, a, radius), mix(top, bottom, (a.sin() + 1.0) / 2.0));
+    }
+    for i in 0..n {
+        mesh.add_triangle(0, 1 + i, 1 + (i + 1) % n);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+    // A mesh isn't anti-aliased; a hairline in the mid tone softens its edge
+    painter.circle_stroke(center, radius, Stroke::new(1.0, mix(top, bottom, 0.55)));
+}
+
+const TRACK: Color32 = Color32::from_rgb(21, 23, 31);
+
+/// Flat and modern: a quiet cap inside a full-range track
+fn paint_arc(painter: &egui::Painter, f: &Face) {
+    let s = f.s;
+    let track_r = f.radius - 2.0 * s;
+    stroke_arc(painter, f.center, track_r, f.angle(0.0), f.angle(1.0), 3.2 * s, TRACK);
+    f.paint_value(painter, track_r, 3.2 * s);
+
+    let cap_r = f.radius - 6.5 * s;
+    let cap = if f.hot { Color32::from_rgb(70, 75, 94) } else { Color32::from_rgb(58, 62, 79) };
+    painter.circle_filled(f.center, cap_r, cap);
+    f.paint_pointer(painter, cap_r * 0.2, cap_r - 1.8 * s, 2.0 * s, theme::text::PRIMARY);
+}
+
+/// Hardware: a turned-metal cap with a knurled edge, in a ring of scale ticks
+fn paint_machined(painter: &egui::Painter, f: &Face) {
+    let s = f.s;
+    let (from, to) = f.span();
+    for i in 0..=10 {
+        let t = i as f32 / 10.0;
+        let lit = t >= from - 1e-3 && t <= to + 1e-3 && to - from > 1e-3;
+        let color = if lit { f.accent } else { Color32::from_rgb(74, 78, 96) };
+        painter.line_segment(
+            [f.at(t, f.radius - 3.4 * s), f.at(t, f.radius)],
+            Stroke::new(1.5 * s, color),
+        );
+    }
+
+    let cap_r = f.radius - 5.0 * s;
+    painter.circle_filled(f.center + Vec2::new(0.0, 2.2 * s), cap_r + 0.8 * s, Color32::from_black_alpha(45));
+    painter.circle_filled(f.center + Vec2::new(0.0, 1.2 * s), cap_r, Color32::from_black_alpha(110));
+    let top = if f.hot { Color32::from_rgb(134, 138, 156) } else { Color32::from_rgb(116, 120, 138) };
+    shaded_disc(painter, f.center, cap_r, top, Color32::from_rgb(42, 45, 58));
+
+    // Knurling turns with the knob
+    let a = f.angle(f.value);
+    for i in 0..28 {
+        let ai = a + i as f32 * std::f32::consts::TAU / 28.0;
+        painter.line_segment(
+            [polar(f.center, ai, cap_r - 2.2 * s), polar(f.center, ai, cap_r - 0.4 * s)],
+            Stroke::new(0.9 * s, Color32::from_black_alpha(80)),
+        );
+    }
+
+    // A shallow dish in the face, lit from the opposite side
+    let face_r = cap_r - 2.6 * s;
+    shaded_disc(painter, f.center, face_r, Color32::from_rgb(58, 61, 76), Color32::from_rgb(94, 98, 116));
+    painter.circle_stroke(f.center, cap_r, Stroke::new(0.8 * s, Color32::from_white_alpha(22)));
+    f.paint_pointer(painter, face_r * 0.15, face_r - 0.6 * s, 2.2 * s, Color32::from_rgb(244, 244, 248));
+}
+
+/// An encoder inside a ring of LEDs that light up to the value
+fn paint_led_ring(painter: &egui::Painter, f: &Face) {
+    let s = f.s;
+    painter.circle_filled(f.center, f.radius, Color32::from_rgb(17, 18, 25));
+    painter.circle_stroke(f.center, f.radius, Stroke::new(1.0 * s, Color32::from_rgb(46, 50, 64)));
+
+    // Each LED lights by how much of its share of the range is covered
+    let (from, to) = f.span();
+    let count = 19;
+    let half = 0.5 / (count - 1) as f32;
+    let ring_r = f.radius - 2.8 * s;
+    for i in 0..count {
+        let t = i as f32 / (count - 1) as f32;
+        let covered = (to.min(t + half) - from.max(t - half)).max(0.0) / (2.0 * half);
+        let level = covered.min(1.0);
+        let pos = f.at(t, ring_r);
+        if level > 0.0 {
+            painter.circle_filled(pos, 2.9 * s, f.accent.gamma_multiply(0.22 * level));
+        }
+        painter.circle_filled(pos, 1.25 * s, mix(Color32::from_rgb(52, 55, 70), f.accent, level));
+    }
+
+    let cap_r = f.radius - 6.2 * s;
+    let top = if f.hot { Color32::from_rgb(82, 86, 104) } else { Color32::from_rgb(70, 74, 90) };
+    shaded_disc(painter, f.center, cap_r, top, Color32::from_rgb(32, 34, 45));
+    f.paint_pointer(painter, cap_r - 5.0 * s, cap_r - 1.8 * s, 2.0 * s, theme::text::PRIMARY);
+}
+
+/// The Arc's track and value around a shaded cap, with a bead where the value ends
+fn paint_hybrid(painter: &egui::Painter, f: &Face) {
+    let s = f.s;
+    let track_r = f.radius - 1.8 * s;
+    stroke_arc(painter, f.center, track_r, f.angle(0.0), f.angle(1.0), 2.8 * s, TRACK);
+    f.paint_value(painter, track_r, 2.8 * s);
+    painter.circle_filled(f.at(f.value, track_r), 1.9 * s, Color32::WHITE);
+
+    let cap_r = f.radius - 5.6 * s;
+    painter.circle_filled(f.center + Vec2::new(0.0, 1.4 * s), cap_r + 0.4 * s, Color32::from_black_alpha(100));
+    let top = if f.hot { Color32::from_rgb(112, 117, 138) } else { Color32::from_rgb(98, 102, 122) };
+    shaded_disc(painter, f.center, cap_r, top, Color32::from_rgb(44, 47, 61));
+    painter.circle_stroke(f.center, cap_r, Stroke::new(0.8 * s, Color32::from_white_alpha(20)));
+    f.paint_pointer(painter, cap_r * 0.25, cap_r - 1.6 * s, 2.2 * s, theme::text::PRIMARY);
+}
+
+/// Value and label under the refreshed knobs: the value in the title face so
+/// numbers read at a glance, the name quieter beneath it
+fn paint_readout(painter: &egui::Painter, knob_rect: Rect, s: f32, config: &KnobConfig, value: f32) {
+    let x = knob_rect.center().x;
+    let mut y = knob_rect.bottom() + 1.0 * s;
+    if config.show_value {
+        painter.text(
+            Pos2::new(x, y + 6.5 * s),
+            egui::Align2::CENTER_CENTER,
+            config.format.format(value),
+            egui::FontId::new(10.0 * s, egui::FontFamily::Name(theme::TITLE_FAMILY.into())),
+            theme::text::PRIMARY,
+        );
+        y += 14.5 * s;
+    }
+    if let Some(label) = &config.label {
+        painter.text(
+            Pos2::new(x, y + 6.0 * s),
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(9.0 * s),
+            Color32::from_rgb(178, 181, 196),
+        );
     }
 }
 

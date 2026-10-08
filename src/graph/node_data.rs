@@ -16,7 +16,7 @@ use egui_node_graph2::{ConnectionSignalTrait, NodeDataTrait, NodeResponse, UserR
 use crate::dsp::ModuleCategory;
 use crate::engine::midi_engine::MidiEvent;
 use crate::modules::{LadderFilter, SvfFilter};
-use crate::widgets::{knob, led, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, FrequencyPoint, SpectrumConfig, SpectrumStyle, piano, PianoConfig, PianoData};
+use crate::widgets::{knob, led, KnobStyle, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, FrequencyPoint, SpectrumConfig, SpectrumStyle, piano, PianoConfig, PianoData};
 use super::hints::{self, Hint};
 use super::{SynthResponse, SynthValueType};
 
@@ -564,6 +564,8 @@ impl SynthNodeData {
         responses: &mut Vec<NodeResponse<SynthResponse, Self>>,
         signal_value: Option<f32>,
         _midi_config: &KnobMidiConfig,
+        accent: Color32,
+        style: KnobStyle,
     ) {
         // Dim the knob if it's connected (externally controlled)
         let alpha = if is_connected { 0.5 } else { 1.0 };
@@ -581,6 +583,8 @@ impl SynthNodeData {
                     stepped: spec.stepped,
                     label: Some(label.to_string()),
                     show_value: true,
+                    accent,
+                    style,
                     ..Default::default()
                 };
                 let original_val = *val;
@@ -2011,6 +2015,8 @@ impl NodeDataTrait for SynthNodeData {
                                         &mut responses,
                                         display_signal,
                                         &midi_config,
+                                        self.category.color(),
+                                        user_state.knob_style,
                                     );
                                 });
                             });

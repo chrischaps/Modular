@@ -15,6 +15,7 @@ From left to right:
 | **File** | **📄 New**, **📂 Open**, **🕘 Recent**, **📚 Examples**, **💾 Save**, **💾 Save As** |
 | **Edit** | **↩ Undo** and **↪ Redo**. Hover either to see which edit it will undo or redo. |
 | **〰 Cables** | How signal flow is drawn along cables: **Chevrons**, **Dots** or **Comets** |
+| **◉ Knobs** | How knobs are drawn: **LED ring**, **Hybrid**, **Arc**, **Machined** or **Classic** |
 | **Output** | The audio device to play through |
 | **MIDI In** | The MIDI controller to listen to. A filled dot (●) means it's connected. |
 
@@ -76,6 +77,8 @@ Hover any jack's name or knob for a tooltip: what it does, its signal type in th
 | Make fine adjustments | Hold `Shift` while dragging |
 | Return to the default | Double-click |
 | Map to a MIDI controller | Right-click, then **Learn MIDI CC** |
+
+A knob's ring lights up in its module's header color. Knobs with a range either side of zero, like **Semi** and **Fine**, light outward from the top, so you can see at a glance which way they're set.
 
 Some knobs move in whole steps, like the Oscillator's **Oct** and **Semi**: they click from one value to the next as you drag.
 
