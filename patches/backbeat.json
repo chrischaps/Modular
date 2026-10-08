@@ -1,0 +1,2912 @@
+{
+  "name": "Backbeat",
+  "version": 5,
+  "nodes": [
+    {
+      "id": 1,
+      "module_id": "util.clock",
+      "position": [
+        20.0,
+        40.0
+      ],
+      "parameters": [
+        {
+          "name": "Tempo",
+          "type": "Number",
+          "value": 96.0
+        },
+        {
+          "name": "Gate Length",
+          "type": "Number",
+          "value": 50.0
+        },
+        {
+          "name": "Division",
+          "type": "Select",
+          "value": 4
+        },
+        {
+          "name": "Run",
+          "type": "Toggle",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "module_id": "seq.step",
+      "position": [
+        420.0,
+        0.0
+      ],
+      "parameters": [
+        {
+          "name": "Steps",
+          "type": "Number",
+          "value": 16.0
+        },
+        {
+          "name": "Direction",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Gate Length",
+          "type": "Number",
+          "value": 99.0
+        },
+        {
+          "name": "Step 1 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 1 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 1 Velocity",
+          "type": "Number",
+          "value": 120.0
+        },
+        {
+          "name": "Step 2 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 2 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 2 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 3 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 3 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 3 Velocity",
+          "type": "Number",
+          "value": 92.0
+        },
+        {
+          "name": "Step 4 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 4 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 4 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 5 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 5 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 5 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 6 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 6 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 6 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 7 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 7 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 7 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 8 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 8 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 8 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 9 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 9 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 9 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 10 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 10 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 10 Velocity",
+          "type": "Number",
+          "value": 78.0
+        },
+        {
+          "name": "Step 11 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 11 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 11 Velocity",
+          "type": "Number",
+          "value": 115.0
+        },
+        {
+          "name": "Step 12 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 12 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 12 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 13 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 13 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 13 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 14 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 14 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 14 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 15 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 15 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 15 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 16 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 16 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 16 Velocity",
+          "type": "Number",
+          "value": 100.0
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "module_id": "mod.adsr",
+      "position": [
+        790.0,
+        0.0
+      ],
+      "parameters": [
+        {
+          "name": "Attack",
+          "type": "Number",
+          "value": 0.001
+        },
+        {
+          "name": "Decay",
+          "type": "Number",
+          "value": 0.045
+        },
+        {
+          "name": "Sustain",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Release",
+          "type": "Number",
+          "value": 0.045
+        },
+        {
+          "name": "Attack Curve",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Decay Curve",
+          "type": "Number",
+          "value": 0.6
+        },
+        {
+          "name": "Release Curve",
+          "type": "Number",
+          "value": 0.6
+        },
+        {
+          "name": "Velocity Amount",
+          "type": "Number",
+          "value": 0.3
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "module_id": "mod.adsr",
+      "position": [
+        790.0,
+        300.0
+      ],
+      "parameters": [
+        {
+          "name": "Attack",
+          "type": "Number",
+          "value": 0.001
+        },
+        {
+          "name": "Decay",
+          "type": "Number",
+          "value": 0.45
+        },
+        {
+          "name": "Sustain",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Release",
+          "type": "Number",
+          "value": 0.45
+        },
+        {
+          "name": "Attack Curve",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Decay Curve",
+          "type": "Number",
+          "value": 0.55
+        },
+        {
+          "name": "Release Curve",
+          "type": "Number",
+          "value": 0.55
+        },
+        {
+          "name": "Velocity Amount",
+          "type": "Number",
+          "value": 0.4
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "module_id": "osc.sine",
+      "position": [
+        1050.0,
+        0.0
+      ],
+      "parameters": [
+        {
+          "name": "Octave",
+          "type": "Number",
+          "value": -2.0
+        },
+        {
+          "name": "Semitone",
+          "type": "Number",
+          "value": -3.0
+        },
+        {
+          "name": "Fine",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "FM Depth",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Exp FM Depth",
+          "type": "Number",
+          "value": 2.6
+        },
+        {
+          "name": "Waveform",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Pulse Width",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "Voices",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Detune",
+          "type": "Number",
+          "value": 0.4
+        },
+        {
+          "name": "Spread",
+          "type": "Number",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "module_id": "util.vca",
+      "position": [
+        1510.0,
+        40.0
+      ],
+      "parameters": [
+        {
+          "name": "Level",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "CV Amount",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "module_id": "seq.step",
+      "position": [
+        420.0,
+        700.0
+      ],
+      "parameters": [
+        {
+          "name": "Steps",
+          "type": "Number",
+          "value": 16.0
+        },
+        {
+          "name": "Direction",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Gate Length",
+          "type": "Number",
+          "value": 99.0
+        },
+        {
+          "name": "Step 1 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 1 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 1 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 2 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 2 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 2 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 3 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 3 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 3 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 4 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 4 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 4 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 5 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 5 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 5 Velocity",
+          "type": "Number",
+          "value": 122.0
+        },
+        {
+          "name": "Step 6 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 6 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 6 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 7 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 7 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 7 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 8 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 8 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 8 Velocity",
+          "type": "Number",
+          "value": 30.0
+        },
+        {
+          "name": "Step 9 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 9 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 9 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 10 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 10 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 10 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 11 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 11 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 11 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 12 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 12 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 12 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 13 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 13 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 13 Velocity",
+          "type": "Number",
+          "value": 122.0
+        },
+        {
+          "name": "Step 14 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 14 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 14 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 15 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 15 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 15 Velocity",
+          "type": "Number",
+          "value": 26.0
+        },
+        {
+          "name": "Step 16 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 16 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 16 Velocity",
+          "type": "Number",
+          "value": 40.0
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "module_id": "mod.adsr",
+      "position": [
+        790.0,
+        700.0
+      ],
+      "parameters": [
+        {
+          "name": "Attack",
+          "type": "Number",
+          "value": 0.001
+        },
+        {
+          "name": "Decay",
+          "type": "Number",
+          "value": 0.09
+        },
+        {
+          "name": "Sustain",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Release",
+          "type": "Number",
+          "value": 0.09
+        },
+        {
+          "name": "Attack Curve",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Decay Curve",
+          "type": "Number",
+          "value": 0.55
+        },
+        {
+          "name": "Release Curve",
+          "type": "Number",
+          "value": 0.55
+        },
+        {
+          "name": "Velocity Amount",
+          "type": "Number",
+          "value": 0.85
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "module_id": "mod.adsr",
+      "position": [
+        790.0,
+        1000.0
+      ],
+      "parameters": [
+        {
+          "name": "Attack",
+          "type": "Number",
+          "value": 0.001
+        },
+        {
+          "name": "Decay",
+          "type": "Number",
+          "value": 0.17
+        },
+        {
+          "name": "Sustain",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Release",
+          "type": "Number",
+          "value": 0.17
+        },
+        {
+          "name": "Attack Curve",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Decay Curve",
+          "type": "Number",
+          "value": 0.6
+        },
+        {
+          "name": "Release Curve",
+          "type": "Number",
+          "value": 0.6
+        },
+        {
+          "name": "Velocity Amount",
+          "type": "Number",
+          "value": 0.85
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "module_id": "osc.sine",
+      "position": [
+        1050.0,
+        700.0
+      ],
+      "parameters": [
+        {
+          "name": "Octave",
+          "type": "Number",
+          "value": -1.0
+        },
+        {
+          "name": "Semitone",
+          "type": "Number",
+          "value": 7.0
+        },
+        {
+          "name": "Fine",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "FM Depth",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Exp FM Depth",
+          "type": "Number",
+          "value": 0.6
+        },
+        {
+          "name": "Waveform",
+          "type": "Select",
+          "value": 3
+        },
+        {
+          "name": "Pulse Width",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "Voices",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Detune",
+          "type": "Number",
+          "value": 0.4
+        },
+        {
+          "name": "Spread",
+          "type": "Number",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "module_id": "source.noise",
+      "position": [
+        1280.0,
+        1000.0
+      ],
+      "parameters": [
+        {
+          "name": "Level",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Rate",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "module_id": "filter.svf",
+      "position": [
+        1510.0,
+        1000.0
+      ],
+      "parameters": [
+        {
+          "name": "Cutoff",
+          "type": "Number",
+          "value": 1800.0
+        },
+        {
+          "name": "Resonance",
+          "type": "Number",
+          "value": 0.25
+        },
+        {
+          "name": "Drive",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "module_id": "util.vca",
+      "position": [
+        1510.0,
+        740.0
+      ],
+      "parameters": [
+        {
+          "name": "Level",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "CV Amount",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "module_id": "seq.step",
+      "position": [
+        420.0,
+        1400.0
+      ],
+      "parameters": [
+        {
+          "name": "Steps",
+          "type": "Number",
+          "value": 16.0
+        },
+        {
+          "name": "Direction",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Gate Length",
+          "type": "Number",
+          "value": 99.0
+        },
+        {
+          "name": "Step 1 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 1 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 1 Velocity",
+          "type": "Number",
+          "value": 108.0
+        },
+        {
+          "name": "Step 2 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 2 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 2 Velocity",
+          "type": "Number",
+          "value": 52.0
+        },
+        {
+          "name": "Step 3 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 3 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 3 Velocity",
+          "type": "Number",
+          "value": 84.0
+        },
+        {
+          "name": "Step 4 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 4 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 4 Velocity",
+          "type": "Number",
+          "value": 52.0
+        },
+        {
+          "name": "Step 5 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 5 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 5 Velocity",
+          "type": "Number",
+          "value": 108.0
+        },
+        {
+          "name": "Step 6 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 6 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 6 Velocity",
+          "type": "Number",
+          "value": 52.0
+        },
+        {
+          "name": "Step 7 Pitch",
+          "type": "Number",
+          "value": 72.0
+        },
+        {
+          "name": "Step 7 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 7 Velocity",
+          "type": "Number",
+          "value": 96.0
+        },
+        {
+          "name": "Step 8 Pitch",
+          "type": "Number",
+          "value": 72.0
+        },
+        {
+          "name": "Step 8 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 8 Velocity",
+          "type": "Number",
+          "value": 50.0
+        },
+        {
+          "name": "Step 9 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 9 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 9 Velocity",
+          "type": "Number",
+          "value": 108.0
+        },
+        {
+          "name": "Step 10 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 10 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 10 Velocity",
+          "type": "Number",
+          "value": 52.0
+        },
+        {
+          "name": "Step 11 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 11 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 11 Velocity",
+          "type": "Number",
+          "value": 84.0
+        },
+        {
+          "name": "Step 12 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 12 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 12 Velocity",
+          "type": "Number",
+          "value": 52.0
+        },
+        {
+          "name": "Step 13 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 13 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 13 Velocity",
+          "type": "Number",
+          "value": 108.0
+        },
+        {
+          "name": "Step 14 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 14 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 14 Velocity",
+          "type": "Number",
+          "value": 52.0
+        },
+        {
+          "name": "Step 15 Pitch",
+          "type": "Number",
+          "value": 72.0
+        },
+        {
+          "name": "Step 15 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 15 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 16 Pitch",
+          "type": "Number",
+          "value": 72.0
+        },
+        {
+          "name": "Step 16 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 16 Velocity",
+          "type": "Number",
+          "value": 50.0
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "module_id": "mod.adsr",
+      "position": [
+        790.0,
+        1400.0
+      ],
+      "parameters": [
+        {
+          "name": "Attack",
+          "type": "Number",
+          "value": 0.001
+        },
+        {
+          "name": "Decay",
+          "type": "Number",
+          "value": 0.045
+        },
+        {
+          "name": "Sustain",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Release",
+          "type": "Number",
+          "value": 0.045
+        },
+        {
+          "name": "Attack Curve",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Decay Curve",
+          "type": "Number",
+          "value": 0.6
+        },
+        {
+          "name": "Release Curve",
+          "type": "Number",
+          "value": 0.6
+        },
+        {
+          "name": "Velocity Amount",
+          "type": "Number",
+          "value": 0.7
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "module_id": "mod.adsr",
+      "position": [
+        790.0,
+        1700.0
+      ],
+      "parameters": [
+        {
+          "name": "Attack",
+          "type": "Number",
+          "value": 0.001
+        },
+        {
+          "name": "Decay",
+          "type": "Number",
+          "value": 0.8
+        },
+        {
+          "name": "Sustain",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Release",
+          "type": "Number",
+          "value": 0.8
+        },
+        {
+          "name": "Attack Curve",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Decay Curve",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "Release Curve",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "Velocity Amount",
+          "type": "Number",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "module_id": "util.vca",
+      "position": [
+        1050.0,
+        1730.0
+      ],
+      "parameters": [
+        {
+          "name": "Level",
+          "type": "Number",
+          "value": 0.85
+        },
+        {
+          "name": "CV Amount",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "module_id": "source.noise",
+      "position": [
+        1050.0,
+        1400.0
+      ],
+      "parameters": [
+        {
+          "name": "Level",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Rate",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "module_id": "source.noise",
+      "position": [
+        1280.0,
+        1730.0
+      ],
+      "parameters": [
+        {
+          "name": "Level",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Rate",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "module_id": "filter.svf",
+      "position": [
+        1280.0,
+        1400.0
+      ],
+      "parameters": [
+        {
+          "name": "Cutoff",
+          "type": "Number",
+          "value": 7500.0
+        },
+        {
+          "name": "Resonance",
+          "type": "Number",
+          "value": 0.3
+        },
+        {
+          "name": "Drive",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "module_id": "filter.svf",
+      "position": [
+        1510.0,
+        1730.0
+      ],
+      "parameters": [
+        {
+          "name": "Cutoff",
+          "type": "Number",
+          "value": 6000.0
+        },
+        {
+          "name": "Resonance",
+          "type": "Number",
+          "value": 0.25
+        },
+        {
+          "name": "Drive",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "module_id": "seq.step",
+      "position": [
+        20.0,
+        2100.0
+      ],
+      "parameters": [
+        {
+          "name": "Steps",
+          "type": "Number",
+          "value": 4.0
+        },
+        {
+          "name": "Direction",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Gate Length",
+          "type": "Number",
+          "value": 10.0
+        },
+        {
+          "name": "Step 1 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 1 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 1 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 2 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 2 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 2 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 3 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 3 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 3 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 4 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 4 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 4 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 5 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 5 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 5 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 6 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 6 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 6 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 7 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 7 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 7 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 8 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 8 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 8 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 9 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 9 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 9 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 10 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 10 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 10 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 11 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 11 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 11 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 12 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 12 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 12 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 13 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 13 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 13 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 14 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 14 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 14 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 15 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 15 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 15 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 16 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 16 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 16 Velocity",
+          "type": "Number",
+          "value": 100.0
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "module_id": "util.clock",
+      "position": [
+        20.0,
+        1820.0
+      ],
+      "parameters": [
+        {
+          "name": "Tempo",
+          "type": "Number",
+          "value": 24.0
+        },
+        {
+          "name": "Gate Length",
+          "type": "Number",
+          "value": 26.0
+        },
+        {
+          "name": "Division",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Run",
+          "type": "Toggle",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "module_id": "seq.step",
+      "position": [
+        420.0,
+        2100.0
+      ],
+      "parameters": [
+        {
+          "name": "Steps",
+          "type": "Number",
+          "value": 16.0
+        },
+        {
+          "name": "Direction",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Gate Length",
+          "type": "Number",
+          "value": 99.0
+        },
+        {
+          "name": "Step 1 Pitch",
+          "type": "Number",
+          "value": 65.0
+        },
+        {
+          "name": "Step 1 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 1 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 2 Pitch",
+          "type": "Number",
+          "value": 65.0
+        },
+        {
+          "name": "Step 2 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 2 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 3 Pitch",
+          "type": "Number",
+          "value": 65.0
+        },
+        {
+          "name": "Step 3 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 3 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 4 Pitch",
+          "type": "Number",
+          "value": 65.0
+        },
+        {
+          "name": "Step 4 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 4 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 5 Pitch",
+          "type": "Number",
+          "value": 65.0
+        },
+        {
+          "name": "Step 5 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 5 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 6 Pitch",
+          "type": "Number",
+          "value": 65.0
+        },
+        {
+          "name": "Step 6 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 6 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 7 Pitch",
+          "type": "Number",
+          "value": 65.0
+        },
+        {
+          "name": "Step 7 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 7 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 8 Pitch",
+          "type": "Number",
+          "value": 65.0
+        },
+        {
+          "name": "Step 8 Gate",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 8 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 9 Pitch",
+          "type": "Number",
+          "value": 65.0
+        },
+        {
+          "name": "Step 9 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 9 Velocity",
+          "type": "Number",
+          "value": 104.0
+        },
+        {
+          "name": "Step 10 Pitch",
+          "type": "Number",
+          "value": 65.0
+        },
+        {
+          "name": "Step 10 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 10 Velocity",
+          "type": "Number",
+          "value": 76.0
+        },
+        {
+          "name": "Step 11 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 11 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 11 Velocity",
+          "type": "Number",
+          "value": 104.0
+        },
+        {
+          "name": "Step 12 Pitch",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Step 12 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 12 Velocity",
+          "type": "Number",
+          "value": 78.0
+        },
+        {
+          "name": "Step 13 Pitch",
+          "type": "Number",
+          "value": 55.0
+        },
+        {
+          "name": "Step 13 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 13 Velocity",
+          "type": "Number",
+          "value": 108.0
+        },
+        {
+          "name": "Step 14 Pitch",
+          "type": "Number",
+          "value": 55.0
+        },
+        {
+          "name": "Step 14 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 14 Velocity",
+          "type": "Number",
+          "value": 80.0
+        },
+        {
+          "name": "Step 15 Pitch",
+          "type": "Number",
+          "value": 50.0
+        },
+        {
+          "name": "Step 15 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 15 Velocity",
+          "type": "Number",
+          "value": 112.0
+        },
+        {
+          "name": "Step 16 Pitch",
+          "type": "Number",
+          "value": 50.0
+        },
+        {
+          "name": "Step 16 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 16 Velocity",
+          "type": "Number",
+          "value": 122.0
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "module_id": "mod.adsr",
+      "position": [
+        790.0,
+        2100.0
+      ],
+      "parameters": [
+        {
+          "name": "Attack",
+          "type": "Number",
+          "value": 0.001
+        },
+        {
+          "name": "Decay",
+          "type": "Number",
+          "value": 0.32
+        },
+        {
+          "name": "Sustain",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Release",
+          "type": "Number",
+          "value": 0.32
+        },
+        {
+          "name": "Attack Curve",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Decay Curve",
+          "type": "Number",
+          "value": 0.55
+        },
+        {
+          "name": "Release Curve",
+          "type": "Number",
+          "value": 0.55
+        },
+        {
+          "name": "Velocity Amount",
+          "type": "Number",
+          "value": 0.6
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "module_id": "osc.sine",
+      "position": [
+        1050.0,
+        2100.0
+      ],
+      "parameters": [
+        {
+          "name": "Octave",
+          "type": "Number",
+          "value": -1.0
+        },
+        {
+          "name": "Semitone",
+          "type": "Number",
+          "value": 2.0
+        },
+        {
+          "name": "Fine",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "FM Depth",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Exp FM Depth",
+          "type": "Number",
+          "value": 0.35
+        },
+        {
+          "name": "Waveform",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Pulse Width",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "Voices",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Detune",
+          "type": "Number",
+          "value": 0.4
+        },
+        {
+          "name": "Spread",
+          "type": "Number",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "module_id": "util.vca",
+      "position": [
+        1510.0,
+        2140.0
+      ],
+      "parameters": [
+        {
+          "name": "Level",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "CV Amount",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "module_id": "mod.adsr",
+      "position": [
+        790.0,
+        2700.0
+      ],
+      "parameters": [
+        {
+          "name": "Attack",
+          "type": "Number",
+          "value": 0.001
+        },
+        {
+          "name": "Decay",
+          "type": "Number",
+          "value": 1.6
+        },
+        {
+          "name": "Sustain",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Release",
+          "type": "Number",
+          "value": 1.6
+        },
+        {
+          "name": "Attack Curve",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Decay Curve",
+          "type": "Number",
+          "value": 0.45
+        },
+        {
+          "name": "Release Curve",
+          "type": "Number",
+          "value": 0.45
+        },
+        {
+          "name": "Velocity Amount",
+          "type": "Number",
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "module_id": "source.noise",
+      "position": [
+        1050.0,
+        2700.0
+      ],
+      "parameters": [
+        {
+          "name": "Level",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Rate",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "module_id": "filter.svf",
+      "position": [
+        1280.0,
+        2700.0
+      ],
+      "parameters": [
+        {
+          "name": "Cutoff",
+          "type": "Number",
+          "value": 4200.0
+        },
+        {
+          "name": "Resonance",
+          "type": "Number",
+          "value": 0.2
+        },
+        {
+          "name": "Drive",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "module_id": "util.attenuverter",
+      "position": [
+        1760.0,
+        1500.0
+      ],
+      "parameters": [
+        {
+          "name": "Amount",
+          "type": "Number",
+          "value": -1.0
+        },
+        {
+          "name": "Offset",
+          "type": "Number",
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "module_id": "util.mixer",
+      "position": [
+        1760.0,
+        0.0
+      ],
+      "parameters": [
+        {
+          "name": "Level 1",
+          "type": "Number",
+          "value": 0.6
+        },
+        {
+          "name": "Level 2",
+          "type": "Number",
+          "value": 0.4
+        },
+        {
+          "name": "Level 3",
+          "type": "Number",
+          "value": 0.45
+        },
+        {
+          "name": "Level 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Pan 1",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Pan 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Pan 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Pan 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Spread",
+          "type": "Number",
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "module_id": "fx.compressor",
+      "position": [
+        2090.0,
+        0.0
+      ],
+      "parameters": [
+        {
+          "name": "Threshold",
+          "type": "Number",
+          "value": -16.0
+        },
+        {
+          "name": "Ratio",
+          "type": "Number",
+          "value": 3.0
+        },
+        {
+          "name": "Attack",
+          "type": "Number",
+          "value": 8.0
+        },
+        {
+          "name": "Release",
+          "type": "Number",
+          "value": 120.0
+        },
+        {
+          "name": "Knee",
+          "type": "Number",
+          "value": 6.0
+        },
+        {
+          "name": "Makeup",
+          "type": "Number",
+          "value": 2.0
+        },
+        {
+          "name": "Mix",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Detector",
+          "type": "Select",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "module_id": "util.mixer",
+      "position": [
+        1760.0,
+        1750.0
+      ],
+      "parameters": [
+        {
+          "name": "Level 1",
+          "type": "Number",
+          "value": 0.55
+        },
+        {
+          "name": "Level 2",
+          "type": "Number",
+          "value": 0.55
+        },
+        {
+          "name": "Level 3",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "Level 4",
+          "type": "Number",
+          "value": 0.45
+        },
+        {
+          "name": "Pan 1",
+          "type": "Number",
+          "value": 0.3
+        },
+        {
+          "name": "Pan 2",
+          "type": "Number",
+          "value": 0.35
+        },
+        {
+          "name": "Pan 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Pan 4",
+          "type": "Number",
+          "value": -0.4
+        },
+        {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Spread",
+          "type": "Number",
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "id": 35,
+      "module_id": "fx.reverb",
+      "position": [
+        2090.0,
+        1750.0
+      ],
+      "parameters": [
+        {
+          "name": "Size",
+          "type": "Number",
+          "value": 0.35
+        },
+        {
+          "name": "Decay",
+          "type": "Number",
+          "value": 0.9
+        },
+        {
+          "name": "Damping",
+          "type": "Number",
+          "value": 0.55
+        },
+        {
+          "name": "Pre-Delay",
+          "type": "Number",
+          "value": 8.0
+        },
+        {
+          "name": "Mix",
+          "type": "Number",
+          "value": 0.2
+        },
+        {
+          "name": "Width",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Mod",
+          "type": "Number",
+          "value": 0.15
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "module_id": "output.audio",
+      "position": [
+        2560.0,
+        900.0
+      ],
+      "parameters": [
+        {
+          "name": "Volume",
+          "type": "Number",
+          "value": 0.72
+        },
+        {
+          "name": "Limiter",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Character",
+          "type": "Toggle",
+          "value": false
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from_node": 1,
+      "from_port": "Gate",
+      "to_node": 2,
+      "to_port": "Clock"
+    },
+    {
+      "from_node": 1,
+      "from_port": "Gate",
+      "to_node": 7,
+      "to_port": "Clock"
+    },
+    {
+      "from_node": 1,
+      "from_port": "Gate",
+      "to_node": 14,
+      "to_port": "Clock"
+    },
+    {
+      "from_node": 1,
+      "from_port": "Gate",
+      "to_node": 24,
+      "to_port": "Clock"
+    },
+    {
+      "from_node": 2,
+      "from_port": "EOC",
+      "to_node": 22,
+      "to_port": "Clock"
+    },
+    {
+      "from_node": 2,
+      "from_port": "Gate",
+      "to_node": 3,
+      "to_port": "Gate"
+    },
+    {
+      "from_node": 2,
+      "from_port": "Gate",
+      "to_node": 4,
+      "to_port": "Gate"
+    },
+    {
+      "from_node": 2,
+      "from_port": "Gate",
+      "to_node": 5,
+      "to_port": "Sync"
+    },
+    {
+      "from_node": 2,
+      "from_port": "Velocity",
+      "to_node": 3,
+      "to_port": "Velocity"
+    },
+    {
+      "from_node": 2,
+      "from_port": "Velocity",
+      "to_node": 4,
+      "to_port": "Velocity"
+    },
+    {
+      "from_node": 3,
+      "from_port": "Out",
+      "to_node": 5,
+      "to_port": "Exp FM"
+    },
+    {
+      "from_node": 4,
+      "from_port": "Out",
+      "to_node": 6,
+      "to_port": "CV"
+    },
+    {
+      "from_node": 5,
+      "from_port": "Out",
+      "to_node": 6,
+      "to_port": "In"
+    },
+    {
+      "from_node": 6,
+      "from_port": "Out",
+      "to_node": 32,
+      "to_port": "Ch 1"
+    },
+    {
+      "from_node": 7,
+      "from_port": "Gate",
+      "to_node": 8,
+      "to_port": "Gate"
+    },
+    {
+      "from_node": 7,
+      "from_port": "Gate",
+      "to_node": 9,
+      "to_port": "Gate"
+    },
+    {
+      "from_node": 7,
+      "from_port": "Gate",
+      "to_node": 10,
+      "to_port": "Sync"
+    },
+    {
+      "from_node": 7,
+      "from_port": "Velocity",
+      "to_node": 8,
+      "to_port": "Velocity"
+    },
+    {
+      "from_node": 7,
+      "from_port": "Velocity",
+      "to_node": 9,
+      "to_port": "Velocity"
+    },
+    {
+      "from_node": 8,
+      "from_port": "Out",
+      "to_node": 10,
+      "to_port": "Exp FM"
+    },
+    {
+      "from_node": 8,
+      "from_port": "Out",
+      "to_node": 13,
+      "to_port": "CV"
+    },
+    {
+      "from_node": 9,
+      "from_port": "Out",
+      "to_node": 11,
+      "to_port": "Level"
+    },
+    {
+      "from_node": 10,
+      "from_port": "Out",
+      "to_node": 13,
+      "to_port": "In"
+    },
+    {
+      "from_node": 11,
+      "from_port": "White",
+      "to_node": 12,
+      "to_port": "In"
+    },
+    {
+      "from_node": 12,
+      "from_port": "HighPass",
+      "to_node": 32,
+      "to_port": "Ch 3"
+    },
+    {
+      "from_node": 13,
+      "from_port": "Out",
+      "to_node": 32,
+      "to_port": "Ch 2"
+    },
+    {
+      "from_node": 14,
+      "from_port": "Gate",
+      "to_node": 15,
+      "to_port": "Gate"
+    },
+    {
+      "from_node": 14,
+      "from_port": "Gate",
+      "to_node": 16,
+      "to_port": "Gate"
+    },
+    {
+      "from_node": 14,
+      "from_port": "Pitch",
+      "to_node": 17,
+      "to_port": "CV"
+    },
+    {
+      "from_node": 14,
+      "from_port": "Velocity",
+      "to_node": 15,
+      "to_port": "Velocity"
+    },
+    {
+      "from_node": 14,
+      "from_port": "Velocity",
+      "to_node": 16,
+      "to_port": "Velocity"
+    },
+    {
+      "from_node": 15,
+      "from_port": "Out",
+      "to_node": 18,
+      "to_port": "Level"
+    },
+    {
+      "from_node": 16,
+      "from_port": "Out",
+      "to_node": 17,
+      "to_port": "In"
+    },
+    {
+      "from_node": 17,
+      "from_port": "Out",
+      "to_node": 19,
+      "to_port": "Level"
+    },
+    {
+      "from_node": 18,
+      "from_port": "White",
+      "to_node": 20,
+      "to_port": "In"
+    },
+    {
+      "from_node": 19,
+      "from_port": "White",
+      "to_node": 21,
+      "to_port": "In"
+    },
+    {
+      "from_node": 20,
+      "from_port": "HighPass",
+      "to_node": 34,
+      "to_port": "Ch 1"
+    },
+    {
+      "from_node": 21,
+      "from_port": "HighPass",
+      "to_node": 34,
+      "to_port": "Ch 2"
+    },
+    {
+      "from_node": 22,
+      "from_port": "Gate",
+      "to_node": 23,
+      "to_port": "Sync"
+    },
+    {
+      "from_node": 23,
+      "from_port": "Gate",
+      "to_node": 24,
+      "to_port": "Reset"
+    },
+    {
+      "from_node": 23,
+      "from_port": "Gate",
+      "to_node": 24,
+      "to_port": "Run"
+    },
+    {
+      "from_node": 23,
+      "from_port": "Gate",
+      "to_node": 31,
+      "to_port": "In"
+    },
+    {
+      "from_node": 24,
+      "from_port": "EOC",
+      "to_node": 28,
+      "to_port": "Gate"
+    },
+    {
+      "from_node": 24,
+      "from_port": "Gate",
+      "to_node": 25,
+      "to_port": "Gate"
+    },
+    {
+      "from_node": 24,
+      "from_port": "Gate",
+      "to_node": 26,
+      "to_port": "Sync"
+    },
+    {
+      "from_node": 24,
+      "from_port": "Pitch",
+      "to_node": 26,
+      "to_port": "V/Oct"
+    },
+    {
+      "from_node": 24,
+      "from_port": "Pitch",
+      "to_node": 34,
+      "to_port": "Pan 3"
+    },
+    {
+      "from_node": 24,
+      "from_port": "Velocity",
+      "to_node": 25,
+      "to_port": "Velocity"
+    },
+    {
+      "from_node": 25,
+      "from_port": "Out",
+      "to_node": 26,
+      "to_port": "Exp FM"
+    },
+    {
+      "from_node": 25,
+      "from_port": "Out",
+      "to_node": 27,
+      "to_port": "CV"
+    },
+    {
+      "from_node": 26,
+      "from_port": "Out",
+      "to_node": 27,
+      "to_port": "In"
+    },
+    {
+      "from_node": 27,
+      "from_port": "Out",
+      "to_node": 34,
+      "to_port": "Ch 3"
+    },
+    {
+      "from_node": 28,
+      "from_port": "Out",
+      "to_node": 29,
+      "to_port": "Level"
+    },
+    {
+      "from_node": 29,
+      "from_port": "White",
+      "to_node": 30,
+      "to_port": "In"
+    },
+    {
+      "from_node": 30,
+      "from_port": "HighPass",
+      "to_node": 34,
+      "to_port": "Ch 4"
+    },
+    {
+      "from_node": 31,
+      "from_port": "Out",
+      "to_node": 34,
+      "to_port": "Level 1"
+    },
+    {
+      "from_node": 31,
+      "from_port": "Out",
+      "to_node": 34,
+      "to_port": "Level 2"
+    },
+    {
+      "from_node": 32,
+      "from_port": "Out",
+      "to_node": 33,
+      "to_port": "In"
+    },
+    {
+      "from_node": 33,
+      "from_port": "Out",
+      "to_node": 36,
+      "to_port": "Mono"
+    },
+    {
+      "from_node": 34,
+      "from_port": "Out L",
+      "to_node": 35,
+      "to_port": "In L"
+    },
+    {
+      "from_node": 34,
+      "from_port": "Out R",
+      "to_node": 35,
+      "to_port": "In R"
+    },
+    {
+      "from_node": 35,
+      "from_port": "Out L",
+      "to_node": 36,
+      "to_port": "Left"
+    },
+    {
+      "from_node": 35,
+      "from_port": "Out R",
+      "to_node": 36,
+      "to_port": "Right"
+    }
+  ],
+  "midi_mappings": []
+}

@@ -197,7 +197,7 @@ Patches are saved as `.json` files holding every module, setting, cable and MIDI
 
 ### Examples
 
-The **📚 Examples** menu holds six ready-made patches: **First Sound**, which opens when the app starts, and one for each [recipe](../recipes/basic-subtractive.md) in this manual. Hover an example to read what it is. Saving an example always asks for a file name, so you save a copy and the original stays intact.
+The **📚 Examples** menu holds nine ready-made patches: **First Sound**, which opens when the app starts, and one for each [recipe](../recipes/basic-subtractive.md) in this manual. Hover an example to read what it is. Saving an example always asks for a file name, so you save a copy and the original stays intact.
 
 ### Recent patches
 

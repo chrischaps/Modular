@@ -52,4 +52,5 @@
 - [Generative Ambient](./recipes/generative-ambient.md)
 - [Shoreline](./recipes/shoreline.md)
 - [Rhythmic Sequence](./recipes/rhythmic-sequence.md)
+- [Backbeat](./recipes/backbeat.md)
 - [Afterglow](./recipes/afterglow.md)
