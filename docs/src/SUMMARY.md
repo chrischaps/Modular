@@ -37,6 +37,7 @@
   - [Attenuverter](./modules/utilities/attenuverter.md)
   - [Mixer](./modules/utilities/mixer.md)
   - [Sample & Hold](./modules/utilities/sample-hold.md)
+  - [Quantizer](./modules/utilities/quantizer.md)
   - [Oscilloscope](./modules/visualization/oscilloscope.md)
   - [Step Sequencer](./modules/utilities/sequencer.md)
   - [MIDI Monitor](./modules/midi/midi-monitor.md)

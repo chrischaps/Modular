@@ -726,6 +726,56 @@
           "value": true
         }
       ]
+    },
+    {
+      "id": 15,
+      "module_id": "source.noise",
+      "position": [
+        242.0,
+        640.0
+      ],
+      "parameters": [
+        {
+          "name": "Level",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "Rate",
+          "type": "Number",
+          "value": 0.2
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "module_id": "util.quantizer",
+      "position": [
+        528.0,
+        650.0
+      ],
+      "parameters": [
+        {
+          "name": "Root",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Scale",
+          "type": "Select",
+          "value": 6
+        },
+        {
+          "name": "Transpose",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Mask",
+          "type": "Number",
+          "value": 2741.0
+        }
+      ]
     }
   ],
   "connections": [
@@ -751,12 +801,6 @@
       "from_node": 2,
       "from_port": "Pitch",
       "to_node": 3,
-      "to_port": "V/Oct"
-    },
-    {
-      "from_node": 2,
-      "from_port": "Pitch",
-      "to_node": 4,
       "to_port": "V/Oct"
     },
     {
@@ -842,6 +886,18 @@
       "from_port": "Out",
       "to_node": 6,
       "to_port": "Resonance"
+    },
+    {
+      "from_node": 15,
+      "from_port": "Random",
+      "to_node": 16,
+      "to_port": "In"
+    },
+    {
+      "from_node": 16,
+      "from_port": "Out",
+      "to_node": 4,
+      "to_port": "V/Oct"
     }
   ],
   "midi_mappings": []

@@ -96,4 +96,5 @@ Raise **Slew** to 0.1–0.3 s on any of the patches above and the steps become s
 - [Clock](../modulation/clock.md): steady triggers
 - [LFO](../modulation/lfo.md): a slow signal to sample
 - [Attenuverter](./attenuverter.md): scale the held values to a useful range
+- [Quantizer](./quantizer.md): snap held values to the notes of a scale
 - [Step Sequencer](./sequencer.md): stepped values you choose yourself

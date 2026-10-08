@@ -22,6 +22,7 @@ These modules run one voice per channel of their widest input:
 | [VCA](../modules/utilities/vca.md) | Gain |
 | [Attenuverter](../modules/utilities/attenuverter.md) | Scaling |
 | [Sample & Hold](../modules/utilities/sample-hold.md) | Held value |
+| [Quantizer](../modules/utilities/quantizer.md) | Note, and its Trig, so a chord comes out as a chord in the scale |
 
 Their outputs carry as many channels as their widest input. The knobs are shared: turning **Cutoff** moves every voice's cutoff.
 

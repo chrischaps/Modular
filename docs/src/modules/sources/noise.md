@@ -70,7 +70,7 @@ The classic: noise, sampled on every clock pulse, played as pitch.
 [Clock Gate] ──> [ADSR Gate]
 ```
 
-Each pulse catches a new value of the noise and holds it as a note. **Level** sets the range: at 50%, the notes wander up to half an octave either side of the oscillator's pitch. The pitches are unquantized, so they fall between the keys of a piano. A little **Slew** on the Sample & Hold turns the jumps into glides.
+Each pulse catches a new value of the noise and holds it as a note. **Level** sets the range: at 50%, the notes wander up to half an octave either side of the oscillator's pitch. The pitches are unquantized, so they fall between the keys of a piano; put a [Quantizer](../utilities/quantizer.md) after the Sample & Hold to keep them in a key. A little **Slew** on the Sample & Hold turns the jumps into glides.
 
 ### Hi-hat
 
@@ -100,6 +100,7 @@ The [Shoreline](../../recipes/shoreline.md) example builds a whole beach this wa
 ## Related modules
 
 - [Sample & Hold](../utilities/sample-hold.md): turns noise into stepped random values
+- [Quantizer](../utilities/quantizer.md): snaps random pitches to a scale
 - [SVF Filter](../filters/svf-filter.md): shapes noise into drums, wind and breath
 - [ADSR Envelope](../modulation/adsr.md): gives noise a shape in time
 - [LFO](../modulation/lfo.md): regular movement, where Random is irregular

@@ -191,6 +191,18 @@ in   Slew               Control  ConstantOnly         inline=false num 0 [0..1] 
 out  Out                Control
 knob Slew               "Slew" KnobOnly
 
+== util.quantizer "Quantizer" finder="Quantizer" Utility
+in   In                 Control  ConnectionOnly       inline=true  port
+in   Root               Control  ConstantOnly         inline=true  select 0 ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] "Root"
+in   Scale              Control  ConstantOnly         inline=true  select 1 ["Chromatic", "Major", "Natural Minor", "Dorian", "Mixolydian", "Harmonic Minor", "Pentatonic Major", "Pentatonic Minor", "Blues", "Whole Tone", "Custom"] "Scale"
+in   Transpose          Control  ConnectionOrConstant inline=true  num 0 [-12..12] st stepped
+in   Mask               Control  ConstantOnly         inline=false num 2741 [0..4095]  stepped
+out  Out                Control
+out  Trig               Gate
+knob Transpose          "Transpose" Modulatable
+monitor [0, 1]
+display ScalePiano
+
 == util.oscilloscope "Oscilloscope" finder="Oscilloscope" Utility
 in   In 1               Audio    ConnectionOnly       inline=true  port
 in   In 2               Audio    ConnectionOnly       inline=true  port

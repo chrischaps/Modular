@@ -1,6 +1,6 @@
 # Module Overview
 
-Modular Synth has 24 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
+Modular Synth has 25 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
 
 The **ID** is the name a patch file uses to refer to the module.
 
@@ -60,6 +60,7 @@ The **ID** is the name a patch file uses to refer to the module.
 | [Attenuverter](./utilities/attenuverter.md) | `util.attenuverter` | Scale, invert and offset a control signal |
 | [Mixer](./utilities/mixer.md) | `util.mixer` | Two-channel summing mixer |
 | [Sample & Hold](./utilities/sample-hold.md) | `util.sample_hold` | Capture a signal's value on each trigger and hold it |
+| [Quantizer](./utilities/quantizer.md) | `util.quantizer` | Snap a pitch to the nearest note of a scale |
 | [Oscilloscope](./visualization/oscilloscope.md) | `util.oscilloscope` | Draw up to two signals as waveforms |
 | [Step Sequencer](./utilities/sequencer.md) | `seq.step` | 16 steps of pitch, gate and velocity |
 | [MIDI Monitor](./midi/midi-monitor.md) | `util.midi_monitor` | Show incoming MIDI messages |
@@ -76,7 +77,7 @@ Header colors describe what a module *is*. The colors of its jacks and cables de
 
 ## Polyphonic modules
 
-The Oscillator, Noise, both filters, the ADSR Envelope, the VCA, the Attenuverter and Sample & Hold run one voice per channel when a polyphonic cable reaches them. Everything else treats a polyphonic cable as one signal. See [Polyphony](../concepts/polyphony.md).
+The Oscillator, Noise, both filters, the ADSR Envelope, the VCA, the Attenuverter, Sample & Hold and the Quantizer run one voice per channel when a polyphonic cable reaches them. Everything else treats a polyphonic cable as one signal. See [Polyphony](../concepts/polyphony.md).
 
 ## Common signal chains
 
@@ -120,6 +121,7 @@ Drive a voice from a sequence instead of a keyboard:
 | Tame or flip a modulation signal | [Attenuverter](./utilities/attenuverter.md) |
 | Play a pattern | [Clock](./modulation/clock.md) into the [Step Sequencer](./utilities/sequencer.md) |
 | Make random changes | [Noise](./sources/noise.md) into [Sample & Hold](./utilities/sample-hold.md) for steps, or its **Random** output for glides |
+| Keep random notes in key | [Quantizer](./utilities/quantizer.md) |
 | Combine two signals | [Mixer](./utilities/mixer.md) |
 | Add space and depth | [Stereo Delay](./effects/delay.md), [Reverb](./effects/reverb.md), [Chorus](./effects/chorus.md) |
 | Add grit or warmth | [Distortion](./effects/distortion.md) |

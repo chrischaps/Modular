@@ -397,6 +397,33 @@ mod tests {
     }
 
     #[test]
+    fn test_quantizer_custom_scale_survives_a_round_trip() {
+        use crate::modules::quantizer::CUSTOM_SCALE;
+        use crate::persistence::{NamedParameter, ParameterValue};
+
+        // Root, fourth, fifth and flat seventh, in A
+        let mask = 0b0100_1010_0001;
+        let mut patch = Patch::new("custom scale");
+        let mut quantizer = NodeData::new(1, "util.quantizer", (0.0, 0.0));
+        quantizer.parameters = vec![
+            NamedParameter::new("Root", ParameterValue::Select(9)),
+            NamedParameter::new("Scale", ParameterValue::Select(CUSTOM_SCALE)),
+            NamedParameter::new("Transpose", ParameterValue::Number(-5.0)),
+            NamedParameter::new("Mask", ParameterValue::Number(mask as f32)),
+        ];
+        patch.nodes.push(quantizer);
+
+        let (saved, warnings) = reload(&patch, 0);
+        assert!(warnings.is_empty(), "{:?}", warnings);
+        let json = serde_json::to_string(&saved).unwrap();
+        let loaded = patch_from_json(&json).unwrap();
+        assert_eq!(param(&loaded, "util.quantizer", "Mask"), mask as f32);
+        assert_eq!(param(&loaded, "util.quantizer", "Scale"), CUSTOM_SCALE as f32);
+        assert_eq!(param(&loaded, "util.quantizer", "Root"), 9.0);
+        assert_eq!(param(&loaded, "util.quantizer", "Transpose"), -5.0);
+    }
+
+    #[test]
     fn test_round_trip_keeps_graph_params_and_midi_mappings() {
         let (first, warnings) = reload(&patch_from_json(V2_FIXTURE).unwrap(), 0);
         assert!(warnings.is_empty(), "{:?}", warnings);

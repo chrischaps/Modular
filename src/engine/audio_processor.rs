@@ -9,7 +9,7 @@ use rtrb::Consumer;
 
 use crate::dsp::denormal::DenormalGuard;
 use crate::dsp::{MidiEvent, ModuleRegistry, Poly, ProcessContext};
-use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Chorus, Clock, Compressor, Distortion, KeyboardInput, LadderFilter, Lfo, MidiMonitor, MidiNote, Mixer, Noise, Oscilloscope, PolyMidi, ParametricEq, Reverb, SampleHold, Oscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
+use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Chorus, Clock, Compressor, Distortion, KeyboardInput, LadderFilter, Lfo, MidiMonitor, MidiNote, Mixer, Noise, Oscilloscope, PolyMidi, ParametricEq, Quantizer, Reverb, SampleHold, Oscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
 
 use super::channels::EngineHandle;
 use super::commands::{AudioMessage, EngineEvent, ScopeFrame};
@@ -41,6 +41,7 @@ pub fn create_module_registry() -> ModuleRegistry {
     registry.register::<Poly<Attenuverter>>();
     registry.register::<Mixer>();
     registry.register::<Poly<SampleHold>>();
+    registry.register::<Poly<Quantizer>>();
     registry.register::<Oscilloscope>();
     registry.register::<StepSequencer>();
     registry.register::<StereoDelay>();
@@ -366,7 +367,8 @@ mod tests {
         assert!(registry.contains("fx.compressor"));
         assert!(registry.contains("util.mixer"));
         assert!(registry.contains("source.noise"));
-        assert_eq!(registry.len(), 24);
+        assert!(registry.contains("util.quantizer"));
+        assert_eq!(registry.len(), 25);
     }
 
     #[test]

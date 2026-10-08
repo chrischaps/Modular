@@ -104,11 +104,13 @@ A large, six-second reverb spreads the chime across the stereo field and blurs e
 
 **Glide.** Raise the Sample & Hold's **Slew** to 50 ms and the chime bends between notes, more like a singing bowl than a bell.
 
+**A tuned chime.** Patch a [Quantizer](../modules/utilities/quantizer.md) between the Sample & Hold and the Oscillator, set to Pentatonic Major. The chime now plays notes of a scale, like a set of tuned bells.
+
 **A shimmer.** Set the Oscillator's **Voices** to 3 and **Detune** to 10%. Each strike now beats slowly against itself, like a long metal tube.
 
 ## Related
 
 - [Noise](../modules/sources/noise.md) – every output used here, explained
 - [Sample & Hold](../modules/utilities/sample-hold.md) – turning noise into notes
-- [Generative Ambient](./generative-ambient.md) – variety from cycles that don't line up, rather than from chance
+- [Generative Ambient](./generative-ambient.md) – variety from cycles that don't line up, and chance kept in key
 - [Rhythmic Sequence](./rhythmic-sequence.md) – noise as a hi-hat

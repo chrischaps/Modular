@@ -200,6 +200,14 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "util.quantizer",
+        knobs: &[modulatable("Transpose", "Transpose")],
+        hidden: &["Mask"],
+        monitor: &["Out", "Trig"],
+        display: NodeDisplay::ScalePiano,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "util.oscilloscope",
         knobs: &[knob_as("Trigger Level", "Trig")],
         display: NodeDisplay::Scope,

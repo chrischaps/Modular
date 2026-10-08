@@ -117,5 +117,5 @@ The Chorus turns the mono mix into stereo. The Stereo Delay is synced to a dotte
 
 - [Step Sequencer](../modules/utilities/sequencer.md) – editing steps and the EOC output
 - [Oscillator](../modules/sources/oscillator.md) – V/Oct and Exp FM
-- [Generative Ambient](./generative-ambient.md) – one sequencer and a single line, left to drift
+- [Generative Ambient](./generative-ambient.md) – one sequencer, and a second voice that wanders in key
 - [Rhythmic Sequence](./rhythmic-sequence.md) – the same dotted-eighth delay under an acid bassline

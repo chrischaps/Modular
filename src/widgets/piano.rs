@@ -1,7 +1,8 @@
 //! Piano keyboard widget for visual feedback of active notes.
 //!
 //! Provides a one-octave piano keyboard display that shows which notes are
-//! currently pressed. Used by the Keyboard and MIDI Note input modules.
+//! currently pressed. Used by the Keyboard and MIDI Note input modules, and
+//! by the Quantizer, which lights its scale and takes clicks on the keys.
 
 use eframe::egui::{self, Color32, Pos2, Rect, Response, Sense, Ui, Vec2};
 
@@ -30,6 +31,10 @@ pub struct PianoConfig {
     pub glow_color: Color32,
     /// Whether to show the octave label below.
     pub show_octave: bool,
+    /// Colour of the marks on keys in the scale (see [`PianoData::scale`]).
+    pub scale_color: Color32,
+    /// Whether keys can be clicked (see [`piano_keys`]).
+    pub clickable: bool,
 }
 
 impl Default for PianoConfig {
@@ -43,6 +48,8 @@ impl Default for PianoConfig {
             black_key_active: Color32::from_rgb(80, 140, 200),  // Darker blue
             glow_color: Color32::from_rgb(100, 180, 255),       // Blue glow
             show_octave: true,
+            scale_color: Color32::from_rgb(100, 180, 255),
+            clickable: false,
         }
     }
 }
@@ -59,6 +66,21 @@ impl PianoConfig {
             white_key_active: Color32::from_rgb(180, 100, 200), // Purple tint
             black_key_active: Color32::from_rgb(140, 80, 160),  // Darker purple
             glow_color: Color32::from_rgb(180, 100, 200),       // Purple glow
+            ..Default::default()
+        }
+    }
+
+    /// A quantizer's scale: lit and played in `color`, keys clickable.
+    pub fn scale(color: Color32) -> Self {
+        Self {
+            // Black keys in the scale stand out from the near-black unlit ones
+            black_key_color: Color32::from_rgb(62, 62, 74),
+            white_key_active: color,
+            black_key_active: color.gamma_multiply(0.85),
+            glow_color: color,
+            scale_color: color,
+            show_octave: false,
+            clickable: true,
             ..Default::default()
         }
     }
@@ -86,6 +108,11 @@ pub struct PianoData {
     pub base_note: u8,
     /// Octave shift for display label (e.g., 0 for C4, 1 for C5).
     pub octave_shift: i32,
+    /// Pitch classes in a scale (bit 0 = C), or `None` to light no scale.
+    /// Keys outside it are drawn unlit, and keys in it carry a mark.
+    pub scale: Option<u16>,
+    /// The scale's root (0 = C), whose mark is ringed.
+    pub root: Option<u8>,
 }
 
 impl PianoData {
@@ -95,7 +122,13 @@ impl PianoData {
             active_notes,
             base_note,
             octave_shift,
+            ..Default::default()
         }
+    }
+
+    /// Whether a key (0-11) is in the scale; every key is when none is set.
+    fn in_scale(&self, semitone: u8) -> bool {
+        self.scale.map_or(true, |scale| scale & (1 << semitone) != 0)
     }
 
     /// Check if a note (0-11 semitone within octave) is active.
@@ -113,43 +146,87 @@ impl PianoData {
 ///     active_notes: vec![60, 64, 67], // C4, E4, G4
 ///     base_note: 60,
 ///     octave_shift: 0,
+///     ..Default::default()
 /// };
 /// let config = PianoConfig::keyboard().with_size(140.0, 45.0);
 /// piano(ui, &data, &config);
 /// ```
 pub fn piano(ui: &mut Ui, data: &PianoData, config: &PianoConfig) -> Response {
+    piano_keys(ui, data, config).0
+}
+
+/// The keyboard's white and black keys, each with its semitone (0-11).
+fn key_rects(keyboard: Rect) -> ([(u8, Rect); 7], [(u8, Rect); 5]) {
+    let white_key_width = keyboard.width() / 7.0;
+    let black_key_width = white_key_width * 0.6;
+    let black_key_height = keyboard.height() * 0.6;
+    let whites = std::array::from_fn(|i| {
+        let min = Pos2::new(keyboard.left() + i as f32 * white_key_width, keyboard.top());
+        (WHITE_KEY_NOTES[i], Rect::from_min_size(min, Vec2::new(white_key_width - 1.0, keyboard.height())))
+    });
+    let blacks = std::array::from_fn(|i| {
+        let x = keyboard.left() + BLACK_KEY_POSITIONS[i] * white_key_width - black_key_width / 2.0;
+        let min = Pos2::new(x, keyboard.top());
+        (BLACK_KEY_NOTES[i], Rect::from_min_size(min, Vec2::new(black_key_width, black_key_height)))
+    });
+    (whites, blacks)
+}
+
+/// The key (0-11) under `pos`. Black keys sit on top, so they win.
+fn key_at(keyboard: Rect, pos: Pos2) -> Option<u8> {
+    let (whites, blacks) = key_rects(keyboard);
+    blacks
+        .iter()
+        .chain(whites.iter())
+        .find(|(_, rect)| rect.contains(pos))
+        .map(|(semitone, _)| *semitone)
+}
+
+/// A piano keyboard, returning the key (0-11) under the pointer as well.
+///
+/// With [`PianoConfig::clickable`] set, the keys sense clicks: a click on a
+/// key is `response.clicked()` with that key returned.
+pub fn piano_keys(ui: &mut Ui, data: &PianoData, config: &PianoConfig) -> (Response, Option<u8>) {
     // Calculate total height including label
     let label_height = if config.show_octave { 12.0 } else { 0.0 };
     let total_height = config.height + label_height;
+    let sense = if config.clickable { Sense::click() } else { Sense::hover() };
 
     let (rect, response) = ui.allocate_exact_size(
         Vec2::new(config.width, total_height),
-        Sense::hover(),
+        sense,
     );
+    let keyboard_rect = Rect::from_min_size(rect.min, Vec2::new(config.width, config.height));
+    let hovered = response.hover_pos().and_then(|pos| key_at(keyboard_rect, pos));
+    if config.clickable && hovered.is_some() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
 
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        let keyboard_rect = Rect::from_min_size(
-            rect.min,
-            Vec2::new(config.width, config.height),
-        );
+        // Strokes and marks grow with the keyboard, which grows with zoom
+        let scale = config.height / 45.0;
+        let (whites, blacks) = key_rects(keyboard_rect);
+        let hover_stroke = egui::Stroke::new(1.5 * scale, config.scale_color);
 
-        // Calculate key dimensions
-        let white_key_width = config.width / 7.0;
-        let black_key_width = white_key_width * 0.6;
-        let black_key_height = config.height * 0.6;
+        // A dot at the foot of each key in the scale; the root's is ringed
+        let mark = |center: Pos2, semitone: u8, on_active: bool| {
+            if data.scale.is_none() || !data.in_scale(semitone) {
+                return;
+            }
+            let color = if on_active { Color32::WHITE } else { config.scale_color };
+            if data.root == Some(semitone) {
+                painter.circle_filled(center, 2.4 * scale, color);
+                painter.circle_stroke(center, 4.0 * scale, egui::Stroke::new(1.0 * scale, color.gamma_multiply(0.7)));
+            } else {
+                painter.circle_filled(center, 1.9 * scale, color);
+            }
+        };
 
         // Draw white keys first (background)
-        for (i, &semitone) in WHITE_KEY_NOTES.iter().enumerate() {
-            let key_rect = Rect::from_min_size(
-                Pos2::new(
-                    keyboard_rect.left() + i as f32 * white_key_width,
-                    keyboard_rect.top(),
-                ),
-                Vec2::new(white_key_width - 1.0, config.height),
-            );
-
+        for &(semitone, key_rect) in &whites {
             let is_active = data.is_note_active(semitone);
+            let lit = data.in_scale(semitone);
 
             // Draw glow effect for active keys
             if is_active {
@@ -168,11 +245,13 @@ pub fn piano(ui: &mut Ui, data: &PianoData, config: &PianoConfig) -> Response {
                 }
             }
 
-            // Key background
+            // Key background: keys outside the scale are left unlit
             let key_color = if is_active {
                 config.white_key_active
-            } else {
+            } else if lit {
                 config.white_key_color
+            } else {
+                Color32::from_rgb(98, 102, 118)
             };
             painter.rect_filled(key_rect, 2.0, key_color);
 
@@ -180,28 +259,28 @@ pub fn piano(ui: &mut Ui, data: &PianoData, config: &PianoConfig) -> Response {
             painter.rect_stroke(
                 key_rect,
                 2.0,
-                egui::Stroke::new(0.5, Color32::from_gray(120)),
+                egui::Stroke::new(0.5, Color32::from_gray(if lit { 120 } else { 60 })),
             );
 
             // Add subtle 3D effect (top highlight)
-            if !is_active {
+            if !is_active && lit {
                 let highlight_rect = Rect::from_min_size(
                     key_rect.min,
                     Vec2::new(key_rect.width(), 2.0),
                 );
                 painter.rect_filled(highlight_rect, 2.0, Color32::from_rgba_unmultiplied(255, 255, 255, 80));
             }
+
+            mark(Pos2::new(key_rect.center().x, key_rect.bottom() - 6.0 * scale), semitone, is_active);
+            if config.clickable && hovered == Some(semitone) {
+                painter.rect_stroke(key_rect.shrink(0.75 * scale), 2.0, hover_stroke);
+            }
         }
 
         // Draw black keys on top
-        for (i, &semitone) in BLACK_KEY_NOTES.iter().enumerate() {
-            let x_pos = keyboard_rect.left() + BLACK_KEY_POSITIONS[i] * white_key_width - black_key_width / 2.0;
-            let key_rect = Rect::from_min_size(
-                Pos2::new(x_pos, keyboard_rect.top()),
-                Vec2::new(black_key_width, black_key_height),
-            );
-
+        for &(semitone, key_rect) in &blacks {
             let is_active = data.is_note_active(semitone);
+            let lit = data.in_scale(semitone);
 
             // Draw glow effect for active keys
             if is_active {
@@ -222,18 +301,25 @@ pub fn piano(ui: &mut Ui, data: &PianoData, config: &PianoConfig) -> Response {
             // Key background
             let key_color = if is_active {
                 config.black_key_active
-            } else {
+            } else if lit {
                 config.black_key_color
+            } else {
+                Color32::from_rgb(16, 16, 20)
             };
             painter.rect_filled(key_rect, 1.5, key_color);
 
             // Subtle highlight on black keys
-            if !is_active {
+            if !is_active && lit {
                 let highlight_rect = Rect::from_min_size(
                     key_rect.min + Vec2::new(1.0, 1.0),
                     Vec2::new(key_rect.width() - 2.0, 3.0),
                 );
                 painter.rect_filled(highlight_rect, 1.0, Color32::from_rgba_unmultiplied(255, 255, 255, 20));
+            }
+
+            mark(Pos2::new(key_rect.center().x, key_rect.bottom() - 5.0 * scale), semitone, is_active);
+            if config.clickable && hovered == Some(semitone) {
+                painter.rect_stroke(key_rect, 1.5, hover_stroke);
             }
         }
 
@@ -255,7 +341,7 @@ pub fn piano(ui: &mut Ui, data: &PianoData, config: &PianoConfig) -> Response {
         }
     }
 
-    response
+    (response, hovered)
 }
 
 #[cfg(test)]
@@ -298,6 +384,7 @@ mod tests {
             active_notes: vec![60, 64, 67], // C4, E4, G4
             base_note: 60,
             octave_shift: 0,
+            ..Default::default()
         };
 
         // C (semitone 0) should be active
@@ -317,12 +404,32 @@ mod tests {
             active_notes: vec![48, 60, 72], // C3, C4, C5 - all C notes
             base_note: 60,
             octave_shift: 0,
+            ..Default::default()
         };
 
         // All should show as C (semitone 0)
         assert!(data.is_note_active(0));
         // But not other notes
         assert!(!data.is_note_active(1));
+    }
+
+    #[test]
+    fn test_key_at_prefers_black_keys() {
+        let keyboard = Rect::from_min_size(Pos2::ZERO, Vec2::new(140.0, 45.0));
+        // Top of the C/C# boundary is C#; the foot of it is C
+        assert_eq!(key_at(keyboard, Pos2::new(15.0, 5.0)), Some(1));
+        assert_eq!(key_at(keyboard, Pos2::new(15.0, 40.0)), Some(0));
+        assert_eq!(key_at(keyboard, Pos2::new(135.0, 40.0)), Some(11));
+        assert_eq!(key_at(keyboard, Pos2::new(70.0, 60.0)), None);
+    }
+
+    #[test]
+    fn test_piano_data_in_scale() {
+        let mut data = PianoData::default();
+        assert!(data.in_scale(1), "no scale: every key lit");
+        data.scale = Some(0b1010_1011_0101); // C major
+        assert!(data.in_scale(0) && data.in_scale(11));
+        assert!(!data.in_scale(1) && !data.in_scale(6));
     }
 
     #[test]
