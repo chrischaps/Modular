@@ -19,7 +19,16 @@
 //!   dropped back down to it. Frames the ring had no room for are dropped
 //!   on the input side.
 //!
-//! Both are counted, in frames, for the status bar. The feed reaches the
+//! Both are counted, in frames, for the status bar.
+//!
+//! **Same clock.** When one driver serves both sides (ASIO), the input and
+//! output callbacks run in lockstep, one after the other at each buffer
+//! switch, at one rate. Their timing never wanders, so the feed holds just
+//! one input buffer and no cushion: see [`input_channel_same_clock`]. If
+//! the input callback runs first, each output reads the input that arrived
+//! moments before it, and the buffer adds nothing to the round trip.
+//!
+//! The feed reaches the
 //! audio thread inside an [`AudioMessage`] and goes back to the UI thread to
 //! be dropped, like a recording's tap, so the ring is never freed there.
 //!
@@ -48,8 +57,12 @@ struct InputStats {
     /// The largest buffer the input device has delivered, in frames at the
     /// output's rate.
     largest_input: AtomicUsize,
-    /// The level the feed refills to, in frames: the input's added latency.
+    /// The level the feed refills to, in frames.
     target_frames: AtomicUsize,
+    /// The latency the feed adds, in frames: the target, less the input
+    /// buffer that arrives just before each read when one driver runs the
+    /// input callback ahead of the output's.
+    added_frames: AtomicUsize,
     /// Set by the input stream's error callback (unplugged, say).
     failed: AtomicBool,
     /// Glitches the input device itself reported (it dropped audio before
@@ -215,6 +228,18 @@ pub struct InputFeed {
     /// The largest buffer the output has asked for, in frames. Some drivers
     /// vary their buffer size from one callback to the next.
     largest_output: usize,
+    /// How the two callbacks are clocked.
+    clock: Clock,
+}
+
+/// How an input's callbacks are clocked against the output's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Clock {
+    /// Separate devices, each on its own clock.
+    Separate,
+    /// One driver, both callbacks at each buffer switch; `input_first` when
+    /// the input's runs before the output's.
+    Shared { input_first: bool },
 }
 
 impl InputFeed {
@@ -226,9 +251,23 @@ impl InputFeed {
     const CUSHION_STEP: usize = 64;
 
     /// The level reads start from: the largest input buffer, the largest
-    /// output buffer, and the cushion.
+    /// output buffer, and the cushion. On a shared clock, the input buffer
+    /// and the cushion: each read finds exactly one buffer waiting.
     fn target(&self) -> usize {
-        self.stats.largest_input.load(Ordering::Relaxed) + self.largest_output + self.cushion
+        let input = self.stats.largest_input.load(Ordering::Relaxed);
+        match self.clock {
+            Clock::Separate => input + self.largest_output + self.cushion,
+            Clock::Shared { .. } => input + self.cushion,
+        }
+    }
+
+    /// The latency the feed adds at `target`: all of it, unless the input
+    /// arrives just before each read.
+    fn added(&self, target: usize) -> usize {
+        match self.clock {
+            Clock::Shared { input_first: true } => target.saturating_sub(self.stats.largest_input.load(Ordering::Relaxed)),
+            _ => target,
+        }
     }
 
     /// Frames waiting in the ring.
@@ -252,9 +291,12 @@ impl InputFeed {
         self.largest_output = self.largest_output.max(output_frames);
         let target = self.target();
         self.stats.target_frames.store(target, Ordering::Relaxed);
+        self.stats.added_frames.store(self.added(target), Ordering::Relaxed);
         let level = self.level();
         if !self.primed {
-            if level < target {
+            // Nothing to start from yet: on a shared clock, before the first
+            // input buffer, the target is still zero
+            if level < target || level == 0 {
                 return;
             }
             self.primed = true;
@@ -339,6 +381,13 @@ impl InputMonitor {
     /// The jitter buffer's level, in frames: the latency it adds on top of
     /// the devices' own.
     pub fn buffered_frames(&self) -> usize {
+        self.stats.added_frames.load(Ordering::Relaxed)
+    }
+
+    /// The level the jitter buffer refills to, in frames. More than
+    /// [`buffered_frames`](Self::buffered_frames) when one driver delivers
+    /// each input buffer just before the output reads it.
+    pub fn target_frames(&self) -> usize {
         self.stats.target_frames.load(Ordering::Relaxed)
     }
 
@@ -381,6 +430,19 @@ pub fn input_channel(sample_rate: u32) -> (InputSender, InputFeed, InputMonitor)
 /// Creates the three ends of an input whose device runs at `input_rate`,
 /// converted to the output's `output_rate` if they differ.
 pub fn input_channel_converting(input_rate: u32, output_rate: u32) -> (InputSender, InputFeed, InputMonitor) {
+    channel(input_rate, output_rate, Clock::Separate)
+}
+
+/// Creates the three ends of an input served by the output's own driver, on
+/// its clock and at its `sample_rate`: the feed holds one input buffer and
+/// no cushion. `input_first` when the driver runs the input's callback
+/// before the output's at each buffer switch, so each read takes the input
+/// that arrived moments before.
+pub fn input_channel_same_clock(sample_rate: u32, input_first: bool) -> (InputSender, InputFeed, InputMonitor) {
+    channel(sample_rate, sample_rate, Clock::Shared { input_first })
+}
+
+fn channel(input_rate: u32, output_rate: u32, clock: Clock) -> (InputSender, InputFeed, InputMonitor) {
     let frames = ((output_rate as f32 * RING_SECONDS) as usize).max(1024);
     let (producer, consumer) = RingBuffer::new(frames * 2);
     let stats = Arc::new(InputStats::default());
@@ -391,8 +453,12 @@ pub fn input_channel_converting(input_rate: u32, output_rate: u32) -> (InputSend
             consumer,
             stats: Arc::clone(&stats),
             primed: false,
-            cushion: InputFeed::MIN_CUSHION,
+            cushion: match clock {
+                Clock::Separate => InputFeed::MIN_CUSHION,
+                Clock::Shared { .. } => 0,
+            },
             largest_output: 0,
+            clock,
         },
         InputMonitor { stats },
     )
@@ -591,6 +657,82 @@ mod tests {
         assert_eq!(monitor.overflow_frames() as usize, 960 + 4800 - 256 - target);
         // What's read is the newest input, `target` frames behind
         assert_eq!(left[0] as usize, 960 + 4800 - target + 1);
+    }
+
+    /// Runs `buffers` ASIO-style buffer switches of `frames` frames, each
+    /// running both callbacks, the input's first if `input_first`. Returns
+    /// the frames heard (left side), and the monitor.
+    fn run_lockstep(frames: usize, buffers: usize, input_first: bool) -> (Vec<f32>, InputMonitor) {
+        let (mut sender, mut feed, monitor) = input_channel_same_clock(48000, input_first);
+        let (mut left, mut right) = (vec![0.0; frames], vec![0.0; frames]);
+        let mut heard = Vec::new();
+        for switch in 0..buffers {
+            let input = ramp(switch * frames, frames);
+            if input_first {
+                sender.push_f32(&input, 2);
+            }
+            feed.begin(frames);
+            feed.read(&mut left, &mut right);
+            heard.extend_from_slice(&left);
+            if !input_first {
+                sender.push_f32(&input, 2);
+            }
+        }
+        (heard, monitor)
+    }
+
+    #[test]
+    fn test_same_clock_holds_one_buffer_whichever_callback_runs_first() {
+        for frames in [32, 64, 128, 256] {
+            for input_first in [true, false] {
+                let (heard, monitor) = run_lockstep(frames, 2000, input_first);
+                let start = assert_unbroken(&heard);
+                assert_eq!(monitor.underrun_frames(), 0, "{frames}, input first {input_first}");
+                assert_eq!(monitor.overflow_frames(), 0, "{frames}, input first {input_first}");
+                assert_eq!(monitor.target_frames(), frames, "one buffer, no cushion");
+                if input_first {
+                    // Each read takes the buffer that arrived just before it
+                    assert_eq!(start, 1, "the first switch is heard at once");
+                    assert_eq!(monitor.buffered_frames(), 0, "adds nothing to the round trip");
+                } else {
+                    assert_eq!(start, frames + 1, "heard one switch later");
+                    assert_eq!(monitor.buffered_frames(), frames);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_same_clock_recovers_from_a_late_input() {
+        // The driver runs the output's callback first once, where it had
+        // been running the input's: that read runs dry, and the cushion
+        // grows by a step, so the order no longer matters
+        let frames = 128;
+        let (mut sender, mut feed, monitor) = input_channel_same_clock(48000, true);
+        let (mut left, mut right) = (vec![0.0; frames], vec![0.0; frames]);
+        let mut pushed = 0;
+        let mut push = |sender: &mut InputSender| {
+            sender.push_f32(&ramp(pushed, frames), 2);
+            pushed += frames;
+        };
+        for _ in 0..10 {
+            push(&mut sender);
+            feed.begin(frames);
+            feed.read(&mut left, &mut right);
+        }
+        feed.begin(frames);
+        feed.read(&mut left, &mut right);
+        assert_eq!(monitor.underrun_frames(), frames as u64);
+        for i in 0..200 {
+            if i == 1 {
+                assert_eq!(monitor.target_frames(), frames + InputFeed::CUSHION_STEP);
+            }
+            push(&mut sender);
+            feed.begin(frames);
+            feed.read(&mut left, &mut right);
+        }
+        assert_eq!(monitor.underrun_frames(), frames as u64, "it settled");
+        assert_eq!(monitor.overflow_frames(), 0);
     }
 
     /// A 1 kHz sine at `rate`, `seconds` long, at amplitude 0.5.

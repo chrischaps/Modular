@@ -5,6 +5,7 @@
 
 use std::time::Instant;
 
+use cpal::{FromSample, Sample};
 use rtrb::Consumer;
 
 use crate::dsp::denormal::DenormalGuard;
@@ -168,6 +169,27 @@ impl AudioProcessor {
 
     /// Smoothing factor for CPU load averaging (0-1, higher = more responsive).
     const CPU_SMOOTHING: f32 = 0.3;
+
+    /// Processes into `output` of any sample type, by way of `scratch`: the
+    /// same as [`process`](Self::process), converted, for devices that take
+    /// integer samples (most ASIO drivers). A callback longer than `scratch`
+    /// is processed in parts.
+    ///
+    /// REAL-TIME SAFE: no allocation, locking or blocking.
+    pub fn process_into<T: Sample + FromSample<f32>>(&mut self, output: &mut [T], scratch: &mut [f32], channels: usize) {
+        let part = scratch.len() / channels.max(1) * channels.max(1);
+        if part == 0 {
+            output.fill(T::EQUILIBRIUM);
+            return;
+        }
+        for chunk in output.chunks_mut(part) {
+            let rendered = &mut scratch[..chunk.len()];
+            self.process(rendered, channels);
+            for (out, &sample) in chunk.iter_mut().zip(rendered.iter()) {
+                *out = T::from_sample(sample);
+            }
+        }
+    }
 
     /// Processes a block of audio.
     ///
@@ -554,6 +576,32 @@ mod tests {
 
         let tail = &output[256 * 2..];
         assert!(tail.iter().any(|&s| s.abs() > 0.01), "second chunk was rendered");
+    }
+
+    #[test]
+    fn test_process_into_converts_for_integer_devices() {
+        // The same patch twice: once as floats, once as an ASIO driver's
+        // 32-bit integers, through a scratch buffer that holds less than
+        // a callback, so it's rendered in parts
+        let (mut ui, mut floats) = processor();
+        playing_patch(&mut ui);
+        let (mut ui, mut ints) = processor();
+        playing_patch(&mut ui);
+
+        let mut expected = vec![0.0f32; 441 * 2];
+        floats.process(&mut expected, 2);
+        let mut output = vec![0i32; 441 * 2];
+        let mut scratch = vec![0.0f32; 100 * 2];
+        ints.process_into(&mut output, &mut scratch, 2);
+
+        assert!(output.iter().any(|&s| s.unsigned_abs() > i32::MAX as u32 / 100), "audible");
+        for (&int, &float) in output.iter().zip(&expected) {
+            assert_eq!(int, i32::from_sample(float));
+        }
+
+        // No room even for one frame: silence, not a panic
+        ints.process_into(&mut output, &mut [0.0f32; 1], 2);
+        assert!(output.iter().all(|&s| s == 0));
     }
 
     #[test]

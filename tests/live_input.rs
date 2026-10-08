@@ -6,7 +6,11 @@
 //! cargo test --release --test live_input -- --ignored --nocapture
 //! ```
 //!
-//! `LIVE_INPUT_SECONDS` sets how long it listens (3 s by default).
+//! `LIVE_INPUT_SECONDS` sets how long it listens (3 s by default): 600
+//! makes it a ten-minute soak. `MODULAR_AUDIO_SYSTEM=asio` runs it through
+//! the first ASIO driver (build with `--features asio`), and
+//! `MODULAR_BUFFER=128` asks that driver for 128-frame buffers. On ASIO,
+//! input and output share a clock, so any dropout at all fails the test.
 //!
 //! The patch is Audio Input into the output at volume 0, so nothing is
 //! heard and nothing can feed back. It reports what the module's meters
@@ -15,14 +19,22 @@
 
 use std::time::{Duration, Instant};
 
-use modular_synth::engine::{AudioEngine, AudioProcessor, EngineChannels, EngineCommand, EngineEvent, RoundTrip};
+use modular_synth::engine::{AudioEngine, AudioProcessor, AudioSystem, EngineChannels, EngineCommand, EngineEvent, RoundTrip};
 
 #[test]
 #[ignore = "needs audio hardware and an input device"]
 fn default_input_reaches_the_audio_input_module() {
-    let mut engine = AudioEngine::new().expect("an output device");
+    let system = match std::env::var("MODULAR_AUDIO_SYSTEM") {
+        Ok(key) => AudioSystem::from_key(&key).unwrap_or_else(|| panic!("this build has no {key} audio system")),
+        Err(_) => AudioSystem::System,
+    };
+    let buffer = std::env::var("MODULAR_BUFFER").ok().and_then(|s| s.parse().ok());
+    let mut engine = match AudioEngine::with_system(system, buffer) {
+        Ok(engine) => engine,
+        Err(e) => panic!("{}: {}", system.label(), e),
+    };
     let inputs = engine.enumerate_input_devices();
-    println!("output: {} at {} Hz", engine.current_device_name(), engine.sample_rate());
+    println!("output: {} on {} at {} Hz", engine.current_device_name(), system.label(), engine.sample_rate());
     for device in &inputs {
         println!("input {}: {}{}", device.index, device.name, if device.is_default { " (default)" } else { "" });
     }
@@ -51,6 +63,7 @@ fn default_input_reaches_the_audio_input_module() {
         engine.input_sample_rate().unwrap()
     );
     ui.connect_input(feed);
+    println!("buffer: {:?} frames per callback", engine.buffer_frames());
 
     let mut peak = 0.0f32;
     let mut readings = 0;
@@ -89,7 +102,12 @@ fn default_input_reaches_the_audio_input_module() {
         if trip.complete() { "" } else { " (at least)" },
     );
     assert!(!monitor.failed(), "the input stream reported an error");
+    assert!(!engine.stream_failed(), "the output stream reported an error");
+    if system == AudioSystem::Asio {
+        assert_eq!(monitor.underrun_frames(), 0, "a shared clock never runs dry");
+        assert_eq!(monitor.overflow_frames(), 0, "a shared clock never runs ahead");
+    }
     assert!(readings > 100, "the Audio Input module ran");
-    assert!(monitor.buffered_frames() > 0, "the input was read");
+    assert!(monitor.target_frames() > 0, "the input was read");
     assert!(peak > 0.0, "the input brought some signal (even a room's hiss)");
 }

@@ -2,14 +2,21 @@
 //!
 //! Manages the cpal audio stream and interfaces with system audio hardware.
 //! The audio callback runs in a separate thread and must be real-time safe.
+//!
+//! The engine runs on one of the computer's [`AudioSystem`]s: the one every
+//! app shares (WASAPI on Windows), or, built with the `asio` feature, an
+//! interface's ASIO driver. ASIO serves input and output from one driver on
+//! one clock, in buffers of a few milliseconds, for live playing. It also
+//! loads one driver at a time, which shapes how devices are listed and
+//! opened here: see [`AudioEngine::set_audio_system`].
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, FromSample, Host, SampleFormat, SizedSample, Stream, StreamConfig};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use cpal::{BufferSize, Device, FromSample, Host, SampleFormat, SizedSample, Stream, StreamConfig, SupportedBufferSize};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::audio_input::{input_channel_converting, InputFeed, InputMonitor, InputSender};
+use super::audio_input::{input_channel_converting, input_channel_same_clock, InputFeed, InputMonitor, InputSender};
 use super::audio_processor::AudioProcessor;
 use super::latency::LatencyGauge;
 use crate::dsp::{InputAudio, MidiEvent};
@@ -27,6 +34,12 @@ pub enum AudioError {
     StreamCreationFailed(String),
     /// Failed to start/stop playback.
     StreamPlaybackFailed(String),
+    /// No ASIO driver would start.
+    NoAsioDriver,
+    /// The named ASIO driver wouldn't start.
+    DriverUnavailable(String),
+    /// This build can't run on that audio system.
+    SystemUnavailable(AudioSystem),
 }
 
 impl std::fmt::Display for AudioError {
@@ -43,12 +56,80 @@ impl std::fmt::Display for AudioError {
             AudioError::StreamPlaybackFailed(msg) => {
                 write!(f, "Failed to control audio playback: {}", msg)
             }
-
+            AudioError::NoAsioDriver => write!(
+                f,
+                "No ASIO driver would start. Check that the interface is plugged in, that no other app is using it, \
+                 and that its ASIO driver is installed (for a Scarlett: Focusrite USB ASIO, from focusrite.com)"
+            ),
+            AudioError::DriverUnavailable(name) => write!(
+                f,
+                "{} wouldn't start: check that the interface is plugged in and that no other app is using it",
+                name
+            ),
+            AudioError::SystemUnavailable(system) => write!(f, "This build of Modular can't use {}", system.label()),
         }
     }
 }
 
 impl std::error::Error for AudioError {}
+
+/// One of the computer's audio systems.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AudioSystem {
+    /// The operating system's own, shared by every app: WASAPI on Windows,
+    /// CoreAudio on macOS, ALSA on Linux.
+    #[default]
+    System,
+    /// An interface's ASIO driver, which talks to the hardware directly
+    /// (Windows, in builds with the `asio` feature).
+    Asio,
+}
+
+impl AudioSystem {
+    /// Every system this build can run on, the default first.
+    pub fn available() -> Vec<AudioSystem> {
+        let mut systems = vec![AudioSystem::System];
+        if cfg!(all(windows, feature = "asio")) {
+            systems.push(AudioSystem::Asio);
+        }
+        systems
+    }
+
+    /// Its name, for menus.
+    pub fn label(self) -> &'static str {
+        match self {
+            AudioSystem::System if cfg!(windows) => "Windows Audio",
+            AudioSystem::System => "System audio",
+            AudioSystem::Asio => "ASIO",
+        }
+    }
+
+    /// A stable name, to remember the choice by.
+    pub fn key(self) -> &'static str {
+        match self {
+            AudioSystem::System => "system",
+            AudioSystem::Asio => "asio",
+        }
+    }
+
+    /// The system remembered as `key`, if this build has it.
+    pub fn from_key(key: &str) -> Option<Self> {
+        AudioSystem::available().into_iter().find(|system| system.key() == key)
+    }
+
+    fn host(self) -> Result<Host, AudioError> {
+        match self {
+            AudioSystem::System => Ok(cpal::default_host()),
+            #[cfg(all(windows, feature = "asio"))]
+            AudioSystem::Asio => cpal::host_from_id(cpal::HostId::Asio).map_err(|_| AudioError::NoAsioDriver),
+            #[cfg(not(all(windows, feature = "asio")))]
+            AudioSystem::Asio => Err(AudioError::SystemUnavailable(self)),
+        }
+    }
+}
+
+/// The buffer sizes, in frames, offered on systems that let Modular choose.
+pub const BUFFER_CHOICES: [u32; 5] = [32, 64, 128, 256, 512];
 
 /// An input device's stream, while it's open.
 struct OpenInput {
@@ -87,19 +168,53 @@ struct AudioState {
     callbacks: AtomicU64,
     /// Set by the stream's error callback (device unplugged, driver reset).
     stream_failed: AtomicBool,
+    /// Why the stream stopped: one of the `STOPPED_*` reasons.
+    stopped: AtomicU8,
     /// Glitches the output device reported, which the stream recovers from.
     xruns: AtomicU64,
     /// The output device's own delay, from callback to playback.
     output_latency: LatencyGauge,
 }
 
+/// The stream is running (or hasn't failed).
+const STOPPED_NOT: u8 = 0;
+/// The device went away, or failed.
+const STOPPED_LOST: u8 = 1;
+/// The driver asked for the stream to be rebuilt: its buffer size or sample
+/// rate was changed from its own control panel.
+const STOPPED_RESET: u8 = 2;
+
 impl AudioState {
+    /// Takes in an error from a stream's error callback: a glitch is
+    /// counted, anything else ends the stream.
+    fn take_error(&self, err: &cpal::Error) {
+        if is_glitch(err) {
+            self.xruns.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        eprintln!("Audio stream error: {}", err);
+        let reason = match err.kind() {
+            cpal::ErrorKind::StreamInvalidated => STOPPED_RESET,
+            _ => STOPPED_LOST,
+        };
+        self.stopped.store(reason, Ordering::Relaxed);
+        self.stream_failed.store(true, Ordering::Relaxed);
+    }
+
+    /// Readies the state for a new stream.
+    fn reset(&self) {
+        self.stream_failed.store(false, Ordering::Relaxed);
+        self.stopped.store(STOPPED_NOT, Ordering::Relaxed);
+        self.output_latency.clear();
+    }
+
     fn new() -> Self {
         Self {
             test_tone_enabled: AtomicBool::new(false),
             phase_fixed: AtomicU32::new(0),
             callbacks: AtomicU64::new(0),
             stream_failed: AtomicBool::new(false),
+            stopped: AtomicU8::new(STOPPED_NOT),
             xruns: AtomicU64::new(0),
             output_latency: LatencyGauge::default(),
         }
@@ -108,9 +223,18 @@ impl AudioState {
 
 /// The main audio engine that manages cpal streams.
 pub struct AudioEngine {
+    system: AudioSystem,
     host: Host,
     device: Device,
     config: StreamConfig,
+    /// The output's sample format: f32, or what an ASIO driver takes.
+    format: SampleFormat,
+    /// The buffer size asked for, in frames, on systems that let Modular
+    /// choose; `None` leaves it to the driver.
+    buffer_request: Option<u32>,
+    /// The ASIO drivers, listed while none was loaded: ASIO loads one at a
+    /// time, so while one runs the others can't be listed.
+    asio_devices: Vec<Device>,
     stream: Option<Stream>,
     state: Arc<AudioState>,
     /// The graph processor driven by the stream, kept here so it survives a
@@ -123,58 +247,190 @@ pub struct AudioEngine {
 impl AudioEngine {
     /// Create a new AudioEngine using the default output device.
     pub fn new() -> Result<Self, AudioError> {
-        let host = cpal::default_host();
+        Self::with_system(AudioSystem::System, None)
+    }
 
-        let device = host
-            .default_output_device()
-            .ok_or(AudioError::NoOutputDevice)?;
-
-        let supported_config = device
-            .default_output_config()
-            .map_err(|e| AudioError::ConfigurationFailed(e.to_string()))?;
-
-        let sample_rate = supported_config.sample_rate();
-        let config = StreamConfig {
-            channels: supported_config.channels(),
-            sample_rate,
-            buffer_size: cpal::BufferSize::Default,
-        };
-
-        let state = Arc::new(AudioState::new());
-
+    /// Creates an engine on `system`'s default output device (an ASIO
+    /// system's first driver), asking for `buffer` frames per callback
+    /// where the system lets Modular choose.
+    pub fn with_system(system: AudioSystem, buffer: Option<u32>) -> Result<Self, AudioError> {
+        let host = system.host()?;
+        let asio_devices = list_asio_devices(&host, system);
+        let device = default_output_device(&host, system, &asio_devices)?;
+        let (config, format) = output_config(&device, system, buffer)?;
         Ok(Self {
+            system,
             host,
             device,
             config,
+            format,
+            buffer_request: buffer,
+            asio_devices,
             stream: None,
-            state,
+            state: Arc::new(AudioState::new()),
             processor: None,
             input: None,
         })
     }
 
+    /// The audio system the engine runs on.
+    pub fn audio_system(&self) -> AudioSystem {
+        self.system
+    }
+
+    /// Moves the engine, and a running patch with it, to `system`, on its
+    /// default output device. The input closes: open it again from
+    /// [`enumerate_input_devices`](Self::enumerate_input_devices), which
+    /// lists the new system's. If `system` won't start, the engine goes
+    /// back to the one it was on and returns why.
+    pub fn set_audio_system(&mut self, system: AudioSystem) -> Result<(), AudioError> {
+        if system == self.system {
+            return Ok(());
+        }
+        let previous = self.system;
+        let was_running = self.is_running();
+        // ASIO lists its drivers by loading each in turn, which it can't do
+        // while one is in use
+        self.close_input();
+        self.stop()?;
+        match self.move_to(system, was_running) {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let _ = self.move_to(previous, was_running);
+                Err(e)
+            }
+        }
+    }
+
+    /// Opens `system`'s default output device, and restarts the stream
+    /// there if `restart`.
+    fn move_to(&mut self, system: AudioSystem, restart: bool) -> Result<(), AudioError> {
+        let host = system.host()?;
+        let asio_devices = list_asio_devices(&host, system);
+        let device = default_output_device(&host, system, &asio_devices)?;
+        let (config, format) = output_config(&device, system, self.buffer_request)?;
+        self.system = system;
+        self.host = host;
+        self.asio_devices = asio_devices;
+        self.device = device;
+        self.config = config;
+        self.format = format;
+        if restart {
+            self.restart_stream()?;
+        }
+        Ok(())
+    }
+
+    /// The buffer sizes, in frames, the output device runs at from
+    /// [`BUFFER_CHOICES`]. Empty where the system sets its own (Windows
+    /// Audio rounds any request up to its own period).
+    pub fn buffer_choices(&self) -> Vec<u32> {
+        if self.system != AudioSystem::Asio {
+            return Vec::new();
+        }
+        match self.device.default_output_config().map(|config| *config.buffer_size()) {
+            Ok(SupportedBufferSize::Range { min, max }) => {
+                BUFFER_CHOICES.into_iter().filter(|frames| (min..=max).contains(frames)).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// The buffer size asked for, in frames, if one was.
+    pub fn buffer_request(&self) -> Option<u32> {
+        self.buffer_request
+    }
+
+    /// The output's frames per callback, once the stream has said.
+    pub fn buffer_frames(&self) -> Option<u32> {
+        self.stream.as_ref().and_then(|stream| stream.buffer_size().ok())
+    }
+
+    /// Asks for `frames` per callback where the system lets Modular choose
+    /// (`None` leaves it to the driver), rebuilding a running stream to
+    /// take it. The input closes, as for
+    /// [`set_audio_system`](Self::set_audio_system). A driver that won't run
+    /// at that size picks its own: see [`buffer_frames`](Self::buffer_frames).
+    pub fn set_buffer_size(&mut self, frames: Option<u32>) -> Result<(), AudioError> {
+        self.buffer_request = frames;
+        if self.system != AudioSystem::Asio {
+            return Ok(());
+        }
+        let was_running = self.is_running();
+        // The driver keeps the size its buffers were made at until every
+        // stream on it has closed
+        self.close_input();
+        self.stop()?;
+        let (config, format) = output_config(&self.device, self.system, frames)?;
+        self.config = config;
+        self.format = format;
+        if was_running {
+            self.restart_stream()?;
+        }
+        Ok(())
+    }
+
+    /// Whether the driver stopped the stream to change its own settings
+    /// (its buffer size or sample rate, from its control panel), so it
+    /// should be rebuilt with [`restart_after_reset`](Self::restart_after_reset).
+    pub fn stream_reset(&self) -> bool {
+        self.state.stopped.load(Ordering::Relaxed) == STOPPED_RESET
+    }
+
+    /// Rebuilds the stream after the driver reset it, at the driver's new
+    /// settings: its own buffer size from now on, rather than the one asked
+    /// for. The input closes, as for [`set_audio_system`](Self::set_audio_system).
+    pub fn restart_after_reset(&mut self) -> Result<(), AudioError> {
+        self.buffer_request = None;
+        self.close_input();
+        self.stop()?;
+        let (config, format) = output_config(&self.device, self.system, None)?;
+        self.config = config;
+        self.format = format;
+        self.restart_stream()
+    }
+
+    /// Starts the stream again on the current device: the processor's, or
+    /// the test tone without one.
+    fn restart_stream(&mut self) -> Result<(), AudioError> {
+        match self.processor.clone() {
+            Some(processor) => {
+                // The old stream is gone, so this lock is uncontended
+                if let Ok(mut proc) = processor.lock() {
+                    proc.set_sample_rate(self.config.sample_rate as f32);
+                }
+                self.build_processor_stream(processor)
+            }
+            None => self.start(),
+        }
+    }
+
+    /// The output devices to choose from, in menu order.
+    fn output_device_list(&self) -> Vec<Device> {
+        match self.system {
+            AudioSystem::Asio => self.asio_devices.clone(),
+            AudioSystem::System => self.host.output_devices().map(|devices| devices.collect()).unwrap_or_default(),
+        }
+    }
+
     /// Get information about all available output devices.
     pub fn enumerate_devices(&self) -> Vec<DeviceInfo> {
-        let default_name = self
-            .host
-            .default_output_device()
-            .and_then(|d| device_name(&d));
-
-        self.host
-            .output_devices()
-            .map(|devices| {
-                devices
-                    .enumerate()
-                    .filter_map(|(index, device)| {
-                        device_name(&device).map(|name| DeviceInfo {
-                            is_default: Some(&name) == default_name.as_ref(),
-                            name,
-                            index,
-                        })
-                    })
-                    .collect()
+        // ASIO has no default: its first driver opens first
+        let default_name = match self.system {
+            AudioSystem::System => self.host.default_output_device().and_then(|d| device_name(&d)),
+            AudioSystem::Asio => self.asio_devices.first().and_then(device_name),
+        };
+        self.output_device_list()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, device)| {
+                device_name(device).map(|name| DeviceInfo {
+                    is_default: Some(&name) == default_name.as_ref(),
+                    name,
+                    index,
+                })
             })
-            .unwrap_or_default()
+            .collect()
     }
 
     /// Get the name of the currently selected device.
@@ -182,60 +438,48 @@ impl AudioEngine {
         device_name(&self.device).unwrap_or_else(|| "Unknown".to_string())
     }
 
+    /// The current device's index in [`enumerate_devices`](Self::enumerate_devices).
+    pub fn current_device_index(&self) -> Option<usize> {
+        let name = device_name(&self.device)?;
+        self.enumerate_devices().into_iter().find(|info| info.name == name).map(|info| info.index)
+    }
+
     /// Select a different output device by index.
     ///
     /// If a stream was running it is rebuilt on the new device. When the
     /// engine is driving an `AudioProcessor`, the same processor (and so the
     /// whole patch) moves to the new device, re-prepared at its sample rate.
+    /// On ASIO the input closes: its driver is the output's.
     pub fn select_device(&mut self, index: usize) -> Result<(), AudioError> {
-        // Stop current stream if running
+        let device = self.output_device_list().into_iter().nth(index).ok_or(AudioError::NoOutputDevice)?;
+        let (config, format) = output_config(&device, self.system, self.buffer_request)?;
+
         let was_running = self.is_running();
-        if was_running {
-            self.stop()?;
+        if self.system == AudioSystem::Asio {
+            // The old driver must unload before the new one can load
+            self.close_input();
         }
-
-        // Find the device by index
-        let device = self
-            .host
-            .output_devices()
-            .map_err(|e| AudioError::ConfigurationFailed(e.to_string()))?
-            .nth(index)
-            .ok_or(AudioError::NoOutputDevice)?;
-
-        // Get configuration for new device
-        let supported_config = device
-            .default_output_config()
-            .map_err(|e| AudioError::ConfigurationFailed(e.to_string()))?;
-
-        let sample_rate = supported_config.sample_rate();
-        let config = StreamConfig {
-            channels: supported_config.channels(),
-            sample_rate,
-            buffer_size: cpal::BufferSize::Default,
-        };
-
+        self.stop()?;
         self.device = device;
         self.config = config;
-
-        // Restart if it was running before
+        self.format = format;
         if was_running {
-            match self.processor.clone() {
-                Some(processor) => {
-                    // The old stream is gone, so this lock is uncontended
-                    if let Ok(mut proc) = processor.lock() {
-                        proc.set_sample_rate(sample_rate as f32);
-                    }
-                    self.build_processor_stream(processor)?;
-                }
-                None => self.start()?,
-            }
+            self.restart_stream()?;
         }
-
         Ok(())
     }
 
-    /// Get information about all available input devices.
+    /// Get information about all available input devices. On ASIO, that's
+    /// the output's own driver, if it has inputs: one driver serves both.
     pub fn enumerate_input_devices(&self) -> Vec<DeviceInfo> {
+        if self.system == AudioSystem::Asio {
+            let has_inputs = self.device.default_input_config().is_ok_and(|config| config.channels() > 0);
+            return device_name(&self.device)
+                .filter(|_| has_inputs)
+                .map(|name| DeviceInfo { name, is_default: true, index: 0 })
+                .into_iter()
+                .collect();
+        }
         let default_name = self.host.default_input_device().and_then(|d| device_name(&d));
         self.host
             .input_devices()
@@ -264,6 +508,9 @@ impl AudioEngine {
     /// it runs at its own and the input is converted on the way in.
     pub fn open_input(&mut self, index: usize) -> Result<(InputFeed, InputMonitor), AudioError> {
         self.close_input();
+        if self.system == AudioSystem::Asio {
+            return self.open_asio_input(index);
+        }
         let device = self
             .host
             .input_devices()
@@ -317,12 +564,7 @@ impl AudioEngine {
             buffer_size: cpal::BufferSize::Default,
         };
         let (sender, feed, monitor) = input_channel_converting(config.sample_rate, rate);
-        let stream = match supported_config.sample_format() {
-            SampleFormat::I32 => build_input_stream::<i32>(&device, &config, sender, monitor.clone()),
-            SampleFormat::I16 => build_input_stream::<i16>(&device, &config, sender, monitor.clone()),
-            SampleFormat::U16 => build_input_stream::<u16>(&device, &config, sender, monitor.clone()),
-            _ => build_input_stream::<f32>(&device, &config, sender, monitor.clone()),
-        }?;
+        let stream = build_input_stream(supported_config.sample_format(), &device, &config, sender, monitor.clone())?;
         stream.play().map_err(|e| AudioError::StreamPlaybackFailed(e.to_string()))?;
 
         self.input = Some(OpenInput {
@@ -332,6 +574,46 @@ impl AudioEngine {
             channels: config.channels,
             sample_rate: config.sample_rate,
         });
+        Ok((feed, monitor))
+    }
+
+    /// Opens the inputs of the output's ASIO driver (input `index` 0, the
+    /// only one listed): on its clock, at its rate and buffer size, through
+    /// a jitter buffer that holds one buffer.
+    fn open_asio_input(&mut self, index: usize) -> Result<(InputFeed, InputMonitor), AudioError> {
+        if index != 0 {
+            return Err(AudioError::NoInputDevice);
+        }
+        let device = self.device.clone();
+        let name = device_name(&device).unwrap_or_else(|| "Unknown".to_string());
+        let supported = device
+            .default_input_config()
+            .map_err(|e| AudioError::ConfigurationFailed(e.to_string()))?;
+        let config = StreamConfig {
+            // The patch hears the first two
+            channels: supported.channels().min(2),
+            sample_rate: self.config.sample_rate,
+            buffer_size: self.buffer_frames().map_or(self.config.buffer_size, BufferSize::Fixed),
+        };
+        // ASIO runs its streams' callbacks in the order they were opened, at
+        // each buffer switch. The output's is opened again below, behind
+        // this one, so each output reads the input that arrived just before
+        let (sender, feed, monitor) = input_channel_same_clock(config.sample_rate, true);
+        let stream = build_input_stream(supported.sample_format(), &device, &config, sender, monitor.clone())?;
+        stream.play().map_err(|e| AudioError::StreamPlaybackFailed(e.to_string()))?;
+        self.input = Some(OpenInput {
+            _stream: stream,
+            index,
+            name,
+            channels: config.channels,
+            sample_rate: config.sample_rate,
+        });
+        if let (Some(processor), true) = (self.processor.clone(), self.stream.is_some()) {
+            // Dropping the stream only removes its callback: the driver, and
+            // its buffers, stay with the input's stream
+            self.stream = None;
+            self.build_processor_stream(processor)?;
+        }
         Ok((feed, monitor))
     }
 
@@ -396,7 +678,7 @@ impl AudioEngine {
 
         let state = Arc::clone(&self.state);
         let error_state = Arc::clone(&self.state);
-        self.state.stream_failed.store(false, Ordering::Relaxed);
+        self.state.reset();
         let sample_rate = self.config.sample_rate as f32;
         let channels = self.config.channels as usize;
 
@@ -449,14 +731,7 @@ impl AudioEngine {
                         }
                     }
                 },
-                move |err| {
-                    if is_glitch(&err) {
-                        error_state.xruns.fetch_add(1, Ordering::Relaxed);
-                    } else {
-                        eprintln!("Audio stream error: {}", err);
-                        error_state.stream_failed.store(true, Ordering::Relaxed);
-                    }
-                },
+                move |err| error_state.take_error(&err),
                 None,
             )
             .map_err(|e| AudioError::StreamCreationFailed(e.to_string()))?;
@@ -560,40 +835,16 @@ impl AudioEngine {
         &mut self,
         processor: Arc<Mutex<AudioProcessor>>,
     ) -> Result<(), AudioError> {
-        let channels = self.config.channels as usize;
-        let state = Arc::clone(&self.state);
-        let error_state = Arc::clone(&self.state);
-        self.state.stream_failed.store(false, Ordering::Relaxed);
-        self.state.output_latency.clear();
-
-        let stream = self
-            .device
-            .build_output_stream(
-                self.config,
-                move |data: &mut [f32], info: &cpal::OutputCallbackInfo| {
-                    state.callbacks.fetch_add(1, Ordering::Relaxed);
-                    let time = info.timestamp();
-                    state.output_latency.record(time.playback.checked_duration_since(time.callback));
-                    // REAL-TIME SAFE: the lock is only ever taken here, or by
-                    // select_device while no stream is running, so try_lock
-                    // never fails in practice. If it did, output silence
-                    // rather than wait.
-                    match processor.try_lock() {
-                        Ok(mut proc) => proc.process(data, channels),
-                        Err(_) => data.fill(0.0),
-                    }
-                },
-                move |err| {
-                    if is_glitch(&err) {
-                        error_state.xruns.fetch_add(1, Ordering::Relaxed);
-                    } else {
-                        eprintln!("Audio stream error: {}", err);
-                        error_state.stream_failed.store(true, Ordering::Relaxed);
-                    }
-                },
-                None,
-            )
-            .map_err(|e| AudioError::StreamCreationFailed(e.to_string()))?;
+        self.state.reset();
+        let stream = match self.build_output_stream(Arc::clone(&processor)) {
+            // Some drivers only run at certain sizes: let this one choose
+            Err(e) if matches!(self.config.buffer_size, BufferSize::Fixed(_)) && e.kind() == cpal::ErrorKind::UnsupportedConfig => {
+                self.config.buffer_size = BufferSize::Default;
+                self.build_output_stream(processor)
+            }
+            built => built,
+        }
+        .map_err(|e| stream_error(e, &self.device, self.system))?;
 
         stream
             .play()
@@ -601,6 +852,109 @@ impl AudioEngine {
 
         self.stream = Some(stream);
         Ok(())
+    }
+
+    /// Builds a stream that runs `processor`, in the device's sample format.
+    fn build_output_stream(&self, processor: Arc<Mutex<AudioProcessor>>) -> Result<Stream, cpal::Error> {
+        match self.format {
+            SampleFormat::I32 => self.build_output::<i32>(processor),
+            SampleFormat::I24 => self.build_output::<cpal::I24>(processor),
+            SampleFormat::I16 => self.build_output::<i16>(processor),
+            SampleFormat::F64 => self.build_output::<f64>(processor),
+            _ => self.build_output::<f32>(processor),
+        }
+    }
+
+    /// Builds a stream that runs `processor`, writing samples of type `T`.
+    fn build_output<T>(&self, processor: Arc<Mutex<AudioProcessor>>) -> Result<Stream, cpal::Error>
+    where
+        T: SizedSample + FromSample<f32>,
+    {
+        let channels = self.config.channels as usize;
+        let state = Arc::clone(&self.state);
+        let error_state = Arc::clone(&self.state);
+        // Rendered here, then converted: room for the largest buffer the
+        // device might ask for
+        let mut scratch = vec![0.0f32; largest_buffer(&self.device) * channels.max(1)];
+        self.device.build_output_stream(
+            self.config,
+            move |data: &mut [T], info: &cpal::OutputCallbackInfo| {
+                state.callbacks.fetch_add(1, Ordering::Relaxed);
+                let time = info.timestamp();
+                state.output_latency.record(time.playback.checked_duration_since(time.callback));
+                // REAL-TIME SAFE: the lock is only ever taken here, or by
+                // the engine while no stream is running, so try_lock never
+                // fails in practice. If it did, output silence rather than
+                // wait.
+                match processor.try_lock() {
+                    Ok(mut proc) => proc.process_into(data, &mut scratch, channels),
+                    Err(_) => data.fill(T::EQUILIBRIUM),
+                }
+            },
+            move |err| error_state.take_error(&err),
+            None,
+        )
+    }
+}
+
+/// The ASIO drivers that will start, if `system` is ASIO. Each is loaded in
+/// turn to list it, so this runs while none is in use.
+fn list_asio_devices(host: &Host, system: AudioSystem) -> Vec<Device> {
+    match system {
+        AudioSystem::Asio => host.output_devices().map(|devices| devices.collect()).unwrap_or_default(),
+        AudioSystem::System => Vec::new(),
+    }
+}
+
+/// The output device a system opens on: the system's default, or the first
+/// ASIO driver that will start.
+fn default_output_device(host: &Host, system: AudioSystem, asio_devices: &[Device]) -> Result<Device, AudioError> {
+    match system {
+        AudioSystem::System => host.default_output_device().ok_or(AudioError::NoOutputDevice),
+        AudioSystem::Asio => asio_devices.first().cloned().ok_or(AudioError::NoAsioDriver),
+    }
+}
+
+/// The stream config and sample format to run `device` at, asking for
+/// `buffer` frames per callback on systems that let Modular choose.
+fn output_config(device: &Device, system: AudioSystem, buffer: Option<u32>) -> Result<(StreamConfig, SampleFormat), AudioError> {
+    let supported = device
+        .default_output_config()
+        .map_err(|e| AudioError::ConfigurationFailed(e.to_string()))?;
+    let buffer_size = match (system, buffer, supported.buffer_size()) {
+        (AudioSystem::Asio, Some(frames), SupportedBufferSize::Range { min, max }) => BufferSize::Fixed(frames.clamp(*min, *max)),
+        _ => BufferSize::Default,
+    };
+    let channels = match system {
+        // An interface's first pair: Modular plays stereo
+        AudioSystem::Asio => supported.channels().min(2),
+        // Shared mode runs at the device's own layout
+        AudioSystem::System => supported.channels(),
+    };
+    // Some ASIO drivers don't know their rate until they run
+    let sample_rate = match supported.sample_rate() {
+        0 => 48_000,
+        rate => rate,
+    };
+    Ok((StreamConfig { channels, sample_rate, buffer_size }, supported.sample_format()))
+}
+
+/// The most frames a callback on `device` might ask for, for a buffer
+/// that has to hold one.
+fn largest_buffer(device: &Device) -> usize {
+    match device.default_output_config().map(|config| *config.buffer_size()) {
+        Ok(SupportedBufferSize::Range { max, .. }) => (max as usize).clamp(4096, 16384),
+        _ => 8192,
+    }
+}
+
+/// Explains a stream that wouldn't build.
+fn stream_error(err: cpal::Error, device: &Device, system: AudioSystem) -> AudioError {
+    match (system, err.kind()) {
+        (AudioSystem::Asio, cpal::ErrorKind::DeviceBusy | cpal::ErrorKind::DeviceNotAvailable) => {
+            AudioError::DriverUnavailable(device_name(device).unwrap_or_else(|| "The ASIO driver".to_string()))
+        }
+        _ => AudioError::StreamCreationFailed(err.to_string()),
     }
 }
 
@@ -616,9 +970,28 @@ fn device_name(device: &Device) -> Option<String> {
     device.description().ok().map(|description| description.name().to_string())
 }
 
-/// Builds a stream that pushes device `device`'s input, in samples of type
-/// `T`, into `sender`.
-fn build_input_stream<T>(
+/// Builds a stream that pushes `device`'s input, in samples of `format`,
+/// into `sender`.
+fn build_input_stream(
+    format: SampleFormat,
+    device: &Device,
+    config: &StreamConfig,
+    sender: InputSender,
+    monitor: InputMonitor,
+) -> Result<Stream, AudioError> {
+    match format {
+        SampleFormat::I32 => build_input_stream_of::<i32>(device, config, sender, monitor),
+        SampleFormat::I24 => build_input_stream_of::<cpal::I24>(device, config, sender, monitor),
+        SampleFormat::I16 => build_input_stream_of::<i16>(device, config, sender, monitor),
+        SampleFormat::U16 => build_input_stream_of::<u16>(device, config, sender, monitor),
+        SampleFormat::F64 => build_input_stream_of::<f64>(device, config, sender, monitor),
+        _ => build_input_stream_of::<f32>(device, config, sender, monitor),
+    }
+}
+
+/// Builds a stream that pushes `device`'s input, in samples of type `T`,
+/// into `sender`.
+fn build_input_stream_of<T>(
     device: &Device,
     config: &StreamConfig,
     mut sender: InputSender,

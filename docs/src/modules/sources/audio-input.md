@@ -65,6 +65,27 @@ Each device's figure comes from the timestamps it puts on its audio. Windows doe
 - If the input device is unplugged, the status bar shows **⚠ Input lost**. Choose it again under **Input**.
 - A mono device is heard on both sides. An interface with more than two inputs gives its first two.
 
+## Low latency with ASIO (Windows)
+
+Windows Audio is shared by every app, and each direction passes through the Windows audio engine: fine for a pad or a sampled loop, but a guitarist hears 60 ms as a slap-back echo of their own playing. An audio interface's **ASIO** driver skips all of that. Input and output come from one driver, on one clock, in buffers a few milliseconds long, and Modular holds nothing between them: each output buffer is computed from the input that arrived moments before.
+
+To use it, build Modular with ASIO ([Build with ASIO](../../getting-started/installation.md#build-with-asio-windows-optional)), then open the **Output** menu and choose **ASIO** under **Audio system**. The menu then lists ASIO drivers, and **Input** offers that driver's inputs. Choose it there to hear your interface.
+
+**Buffer** sets how many frames the driver hands over at a time, and the closed Output menu shows it beside the driver's name:
+
+| Buffer | At 48 kHz | Round trip, about | |
+|--------|-----------|-------------------|---|
+| **64** | 1.3 ms | 5 ms | The quickest; needs a computer with headroom |
+| **128** | 2.7 ms | 8 ms | A good start for guitar and voice |
+| **256** | 5.3 ms | 13 ms | Busy patches with long reverbs |
+| **512** | 10.7 ms | 24 ms | Room to spare; too slow to play against |
+
+The round trip is roughly one buffer in and one out, plus the interface's own converters and Modular's 1 ms limiter. If you hear crackles, or the CPU meter runs high, go up a size. Smaller buffers make Modular answer more often, with less time for each answer.
+
+- ASIO drivers serve one app at a time. If another app (a DAW, say) has the interface, choosing ASIO says so and stays on Windows Audio.
+- Changing the buffer from the driver's own control panel restarts audio at the driver's new size, with a note in the status bar.
+- Modular remembers the audio system and buffer between sessions.
+
 ## Feedback
 
 A microphone near speakers hears the speakers. Through a reverb or a delay with feedback, that can build into a howl. The first time you turn on an input while the output is speakers, the status bar says so. Use headphones, or keep the volume low. If it does run away, the Audio Output's limiter keeps it from getting dangerously loud. Press **⏹ Stop** to silence it.

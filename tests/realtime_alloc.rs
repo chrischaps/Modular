@@ -16,7 +16,7 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use modular_synth::engine::{
-    create_module_registry, input_channel, AudioProcessor, EngineChannels, EngineCommand, MidiEvent, NodeId,
+    create_module_registry, input_channel, input_channel_same_clock, AudioProcessor, EngineChannels, EngineCommand, MidiEvent, NodeId,
     Recording, TimestampedMidiEvent, UiHandle,
 };
 
@@ -252,6 +252,69 @@ fn audio_callback_never_allocates() {
     assert!(monitor.device_latency().is_some(), "the input's timestamps were taken in");
     assert!(output.iter().all(|s| s.is_finite()));
     assert_eq!(allocations, 0, "audio callback allocated {allocations} times over {blocks} callbacks");
+}
+
+/// The ASIO path: one driver runs the input's callback and then the
+/// output's at each buffer switch, in small buffers, and the output takes
+/// 32-bit integers, converted from the patch's floats through a scratch
+/// buffer.
+#[test]
+fn asio_callback_never_allocates() {
+    let (mut ui, engine) = EngineChannels::with_defaults().split();
+    let mut processor = AudioProcessor::new(48000.0, 256, engine);
+    let nodes = build_big_patch(&mut ui, PATCH_SIZE);
+    ui.send_command(EngineCommand::SetPlaying(true));
+
+    let (mut input, feed, mut monitor) = input_channel_same_clock(48000, true);
+    ui.connect_input(feed);
+    assert!(ui.flush());
+
+    // Made when the stream is built, as the engine does
+    let mut scratch = vec![0.0_f32; 4096 * 2];
+    let mut output = vec![0_i32; 128 * 2];
+    let mut allocations = 0;
+
+    for round in 0..2000 {
+        let frames = if round < 1000 { 64 } else { 128 };
+
+        // The buffer size changes from the driver's panel, and the input
+        // opens again on the new one
+        if round == 1000 {
+            let (next, feed, next_monitor) = input_channel_same_clock(48000, true);
+            input = next;
+            monitor = next_monitor;
+            ui.connect_input(feed);
+            ui.flush();
+        }
+        ui.send_command(EngineCommand::SetParameter { node_id: 1, param_index: 0, value: 220.0 + round as f32 });
+        if round % 50 == 25 {
+            let (node_id, module_id) = nodes[round / 50 % nodes.len()];
+            ui.send_command(EngineCommand::RemoveModule { node_id });
+            ui.send_command(EngineCommand::AddModule { node_id, module_id });
+        }
+        ui.flush();
+        ui.drain_events().for_each(drop);
+
+        let device_input: Vec<f32> = (0..frames).flat_map(|n| [(n as f32 * 0.13).sin() * 0.5; 2]).collect();
+        let output = &mut output[..frames * 2];
+        allocations += count_allocations(|| {
+            input.record_latency(Some(std::time::Duration::from_micros(2_700)));
+            input.push_f32(&device_input, 2);
+            if round % 100 == 0 {
+                // The driver reports an overload now and then
+                monitor.mark_xrun();
+            }
+            processor.process_into(output, &mut scratch, 2)
+        });
+    }
+
+    assert!(processor.has_input());
+    assert_eq!(monitor.underrun_frames(), 0, "a shared clock never runs dry");
+    assert_eq!(monitor.overflow_frames(), 0);
+    assert_eq!(monitor.target_frames(), 128, "one buffer");
+    assert_eq!(monitor.buffered_frames(), 0, "read as it arrives");
+    assert_eq!(monitor.device_xruns(), 10);
+    assert_eq!(allocations, 0, "ASIO callback allocated {allocations} times");
 }
 
 /// Index of the port called `name` on a registered module.

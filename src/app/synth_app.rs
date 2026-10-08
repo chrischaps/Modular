@@ -11,7 +11,7 @@ use eframe::egui::{self, RichText, Layout, Align};
 use egui_node_graph2::{FlowGlyph, GraphEditorState, NodeResponse, NodeTemplateTrait, InputParamKind};
 
 use crate::engine::{
-    AudioEngine, AudioError, AudioProcessor, DeviceInfo, EngineChannels, EngineCommand, InputMonitor, Recording, RoundTrip,
+    AudioEngine, AudioError, AudioProcessor, AudioSystem, DeviceInfo, EngineChannels, EngineCommand, InputMonitor, Recording, RoundTrip,
     UiHandle, MidiDeviceInfo, MidiEngine, MidiEvent, MidiReceivers, TimestampedMidiEvent,
 };
 use rtrb::Consumer;
@@ -51,6 +51,11 @@ const FLOW_GLYPH_KEY: &str = "cable_flow_glyph";
 
 /// Storage key for how knobs are drawn (Knobs menu)
 const KNOB_STYLE_KEY: &str = "knob_style";
+/// Where the audio system chosen under Output is remembered.
+const AUDIO_SYSTEM_KEY: &str = "audio_system";
+/// Where the buffer size chosen under Output is remembered, in frames
+/// (empty: the driver's own).
+const BUFFER_FRAMES_KEY: &str = "buffer_frames";
 
 /// How long a stopped recording waits for the audio thread to hand its tap
 /// back before the file is finished without it (the device has gone quiet).
@@ -734,6 +739,8 @@ impl SynthApp {
             }
         }
         if let Ok(ref mut engine) = self.audio_engine {
+            // On ASIO the engine closes it: its driver is the output's
+            let input = engine.input_index();
             match engine.select_device(index) {
                 Ok(()) => {
                     self.selected_device_index = index;
@@ -745,9 +752,108 @@ impl SynthApp {
             }
             // The input must run at the new output's rate: open it again,
             // which also checks the new output for feedback
-            if let Some(input) = engine.input_index() {
+            if let Some(input) = input {
+                self.refresh_input_devices();
                 self.select_input(Some(input));
             }
+        }
+    }
+
+    /// Moves audio to another system (Windows Audio or ASIO). An open input
+    /// moves too, to the new system's default input. If the system won't
+    /// start, audio stays where it was and a notice says why.
+    fn select_audio_system(&mut self, system: AudioSystem) {
+        self.end_take_for_device_change();
+        let Ok(engine) = self.audio_engine.as_mut() else { return };
+        let had_input = engine.input_index().is_some();
+        let result = engine.set_audio_system(system);
+        self.after_output_change();
+        if let Err(e) = result {
+            self.raise_notice(format!("Can't use {}: {}", system.label(), e));
+        }
+        if had_input {
+            let default = self.input_devices.iter().find(|d| d.is_default).or(self.input_devices.first());
+            self.select_input(default.map(|d| d.index));
+        }
+    }
+
+    /// Asks the driver for `frames` per callback (ASIO), keeping an open
+    /// input open.
+    fn select_buffer(&mut self, frames: u32) {
+        self.end_take_for_device_change();
+        let Ok(engine) = self.audio_engine.as_mut() else { return };
+        let input = engine.input_index();
+        let result = engine.set_buffer_size(Some(frames));
+        let running = engine.buffer_frames();
+        self.after_output_change();
+        match result {
+            Err(e) => self.raise_notice(format!("Can't change the buffer: {}", e)),
+            Ok(()) => {
+                if let Some(running) = running.filter(|&running| running != frames) {
+                    self.raise_notice(format!("The driver doesn't run at {} frames: it chose {}", frames, running));
+                }
+            }
+        }
+        if input.is_some() {
+            self.select_input(input);
+        }
+    }
+
+    /// When the driver has stopped the stream to change its own settings
+    /// (its buffer size, from its control panel), starts it again there.
+    fn recover_from_driver_reset(&mut self) {
+        let Ok(engine) = self.audio_engine.as_mut() else { return };
+        if !engine.stream_reset() {
+            return;
+        }
+        self.end_take_for_device_change();
+        let Ok(engine) = self.audio_engine.as_mut() else { return };
+        let input = engine.input_index();
+        let result = engine.restart_after_reset();
+        let running = engine.buffer_frames();
+        self.after_output_change();
+        match (result, running) {
+            (Err(e), _) => self.audio_error_message = Some(e.to_string()),
+            (Ok(()), Some(frames)) => {
+                self.raise_notice(format!("The driver's settings changed: audio restarted at {} frames", frames))
+            }
+            (Ok(()), None) => self.raise_notice("The driver's settings changed: audio restarted".to_string()),
+        }
+        if input.is_some() {
+            self.select_input(input);
+        }
+    }
+
+    /// Ends a recording before the output changes: a take has one rate and
+    /// channel count. Stopping the stream hands its tap back, so it
+    /// finishes cleanly.
+    fn end_take_for_device_change(&mut self) {
+        if self.is_recording() {
+            self.stop_recording();
+            if let Some(handle) = self.ui_handle.as_mut() {
+                handle.flush();
+            }
+        }
+    }
+
+    /// Lists the devices again after the output changed system, device or
+    /// buffer, pointing the Output menu at the one running.
+    fn after_output_change(&mut self) {
+        let Ok(engine) = self.audio_engine.as_ref() else { return };
+        self.audio_devices = engine.enumerate_devices();
+        self.selected_device_index = engine.current_device_index().unwrap_or(0);
+        self.input_devices = engine.enumerate_input_devices();
+        if !engine.stream_failed() {
+            self.audio_error_message = None;
+        }
+        // The engine closed the input, if it was open; select_input opens
+        // it again where the caller wants it
+        if engine.input_index().is_none() {
+            if let Some(handle) = self.ui_handle.as_mut() {
+                handle.disconnect_input();
+            }
+            self.input_monitor = None;
+            self.user_state.audio_input_name = None;
         }
     }
 
@@ -1124,16 +1230,40 @@ impl SynthApp {
 
                     // Truncate long device names
                     let display_name = if current_device.len() > 30 {
-                        format!("{}...", &current_device[..27])
+                        format!("{}...", &current_device[..current_device.floor_char_boundary(27)])
                     } else {
                         current_device.to_string()
                     };
+                    let (system, buffer_choices, buffer_frames, sample_rate) = match &self.audio_engine {
+                        Ok(engine) => (engine.audio_system(), engine.buffer_choices(), engine.buffer_frames(), engine.sample_rate()),
+                        Err(_) => (AudioSystem::default(), Vec::new(), None, 0),
+                    };
+                    // ASIO shows its buffer, the number a player tunes
+                    let selected_text = match (system, buffer_frames) {
+                        (AudioSystem::Asio, Some(frames)) => format!("{} · {}", display_name, frames),
+                        _ => display_name,
+                    };
+                    let frames_ms = |frames: u32| frames as f64 * 1000.0 / sample_rate.max(1) as f64;
 
                     egui::ComboBox::from_id_salt("device_selector")
-                        .selected_text(display_name)
+                        .selected_text(selected_text)
                         .width(200.0)
                         .height(DEVICE_MENU_HEIGHT)
                         .show_ui(ui, |ui| {
+                            let systems = AudioSystem::available();
+                            if systems.len() > 1 {
+                                ui.label(RichText::new("Audio system").color(theme::text::SECONDARY).small());
+                                for choice in systems {
+                                    let hint = match choice {
+                                        AudioSystem::Asio => "Your interface's own driver: a few milliseconds from input to output, for playing live",
+                                        AudioSystem::System => "Shared with every other app, with more delay",
+                                    };
+                                    if ui.selectable_label(choice == system, choice.label()).on_hover_text(hint).clicked() && choice != system {
+                                        actions.select_audio_system = Some(choice);
+                                    }
+                                }
+                                ui.separator();
+                            }
                             for device in &self.audio_devices {
                                 let label = if device.is_default {
                                     format!("{} (Default)", device.name)
@@ -1147,6 +1277,21 @@ impl SynthApp {
                                 ).clicked() {
                                     actions.select_device = Some(device.index);
                                 }
+                            }
+
+                            if !buffer_choices.is_empty() {
+                                ui.separator();
+                                ui.label(RichText::new("Buffer").color(theme::text::SECONDARY).small())
+                                    .on_hover_text("Smaller is quicker to answer your playing, and harder work for the computer. If you hear crackles, go up a size");
+                                ui.horizontal(|ui| {
+                                    for frames in &buffer_choices {
+                                        let label = ui.selectable_label(buffer_frames == Some(*frames), frames.to_string())
+                                            .on_hover_text(format!("{:.1} ms", frames_ms(*frames)));
+                                        if label.clicked() && buffer_frames != Some(*frames) {
+                                            actions.select_buffer = Some(*frames);
+                                        }
+                                    }
+                                });
                             }
 
                             ui.separator();
@@ -2380,6 +2525,19 @@ impl SynthApp {
                 .find(|k| k.name() == style)
                 .unwrap_or_default();
         }
+        // The audio system and buffer chosen last time
+        let buffer = storage
+            .and_then(|s| s.get_string(BUFFER_FRAMES_KEY))
+            .and_then(|frames| frames.parse::<u32>().ok());
+        let system = storage
+            .and_then(|s| s.get_string(AUDIO_SYSTEM_KEY))
+            .and_then(|key| AudioSystem::from_key(&key));
+        if let Ok(engine) = self.audio_engine.as_mut() {
+            let _ = engine.set_buffer_size(buffer);
+        }
+        if let Some(system) = system {
+            self.select_audio_system(system);
+        }
     }
 
     /// Validate a connection and return an error message if invalid.
@@ -2895,6 +3053,9 @@ struct ToolbarActions {
     choose_recordings_folder: bool,
     reset_recordings_folder: bool,
     select_device: Option<usize>,
+    select_audio_system: Option<AudioSystem>,
+    /// A buffer size, in frames.
+    select_buffer: Option<u32>,
     /// Open this input device, or with `None` close the input.
     select_input: Option<Option<usize>>,
     refresh_input_devices: bool,
@@ -2927,6 +3088,7 @@ impl eframe::App for SynthApp {
 
         // Process events from the audio engine
         self.process_engine_events();
+        self.recover_from_driver_reset();
         let now = ctx.input(|i| i.time);
         self.user_state.tick_signal_history(now, &self.graph_state.graph);
 
@@ -3095,6 +3257,12 @@ impl eframe::App for SynthApp {
         if toolbar_actions.refresh_devices {
             self.refresh_devices();
         }
+        if let Some(system) = toolbar_actions.select_audio_system {
+            self.select_audio_system(system);
+        }
+        if let Some(frames) = toolbar_actions.select_buffer {
+            self.select_buffer(frames);
+        }
         if let Some(device_index) = toolbar_actions.select_device {
             self.select_device(device_index);
         }
@@ -3225,6 +3393,10 @@ impl eframe::App for SynthApp {
         self.recent_files.store(storage);
         storage.set_string(FLOW_GLYPH_KEY, self.user_state.flow_glyph.name().to_string());
         storage.set_string(KNOB_STYLE_KEY, self.user_state.knob_style.name().to_string());
+        if let Ok(engine) = &self.audio_engine {
+            storage.set_string(AUDIO_SYSTEM_KEY, engine.audio_system().key().to_string());
+            storage.set_string(BUFFER_FRAMES_KEY, engine.buffer_request().map(|f| f.to_string()).unwrap_or_default());
+        }
         let folder = self.recordings_folder.as_ref().map(|f| f.display().to_string()).unwrap_or_default();
         storage.set_string(recording::FOLDER_KEY, folder);
         let autosave = if let Some(recovery) = &self.recovery {

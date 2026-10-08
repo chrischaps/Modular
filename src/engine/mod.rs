@@ -16,9 +16,9 @@ pub mod midi_scheduler;
 pub mod offline;
 pub mod recorder;
 
-pub use audio_engine::{AudioEngine, AudioError, DeviceInfo};
+pub use audio_engine::{AudioEngine, AudioError, AudioSystem, DeviceInfo, BUFFER_CHOICES};
 pub use audio_graph::{AudioGraph, Connection};
-pub use audio_input::{input_channel, input_channel_converting, InputFeed, InputMonitor, InputSender};
+pub use audio_input::{input_channel, input_channel_converting, input_channel_same_clock, InputFeed, InputMonitor, InputSender};
 pub use audio_processor::{AudioProcessor, create_module_registry};
 pub use channels::{
     EngineChannels, EngineHandle, UiHandle, DEFAULT_COMMAND_BUFFER_SIZE, DEFAULT_EVENT_BUFFER_SIZE,

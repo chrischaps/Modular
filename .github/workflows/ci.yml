@@ -42,3 +42,13 @@ jobs:
       # in the job summary rather than buried in the full run
       - name: Audio thread allocation guard
         run: cargo test --test realtime_alloc
+
+      # ASIO is an opt-in Windows build: check it still compiles. The runner
+      # has LLVM for bindgen; the build fetches Steinberg's ASIO SDK. Its
+      # PowerShell unzip fails under pwsh's module path, so that's cleared
+      - name: Check the ASIO build
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        env:
+          LIBCLANG_PATH: C:\Program Files\LLVM\bin
+        run: env -u PSModulePath cargo check --features asio --all-targets

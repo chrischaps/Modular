@@ -7,6 +7,11 @@ authors = ["Chris"]
 license = "MIT"
 default-run = "modular_synth"
 
+[features]
+# Low-latency audio through an interface's ASIO driver (Windows). Needs LLVM
+# (libclang) to build; see docs/src/getting-started/installation.md
+asio = ["cpal/asio"]
+
 [dependencies]
 eframe = { version = "0.30", features = ["persistence"] }
 egui = "0.30"

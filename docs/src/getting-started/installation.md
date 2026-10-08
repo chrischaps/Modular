@@ -30,7 +30,7 @@ cargo --version
 
 ### Install system libraries (Linux only)
 
-Windows and macOS need nothing more: Modular Synth uses WASAPI and CoreAudio, which come with the system.
+Windows and macOS need nothing more: Modular Synth uses WASAPI and CoreAudio, which come with the system. (ASIO on Windows is optional: see [Build with ASIO](#build-with-asio-windows-optional).)
 
 On Linux, install the development packages for ALSA (audio), X11 and keyboard handling. On Debian and Ubuntu:
 
@@ -52,6 +52,37 @@ cargo run --release
 The first build takes a few minutes. Always use `--release` to play: the debug build is much slower and can't keep up with a busy patch, so you'll hear dropouts. The finished binary is `target/release/modular_synth`.
 
 The app opens on the **First Sound** example. Press **▶ Play**, then play the `Z` to `M` keys on your computer keyboard. If you hear a note, everything is working.
+
+### Build with ASIO (Windows, optional)
+
+For playing a guitar or singing through Modular, Windows Audio's round trip of 60 ms or so is too slow to play against. An audio interface's **ASIO** driver talks to the hardware directly and gets it down to around 10 ms. ASIO support is a build option, off by default:
+
+1. **Install your interface's ASIO driver** from its maker. For a Focusrite Scarlett, that's the Focusrite USB driver from [focusrite.com](https://focusrite.com/downloads). Restart, or unplug the interface and plug it back in, once it's installed: until then the driver may not find the interface.
+2. **Install LLVM**, which the build uses to read the ASIO headers:
+
+   ```bash
+   winget install LLVM.LLVM
+   ```
+
+   Then point the build at it. In a new terminal:
+
+   ```bash
+   setx LIBCLANG_PATH "C:\Program Files\LLVM\bin"
+   ```
+
+3. **Build with the `asio` feature:**
+
+   ```bash
+   cargo run --release --features asio
+   ```
+
+   The first build downloads Steinberg's ASIO SDK into your temp folder. To use a copy you already have, set `CPAL_ASIO_DIR` to its folder.
+
+   If the build stops at "Failed to extract ASIO SDK", Windows PowerShell couldn't load its unzip command, which happens when the build runs from PowerShell 7. Build from Git Bash with `env -u PSModulePath cargo run --release --features asio`, or unzip `%TEMP%\asio_sdk.zip` yourself and set `CPAL_ASIO_DIR` to the folder inside.
+
+Then choose **ASIO** at the top of the **Output** menu. See [Audio Input](../modules/sources/audio-input.md#low-latency-with-asio-windows) for choosing a buffer size.
+
+Steinberg licenses the ASIO SDK under the GPLv3 (or its own proprietary terms). Modular's source is MIT, but a binary you build with ASIO includes the SDK, so if you share one, the GPLv3 applies to it. The prebuilt releases leave ASIO out.
 
 ## Command line
 
