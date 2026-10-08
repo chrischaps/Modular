@@ -69,6 +69,35 @@ impl TransportState {
     }
 }
 
+/// Live audio from the input device (a microphone, guitar or line source)
+/// for one block. Each side is `block_size` samples long, or empty when no
+/// input is open, as in the offline renderer.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct InputAudio<'a> {
+    pub left: &'a [f32],
+    pub right: &'a [f32],
+}
+
+impl<'a> InputAudio<'a> {
+    /// The `frames` frames from `start`, or as many of them as there are.
+    pub fn slice(&self, start: usize, frames: usize) -> InputAudio<'a> {
+        let part = |side: &'a [f32]| {
+            let start = start.min(side.len());
+            &side[start..(start + frames).min(side.len())]
+        };
+        InputAudio { left: part(self.left), right: part(self.right) }
+    }
+
+    /// The sample at `index` on each side, or silence past the end.
+    #[inline]
+    pub fn frame(&self, index: usize) -> (f32, f32) {
+        (
+            self.left.get(index).copied().unwrap_or(0.0),
+            self.right.get(index).copied().unwrap_or(0.0),
+        )
+    }
+}
+
 /// Context provided to modules during audio processing.
 ///
 /// Contains all the runtime information a module needs to process audio,
@@ -85,6 +114,8 @@ pub struct ProcessContext<'a> {
     /// Incoming MIDI for this block, in time order. Each event's
     /// `sample_offset` is the sample within the block it lands on.
     pub midi: &'a [MidiEvent],
+    /// Audio from the input device for this block.
+    pub input: InputAudio<'a>,
 }
 
 impl<'a> ProcessContext<'a> {
@@ -95,6 +126,7 @@ impl<'a> ProcessContext<'a> {
             block_size,
             transport: TransportState::new(),
             midi: &[],
+            input: InputAudio::default(),
         }
     }
 
@@ -105,17 +137,24 @@ impl<'a> ProcessContext<'a> {
             block_size,
             transport,
             midi: &[],
+            input: InputAudio::default(),
         }
     }
 
     /// The same context, carrying `midi` as this block's MIDI input.
-    pub fn with_midi<'b>(self, midi: &'b [MidiEvent]) -> ProcessContext<'b> {
-        ProcessContext {
-            sample_rate: self.sample_rate,
-            block_size: self.block_size,
-            transport: self.transport,
-            midi,
-        }
+    pub fn with_midi<'b>(self, midi: &'b [MidiEvent]) -> ProcessContext<'b>
+    where
+        'a: 'b,
+    {
+        ProcessContext { midi, ..self }
+    }
+
+    /// The same context, carrying `input` as this block's audio input.
+    pub fn with_input<'b>(self, input: InputAudio<'b>) -> ProcessContext<'b>
+    where
+        'a: 'b,
+    {
+        ProcessContext { input, ..self }
     }
 
     /// Returns the duration of the current block in seconds.

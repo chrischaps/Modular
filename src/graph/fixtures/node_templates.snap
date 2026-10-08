@@ -40,6 +40,22 @@ knob Level              "Level" Modulatable
 knob Rate               "Rate" Modulatable
 display NoiseSpectrum
 
+== source.audio_input "Audio Input" finder="Audio Input" Source
+in   Gain               Control  ConstantOnly         inline=false num 0 [-24..24] dB
+in   Threshold          Control  ConstantOnly         inline=false num -30 [-60..0] dB
+in   Attack             Control  ConstantOnly         inline=false num 5 [0.1..100] ms log
+in   Release            Control  ConstantOnly         inline=false num 150 [5..2000] ms log
+out  L                  Audio
+out  R                  Audio
+out  Follow             Control
+out  Gate               Gate
+knob Gain               "Gain" KnobOnly
+knob Threshold          "Thresh" KnobOnly
+knob Attack             "Attack" KnobOnly
+knob Release            "Release" KnobOnly
+monitor [2, 3]
+display InputListen
+
 == input.keyboard "Keyboard" finder="Keyboard" Source
 in   Note               Control  ConstantOnly         inline=false num 60 [0..127]
 in   Gate               Control  ConstantOnly         inline=false toggle false ""

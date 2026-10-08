@@ -19,6 +19,7 @@
 - [Module Overview](./modules/index.md)
   - [Oscillator](./modules/sources/oscillator.md)
   - [Noise](./modules/sources/noise.md)
+  - [Audio Input](./modules/sources/audio-input.md)
   - [Keyboard](./modules/midi/keyboard.md)
   - [MIDI Note](./modules/midi/midi-note.md)
   - [Poly MIDI](./modules/midi/poly-midi.md)

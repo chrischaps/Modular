@@ -233,6 +233,9 @@ pub enum NodeDisplay {
     /// Mixer: where each channel sits in the stereo field, its meter and
     /// mute button, and the master meter.
     MixerStrips,
+    /// Audio Input: the input's meters, and Follow scrolling past the
+    /// Threshold.
+    InputListen,
 }
 
 /// Data stored per node in the graph.
@@ -2021,6 +2024,12 @@ impl NodeDataTrait for SynthNodeData {
         // Mixer: the stereo panorama, and a meter and mute per strip
         if self.display == NodeDisplay::MixerStrips {
             if let Some((param_name, value)) = super::mixer_strips::mixer_strips(ui, node_id, graph, user_state, zoom) {
+                responses.push(NodeResponse::User(SynthResponse::ParameterChanged { node_id, param_name, value }));
+            }
+        }
+
+        if self.display == NodeDisplay::InputListen {
+            if let Some((param_name, value)) = super::input_display::input_display(ui, node_id, graph, user_state, zoom) {
                 responses.push(NodeResponse::User(SynthResponse::ParameterChanged { node_id, param_name, value }));
             }
         }

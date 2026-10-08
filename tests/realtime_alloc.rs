@@ -4,18 +4,20 @@
 //! plays a patch of more than 30 modules (every built-in module, some
 //! twice), through odd device buffer sizes, while the patch is edited and
 //! its Clock changes tempo under a tempo-synced Delay and its effects are
-//! bypassed and brought back, live MIDI plays its MIDI Note modules, and
-//! the output is recorded (one take stopped and a new one started midway).
-//! Edits are compiled on the "UI" side (outside the counted region);
-//! installing them happens inside it.
+//! bypassed and brought back, live MIDI plays its MIDI Note modules, a live
+//! audio input feeds its Audio Input module (the input device switched
+//! midway), and the output is recorded (one take stopped and a new one
+//! started midway). Edits are compiled on the "UI" side (outside the counted
+//! region); installing them happens inside it. The input device's callback
+//! is counted too.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use modular_synth::engine::{
-    create_module_registry, AudioProcessor, EngineChannels, EngineCommand, MidiEvent, NodeId, Recording,
-    TimestampedMidiEvent, UiHandle,
+    create_module_registry, input_channel, AudioProcessor, EngineChannels, EngineCommand, MidiEvent, NodeId,
+    Recording, TimestampedMidiEvent, UiHandle,
 };
 
 struct CountingAllocator;
@@ -144,6 +146,12 @@ fn audio_callback_never_allocates() {
     std::fs::create_dir_all(&takes).unwrap();
     let (mut recording, tap) = Recording::start(&takes.join("take1.wav"), 48000, 2).unwrap();
     ui.start_recording(tap);
+
+    // A stereo input device delivering 480-frame buffers of a tone
+    let (mut input, feed, mut monitor) = input_channel(48000);
+    ui.connect_input(feed);
+    let device_input: Vec<f32> = (0..480).flat_map(|n| [(n as f32 * 0.13).sin() * 0.5; 2]).collect();
+    let mut input_due = 0usize;
     assert!(ui.flush());
 
     // Typical WASAPI/CoreAudio sizes, including ones larger than a block
@@ -154,6 +162,16 @@ fn audio_callback_never_allocates() {
 
     for round in 0..1000 {
         let frames = device_buffers[round % device_buffers.len()];
+
+        // Midway, switch input devices: the old feed comes back to be dropped
+        // here, the new one goes in
+        if round == 300 {
+            let (next, feed, next_monitor) = input_channel(48000);
+            input = next;
+            monitor = next_monitor;
+            ui.connect_input(feed);
+            ui.flush();
+        }
 
         // Midway, end the take and start another: the old tap comes back to
         // be dropped here, the new one goes in
@@ -208,6 +226,13 @@ fn audio_callback_never_allocates() {
         ui.flush();
         ui.drain_events().for_each(drop);
 
+        // The input device keeps time with the output, 480 frames at a time
+        input_due += frames;
+        while input_due >= 480 {
+            allocations += count_allocations(|| input.push_f32(&device_input, 2));
+            input_due -= 480;
+        }
+
         allocations += count_allocations(|| processor.process(&mut output[..frames * 2], 2));
         blocks += 1;
     }
@@ -218,6 +243,9 @@ fn audio_callback_never_allocates() {
     assert!(processor.plan().tempo_bpm().is_some(), "the Clock sets the patch tempo");
     assert!(processor.is_recording());
     assert!(recording.elapsed().as_secs_f32() > 1.0, "the second take heard half the run");
+    assert!(processor.has_input());
+    assert!(monitor.buffered_frames() > 0, "the second input was read");
+    assert_eq!(monitor.overflow_frames(), 0);
     assert!(output.iter().all(|s| s.is_finite()));
     assert_eq!(allocations, 0, "audio callback allocated {allocations} times over {blocks} callbacks");
 }

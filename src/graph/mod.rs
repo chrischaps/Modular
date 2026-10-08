@@ -6,6 +6,7 @@
 pub mod catalog;
 mod data_types;
 pub mod hints;
+pub mod input_display;
 mod mixer_strips;
 mod module_ui;
 mod node_data;

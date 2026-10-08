@@ -17,9 +17,10 @@ From left to right:
 | **〰 Cables** | How signal flow is drawn along cables: **Chevrons**, **Dots** or **Comets** |
 | **◉ Knobs** | How knobs are drawn: **LED ring**, **Hybrid**, **Arc**, **Machined** or **Classic** |
 | **Output** | The audio device to play through |
+| **Input** | The microphone, guitar or line input that [Audio Input](../modules/sources/audio-input.md) modules hear. It starts at **None**: nothing is opened until you choose a device. A filled dot (●) means it's open. |
 | **MIDI In** | The MIDI controller to listen to. A filled dot (●) means it's connected. |
 
-At the right end, the toolbar shows a CPU meter while the patch plays, the device's sample rate and channel count, and whether the audio engine is running.
+At the right end, the toolbar shows a CPU meter while the patch plays, the device's sample rate and channel count, and whether the audio engine is running. While an input is open, **In** shows how much audio is held between the input and output devices, in milliseconds; it turns amber for a moment after a dropout. Hover it for details.
 
 ## The status bar
 

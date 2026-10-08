@@ -11,8 +11,8 @@ use eframe::egui::{self, RichText, Layout, Align};
 use egui_node_graph2::{FlowGlyph, GraphEditorState, NodeResponse, NodeTemplateTrait, InputParamKind};
 
 use crate::engine::{
-    AudioEngine, AudioError, AudioProcessor, DeviceInfo, EngineChannels, EngineCommand, Recording, UiHandle,
-    MidiDeviceInfo, MidiEngine, MidiEvent, MidiReceivers, TimestampedMidiEvent,
+    AudioEngine, AudioError, AudioProcessor, DeviceInfo, EngineChannels, EngineCommand, InputMonitor, Recording,
+    UiHandle, MidiDeviceInfo, MidiEngine, MidiEvent, MidiReceivers, TimestampedMidiEvent,
 };
 use rtrb::Consumer;
 use crate::graph::{
@@ -28,6 +28,7 @@ use crate::widgets::{cpu_meter, CpuMeterConfig, KnobStyle};
 use super::capture::{Capture, CaptureAction, CaptureConfig};
 use super::editing;
 use super::engine_sync;
+use super::input_device;
 use super::palette::{PaletteAction, QuickAdd};
 use super::recording::{self, RecState, Toast, ToastAction};
 use super::session::{self, Answer, Autosave, Discard, RecentFiles};
@@ -54,6 +55,12 @@ const KNOB_STYLE_KEY: &str = "knob_style";
 /// How long a stopped recording waits for the audio thread to hand its tap
 /// back before the file is finished without it (the device has gone quiet).
 const RECORDING_PATIENCE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// How long a warning stays in the status bar, unless clicked away.
+const NOTICE_SECONDS: f64 = 12.0;
+
+/// How long the input's status stays amber after a dropout.
+const INPUT_GLITCH_HOLD: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// Target parameter for MIDI Learn mode.
 ///
@@ -202,6 +209,19 @@ pub struct SynthApp {
     recordings_folder: Option<PathBuf>,
     /// The note about the last finished take.
     record_toast: Option<Toast>,
+
+    // --- Audio input ---
+    /// Input devices, for the Input menu.
+    input_devices: Vec<DeviceInfo>,
+    /// The open input's counters and health, while one is open.
+    input_monitor: Option<InputMonitor>,
+    /// The input's dropouts so far (underruns plus overflows, in frames),
+    /// and when that last grew.
+    input_glitches: (u64, Instant),
+    /// Whether this session has warned about the input hearing the speakers.
+    feedback_warned: bool,
+    /// A warning for the status bar, and when it was raised (UI clock).
+    notice: Option<(String, f64)>,
 }
 
 /// What a module's right-click menu asked for, handled once the graph is drawn.
@@ -236,6 +256,8 @@ impl SynthApp {
             }
             Err(_) => (Vec::new(), 0),
         };
+        // Listed, not opened: nothing opens the microphone unasked
+        let input_devices = audio_engine.as_ref().map(|e| e.enumerate_input_devices()).unwrap_or_default();
 
         // Initialize MIDI engine
         let (midi_engine, midi_receivers, midi_devices, midi_error_message) =
@@ -322,6 +344,11 @@ impl SynthApp {
             recording: None,
             recordings_folder: None,
             record_toast: None,
+            input_devices,
+            input_monitor: None,
+            input_glitches: (0, Instant::now()),
+            feedback_warned: false,
+            notice: None,
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -370,6 +397,7 @@ impl SynthApp {
                     }
                     midi.extend(event.to_dsp(offset));
                 }
+                CaptureAction::InputFile(name) => self.user_state.audio_input_name = Some(name),
                 CaptureAction::SetParam { module, nth, input, value } => {
                     match find_input(&self.graph_state.graph, &module, nth, &input) {
                         Some(id) => self.graph_state.graph.inputs[id].value.set_actual_value(value),
@@ -386,8 +414,8 @@ impl SynthApp {
         }
         midi.sort_by_key(|e| e.sample_offset);
         let (Ok(engine), Some(capture)) = (self.audio_engine.as_ref(), self.capture.as_mut()) else { return };
-        let buffer = capture.audio_buffer();
-        engine.render_offline(buffer, 2, &mut midi);
+        let (buffer, input) = capture.audio_and_input();
+        engine.render_offline(buffer, 2, &mut midi, input);
         capture.commit_audio();
     }
 
@@ -396,6 +424,65 @@ impl SynthApp {
         if let Ok(ref engine) = self.audio_engine {
             self.audio_devices = engine.enumerate_devices();
         }
+    }
+
+    /// Refresh the list of input devices.
+    fn refresh_input_devices(&mut self) {
+        if let Ok(ref engine) = self.audio_engine {
+            self.input_devices = engine.enumerate_input_devices();
+        }
+    }
+
+    /// Opens input device `index` and connects it to the patch's Audio
+    /// Input modules, or with `None` closes the input.
+    fn select_input(&mut self, index: Option<usize>) {
+        let Ok(engine) = self.audio_engine.as_mut() else { return };
+        let opened = index.map(|index| engine.open_input(index));
+        let input_name = engine.input_name().map(str::to_string);
+        if index.is_none() {
+            engine.close_input();
+        }
+        match opened {
+            Some(Ok((feed, monitor))) => {
+                if let Some(handle) = self.ui_handle.as_mut() {
+                    handle.connect_input(feed);
+                }
+                self.input_glitches = (0, Instant::now());
+                self.input_monitor = Some(monitor);
+                self.user_state.audio_input_name = input_name;
+                self.warn_about_feedback();
+            }
+            failed => {
+                if let Some(handle) = self.ui_handle.as_mut() {
+                    handle.disconnect_input();
+                }
+                self.input_monitor = None;
+                self.user_state.audio_input_name = None;
+                if let Some(Err(e)) = failed {
+                    self.raise_notice(format!("Can't open the input: {}", e));
+                }
+            }
+        }
+    }
+
+    /// The first time an input is live while the output is speakers, says
+    /// once that it may feed back.
+    fn warn_about_feedback(&mut self) {
+        if self.feedback_warned || self.input_monitor.is_none() {
+            return;
+        }
+        let Some(output) = self.audio_devices.get(self.selected_device_index).map(|d| d.name.clone()) else { return };
+        if input_device::looks_like_headphones(&output) {
+            return;
+        }
+        self.feedback_warned = true;
+        self.raise_notice(input_device::feedback_warning(&output));
+    }
+
+    /// Puts a warning in the status bar for a while.
+    fn raise_notice(&mut self, text: String) {
+        // Stamped on the next frame, when the UI clock is at hand
+        self.notice = Some((text, f64::NAN));
     }
 
     /// Refresh the list of available MIDI devices
@@ -655,6 +742,11 @@ impl SynthApp {
                 Err(e) => {
                     self.audio_error_message = Some(e.to_string());
                 }
+            }
+            // The input must run at the new output's rate: open it again,
+            // which also checks the new output for feedback
+            if let Some(input) = engine.input_index() {
+                self.select_input(Some(input));
             }
         }
     }
@@ -1062,6 +1154,58 @@ impl SynthApp {
                                 actions.refresh_devices = true;
                             }
                         });
+
+                    // Audio input selector: None until chosen
+                    ui.add_space(12.0);
+                    ui.label(RichText::new("Input").color(theme::text::SECONDARY));
+                    ui.add_space(8.0);
+                    let (input_index, input_name) = match &self.audio_engine {
+                        Ok(engine) => (engine.input_index(), engine.input_name().map(str::to_string)),
+                        Err(_) => (None, None),
+                    };
+                    let input_failed = self.input_monitor.as_ref().is_some_and(InputMonitor::failed);
+                    let input_text = match &input_name {
+                        Some(name) => {
+                            let name = if name.len() > 22 { format!("{}...", &name[..name.floor_char_boundary(19)]) } else { name.clone() };
+                            if input_failed {
+                                RichText::new(format!("⚠ {}", name)).color(theme::accent::ERROR)
+                            } else {
+                                RichText::new(format!("● {}", name))
+                            }
+                        }
+                        None => RichText::new("○ None"),
+                    };
+                    egui::ComboBox::from_id_salt("input_device_selector")
+                        .selected_text(input_text)
+                        .width(180.0)
+                        .height(DEVICE_MENU_HEIGHT)
+                        .show_ui(ui, |ui| {
+                            if ui.selectable_label(input_index.is_none(), "None").clicked() {
+                                actions.select_input = Some(None);
+                            }
+                            ui.separator();
+                            if self.input_devices.is_empty() {
+                                ui.label(RichText::new("No input devices found")
+                                    .color(theme::text::DISABLED)
+                                    .italics());
+                            }
+                            for device in &self.input_devices {
+                                let label = if device.is_default {
+                                    format!("{} (Default)", device.name)
+                                } else {
+                                    device.name.clone()
+                                };
+                                if ui.selectable_label(input_index == Some(device.index), label).clicked() {
+                                    actions.select_input = Some(Some(device.index));
+                                }
+                            }
+                            ui.separator();
+                            if ui.button("🔄 Refresh").clicked() {
+                                actions.refresh_input_devices = true;
+                            }
+                        })
+                        .response
+                        .on_hover_text("Audio Input modules hear this device: a microphone, guitar or line in");
 
                     group_break(ui);
 
@@ -2321,6 +2465,14 @@ impl SynthApp {
                 ui.label(RichText::new(status_msg)
                     .color(theme::accent::SUCCESS)
                     .small());
+            } else if let Some((notice, _)) = &self.notice {
+                let label = ui.add(
+                    egui::Label::new(RichText::new(format!("⚠ {}", notice)).color(theme::accent::WARNING).small())
+                        .sense(egui::Sense::click()),
+                );
+                if label.on_hover_text("Click to dismiss").clicked() {
+                    self.notice = None;
+                }
             } else if let Some(validation_msg) = self.user_state.validation_message() {
                 // Show validation error with warning icon
                 ui.label(RichText::new(format!("⚠ {}", validation_msg))
@@ -2370,7 +2522,7 @@ impl SynthApp {
                         AudioStatus::NoAudio => (
                             "⚠ No audio",
                             theme::accent::ERROR,
-                            "The output device has stopped taking audio (unplugged, or taken by                              another app). Choose it again under Output to reconnect.",
+                            "The output device has stopped taking audio (unplugged, or taken by another app). Choose it again under Output to reconnect.",
                         ),
                     };
                     ui.label(RichText::new(status_text).color(status_color).small())
@@ -2380,6 +2532,47 @@ impl SynthApp {
                         engine.sample_rate(),
                         engine.channels()
                     )).color(theme::text::SECONDARY).small());
+                    if let Some(monitor) = &self.input_monitor {
+                        let glitches = monitor.underrun_frames() + monitor.overflow_frames();
+                        let now = Instant::now();
+                        if glitches != self.input_glitches.0 {
+                            self.input_glitches = (glitches, now);
+                        }
+                        let recent = glitches > 0 && now - self.input_glitches.1 < INPUT_GLITCH_HOLD;
+                        let buffered = input_device::latency(monitor.buffered_frames(), engine.sample_rate());
+                        let (text, color) = if monitor.failed() {
+                            ("⚠ Input lost".to_string(), theme::accent::ERROR)
+                        } else if recent {
+                            (format!("In {:.0} ms", buffered.as_secs_f64() * 1000.0), theme::accent::WARNING)
+                        } else {
+                            (format!("In {:.0} ms", buffered.as_secs_f64() * 1000.0), theme::text::SECONDARY)
+                        };
+                        let rate = engine.sample_rate().max(1) as f64;
+                        let details = if monitor.failed() {
+                            "The input device has stopped (unplugged, or taken by another app). Choose it again under Input.".to_string()
+                        } else {
+                            let converted = match engine.input_sample_rate() {
+                                Some(input_rate) if input_rate != engine.sample_rate() => format!(
+                                    "\nConverted from {} to {}",
+                                    input_device::khz(input_rate),
+                                    input_device::khz(engine.sample_rate())
+                                ),
+                                _ => String::new(),
+                            };
+                            format!(
+                                "Input: {}{}\nBuffered {:.1} ms to ride out timing between the devices\nDropouts so far: {:.0} ms of silence, {:.0} ms skipped",
+                                engine.input_name().unwrap_or("?"),
+                                converted,
+                                buffered.as_secs_f64() * 1000.0,
+                                monitor.underrun_frames() as f64 / rate * 1000.0,
+                                monitor.overflow_frames() as f64 / rate * 1000.0,
+                            )
+                        };
+                        ui.label(RichText::new(text).color(color).small()).on_hover_text(details);
+                        if recent {
+                            ui.ctx().request_repaint_after(INPUT_GLITCH_HOLD);
+                        }
+                    }
                     if self.is_playing {
                         cpu_meter(ui, self.cpu_load, &CpuMeterConfig::compact());
                     }
@@ -2697,6 +2890,9 @@ struct ToolbarActions {
     choose_recordings_folder: bool,
     reset_recordings_folder: bool,
     select_device: Option<usize>,
+    /// Open this input device, or with `None` close the input.
+    select_input: Option<Option<usize>>,
+    refresh_input_devices: bool,
     refresh_devices: bool,
     save_patch: bool,
     save_as_patch: bool,
@@ -2728,6 +2924,18 @@ impl eframe::App for SynthApp {
         self.process_engine_events();
         let now = ctx.input(|i| i.time);
         self.user_state.tick_signal_history(now, &self.graph_state.graph);
+
+        // A warning in the status bar fades out after a while
+        if let Some((_, raised)) = self.notice.as_mut() {
+            if raised.is_nan() {
+                *raised = now;
+            }
+            if now - *raised > NOTICE_SECONDS {
+                self.notice = None;
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_secs_f64(NOTICE_SECONDS - (now - *raised)));
+            }
+        }
 
         // Advance meter ballistics; keep repainting until it has settled
         let dt = ctx.input(|i| i.stable_dt).min(0.1);
@@ -2884,6 +3092,12 @@ impl eframe::App for SynthApp {
         }
         if let Some(device_index) = toolbar_actions.select_device {
             self.select_device(device_index);
+        }
+        if toolbar_actions.refresh_input_devices {
+            self.refresh_input_devices();
+        }
+        if let Some(input) = toolbar_actions.select_input {
+            self.select_input(input);
         }
 
         // Handle save/load actions (from toolbar buttons or keyboard shortcuts)

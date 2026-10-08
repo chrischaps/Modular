@@ -43,6 +43,8 @@
 //!                                   # first framed, scaled 0.5 about the
 //!                                   # centre and shifted (-300, 0), over 3 s
 //! 5.0  still filter-opens           # save this frame as filter-opens.ppm
+//! 5.0  input voice.wav              # Audio Input modules hear this WAV
+//!                                   # from now on, in place of a device
 //! 9.0  end
 //! ```
 
@@ -54,7 +56,8 @@ use std::process::{Child, Command, Stdio};
 use eframe::egui;
 use egui::{Pos2, Vec2};
 
-use crate::engine::MidiEvent;
+use crate::dsp::InputAudio;
+use crate::engine::{read_wav, MidiEvent, StereoBuffer};
 
 /// The fewest frames drawn before recording starts, so the window size,
 /// theme and patch have settled. Cues at negative times lengthen the warmup
@@ -131,6 +134,8 @@ enum Cue {
     Zoom { factor: f32, dur: f64 },
     Camera { offset: Vec2, scale: f32, dur: f64 },
     Still(String),
+    /// Play a WAV file into Audio Input modules.
+    Input(PathBuf),
     End,
 }
 
@@ -142,6 +147,8 @@ pub enum CaptureAction {
     Midi { event: MidiEvent, offset: u32 },
     /// Set a module's input to a value in real units.
     SetParam { module: String, nth: usize, input: String, value: f32 },
+    /// Audio Input modules are now hearing this file.
+    InputFile(String),
 }
 
 /// A value easing from one point to another over a span of time.
@@ -249,6 +256,10 @@ pub struct Capture {
 
     finished: bool,
     size_checked: bool,
+    /// A WAV playing into Audio Input modules, and how far it has played.
+    input: Option<(StereoBuffer, usize)>,
+    /// This frame's share of `input`, interleaved stereo.
+    input_frame: StereoBuffer,
 }
 
 impl Capture {
@@ -310,6 +321,8 @@ impl Capture {
 
             finished: false,
             size_checked: false,
+            input: None,
+            input_frame: StereoBuffer::default(),
         })
     }
 
@@ -478,6 +491,16 @@ impl Capture {
                     self.zoom_left = Some((factor.ln(), at, dur.max(self.dt())));
                 }
                 Cue::Still(name) => self.stills.push(name),
+                Cue::Input(path) => match read_wav(&path) {
+                    Ok((audio, rate)) if rate == self.config.sample_rate => {
+                        let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+                        self.actions.push(CaptureAction::InputFile(name));
+                        // From this frame's start: a cue's offset isn't kept
+                        self.input = Some((audio, 0));
+                    }
+                    Ok((_, rate)) => eprintln!("capture: {} is {} Hz, the capture {} Hz", path.display(), rate, self.config.sample_rate),
+                    Err(e) => eprintln!("capture: {}: {}", path.display(), e),
+                },
                 Cue::End => self.finished = true,
             }
         }
@@ -584,11 +607,23 @@ impl Capture {
         end.saturating_sub(self.samples_done) as usize
     }
 
-    /// A buffer for this frame's audio, interleaved stereo.
-    pub fn audio_buffer(&mut self) -> &mut Vec<f32> {
+    /// A buffer for this frame's audio, interleaved stereo, and the audio
+    /// input it hears: the frame's share of an `input` file, if one plays.
+    pub fn audio_and_input(&mut self) -> (&mut Vec<f32>, InputAudio<'_>) {
         let frames = self.samples_this_frame();
         self.audio.resize(frames * 2, 0.0);
-        &mut self.audio
+        let Some((file, played)) = self.input.as_mut() else {
+            return (&mut self.audio, InputAudio::default());
+        };
+        let start = (*played).min(file.left.len());
+        let end = (start + frames).min(file.left.len());
+        *played += frames;
+        self.input_frame.left.clear();
+        self.input_frame.right.clear();
+        self.input_frame.left.extend_from_slice(&file.left[start..end]);
+        self.input_frame.right.extend_from_slice(&file.right[start..end]);
+        let input = InputAudio { left: &self.input_frame.left, right: &self.input_frame.right };
+        (&mut self.audio, input)
     }
 
     /// Keeps the frame's rendered audio.
@@ -794,6 +829,7 @@ fn parse_script(text: &str) -> Result<Vec<(f64, Cue)>, String> {
                 dur: opt(5)?,
             })),
             "still" => cues.push((t, Cue::Still(words.get(2).ok_or_else(|| err("missing name"))?.to_string()))),
+            "input" => cues.push((t, Cue::Input(PathBuf::from(words.get(2).ok_or_else(|| err("missing file"))?)))),
             "end" => cues.push((t, Cue::End)),
             _ => return Err(err("unknown cue")),
         }

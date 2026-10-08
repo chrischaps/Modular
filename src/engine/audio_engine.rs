@@ -4,18 +4,21 @@
 //! The audio callback runs in a separate thread and must be real-time safe.
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, Host, SampleRate, Stream, StreamConfig};
+use cpal::{Device, FromSample, Host, SampleFormat, SampleRate, SizedSample, Stream, StreamConfig};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use super::audio_input::{input_channel_converting, InputFeed, InputMonitor, InputSender};
 use super::audio_processor::AudioProcessor;
-use crate::dsp::MidiEvent;
+use crate::dsp::{InputAudio, MidiEvent};
 
 /// Errors that can occur during audio engine operation.
 #[derive(Debug, Clone)]
 pub enum AudioError {
     /// No audio output device was found.
     NoOutputDevice,
+    /// The chosen input device is gone.
+    NoInputDevice,
     /// Failed to get device configuration.
     ConfigurationFailed(String),
     /// Failed to create the audio stream.
@@ -28,6 +31,7 @@ impl std::fmt::Display for AudioError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AudioError::NoOutputDevice => write!(f, "No audio output device found"),
+            AudioError::NoInputDevice => write!(f, "That input device is gone: choose it again under Input"),
             AudioError::ConfigurationFailed(msg) => {
                 write!(f, "Failed to get device configuration: {}", msg)
             }
@@ -37,11 +41,25 @@ impl std::fmt::Display for AudioError {
             AudioError::StreamPlaybackFailed(msg) => {
                 write!(f, "Failed to control audio playback: {}", msg)
             }
+
         }
     }
 }
 
 impl std::error::Error for AudioError {}
+
+/// An input device's stream, while it's open.
+struct OpenInput {
+    /// Kept alive to keep recording; dropping it closes the device.
+    _stream: Stream,
+    /// The device's index in [`AudioEngine::enumerate_input_devices`].
+    index: usize,
+    name: String,
+    /// The device's own channel count (the patch hears its first two).
+    channels: u16,
+    /// The device's own sample rate, converted to the output's if it differs.
+    sample_rate: u32,
+}
 
 /// Information about an audio output device.
 #[derive(Debug, Clone)]
@@ -90,6 +108,8 @@ pub struct AudioEngine {
     /// The graph processor driven by the stream, kept here so it survives a
     /// device change (the stream, and its callback's handle, are rebuilt).
     processor: Option<Arc<Mutex<AudioProcessor>>>,
+    /// The input device's stream, while one is open.
+    input: Option<OpenInput>,
 }
 
 impl AudioEngine {
@@ -121,6 +141,7 @@ impl AudioEngine {
             stream: None,
             state,
             processor: None,
+            input: None,
         })
     }
 
@@ -203,6 +224,135 @@ impl AudioEngine {
         }
 
         Ok(())
+    }
+
+    /// Get information about all available input devices.
+    pub fn enumerate_input_devices(&self) -> Vec<DeviceInfo> {
+        let default_name = self.host.default_input_device().and_then(|d| d.name().ok());
+        self.host
+            .input_devices()
+            .map(|devices| {
+                devices
+                    .enumerate()
+                    .filter_map(|(index, device)| {
+                        device.name().ok().map(|name| DeviceInfo {
+                            is_default: Some(&name) == default_name.as_ref(),
+                            name,
+                            index,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Opens input device `index`, closing any input already open. Returns
+    /// the feed to hand to the audio thread (see
+    /// [`UiHandle::connect_input`](super::UiHandle::connect_input)) and a
+    /// monitor for the UI.
+    ///
+    /// The device runs at the output's sample rate if it can. If it can't
+    /// (Windows often sets a microphone to 48 kHz and speakers to 44.1 kHz),
+    /// it runs at its own and the input is converted on the way in.
+    pub fn open_input(&mut self, index: usize) -> Result<(InputFeed, InputMonitor), AudioError> {
+        self.close_input();
+        let device = self
+            .host
+            .input_devices()
+            .map_err(|e| AudioError::ConfigurationFailed(e.to_string()))?
+            .nth(index)
+            .ok_or(AudioError::NoInputDevice)?;
+        let name = device.name().unwrap_or_else(|_| "Unknown".to_string());
+
+        let rate = self.config.sample_rate;
+        let supported: Vec<_> = device
+            .supported_input_configs()
+            .map_err(|e| AudioError::ConfigurationFailed(e.to_string()))?
+            .collect();
+        // The richest format the device offers at our rate, in stereo if it can
+        let format_rank = |format: SampleFormat| match format {
+            SampleFormat::F32 => Some(0),
+            SampleFormat::I32 => Some(1),
+            SampleFormat::I16 => Some(2),
+            SampleFormat::U16 => Some(3),
+            _ => None,
+        };
+        let channel_rank = |channels: u16| match channels {
+            2 => 0,
+            1 => 1,
+            n => n,
+        };
+        let at_output_rate = supported
+            .iter()
+            .filter(|range| range.min_sample_rate() <= rate && rate <= range.max_sample_rate())
+            .filter_map(|range| format_rank(range.sample_format()).map(|rank| (rank, channel_rank(range.channels()), range)))
+            .min_by_key(|&(rank, channels, _)| (rank, channels))
+            .map(|(_, _, range)| range.clone().with_sample_rate(rate));
+        // Otherwise the device's own settings, converted on the way in
+        let supported_config = match at_output_rate {
+            Some(config) => config,
+            None => device
+                .default_input_config()
+                .map_err(|e| AudioError::ConfigurationFailed(e.to_string()))?,
+        };
+        if format_rank(supported_config.sample_format()).is_none() {
+            return Err(AudioError::ConfigurationFailed(format!(
+                "{} records {:?} samples, which Modular can't read",
+                name,
+                supported_config.sample_format()
+            )));
+        }
+
+        let config = StreamConfig {
+            channels: supported_config.channels(),
+            sample_rate: supported_config.sample_rate(),
+            buffer_size: cpal::BufferSize::Default,
+        };
+        let (sender, feed, monitor) = input_channel_converting(config.sample_rate.0, rate.0);
+        let stream = match supported_config.sample_format() {
+            SampleFormat::I32 => build_input_stream::<i32>(&device, &config, sender, monitor.clone()),
+            SampleFormat::I16 => build_input_stream::<i16>(&device, &config, sender, monitor.clone()),
+            SampleFormat::U16 => build_input_stream::<u16>(&device, &config, sender, monitor.clone()),
+            _ => build_input_stream::<f32>(&device, &config, sender, monitor.clone()),
+        }?;
+        stream.play().map_err(|e| AudioError::StreamPlaybackFailed(e.to_string()))?;
+
+        self.input = Some(OpenInput {
+            _stream: stream,
+            index,
+            name,
+            channels: config.channels,
+            sample_rate: config.sample_rate.0,
+        });
+        Ok((feed, monitor))
+    }
+
+    /// Closes the input device, if one is open. Its feed stays with the
+    /// audio thread, silent, until disconnected.
+    pub fn close_input(&mut self) {
+        self.input = None;
+    }
+
+    /// The open input device's index in
+    /// [`enumerate_input_devices`](Self::enumerate_input_devices).
+    pub fn input_index(&self) -> Option<usize> {
+        self.input.as_ref().map(|input| input.index)
+    }
+
+    /// The open input device's name.
+    pub fn input_name(&self) -> Option<&str> {
+        self.input.as_ref().map(|input| input.name.as_str())
+    }
+
+    /// The open input device's channel count.
+    pub fn input_channels(&self) -> Option<u16> {
+        self.input.as_ref().map(|input| input.channels)
+    }
+
+    /// The open input device's sample rate. When it differs from the
+    /// output's, the input is converted.
+    pub fn input_sample_rate(&self) -> Option<u32> {
+        self.input.as_ref().map(|input| input.sample_rate)
     }
 
     /// Get the current stream configuration.
@@ -369,12 +519,13 @@ impl AudioEngine {
         Ok(())
     }
 
-    /// Renders one buffer through the processor with the given MIDI, after
-    /// [`go_offline`](Self::go_offline). Returns false with no processor.
-    pub fn render_offline(&self, output: &mut [f32], channels: usize, midi: &mut [MidiEvent]) -> bool {
+    /// Renders one buffer through the processor with the given MIDI and
+    /// audio input, after [`go_offline`](Self::go_offline). Returns false
+    /// with no processor.
+    pub fn render_offline(&self, output: &mut [f32], channels: usize, midi: &mut [MidiEvent], input: InputAudio<'_>) -> bool {
         match self.processor.as_ref().map(|p| p.lock()) {
             Some(Ok(mut processor)) => {
-                processor.process_offline(output, channels, midi);
+                processor.process_offline(output, channels, midi, input);
                 true
             }
             _ => false,
@@ -421,6 +572,35 @@ impl AudioEngine {
         self.stream = Some(stream);
         Ok(())
     }
+}
+
+/// Builds a stream that pushes device `device`'s input, in samples of type
+/// `T`, into `sender`.
+fn build_input_stream<T>(
+    device: &Device,
+    config: &StreamConfig,
+    mut sender: InputSender,
+    monitor: InputMonitor,
+) -> Result<Stream, AudioError>
+where
+    T: SizedSample,
+    f32: FromSample<T>,
+{
+    let channels = config.channels as usize;
+    device
+        .build_input_stream(
+            config,
+            move |data: &[T], _: &cpal::InputCallbackInfo| {
+                // REAL-TIME SAFE: a copy into the ring, nothing else
+                sender.push(data, channels, |sample| sample.to_sample::<f32>());
+            },
+            move |err| {
+                eprintln!("Audio input error: {}", err);
+                monitor.mark_failed();
+            },
+            None,
+        )
+        .map_err(|e| AudioError::StreamCreationFailed(e.to_string()))
 }
 
 #[cfg(test)]

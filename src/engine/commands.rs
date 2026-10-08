@@ -6,6 +6,7 @@
 use crate::dsp::{MeterLevels, OutputLevels, SignalBuffer, MAX_CHANNELS};
 use crate::modules::oscilloscope::SCOPE_BUFFER_SIZE;
 
+use super::audio_input::InputFeed;
 use super::graph_plan::GraphPlan;
 use super::recorder::RecordTap;
 
@@ -141,6 +142,11 @@ pub enum AudioMessage {
     StartRecording(RecordTap),
     /// Hand the recording's tap back to the UI, which ends the recording.
     StopRecording,
+    /// Start reading the patch's audio input from this feed. A feed already
+    /// connected is handed back first.
+    ConnectInput(InputFeed),
+    /// Hand the audio input's feed back to the UI.
+    DisconnectInput,
 }
 
 /// One oscilloscope capture, sent from the audio thread by value so that

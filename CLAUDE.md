@@ -171,6 +171,10 @@ cargo run --release
 cargo run --release --bin render -- patch.json out.wav --seconds 5
 # ...playing a short phrase into Keyboard/MIDI nodes (for patches that need a player)
 cargo run --release --bin render -- patches/lush-pad.json out.wav --audition
+# ...feeding a WAV to Audio Input modules (a capture script's `input file.wav` cue does the same)
+cargo run --release --bin render -- patch.json out.wav --input voice.wav
+# The real input device, end to end (needs a mic; the patch is muted)
+cargo test --release --test live_input -- --ignored --nocapture
 
 # Film the app with sound: a frame-stepped capture plays a cue script through the real
 # input paths (see src/app/capture.rs). The showcase kit wraps it; build into

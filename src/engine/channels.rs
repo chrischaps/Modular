@@ -8,6 +8,7 @@
 //!   audio thread
 //! - **retired taps** (audio -> UI): recording taps the audio thread is done
 //!   with, for the same reason
+//! - **retired inputs** (audio -> UI): audio input feeds, likewise
 //! - **events** (audio -> UI): metering, monitor values, status
 //! - **scope frames** (audio -> UI): oscilloscope captures, by value
 //!
@@ -24,6 +25,7 @@ use super::audio_graph::AudioGraph;
 use super::audio_processor::create_module_registry;
 use super::commands::{AudioMessage, EngineCommand, EngineEvent, ScopeFrame};
 use super::graph_plan::GraphPlan;
+use super::audio_input::InputFeed;
 use super::recorder::RecordTap;
 
 /// Default buffer size for the message queue (UI -> Engine).
@@ -40,6 +42,10 @@ pub const MAX_PLANS_IN_FLIGHT: usize = 4;
 /// Recording taps that can be on their way back at once. The UI starts a
 /// recording only once the last one's tap is back, so one would do.
 const RETIRED_TAP_BUFFER_SIZE: usize = 4;
+
+/// Audio input feeds that can be on their way back at once: one for each
+/// time the input device is changed between two UI frames.
+const RETIRED_INPUT_BUFFER_SIZE: usize = 4;
 
 /// Oscilloscope captures that can wait for the UI.
 const SCOPE_FRAME_BUFFER_SIZE: usize = 8;
@@ -123,6 +129,7 @@ impl EngineChannels {
         let (event_tx, event_rx) = RingBuffer::new(event_capacity);
         let (scope_tx, scope_rx) = RingBuffer::new(SCOPE_FRAME_BUFFER_SIZE);
         let (retired_tap_tx, retired_tap_rx) = RingBuffer::new(RETIRED_TAP_BUFFER_SIZE);
+        let (retired_input_tx, retired_input_rx) = RingBuffer::new(RETIRED_INPUT_BUFFER_SIZE);
 
         // Placeholder settings until an AudioProcessor reports the real ones
         let graph = AudioGraph::with_registry(44100.0, 256, create_module_registry());
@@ -135,12 +142,13 @@ impl EngineChannels {
                 message_tx,
                 retired_rx,
                 retired_tap_rx,
+                retired_input_rx,
                 event_rx,
                 scope_rx,
                 config: Arc::clone(&config),
                 unsent_plan: None,
                 unsent_transport: UnsentTransport::default(),
-                unsent_recording: Vec::new(),
+                unsent_handoffs: Vec::new(),
                 // The processor starts with an empty plan of its own, which
                 // it retires to us like any other
                 plans_in_flight: 1,
@@ -149,6 +157,7 @@ impl EngineChannels {
                 message_rx,
                 retired_tx,
                 retired_tap_tx,
+                retired_input_tx,
                 event_tx,
                 scope_tx,
                 config,
@@ -179,6 +188,7 @@ pub struct UiHandle {
     message_tx: Producer<AudioMessage>,
     retired_rx: Consumer<Box<GraphPlan>>,
     retired_tap_rx: Consumer<RecordTap>,
+    retired_input_rx: Consumer<InputFeed>,
     event_rx: Consumer<EngineEvent>,
     scope_rx: Consumer<ScopeFrame>,
     config: Arc<AudioConfig>,
@@ -187,8 +197,9 @@ pub struct UiHandle {
     unsent_plan: Option<Box<GraphPlan>>,
     /// Play/stop changes that didn't fit in the queue yet.
     unsent_transport: UnsentTransport,
-    /// Recording starts and stops that didn't fit in the queue yet, in order.
-    unsent_recording: Vec<AudioMessage>,
+    /// Recording starts and stops, and audio inputs connected and
+    /// disconnected, that didn't fit in the queue yet, in order.
+    unsent_handoffs: Vec<AudioMessage>,
     /// Plans sent (or held by the audio thread) and not yet returned.
     plans_in_flight: usize,
 }
@@ -234,24 +245,38 @@ impl UiHandle {
     /// output into it from the next callback. Never dropped: if the queue is
     /// full it's delivered by a later [`flush`](Self::flush).
     pub fn start_recording(&mut self, tap: RecordTap) {
-        self.unsent_recording.push(AudioMessage::StartRecording(tap));
-        self.send_recording();
+        self.unsent_handoffs.push(AudioMessage::StartRecording(tap));
+        self.send_handoffs();
     }
 
     /// Asks the audio thread to hand the recording's tap back, ending the
     /// recording once a [`flush`](Self::flush) drops it.
     pub fn stop_recording(&mut self) {
-        self.unsent_recording.push(AudioMessage::StopRecording);
-        self.send_recording();
+        self.unsent_handoffs.push(AudioMessage::StopRecording);
+        self.send_handoffs();
     }
 
-    /// Sends any recording starts and stops waiting for room in the queue.
+    /// Hands an audio input's feed to the audio thread, which reads from it
+    /// from the next callback, replacing any input it had. Never dropped.
+    pub fn connect_input(&mut self, feed: InputFeed) {
+        self.unsent_handoffs.push(AudioMessage::ConnectInput(feed));
+        self.send_handoffs();
+    }
+
+    /// Asks the audio thread to hand its audio input back, leaving the
+    /// patch's Audio Input modules silent.
+    pub fn disconnect_input(&mut self) {
+        self.unsent_handoffs.push(AudioMessage::DisconnectInput);
+        self.send_handoffs();
+    }
+
+    /// Sends any recording or input changes waiting for room in the queue.
     /// Returns true if none are left waiting.
-    fn send_recording(&mut self) -> bool {
-        while !self.unsent_recording.is_empty() {
-            let message = self.unsent_recording.remove(0);
+    fn send_handoffs(&mut self) -> bool {
+        while !self.unsent_handoffs.is_empty() {
+            let message = self.unsent_handoffs.remove(0);
             if let Err(PushError::Full(message)) = self.message_tx.push(message) {
-                self.unsent_recording.insert(0, message);
+                self.unsent_handoffs.insert(0, message);
                 return false;
             }
         }
@@ -286,11 +311,14 @@ impl UiHandle {
         while let Ok(tap) = self.retired_tap_rx.pop() {
             drop(tap);
         }
+        while let Ok(feed) = self.retired_input_rx.pop() {
+            drop(feed);
+        }
 
         let (sample_rate, block_size) = self.config.load();
         self.graph.set_audio_config(sample_rate, block_size);
 
-        if !self.send_recording() || !self.send_transport() {
+        if !self.send_handoffs() || !self.send_transport() {
             return false;
         }
 
@@ -354,6 +382,7 @@ pub struct EngineHandle {
     message_rx: Consumer<AudioMessage>,
     retired_tx: Producer<Box<GraphPlan>>,
     retired_tap_tx: Producer<RecordTap>,
+    retired_input_tx: Producer<InputFeed>,
     event_tx: Producer<EngineEvent>,
     scope_tx: Producer<ScopeFrame>,
     config: Arc<AudioConfig>,
@@ -389,6 +418,18 @@ impl EngineHandle {
         if let Err(PushError::Full(tap)) = self.retired_tap_tx.push(tap) {
             debug_assert!(false, "retired tap queue full");
             drop(tap);
+        }
+    }
+
+    /// Hands an audio input feed back to the UI thread, so its ring is freed
+    /// there.
+    ///
+    /// REAL-TIME SAFE: should the queue ever be full, the feed is dropped
+    /// here rather than lost.
+    pub fn retire_input(&mut self, feed: InputFeed) {
+        if let Err(PushError::Full(feed)) = self.retired_input_tx.push(feed) {
+            debug_assert!(false, "retired input queue full");
+            drop(feed);
         }
     }
 
@@ -468,6 +509,11 @@ mod tests {
                     seen.push("record");
                 }
                 AudioMessage::StopRecording => seen.push("stop recording"),
+                AudioMessage::ConnectInput(feed) => {
+                    engine.retire_input(feed);
+                    seen.push("input");
+                }
+                AudioMessage::DisconnectInput => seen.push("no input"),
             }
         }
         seen

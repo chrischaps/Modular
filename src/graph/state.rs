@@ -154,6 +154,9 @@ pub struct SynthGraphState {
     /// Modules' own meters (a Mixer's channel strips), fed by MeterLevels
     /// events. Key: engine node ID.
     pub module_meters: HashMap<EngineNodeId, ModuleMeters>,
+
+    /// The input device Audio Input modules are listening to, if one is open.
+    pub audio_input_name: Option<String>,
 }
 
 impl Default for SynthGraphState {
@@ -186,6 +189,7 @@ impl Default for SynthGraphState {
             midi_active_notes: Vec::new(),
             output_meter: LevelMeter::default(),
             module_meters: HashMap::new(),
+            audio_input_name: None,
         }
     }
 }

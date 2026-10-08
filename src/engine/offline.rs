@@ -6,7 +6,7 @@
 //! [`GraphPlan`] swapping as the live app.
 
 use crate::dsp::denormal::DenormalGuard;
-use crate::dsp::{MidiEvent, MidiMessage, ProcessContext};
+use crate::dsp::{InputAudio, MidiEvent, MidiMessage, ProcessContext};
 use crate::persistence::{compile_patch, CompiledPatch, Patch, PatchError};
 
 use super::{create_module_registry, AudioGraph, EngineCommand, GraphPlan};
@@ -29,6 +29,11 @@ pub struct OfflineRenderer {
     midi: Vec<(u64, MidiEvent)>,
     /// The current block's MIDI, re-based to the block start.
     block_midi: Vec<MidiEvent>,
+    /// What Audio Input modules hear, from frame 0 of the sample clock.
+    /// Empty (silence) unless set.
+    input: StereoBuffer,
+    /// The current block of `input`.
+    block_input: StereoBuffer,
 }
 
 impl OfflineRenderer {
@@ -41,6 +46,8 @@ impl OfflineRenderer {
             position: 0,
             midi: Vec::new(),
             block_midi: Vec::new(),
+            input: StereoBuffer::default(),
+            block_input: StereoBuffer { left: vec![0.0; block_size], right: vec![0.0; block_size] },
         }
     }
 
@@ -97,6 +104,25 @@ impl OfflineRenderer {
         self.midi.insert(at, (frame, MidiEvent::new(0, channel, message)));
     }
 
+    /// Sets what Audio Input modules hear, as the input device would bring
+    /// it, starting at frame 0 of the sample clock (see
+    /// [`position`](Self::position)). Past its end they hear silence.
+    pub fn set_audio_input(&mut self, input: StereoBuffer) {
+        self.input = input;
+    }
+
+    /// Copies the input that falls in the next block into `block_input`.
+    fn take_block_input(&mut self) {
+        let start = (self.position as usize).min(self.input.left.len());
+        let end = (start + self.context.block_size).min(self.input.left.len());
+        let count = end - start;
+        let block = &mut self.block_input;
+        block.left[..count].copy_from_slice(&self.input.left[start..end]);
+        block.right[..count].copy_from_slice(&self.input.right[start..end]);
+        block.left[count..].fill(0.0);
+        block.right[count..].fill(0.0);
+    }
+
     /// Frames processed so far. Renders run in whole blocks, so this can be
     /// ahead of the frames returned when a render isn't a whole number of
     /// blocks.
@@ -134,7 +160,9 @@ impl OfflineRenderer {
         self.sync_plan();
         while out.left.len() < frames {
             self.take_block_midi();
-            self.plan.process(&self.context.with_midi(&self.block_midi));
+            self.take_block_input();
+            let input = InputAudio { left: &self.block_input.left, right: &self.block_input.right };
+            self.plan.process(&self.context.with_midi(&self.block_midi).with_input(input));
             self.position += self.context.block_size as u64;
 
             let wanted = (frames - out.left.len()).min(self.context.block_size);
@@ -239,6 +267,29 @@ pub const AUDITION: &[(u8, f32, f32)] = &[
     (64, 2.5, 1.5),
     (67, 2.5, 1.5),
 ];
+
+/// Reads a mono or stereo WAV (a bigger one gives its first two channels),
+/// returning it with its sample rate.
+pub fn read_wav(path: &std::path::Path) -> Result<(StereoBuffer, u32), String> {
+    let mut reader = hound::WavReader::open(path).map_err(|e| e.to_string())?;
+    let spec = reader.spec();
+    let samples: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Float => reader.samples::<f32>().collect::<Result<_, _>>(),
+        hound::SampleFormat::Int => {
+            let scale = 1.0 / (1u64 << (spec.bits_per_sample - 1)) as f32;
+            reader.samples::<i32>().map(|s| s.map(|s| s as f32 * scale)).collect::<Result<_, _>>()
+        }
+    }
+    .map_err(|e| e.to_string())?;
+
+    let channels = spec.channels.max(1) as usize;
+    let mut input = StereoBuffer::default();
+    for frame in samples.chunks_exact(channels) {
+        input.left.push(frame[0]);
+        input.right.push(if channels > 1 { frame[1] } else { frame[0] });
+    }
+    Ok((input, spec.sample_rate))
+}
 
 impl StereoBuffer {
     /// Adds `other` to the end of this buffer.
@@ -428,6 +479,68 @@ mod tests {
         assert_eq!(at_80.len(), 2, "pulse and echo at 80 BPM: {at_80:?}");
         let beat = at_80[1] - at_80[0];
         assert!((beat - 0.75).abs() < 0.002, "echo after {beat} s at 80 BPM");
+    }
+
+    /// A 1 kHz tone at -12 dBFS from `start` for `length` seconds, in
+    /// `seconds` of silence.
+    fn tone_burst(sr: f32, seconds: f32, start: f32, length: f32) -> StereoBuffer {
+        let left: Vec<f32> = (0..(seconds * sr) as usize)
+            .map(|n| {
+                let t = n as f32 / sr;
+                let on = (start..start + length).contains(&t);
+                if on { 0.25 * (2.0 * std::f32::consts::PI * 1000.0 * t).sin() } else { 0.0 }
+            })
+            .collect();
+        StereoBuffer { right: left.iter().map(|s| -s).collect(), left }
+    }
+
+    #[test]
+    fn test_audio_input_plays_what_it_is_given() {
+        let mut patch = Patch::new("input");
+        patch.nodes.push(NodeData::new(1, "source.audio_input", (0.0, 0.0)));
+        patch.nodes.push(NodeData::new(2, "output.audio", (200.0, 0.0)));
+        patch.connections.push(ConnectionData::new(1, "L", 2, "Left"));
+        patch.connections.push(ConnectionData::new(1, "R", 2, "Right"));
+        let (mut r, _) = OfflineRenderer::from_patch(&patch, 48000.0, 256).unwrap();
+
+        // Silent until given input, as in the renderer with no device
+        assert_eq!(peak(&r.render(4800).left), 0.0);
+
+        r.set_audio_input(tone_burst(48000.0, 1.5, 0.2, 1.0));
+        let out = r.render_seconds(1.5);
+        let heard = &out.left[(0.5 * 48000.0) as usize..(1.0 * 48000.0) as usize];
+        // At the output's default volume of 0.8
+        let level = rms(heard) / (0.8 * 0.25 / 2f32.sqrt());
+        assert!((level - 1.0).abs() < 0.02, "the tone comes through at {level}");
+        // Its own right side, not a copy of the left
+        let right = &out.right[(0.5 * 48000.0) as usize..(1.0 * 48000.0) as usize];
+        assert!(heard.iter().zip(right).all(|(l, r)| (l + r).abs() < 1e-3));
+    }
+
+    #[test]
+    fn test_audio_input_gate_plays_an_envelope() {
+        // A tone burst on the input opens the gate, which plays the
+        // oscillator through an envelope and a VCA
+        let mut patch = Patch::new("trigger");
+        patch.nodes.push(NodeData::new(1, "source.audio_input", (0.0, 0.0)));
+        patch.nodes.push(NodeData::new(2, "mod.adsr", (200.0, 0.0)));
+        patch.nodes.push(NodeData::new(3, "osc.sine", (200.0, 200.0)));
+        patch.nodes.push(NodeData::new(4, "util.vca", (400.0, 0.0)));
+        patch.nodes.push(NodeData::new(5, "output.audio", (600.0, 0.0)));
+        patch.connections.push(ConnectionData::new(1, "Gate", 2, "Gate"));
+        patch.connections.push(ConnectionData::new(3, "Out", 4, "In"));
+        patch.connections.push(ConnectionData::new(2, "Out", 4, "CV"));
+        patch.connections.push(ConnectionData::new(4, "Out", 5, "Mono"));
+        let (mut r, _) = OfflineRenderer::from_patch(&patch, 48000.0, 256).unwrap();
+
+        r.set_audio_input(tone_burst(48000.0, 3.0, 0.5, 0.5));
+        let out = r.render_seconds(3.0);
+        let window = |from: f32, to: f32| rms(&out.left[(from * 48000.0) as usize..(to * 48000.0) as usize]);
+        assert!(window(0.0, 0.5) < 1e-4, "quiet before the burst");
+        assert!(window(0.55, 0.95) > 0.1, "the burst plays the oscillator");
+        // The gate closes about 0.4 s after the burst, then the envelope
+        // releases
+        assert!(window(2.6, 3.0) < 1e-3, "and lets it go after");
     }
 
     /// Oscillator (saw) into a delay's left input, both delay outputs to the

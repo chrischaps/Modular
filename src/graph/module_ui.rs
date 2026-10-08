@@ -115,6 +115,13 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "source.audio_input",
+        knobs: &[knob("Gain"), knob_as("Threshold", "Thresh"), knob("Attack"), knob("Release")],
+        monitor: &["Follow", "Gate"],
+        display: NodeDisplay::InputListen,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "input.keyboard",
         knobs: &[knob_as("Octave", "Oct"), knob_as("Velocity", "Vel")],
         hidden: &["Note", "Gate"],

@@ -8,9 +8,10 @@ use std::time::Instant;
 use rtrb::Consumer;
 
 use crate::dsp::denormal::DenormalGuard;
-use crate::dsp::{MidiEvent, ModuleRegistry, Poly, ProcessContext};
-use crate::modules::{AdsrEnvelope, Attenuverter, AudioOutput, Chorus, Clock, Compressor, Distortion, KeyboardInput, LadderFilter, Lfo, MidiMonitor, MidiNote, Mixer, Noise, Oscilloscope, PolyMidi, ParametricEq, Quantizer, Reverb, SampleHold, Oscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
+use crate::dsp::{InputAudio, MidiEvent, ModuleRegistry, Poly, ProcessContext};
+use crate::modules::{AdsrEnvelope, Attenuverter, AudioInput, AudioOutput, Chorus, Clock, Compressor, Distortion, KeyboardInput, LadderFilter, Lfo, MidiMonitor, MidiNote, Mixer, Noise, Oscilloscope, PolyMidi, ParametricEq, Quantizer, Reverb, SampleHold, Oscillator, StepSequencer, StereoDelay, SvfFilter, Vca};
 
+use super::audio_input::InputFeed;
 use super::channels::EngineHandle;
 use super::commands::{AudioMessage, EngineEvent, ScopeFrame};
 use super::graph_plan::GraphPlan;
@@ -30,6 +31,7 @@ pub fn create_module_registry() -> ModuleRegistry {
     let mut registry = ModuleRegistry::new();
     registry.register::<Poly<Oscillator>>();
     registry.register::<Poly<Noise>>();
+    registry.register::<AudioInput>();
     registry.register::<KeyboardInput>();
     registry.register::<MidiNote>();
     registry.register::<PolyMidi>();
@@ -54,6 +56,47 @@ pub fn create_module_registry() -> ModuleRegistry {
     registry.register::<MidiMonitor>();
     registry.register::<AudioOutput>();
     registry
+}
+
+/// The patch's audio input on the audio thread: the feed from the input
+/// device, if one is open, and the block it's read into.
+struct LiveInput {
+    feed: Option<InputFeed>,
+    left: Vec<f32>,
+    right: Vec<f32>,
+}
+
+impl LiveInput {
+    fn new(block_size: usize) -> Self {
+        Self { feed: None, left: vec![0.0; block_size], right: vec![0.0; block_size] }
+    }
+
+    /// Reads the next `frames` frames (at most a block), or silence with no
+    /// input open.
+    fn next_block(&mut self, frames: usize) -> InputAudio<'_> {
+        let Some(feed) = self.feed.as_mut() else {
+            return InputAudio::default();
+        };
+        let frames = frames.min(self.left.len());
+        let (left, right) = (&mut self.left[..frames], &mut self.right[..frames]);
+        feed.read(left, right);
+        InputAudio { left, right }
+    }
+
+    /// Drops input that arrived while nothing reads it.
+    fn discard(&mut self) {
+        if let Some(feed) = self.feed.as_mut() {
+            feed.discard();
+        }
+    }
+}
+
+/// Where a render's audio input comes from.
+enum RenderInput<'a> {
+    /// The input device, a block at a time.
+    Live(&'a mut LiveInput),
+    /// Audio given for the whole buffer, as when filming.
+    Given(InputAudio<'a>),
 }
 
 /// Audio processor that runs in the audio callback.
@@ -83,6 +126,8 @@ pub struct AudioProcessor {
     cpu_load_avg: f32,
     /// Where the finished output is copied while recording.
     recorder: Option<RecordTap>,
+    /// Audio from the input device, for Audio Input modules.
+    input: LiveInput,
 }
 
 impl AudioProcessor {
@@ -106,6 +151,7 @@ impl AudioProcessor {
             frame_counter: 0,
             cpu_load_avg: 0.0,
             recorder: None,
+            input: LiveInput::new(block_size),
         }
     }
 
@@ -128,7 +174,8 @@ impl AudioProcessor {
     /// This is called from the cpal audio callback. It:
     /// 1. Applies pending messages from the UI (new plans, parameters, play/stop)
     /// 2. Places the MIDI that arrived since the last callback in this buffer
-    /// 3. If playing, runs the graph, in chunks of at most the plan's block size
+    /// 3. If playing, runs the graph, in chunks of at most the plan's block
+    ///    size, each with its share of the audio input
     /// 4. Writes the output module's audio to the output buffer
     /// 5. While recording, copies that buffer to the recording
     ///
@@ -152,8 +199,10 @@ impl AudioProcessor {
         output.fill(0.0);
 
         if !self.is_playing || channels == 0 {
-            // Notes played while stopped shouldn't all sound at once on Play
+            // Notes played while stopped shouldn't all sound at once on Play,
+            // nor should the input arrive late
             self.midi.skip(start_time);
+            self.input.discard();
             // Reset CPU load when not playing
             self.cpu_load_avg = 0.0;
             self.record(output, channels);
@@ -162,7 +211,10 @@ impl AudioProcessor {
 
         let num_frames = output.len() / channels;
         let midi = self.midi.collect(start_time, num_frames);
-        Self::render(&mut self.plan, self.sample_rate, output, channels, midi);
+        if let Some(feed) = self.input.feed.as_mut() {
+            feed.begin(num_frames);
+        }
+        Self::render(&mut self.plan, self.sample_rate, output, channels, midi, RenderInput::Live(&mut self.input));
         self.record(output, channels);
 
         self.send_monitor_values();
@@ -192,18 +244,21 @@ impl AudioProcessor {
     ///
     /// The capture mode renders this way, one video frame's worth of audio
     /// per UI frame, so picture and sound advance in lockstep however long
-    /// each frame takes to draw. Live MIDI that arrived meanwhile is dropped.
-    pub fn process_offline(&mut self, output: &mut [f32], channels: usize, midi: &mut [MidiEvent]) {
+    /// each frame takes to draw. Live MIDI and audio input that arrived
+    /// meanwhile are dropped: Audio Input modules hear `input` instead,
+    /// from the start of the buffer.
+    pub fn process_offline(&mut self, output: &mut [f32], channels: usize, midi: &mut [MidiEvent], input: InputAudio<'_>) {
         let _denormals = DenormalGuard::new();
         self.process_messages();
         self.midi.skip(Instant::now());
+        self.input.discard();
         output.fill(0.0);
         if !self.is_playing || channels == 0 {
             self.record(output, channels);
             return;
         }
 
-        Self::render(&mut self.plan, self.sample_rate, output, channels, midi);
+        Self::render(&mut self.plan, self.sample_rate, output, channels, midi, RenderInput::Given(input));
         self.record(output, channels);
 
         self.send_monitor_values();
@@ -213,14 +268,26 @@ impl AudioProcessor {
     }
 
     /// Runs the graph over a buffer in plan-sized blocks, each with the MIDI
-    /// that falls inside it, and writes the output module's audio into it.
-    fn render(plan: &mut GraphPlan, sample_rate: f32, output: &mut [f32], channels: usize, mut midi: &mut [MidiEvent]) {
+    /// that falls inside it and the next block of `input`, and writes the
+    /// output module's audio into it.
+    fn render(
+        plan: &mut GraphPlan,
+        sample_rate: f32,
+        output: &mut [f32],
+        channels: usize,
+        mut midi: &mut [MidiEvent],
+        mut input: RenderInput<'_>,
+    ) {
         let block = plan.max_block_size().max(1);
         for (index, chunk) in output.chunks_mut(block * channels).enumerate() {
             let frames = chunk.len() / channels;
             let start = index * block;
             let chunk_midi = take_chunk(&mut midi, start, start + frames);
-            let context = ProcessContext::new(sample_rate, frames).with_midi(chunk_midi);
+            let chunk_input = match &mut input {
+                RenderInput::Live(input) => input.next_block(frames),
+                RenderInput::Given(given) => given.slice(start, frames),
+            };
+            let context = ProcessContext::new(sample_rate, frames).with_midi(chunk_midi).with_input(chunk_input);
             plan.process(&context);
             Self::write_output(plan, chunk, channels, frames);
         }
@@ -309,6 +376,16 @@ impl AudioProcessor {
                         self.engine_handle.retire_tap(tap);
                     }
                 }
+                AudioMessage::ConnectInput(feed) => {
+                    if let Some(old) = self.input.feed.replace(feed) {
+                        self.engine_handle.retire_input(old);
+                    }
+                }
+                AudioMessage::DisconnectInput => {
+                    if let Some(feed) = self.input.feed.take() {
+                        self.engine_handle.retire_input(feed);
+                    }
+                }
             }
         }
     }
@@ -333,6 +410,11 @@ impl AudioProcessor {
                 *ch = (l + r) * 0.5;
             }
         }
+    }
+
+    /// Whether an audio input is connected.
+    pub fn has_input(&self) -> bool {
+        self.input.feed.is_some()
     }
 
     /// Whether the output is being copied to a recording.
@@ -410,7 +492,8 @@ mod tests {
         assert!(registry.contains("util.mixer"));
         assert!(registry.contains("source.noise"));
         assert!(registry.contains("util.quantizer"));
-        assert_eq!(registry.len(), 25);
+        assert!(registry.contains("source.audio_input"));
+        assert_eq!(registry.len(), 26);
     }
 
     #[test]

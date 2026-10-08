@@ -73,8 +73,17 @@ cargo run --release --bin render -- patches/fm-synthesis.json out.wav --seconds 
 | `--sample-rate HZ` | 48000 | Sample rate of the file |
 | `--block-size N` | 256 | Samples processed per block |
 | `--audition` | off | Plays a short phrase into the patch's Keyboard, MIDI Note and Poly MIDI modules |
+| `--input FILE.wav` | none | What [Audio Input](../modules/sources/audio-input.md) modules hear, in place of an input device. It must be at the render's sample rate |
 
-A patch that waits for a player renders silence unless something inside it plays notes (a Clock or Step Sequencer, say) or you add `--audition`.
+A patch that waits for a player renders silence unless something inside it plays notes (a Clock or Step Sequencer, say) or you add `--audition`. Audio Input modules render silence unless you give them a file with `--input`.
+
+## Microphone access
+
+Modular Synth opens a microphone or other input only when you choose one in the toolbar's **Input** menu.
+
+- **macOS** asks for permission the first time. If you run Modular Synth from a terminal (`cargo run`), macOS asks on behalf of the terminal app, and the permission belongs to it. If you said no, or the input stays silent, turn it on under **System Settings → Privacy & Security → Microphone**, then quit and reopen the terminal or the app.
+- **Windows** lets desktop apps use the microphone unless it's turned off under **Settings → Privacy & security → Microphone** (**Let desktop apps access your microphone**).
+- **Linux** has no permission prompt; the input appears if ALSA (or PipeWire's ALSA support) lists it.
 
 To run the test suite, use `cargo test`.
 

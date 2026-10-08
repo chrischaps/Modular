@@ -18,7 +18,7 @@ pub mod signal;
 pub mod smoothed_value;
 
 // Re-export commonly used types
-pub use context::{ProcessContext, TransportState};
+pub use context::{InputAudio, ProcessContext, TransportState};
 pub use module_trait::{DspModule, MeterLevels, ModuleCategory, ModuleError, ModuleInfo, OutputLevels, MAX_METERS};
 pub use parameter::{ParameterDefinition, ParameterDisplay};
 pub use poly::Poly;

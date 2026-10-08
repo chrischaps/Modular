@@ -8,12 +8,13 @@ The **ID** is the name a patch file uses to refer to the module.
 
 ### Source
 
-<span class="swatch bar source"></span>Blue header. Modules that start a sound or a note: the oscillator and noise source, and the modules that turn your playing into pitch and gate signals.
+<span class="swatch bar source"></span>Blue header. Modules that start a sound or a note: the oscillator and noise source, the audio input, and the modules that turn your playing into pitch and gate signals.
 
 | Module | ID | What it does |
 |--------|----|--------------|
 | [Oscillator](./sources/oscillator.md) | `osc.sine` | Band-limited VCO with a tune section, hard sync, through-zero FM, a sub-oscillator and unison |
 | [Noise](./sources/noise.md) | `source.noise` | White, pink and brown noise, and a smooth random voltage |
+| [Audio Input](./sources/audio-input.md) | `source.audio_input` | A microphone, guitar or line input, with an envelope follower and a gate |
 | [Keyboard](./midi/keyboard.md) | `input.keyboard` | Play notes from your computer keyboard |
 | [MIDI Note](./midi/midi-note.md) | `input.midi_note` | One voice of pitch, gate, velocity and aftertouch from a MIDI controller |
 | [Poly MIDI](./midi/poly-midi.md) | `input.poly_midi` | Up to eight voices from a MIDI controller, for chords |
@@ -114,6 +115,8 @@ Drive a voice from a sequence instead of a keyboard:
 |-----|-----------|
 | Make a tone | [Oscillator](./sources/oscillator.md) |
 | Make drums, wind or breath | [Noise](./sources/noise.md) through a filter and an envelope |
+| Play a microphone or guitar through the patch | [Audio Input](./sources/audio-input.md) |
+| Let a live sound or drum loop move or trigger the patch | [Audio Input](./sources/audio-input.md)'s **Follow** and **Gate** |
 | Play notes | [Keyboard](./midi/keyboard.md), [MIDI Note](./midi/midi-note.md), or [Poly MIDI](./midi/poly-midi.md) for chords |
 | Darken or brighten a sound | [SVF Filter](./filters/svf-filter.md) or [Ladder Filter](./filters/ladder-filter.md) |
 | Give each note a shape in time | [ADSR Envelope](./modulation/adsr.md) into a [VCA](./utilities/vca.md) |

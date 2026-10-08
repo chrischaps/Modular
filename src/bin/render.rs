@@ -1,24 +1,24 @@
 //! Render a patch to a WAV file without opening the app.
 //!
 //! ```text
-//! cargo run --release --bin render -- <patch.json> <out.wav> [--seconds N] [--sample-rate HZ] [--audition]
+//! cargo run --release --bin render -- <patch.json> <out.wav> [--seconds N] [--sample-rate HZ] [--audition] [--input in.wav]
 //! ```
 //!
 //! Prints the peak and RMS level of each channel so renders can be compared
 //! before and after a DSP change. Patches that need live input (Keyboard,
 //! MIDI Note, Poly MIDI) render silence unless something in the patch
 //! triggers them, such as a Clock or Sequencer, or `--audition` is given to
-//! play a short phrase into them.
+//! play a short phrase into them. Audio Input modules are silent too, unless
+//! `--input` gives them a WAV file to hear in place of the input device.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use modular_synth::dsp::analysis::{amp_to_db, peak, rms};
-use modular_synth::engine::OfflineRenderer;
+use modular_synth::engine::{read_wav, OfflineRenderer};
 use modular_synth::persistence::load_from_file;
 
-const USAGE: &str =
-    "usage: render <patch.json> <out.wav> [--seconds N] [--sample-rate HZ] [--block-size N] [--audition]";
+const USAGE: &str = "usage: render <patch.json> <out.wav> [--seconds N] [--sample-rate HZ] [--block-size N] [--audition] [--input in.wav]";
 
 struct Args {
     patch: PathBuf,
@@ -27,6 +27,8 @@ struct Args {
     sample_rate: u32,
     block_size: usize,
     audition: bool,
+    /// A WAV file for Audio Input modules to hear.
+    input: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -35,6 +37,7 @@ fn parse_args() -> Result<Args, String> {
     let mut sample_rate = 48_000;
     let mut block_size = 256;
     let mut audition = false;
+    let mut input = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -48,6 +51,7 @@ fn parse_args() -> Result<Args, String> {
                 block_size = value("--block-size")?.parse().map_err(|e| format!("--block-size: {}", e))?
             }
             "--audition" => audition = true,
+            "--input" => input = Some(PathBuf::from(value("--input")?)),
             "-h" | "--help" => return Err(USAGE.to_string()),
             flag if flag.starts_with("--") => return Err(format!("unknown option {}\n{}", flag, USAGE)),
             _ => positional.push(PathBuf::from(arg)),
@@ -62,6 +66,7 @@ fn parse_args() -> Result<Args, String> {
             sample_rate,
             block_size,
             audition,
+            input,
         }),
         _ => Err(USAGE.to_string()),
     }
@@ -74,6 +79,19 @@ fn run(args: Args) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     for warning in &compiled.warnings {
         eprintln!("warning: {}", warning);
+    }
+    if let Some(path) = &args.input {
+        let (input, rate) = read_wav(path).map_err(|e| format!("{}: {}", path.display(), e))?;
+        if rate != args.sample_rate {
+            return Err(format!(
+                "{} is {} Hz but the render is {} Hz: render with --sample-rate {}",
+                path.display(),
+                rate,
+                args.sample_rate,
+                rate
+            ));
+        }
+        renderer.set_audio_input(input);
     }
 
     let audio = if args.audition {
