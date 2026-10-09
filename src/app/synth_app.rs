@@ -18,7 +18,7 @@ use rtrb::Consumer;
 use crate::graph::annotation_ui;
 use crate::graph::annotations::{Annotation, AnnotationId, Frame, Note, Tint, DEFAULT_NOTE_WIDTH};
 use crate::graph::{
-    port_mapping, validate_connection, AllNodeTemplates, AnyParameterId, SynthDataType, SynthGraphState,
+    port_mapping, validate_connection, AllNodeTemplates, AnyParameterId, GroupId, SynthDataType, SynthGraphState,
     SynthNodeData, SynthNodeTemplate, SynthValueType,
 };
 use crate::modules::keyboard::{key_to_note, relative_to_midi, KeyPriority, KeyboardInput};
@@ -36,6 +36,8 @@ use super::recording::{self, RecState, Toast, ToastAction};
 use super::session::{self, Answer, Autosave, Discard, RecentFiles};
 use super::theme;
 use super::undo::{Applied, History};
+
+mod grouping;
 
 /// Type alias for our graph editor state
 type SynthGraphEditorState = GraphEditorState<SynthNodeData, SynthDataType, SynthValueType, SynthNodeTemplate, SynthGraphState>;
@@ -229,6 +231,15 @@ pub struct SynthApp {
     feedback_warned: bool,
     /// A warning for the status bar, and when it was raised (UI clock).
     notice: Option<(String, f64)>,
+
+    // --- Groups ---
+    /// The groups the view went into, innermost last, each with where its
+    /// node was on screen (relative to the editor), to come back out to.
+    level_trail: Vec<(GroupId, egui::Vec2)>,
+    /// A group just made, while it's being named: naming it names the step.
+    naming_group: Option<GroupId>,
+    /// Tab opened a group, and egui's focus moved on with it to a button.
+    release_tab_focus: bool,
 }
 
 /// What a module's right-click menu asked for, handled once the graph is drawn.
@@ -252,6 +263,12 @@ enum NodeMenuAction {
     Copy(egui_node_graph2::NodeId),
     Reset(egui_node_graph2::NodeId),
     Delete(egui_node_graph2::NodeId),
+    Group(egui_node_graph2::NodeId),
+    Ungroup(egui_node_graph2::NodeId),
+    Enter(egui_node_graph2::NodeId),
+    StartRename(egui_node_graph2::NodeId),
+    Rename(egui_node_graph2::NodeId, String),
+    Pin(egui_node_graph2::NodeId, String, u8),
 }
 
 impl SynthApp {
@@ -370,6 +387,9 @@ impl SynthApp {
             input_glitches: (0, Instant::now()),
             feedback_warned: false,
             notice: None,
+            level_trail: Vec::new(),
+            naming_group: None,
+            release_tab_focus: false,
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -1541,6 +1561,10 @@ impl SynthApp {
         let mut bypass_toggles: Vec<egui_node_graph2::NodeId> = Vec::new();
         // What modules' right-click menus asked for
         let mut node_menu_actions: Vec<NodeMenuAction> = Vec::new();
+        // Groups whose node was closed, whose insides go too
+        let mut deleted_groups: Vec<GroupId> = Vec::new();
+        // What this frame shows: the top of the patch, or a group's inside
+        self.prepare_level();
         // Track if we clicked in the editor area
         let mut cursor_in_editor = false;
         // Store editor rect for coordinate conversion
@@ -1563,6 +1587,7 @@ impl SynthApp {
                 // The grid sits under the patch and moves with it
                 let grid_origin = editor_rect.min + self.graph_state.pan_zoom.pan + self.history.view_origin();
                 theme::draw_grid_background(ui.painter(), editor_rect, grid_origin, self.graph_state.pan_zoom.zoom);
+                self.draw_level_backdrop(ui.painter(), editor_rect);
 
                 // Draw the node graph editor
                 let (zoom_before, pan_before) = (self.graph_state.pan_zoom.zoom, self.graph_state.pan_zoom.pan);
@@ -1610,12 +1635,16 @@ impl SynthApp {
                                 engine_node_id,
                             ));
                         }
-                        NodeResponse::DeleteNodeFull { node_id, .. } => {
+                        NodeResponse::DeleteNodeFull { node_id, node } => {
                             // Get engine node ID before removing from mapping
                             if let Some(engine_node_id) = self.user_state.remove_node(node_id) {
                                 commands_to_send.push(EngineCommand::RemoveModule {
                                     node_id: engine_node_id,
                                 });
+                            }
+                            // A group goes with everything in it
+                            if let Some(id) = node.user_data.kind.group() {
+                                deleted_groups.push(id);
                             }
                         }
                         NodeResponse::ConnectEventEnded { output, input, .. } => {
@@ -1689,6 +1718,24 @@ impl SynthApp {
                         }
                         NodeResponse::User(crate::graph::SynthResponse::DeleteNode(node_id)) => {
                             node_menu_actions.push(NodeMenuAction::Delete(node_id));
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::GroupNode(node_id)) => {
+                            node_menu_actions.push(NodeMenuAction::Group(node_id));
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::UngroupNode(node_id)) => {
+                            node_menu_actions.push(NodeMenuAction::Ungroup(node_id));
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::EnterGroup(node_id)) => {
+                            node_menu_actions.push(NodeMenuAction::Enter(node_id));
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::StartRename(node_id)) => {
+                            node_menu_actions.push(NodeMenuAction::StartRename(node_id));
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::RenameGroup { node_id, name }) => {
+                            node_menu_actions.push(NodeMenuAction::Rename(node_id, name));
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::PinKnob { node_id, param_name, levels }) => {
+                            node_menu_actions.push(NodeMenuAction::Pin(node_id, param_name, levels));
                         }
                         _ => {
                             // Other responses not yet handled
@@ -1779,15 +1826,18 @@ impl SynthApp {
                             }
                         }
 
-                        // Frames and notes, to explain the patch
-                        ui.separator();
+                        // Frames and notes, to explain the patch, on its top level
                         let framing = !self.graph_state.selected_nodes.is_empty();
+                        let annotating = self.frames_allowed();
+                        if annotating {
+                            ui.separator();
+                        }
                         for (label, kind, hint) in [
                             ("Frame", NewAnnotation::Frame,
                                 if framing { "A titled backdrop around the selected modules (Ctrl+Shift+F)" }
                                 else { "A titled backdrop to group modules under (Ctrl+Shift+F frames the selection)" }),
                             ("Note", NewAnnotation::Note, "A card of text. **Bold** for emphasis"),
-                        ] {
+                        ].into_iter().filter(|_| annotating) {
                             let response = ui.add(
                                 egui::Button::new(RichText::new(label).color(theme::text::SECONDARY))
                                     .min_size(egui::vec2(110.0, 0.0))
@@ -1902,6 +1952,10 @@ impl SynthApp {
         for action in node_menu_actions {
             self.handle_node_menu(ctx, action);
         }
+        for id in deleted_groups {
+            self.delete_group_contents(id);
+        }
+        self.draw_breadcrumbs(ctx);
 
         // Remove invalid connections outside the UI closure
         for (output, input) in invalid_connections {
@@ -1935,6 +1989,11 @@ impl SynthApp {
             self.status_message = Some(nothing.to_string());
             return;
         };
+        // Shown where it happens: the level the edit was made on
+        self.prepare_level();
+        if applied.level != self.user_state.level {
+            self.go_to_level(applied.level);
+        }
         for cmd in applied.commands {
             // The engine now has these values, so parameter sync needn't resend them
             if let EngineCommand::SetParameter { node_id, param_index, value } = cmd {
@@ -2030,6 +2089,10 @@ impl SynthApp {
     /// Adds a frame around the selected modules, tinted for what they are,
     /// and opens its title for naming.
     fn frame_selection(&mut self, ctx: &egui::Context) {
+        if !self.frames_allowed() {
+            self.status_message = Some("Frames and notes go on the top level of the patch".to_string());
+            return;
+        }
         let nodes = self.graph_state.selected_nodes.clone();
         let Some(screen) = nodes.iter().filter_map(|&id| annotation_ui::module_rect(ctx, id)).reduce(|a, b| a.union(b)) else {
             self.status_message = Some("Select modules to frame them (Ctrl+Shift+F)".to_string());
@@ -2084,6 +2147,12 @@ impl SynthApp {
             NodeMenuAction::Copy(node_id) => self.copy_selection(ctx, &self.menu_targets(node_id)),
             NodeMenuAction::Reset(node_id) => self.reset_modules(&self.menu_targets(node_id).nodes),
             NodeMenuAction::Delete(node_id) => self.delete_selection(&self.menu_targets(node_id), "Delete", "Deleted"),
+            NodeMenuAction::Group(node_id) => self.group_selection(ctx, &self.menu_targets(node_id).nodes),
+            NodeMenuAction::Ungroup(node_id) => self.ungroup(&self.menu_targets(node_id).nodes),
+            NodeMenuAction::Enter(node_id) => self.enter_group(node_id),
+            NodeMenuAction::StartRename(node_id) => self.start_rename(node_id),
+            NodeMenuAction::Rename(node_id, name) => self.rename_group(node_id, &name),
+            NodeMenuAction::Pin(node_id, param_name, levels) => self.pin_knob(node_id, &param_name, levels),
         }
     }
 
@@ -2791,9 +2860,9 @@ impl SynthApp {
                     .color(theme::accent::ERROR)
                     .small());
             } else {
-                // Show node and connection count
-                let node_count = self.graph_state.graph.nodes.len();
-                let connection_count = self.graph_state.graph.iter_connections().count();
+                // Show module and connection count, through any groups
+                let node_count = self.user_state.node_id_map.len();
+                let connection_count = self.user_state.engine_cables.len();
 
                 let status = if node_count == 0 {
                     "Right-click to add nodes".to_string()
@@ -3236,6 +3305,12 @@ impl eframe::App for SynthApp {
         // A capture renders this frame's audio before anything is drawn
         self.step_capture(ctx);
 
+        if std::mem::take(&mut self.release_tab_focus) {
+            if let Some(focused) = ctx.memory(|m| m.focused()) {
+                ctx.memory_mut(|m| m.surrender_focus(focused));
+            }
+        }
+
         // Process events from the audio engine
         self.process_engine_events();
         self.recover_from_driver_reset();
@@ -3348,6 +3423,7 @@ impl eframe::App for SynthApp {
         // Editing shortcuts act on the graph, so they wait while a text field
         // or the palette has the keys
         if !ctx.wants_keyboard_input() && self.quick_add.is_none() && !prompt_open {
+            self.handle_group_shortcuts(ctx);
             self.handle_editing_shortcuts(ctx);
         }
 
@@ -3489,7 +3565,9 @@ impl eframe::App for SynthApp {
         // Whatever this frame changed becomes an undo step, once the mouse
         // button is up: a knob turn or a drag is one step, not one per frame
         // Typing a frame's title or a note is one step too, once it's done
-        let gesture_held = ctx.input(|i| i.pointer.any_down()) || self.user_state.annotations.is_editing();
+        let gesture_held = ctx.input(|i| i.pointer.any_down())
+            || self.user_state.annotations.is_editing()
+            || self.user_state.renaming.is_some();
         self.history.record(&self.graph_state, &self.user_state, gesture_held, Instant::now());
 
         // Ship this frame's graph edits to the audio thread as one compiled plan

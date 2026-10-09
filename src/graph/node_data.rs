@@ -178,6 +178,22 @@ impl KnobParam {
     }
 }
 
+/// Where a knob is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KnobPlace {
+    /// On its own module.
+    Module,
+    /// On the face of a group it's pinned to, `depth` groups up from its
+    /// module. `outer`: that group sits inside another.
+    Face { depth: u8, outer: bool },
+}
+
+impl KnobPlace {
+    fn is_face(self) -> bool {
+        matches!(self, Self::Face { .. })
+    }
+}
+
 /// Describes an LED indicator that appears in the node's bottom section.
 ///
 /// LED indicators show the state of output ports (e.g., gate triggers, activity).
@@ -388,9 +404,13 @@ impl SynthNodeData {
         self
     }
 
-    /// Get the header color for this node based on its category.
+    /// Get the header color for this node based on its category, or rose
+    /// for a group.
     pub fn header_color(&self) -> Color32 {
-        self.category.color()
+        match self.kind {
+            NodeKind::Module => self.category.color(),
+            kind => super::group_face::header_color(kind),
+        }
     }
 
     /// The header colour as drawn: the category colour, faded toward the
@@ -690,6 +710,287 @@ impl SynthNodeData {
 }
 
 impl SynthNodeData {
+    /// One knob of the module's knob row, with its MIDI badge or signal dot
+    /// and its right-click menu: on the module itself, or on the face of a
+    /// group it's pinned to.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn knob_cell(
+        &self,
+        ui: &mut egui::Ui,
+        node_id: egui_node_graph2::NodeId,
+        knob_param: &KnobParam,
+        graph: &egui_node_graph2::Graph<Self, super::SynthDataType, SynthValueType>,
+        user_state: &mut super::SynthGraphState,
+        zoom: f32,
+        responses: &mut Vec<NodeResponse<SynthResponse, Self>>,
+        place: KnobPlace,
+    ) {
+        let engine_node_id = user_state.get_engine_node_id(node_id);
+        let knob_size = 36.0 * zoom;
+        // Find the corresponding input parameter by name
+        if let Some(node) = graph.nodes.get(node_id) {
+            if let Some((_name, input_id)) = node.inputs.iter().find(|(name, _)| *name == knob_param.param_name) {
+                let input = graph.get_input(*input_id);
+
+                // Calculate param_index by finding the position among editable parameters
+                let current_param_index = node.inputs.iter()
+                    .take_while(|(name, _)| *name != knob_param.param_name)
+                    .filter(|(_, id)| {
+                        let inp = graph.get_input(*id);
+                        matches!(inp.kind,
+                            egui_node_graph2::InputParamKind::ConstantOnly |
+                            egui_node_graph2::InputParamKind::ConnectionOrConstant)
+                    })
+                    .count();
+
+                // Check if this param has an input port and if it's connected
+                // iter_connections returns (InputId, OutputId) - input port and the output it's connected to
+                let is_connected = knob_param.has_input_port() &&
+                    graph.iter_connections().any(|(input, _output)| input == *input_id);
+
+                // Something else in charge of it: a synced LFO's division,
+                // a MIDI clock's tempo
+                let takeover = super::clock_display::knob_takeover(
+                    self.module_id, &knob_param.param_name, node_id, graph, user_state,
+                );
+
+                // Should the knob be disabled? Only for Exposed mode, not for Modulatable
+                let should_disable = takeover.is_some() || (is_connected && knob_param.disable_when_connected());
+
+                // Get input port index for this parameter (for looking up signal value)
+                let input_port_index = if knob_param.has_input_port() {
+                    // Count ConnectionOrConstant and ConnectionOnly inputs before this one
+                    node.inputs.iter()
+                        .take_while(|(name, _)| *name != knob_param.param_name)
+                        .filter(|(_, id)| {
+                            let inp = graph.get_input(*id);
+                            matches!(inp.kind,
+                                egui_node_graph2::InputParamKind::ConnectionOnly |
+                                egui_node_graph2::InputParamKind::ConnectionOrConstant)
+                        })
+                        .count()
+                } else {
+                    0
+                };
+
+                // Get signal feedback value from audio engine (if connected and available)
+                let signal_value = if is_connected {
+                    engine_node_id.and_then(|eid|
+                        user_state.get_input_value(eid, input_port_index))
+                } else {
+                    None
+                };
+
+                // Get MIDI mapping info for this parameter
+                let midi_mapping = engine_node_id.and_then(|eid|
+                    user_state.get_midi_mapping(eid, current_param_index));
+                let is_learn_target = engine_node_id
+                    .map(|eid| user_state.is_midi_learn_target(eid, current_param_index))
+                    .unwrap_or(false);
+
+                // Get min/max values for MIDI Learn
+                let (min_value, max_value) = input.value.range();
+
+                // Build MIDI config for the knob
+                let midi_config = KnobMidiConfig {
+                    has_midi_mapping: midi_mapping.is_some(),
+                    cc_number: midi_mapping.map(|m| m.cc_number),
+                    is_learn_target,
+                    min_value,
+                    max_value,
+                };
+
+                // Render the knob based on value type
+                let knob_response = ui.scope(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_min_width(knob_size + 8.0 * zoom);
+
+                        // Visual indicator for MIDI mapping or learn mode
+                        let show_midi_indicator = midi_config.has_midi_mapping || midi_config.is_learn_target;
+                        let show_connection_indicator = is_connected && !show_midi_indicator;
+
+                        if show_midi_indicator {
+                            // MIDI CC badge - purple for mapped, blinking for learn mode
+                            let badge_color = if midi_config.is_learn_target {
+                                // Blink effect for learn mode
+                                let time = ui.ctx().input(|i| i.time);
+                                let blink = ((time * 4.0).sin() > 0.0) as u8;
+                                Color32::from_rgba_unmultiplied(180, 100, 200, 128 + blink * 127)
+                            } else {
+                                Color32::from_rgb(180, 100, 200) // Purple for MIDI
+                            };
+
+                            // Centred over the knob, which sits at the column's left
+                            let dot_size = 8.0 * zoom;
+                            let badge_center = egui::pos2(
+                                ui.cursor().left() + knob_size / 2.0,
+                                ui.cursor().top() + dot_size / 2.0,
+                            );
+
+                            // Draw badge background
+                            ui.painter().circle_filled(badge_center, dot_size / 2.0 + 1.0 * zoom, badge_color);
+
+                            // Draw "M" letter on badge
+                            let text_pos = badge_center - egui::vec2(3.0 * zoom, 4.0 * zoom);
+                            ui.painter().text(
+                                text_pos,
+                                egui::Align2::LEFT_TOP,
+                                "M",
+                                egui::FontId::proportional(8.0 * zoom),
+                                Color32::WHITE,
+                            );
+
+                            ui.add_space(dot_size + 2.0 * zoom);
+
+                            // Request repaint for blinking effect
+                            if midi_config.is_learn_target {
+                                ui.ctx().request_repaint();
+                            }
+                        } else if show_connection_indicator {
+                            // Orange color for Control signal (matches signal type color)
+                            let indicator_color = if signal_value.is_some() {
+                                Color32::from_rgb(255, 165, 0) // Orange for active signal
+                            } else {
+                                Color32::from_rgb(100, 200, 100) // Green for connected but no signal yet
+                            };
+                            // Draw a small colored dot centered above the knob
+                            let dot_size = 6.0 * zoom;
+                            let dot_rect = egui::Rect::from_center_size(
+                                egui::pos2(
+                                    ui.cursor().left() + knob_size / 2.0,
+                                    ui.cursor().top() + dot_size / 2.0,
+                                ),
+                                egui::vec2(dot_size, dot_size),
+                            );
+                            ui.painter().circle_filled(dot_rect.center(), dot_size / 2.0, indicator_color);
+                            ui.add_space(dot_size + 2.0 * zoom);
+                        }
+
+                        // Render knob based on the value type
+                        // Note: We need to clone to render since we can't mutate through the graph reference
+                        // The actual parameter change will be handled through the normal widget flow
+                        // For modulatable params, pass None for signal_value so knob shows base value
+                        let display_signal = if let Some(takeover) = &takeover {
+                            takeover.value
+                        } else if knob_param.disable_when_connected() {
+                            signal_value
+                        } else {
+                            None // Modulatable: show base knob value, not CV signal
+                        };
+                        Self::render_knob_for_value(
+                            ui,
+                            &input.value,
+                            &knob_param.label,
+                            knob_size,
+                            should_disable,
+                            node_id,
+                            &knob_param.param_name,
+                            responses,
+                            display_signal,
+                            takeover.map(|takeover| takeover.text),
+                            &midi_config,
+                            self.category.color(),
+                            user_state.knob_style,
+                        );
+                    });
+                });
+
+                // Create an interactive rect over the knob area for context menu
+                let knob_rect = knob_response.response.rect;
+                let interact_response = ui.interact(
+                    knob_rect,
+                    egui::Id::new(("knob_context", node_id, current_param_index, place.is_face())),
+                    egui::Sense::click(),
+                );
+                let interact_response = hints::attach(interact_response, Hint::knob(self.module_id, &knob_param.param_name));
+
+                // Handle right-click context menu for MIDI Learn
+                if let Some(engine_id) = engine_node_id {
+                    let menu_response = interact_response.context_menu(|ui| {
+                        // The menu is as wide as its longest entry, not wrapped to the knob
+                        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                        if is_learn_target {
+                            // Already waiting for a CC: the way out
+                            if ui.button("Cancel MIDI Learn").clicked() {
+                                responses.push(NodeResponse::User(SynthResponse::MidiLearnCancel));
+                                ui.close_menu();
+                            }
+                        } else if midi_config.has_midi_mapping {
+                            let cc_text = midi_config.cc_number
+                                .map(|cc| format!("CC #{}", cc))
+                                .unwrap_or_else(|| "MIDI".to_string());
+                            ui.label(RichText::new(cc_text).small().weak());
+                            ui.separator();
+
+                            if ui.button("Clear MIDI").clicked() {
+                                responses.push(NodeResponse::User(SynthResponse::MidiLearnClear {
+                                    engine_node_id: engine_id,
+                                    param_index: current_param_index,
+                                }));
+                                ui.close_menu();
+                            }
+                            if ui.button("Re-learn MIDI CC").clicked() {
+                                responses.push(NodeResponse::User(SynthResponse::MidiLearnStart {
+                                    engine_node_id: engine_id,
+                                    param_index: current_param_index,
+                                    param_name: knob_param.param_name.clone(),
+                                    min_value: midi_config.min_value,
+                                    max_value: midi_config.max_value,
+                                }));
+                                ui.close_menu();
+                            }
+                        } else {
+                            if ui.button("Learn MIDI CC").clicked() {
+                                responses.push(NodeResponse::User(SynthResponse::MidiLearnStart {
+                                    engine_node_id: engine_id,
+                                    param_index: current_param_index,
+                                    param_name: knob_param.param_name.clone(),
+                                    min_value: midi_config.min_value,
+                                    max_value: midi_config.max_value,
+                                }));
+                                ui.close_menu();
+                            }
+                        }
+                        // Pinning: the knob shows on the face of the group around it
+                        let pinned = self.pin_levels(&knob_param.param_name);
+                        let mut pin = |ui: &mut egui::Ui, label: &str, hint: &str, levels: u8| {
+                            if ui.button(label).on_hover_text(hint).clicked() {
+                                responses.push(NodeResponse::User(SynthResponse::PinKnob {
+                                    node_id,
+                                    param_name: knob_param.param_name.clone(),
+                                    levels,
+                                }));
+                                ui.close_menu();
+                            }
+                        };
+                        match place {
+                            KnobPlace::Module if self.parent.is_some() => {
+                                ui.separator();
+                                if pinned == 0 {
+                                    pin(ui, "Show on group", "Put this knob on the face of the group it's in", 1);
+                                } else {
+                                    pin(ui, "Hide from group", "Take this knob off the group's face", 0);
+                                }
+                            }
+                            KnobPlace::Face { depth, outer } => {
+                                ui.separator();
+                                pin(ui, "Hide from group", "Take this knob off this group's face", depth - 1);
+                                if outer && pinned == depth {
+                                    pin(ui, "Show on outer group too", "Put this knob on the face of the group around this one too", depth + 1);
+                                }
+                            }
+                            KnobPlace::Module => {}
+                        }
+                    });
+                    // Set flag if context menu is open to prevent add-node menu
+                    if menu_response.is_some() {
+                        user_state.widget_context_menu_open = true;
+                    }
+                }
+            }
+        }
+    }
+
     /// A module's right-click menu. Each action applies to the whole
     /// selection when the module is part of it.
     fn node_menu(
@@ -712,6 +1013,7 @@ impl SynthNodeData {
             item(ui, label, "Ctrl+B", SynthResponse::ToggleBypass(node_id));
         }
         item(ui, "Reset to defaults", "", SynthResponse::ResetNode(node_id));
+        item(ui, "Group", "Ctrl+G", SynthResponse::GroupNode(node_id));
         ui.separator();
         item(ui, "Delete", "Del", SynthResponse::DeleteNode(node_id));
     }
@@ -812,6 +1114,9 @@ impl NodeDataTrait for SynthNodeData {
     where
         Self::Response: UserResponseTrait,
     {
+        if !self.is_module() {
+            return super::group_face::top_bar(self, ui, node_id, user_state, zoom);
+        }
         let mut responses = Vec::new();
 
         // Right-clicking the module opens its menu. The editor senses clicks
@@ -877,10 +1182,14 @@ impl NodeDataTrait for SynthNodeData {
     where
         Self::Response: UserResponseTrait,
     {
-        let mut responses = Vec::new();
-
         // Output labels keep the full opacity they had before the fade below
         let label_painter = ui.painter().clone();
+        if !self.is_module() {
+            let responses = super::group_face::body(self, ui, node_id, graph, user_state, zoom);
+            place_output_labels(ui, &label_painter, node_id, self.module_id);
+            return responses;
+        }
+        let mut responses = Vec::new();
 
         // A bypassed module's controls fade back but stay adjustable
         if self.bypassed {
@@ -2086,8 +2395,6 @@ impl NodeDataTrait for SynthNodeData {
 
             // Render knobs - just use a simple horizontal layout
             // Centering would require knowing the final node width which we don't have yet
-            let knob_size = 36.0 * zoom;
-
             let per_row = match self.knobs_per_row {
                 0 => self.knob_params.len(),
                 n => n,
@@ -2095,238 +2402,7 @@ impl NodeDataTrait for SynthNodeData {
             for row in self.knob_params.chunks(per_row) {
             ui.horizontal(|ui| {
                 for knob_param in row {
-                    // Find the corresponding input parameter by name
-                    if let Some(node) = graph.nodes.get(node_id) {
-                        if let Some((_name, input_id)) = node.inputs.iter().find(|(name, _)| *name == knob_param.param_name) {
-                            let input = graph.get_input(*input_id);
-
-                            // Calculate param_index by finding the position among editable parameters
-                            let current_param_index = node.inputs.iter()
-                                .take_while(|(name, _)| *name != knob_param.param_name)
-                                .filter(|(_, id)| {
-                                    let inp = graph.get_input(*id);
-                                    matches!(inp.kind,
-                                        egui_node_graph2::InputParamKind::ConstantOnly |
-                                        egui_node_graph2::InputParamKind::ConnectionOrConstant)
-                                })
-                                .count();
-
-                            // Check if this param has an input port and if it's connected
-                            // iter_connections returns (InputId, OutputId) - input port and the output it's connected to
-                            let is_connected = knob_param.has_input_port() &&
-                                graph.iter_connections().any(|(input, _output)| input == *input_id);
-
-                            // Something else in charge of it: a synced LFO's division,
-                            // a MIDI clock's tempo
-                            let takeover = super::clock_display::knob_takeover(
-                                self.module_id, &knob_param.param_name, node_id, graph, user_state,
-                            );
-
-                            // Should the knob be disabled? Only for Exposed mode, not for Modulatable
-                            let should_disable = takeover.is_some() || (is_connected && knob_param.disable_when_connected());
-
-                            // Get input port index for this parameter (for looking up signal value)
-                            let input_port_index = if knob_param.has_input_port() {
-                                // Count ConnectionOrConstant and ConnectionOnly inputs before this one
-                                node.inputs.iter()
-                                    .take_while(|(name, _)| *name != knob_param.param_name)
-                                    .filter(|(_, id)| {
-                                        let inp = graph.get_input(*id);
-                                        matches!(inp.kind,
-                                            egui_node_graph2::InputParamKind::ConnectionOnly |
-                                            egui_node_graph2::InputParamKind::ConnectionOrConstant)
-                                    })
-                                    .count()
-                            } else {
-                                0
-                            };
-
-                            // Get signal feedback value from audio engine (if connected and available)
-                            let signal_value = if is_connected {
-                                engine_node_id.and_then(|eid|
-                                    user_state.get_input_value(eid, input_port_index))
-                            } else {
-                                None
-                            };
-
-                            // Get MIDI mapping info for this parameter
-                            let midi_mapping = engine_node_id.and_then(|eid|
-                                user_state.get_midi_mapping(eid, current_param_index));
-                            let is_learn_target = engine_node_id
-                                .map(|eid| user_state.is_midi_learn_target(eid, current_param_index))
-                                .unwrap_or(false);
-
-                            // Get min/max values for MIDI Learn
-                            let (min_value, max_value) = input.value.range();
-
-                            // Build MIDI config for the knob
-                            let midi_config = KnobMidiConfig {
-                                has_midi_mapping: midi_mapping.is_some(),
-                                cc_number: midi_mapping.map(|m| m.cc_number),
-                                is_learn_target,
-                                min_value,
-                                max_value,
-                            };
-
-                            // Render the knob based on value type
-                            let knob_response = ui.scope(|ui| {
-                                ui.vertical(|ui| {
-                                    ui.set_min_width(knob_size + 8.0 * zoom);
-
-                                    // Visual indicator for MIDI mapping or learn mode
-                                    let show_midi_indicator = midi_config.has_midi_mapping || midi_config.is_learn_target;
-                                    let show_connection_indicator = is_connected && !show_midi_indicator;
-
-                                    if show_midi_indicator {
-                                        // MIDI CC badge - purple for mapped, blinking for learn mode
-                                        let badge_color = if midi_config.is_learn_target {
-                                            // Blink effect for learn mode
-                                            let time = ui.ctx().input(|i| i.time);
-                                            let blink = ((time * 4.0).sin() > 0.0) as u8;
-                                            Color32::from_rgba_unmultiplied(180, 100, 200, 128 + blink * 127)
-                                        } else {
-                                            Color32::from_rgb(180, 100, 200) // Purple for MIDI
-                                        };
-
-                                        // Centred over the knob, which sits at the column's left
-                                        let dot_size = 8.0 * zoom;
-                                        let badge_center = egui::pos2(
-                                            ui.cursor().left() + knob_size / 2.0,
-                                            ui.cursor().top() + dot_size / 2.0,
-                                        );
-
-                                        // Draw badge background
-                                        ui.painter().circle_filled(badge_center, dot_size / 2.0 + 1.0 * zoom, badge_color);
-
-                                        // Draw "M" letter on badge
-                                        let text_pos = badge_center - egui::vec2(3.0 * zoom, 4.0 * zoom);
-                                        ui.painter().text(
-                                            text_pos,
-                                            egui::Align2::LEFT_TOP,
-                                            "M",
-                                            egui::FontId::proportional(8.0 * zoom),
-                                            Color32::WHITE,
-                                        );
-
-                                        ui.add_space(dot_size + 2.0 * zoom);
-
-                                        // Request repaint for blinking effect
-                                        if midi_config.is_learn_target {
-                                            ui.ctx().request_repaint();
-                                        }
-                                    } else if show_connection_indicator {
-                                        // Orange color for Control signal (matches signal type color)
-                                        let indicator_color = if signal_value.is_some() {
-                                            Color32::from_rgb(255, 165, 0) // Orange for active signal
-                                        } else {
-                                            Color32::from_rgb(100, 200, 100) // Green for connected but no signal yet
-                                        };
-                                        // Draw a small colored dot centered above the knob
-                                        let dot_size = 6.0 * zoom;
-                                        let dot_rect = egui::Rect::from_center_size(
-                                            egui::pos2(
-                                                ui.cursor().left() + knob_size / 2.0,
-                                                ui.cursor().top() + dot_size / 2.0,
-                                            ),
-                                            egui::vec2(dot_size, dot_size),
-                                        );
-                                        ui.painter().circle_filled(dot_rect.center(), dot_size / 2.0, indicator_color);
-                                        ui.add_space(dot_size + 2.0 * zoom);
-                                    }
-
-                                    // Render knob based on the value type
-                                    // Note: We need to clone to render since we can't mutate through the graph reference
-                                    // The actual parameter change will be handled through the normal widget flow
-                                    // For modulatable params, pass None for signal_value so knob shows base value
-                                    let display_signal = if let Some(takeover) = &takeover {
-                                        takeover.value
-                                    } else if knob_param.disable_when_connected() {
-                                        signal_value
-                                    } else {
-                                        None // Modulatable: show base knob value, not CV signal
-                                    };
-                                    Self::render_knob_for_value(
-                                        ui,
-                                        &input.value,
-                                        &knob_param.label,
-                                        knob_size,
-                                        should_disable,
-                                        node_id,
-                                        &knob_param.param_name,
-                                        &mut responses,
-                                        display_signal,
-                                        takeover.map(|takeover| takeover.text),
-                                        &midi_config,
-                                        self.category.color(),
-                                        user_state.knob_style,
-                                    );
-                                });
-                            });
-
-                            // Create an interactive rect over the knob area for context menu
-                            let knob_rect = knob_response.response.rect;
-                            let interact_response = ui.interact(
-                                knob_rect,
-                                egui::Id::new(("knob_context", node_id, current_param_index)),
-                                egui::Sense::click(),
-                            );
-                            let interact_response = hints::attach(interact_response, Hint::knob(self.module_id, &knob_param.param_name));
-
-                            // Handle right-click context menu for MIDI Learn
-                            if let Some(engine_id) = engine_node_id {
-                                let menu_response = interact_response.context_menu(|ui| {
-                                    // The menu is as wide as its longest entry, not wrapped to the knob
-                                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-                                    if is_learn_target {
-                                        // Already waiting for a CC: the way out
-                                        if ui.button("Cancel MIDI Learn").clicked() {
-                                            responses.push(NodeResponse::User(SynthResponse::MidiLearnCancel));
-                                            ui.close_menu();
-                                        }
-                                    } else if midi_config.has_midi_mapping {
-                                        let cc_text = midi_config.cc_number
-                                            .map(|cc| format!("CC #{}", cc))
-                                            .unwrap_or_else(|| "MIDI".to_string());
-                                        ui.label(RichText::new(cc_text).small().weak());
-                                        ui.separator();
-
-                                        if ui.button("Clear MIDI").clicked() {
-                                            responses.push(NodeResponse::User(SynthResponse::MidiLearnClear {
-                                                engine_node_id: engine_id,
-                                                param_index: current_param_index,
-                                            }));
-                                            ui.close_menu();
-                                        }
-                                        if ui.button("Re-learn MIDI CC").clicked() {
-                                            responses.push(NodeResponse::User(SynthResponse::MidiLearnStart {
-                                                engine_node_id: engine_id,
-                                                param_index: current_param_index,
-                                                param_name: knob_param.param_name.clone(),
-                                                min_value: midi_config.min_value,
-                                                max_value: midi_config.max_value,
-                                            }));
-                                            ui.close_menu();
-                                        }
-                                    } else {
-                                        if ui.button("Learn MIDI CC").clicked() {
-                                            responses.push(NodeResponse::User(SynthResponse::MidiLearnStart {
-                                                engine_node_id: engine_id,
-                                                param_index: current_param_index,
-                                                param_name: knob_param.param_name.clone(),
-                                                min_value: midi_config.min_value,
-                                                max_value: midi_config.max_value,
-                                            }));
-                                            ui.close_menu();
-                                        }
-                                    }
-                                });
-                                // Set flag if context menu is open to prevent add-node menu
-                                if menu_response.is_some() {
-                                    user_state.widget_context_menu_open = true;
-                                }
-                            }
-                        }
-                    }
+                    self.knob_cell(ui, node_id, knob_param, graph, user_state, zoom, &mut responses, KnobPlace::Module);
                 }
                 });
             }
@@ -2444,6 +2520,16 @@ impl NodeDataTrait for SynthNodeData {
 
     fn titlebar_text_style(&self) -> egui::TextStyle {
         crate::app::theme::title_text_style()
+    }
+
+    /// A group's Inputs and Outputs only go with the group.
+    fn can_delete(
+        &self,
+        _node_id: egui_node_graph2::NodeId,
+        _graph: &egui_node_graph2::Graph<Self, Self::DataType, Self::ValueType>,
+        _user_state: &mut Self::UserState,
+    ) -> bool {
+        !self.kind.is_proxy()
     }
 }
 

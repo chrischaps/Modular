@@ -567,8 +567,18 @@ impl Default for Preview {
 #[derive(Clone, Debug, Default)]
 pub struct Face {
     pub preview: Preview,
-    /// The knobs pinned to it: (module, parameter).
-    pub knobs: Vec<(NodeId, String)>,
+    /// The knobs pinned to it.
+    pub knobs: Vec<FaceKnob>,
+}
+
+/// A knob pinned to a group's face.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FaceKnob {
+    /// The module the knob belongs to.
+    pub node: NodeId,
+    pub param: String,
+    /// How many groups down the module is from the face: 1 directly inside.
+    pub depth: u8,
 }
 
 /// A group's name being typed, in a field on its face.
@@ -630,15 +640,15 @@ pub fn preview(
     preview
 }
 
-/// The knobs a group shows on its face: (module, parameter) for each knob
-/// pinned to it, from modules directly inside it or deeper down, top to
+/// The knobs a group shows on its face: each knob pinned to it, from
+/// modules directly inside it or deeper down, nearest first, then top to
 /// bottom by where the modules sit.
 pub fn face_knobs(
     graph: &SynthGraph,
     position: impl Fn(NodeId) -> Option<Pos2>,
     index: &GroupIndex,
     id: GroupId,
-) -> Vec<(NodeId, String)> {
+) -> Vec<FaceKnob> {
     let mut modules: Vec<(NodeId, u8)> = graph
         .nodes
         .iter()
@@ -655,7 +665,7 @@ pub fn face_knobs(
         let data = &graph[node_id].user_data;
         for knob in &data.knob_params {
             if data.pin_levels(&knob.param_name) >= depth {
-                knobs.push((node_id, knob.param_name.clone()));
+                knobs.push(FaceKnob { node: node_id, param: knob.param_name.clone(), depth });
             }
         }
     }
@@ -852,7 +862,8 @@ mod tests {
         let positions = &rig.editor.node_positions;
         let knobs = |id| face_knobs(graph, |n| positions.get(n).copied(), &index, id);
         // Oscillator (left) before the filter, both directly inside Tone
-        assert_eq!(knobs(GroupId(1000)), [(osc, "Octave".to_string()), (filter, "Cutoff".to_string())]);
+        let knob = |node, param: &str| FaceKnob { node, param: param.to_string(), depth: 1 };
+        assert_eq!(knobs(GroupId(1000)), [knob(osc, "Octave"), knob(filter, "Cutoff")]);
         assert!(knobs(GroupId(1001)).is_empty());
         let _ = outer;
     }

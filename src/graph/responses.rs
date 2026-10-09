@@ -46,6 +46,28 @@ pub enum SynthResponse {
     },
     /// Request to leave MIDI Learn mode without mapping anything.
     MidiLearnCancel,
+    /// Show a module's knob on the faces of the groups around it, `levels`
+    /// groups up (0 takes it off them all).
+    PinKnob {
+        node_id: egui_node_graph2::NodeId,
+        param_name: String,
+        levels: u8,
+    },
+    /// Group the selection the node is part of (or just the node).
+    GroupNode(egui_node_graph2::NodeId),
+    /// Take a group apart onto the level it sits on.
+    UngroupNode(egui_node_graph2::NodeId),
+    /// Show the inside of a group.
+    EnterGroup(egui_node_graph2::NodeId),
+    /// Start typing a group's name.
+    StartRename(egui_node_graph2::NodeId),
+    /// A group's new name, typed.
+    RenameGroup {
+        node_id: egui_node_graph2::NodeId,
+        name: String,
+    },
+    /// Save a group to My Modules.
+    SaveGroup(egui_node_graph2::NodeId),
 }
 
 impl SynthResponse {

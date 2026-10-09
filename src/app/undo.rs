@@ -846,6 +846,7 @@ mod tests {
     use egui::{pos2, vec2, Rect};
     use egui_node_graph2::GraphEditorState;
     use crate::graph::annotations::Annotation;
+    use crate::graph::groups;
 
     /// An editor without a window: the graph, its user state and undo
     /// history, edited the way the editor and its responses edit them.
@@ -1365,5 +1366,111 @@ mod tests {
         assert_eq!(undone.label, "Duplicate 2 modules");
         assert!(same(&rig.snapshot(), &before));
         assert!(pasted.nodes.iter().all(|id| !rig.editor.graph.nodes.contains_key(*id)));
+    }
+
+    /// Groups nodes the way Ctrl+G does, naming the step.
+    fn group(rig: &mut Rig, nodes: &[NodeId], name: &str) -> groups::NewGroup {
+        let id = rig.user_state.allocate_group_id();
+        let bounds = egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 400.0));
+        let new = groups::group(&mut rig.editor, nodes, id, name, bounds).unwrap();
+        rig.history.name_next(format!("Group {name}"));
+        new
+    }
+
+    /// Commands that change what the engine plays.
+    fn sound_changes(commands: &[EngineCommand]) -> usize {
+        count(commands, |c| !matches!(c,
+            EngineCommand::MonitorInput { .. } | EngineCommand::UnmonitorInput { .. }
+                | EngineCommand::MonitorOutput { .. } | EngineCommand::UnmonitorOutput { .. }))
+    }
+
+    #[test]
+    fn test_group_and_ungroup_undo_without_touching_the_sound() {
+        let mut rig = Rig::new();
+        let (osc, filter, _) = voice(&mut rig);
+        let mut new = None;
+        let (undone, redone) = round_trip(&mut rig, |rig| new = Some(group(rig, &[osc, filter], "Tone")));
+        assert_eq!(undone.label, "Group Tone");
+        assert_eq!(sound_changes(&undone.commands), 0, "{:?}", undone.commands);
+        assert_eq!(sound_changes(&redone.commands), 0, "{:?}", redone.commands);
+        // Undone and redone, the group is back with its own ID
+        let group_node = rig.editor.graph.nodes.iter().find(|(_, n)| n.user_data.kind.group().is_some()).unwrap().0;
+        assert_eq!(rig.editor.graph[group_node].label, "Tone");
+        assert_eq!(rig.editor.graph[osc].user_data.parent, rig.editor.graph[group_node].user_data.kind.group());
+        let _ = new;
+
+        let (undone, _) = round_trip(&mut rig, |rig| {
+            groups::ungroup(&mut rig.editor, group_node).unwrap();
+            rig.history.name_next("Ungroup Tone");
+        });
+        assert_eq!(undone.label, "Ungroup Tone");
+        assert_eq!(sound_changes(&undone.commands), 0, "{:?}", undone.commands);
+    }
+
+    #[test]
+    fn test_renaming_and_pinning_undo() {
+        let mut rig = Rig::new();
+        let (osc, filter, _) = voice(&mut rig);
+        let new = group(&mut rig, &[osc, filter], "Group");
+        rig.record();
+
+        let (undone, _) = round_trip(&mut rig, |rig| groups::rename(&mut rig.editor.graph, new.node, "Tone"));
+        assert_eq!(undone.label, "Rename group Tone");
+        rig.undo();
+        assert_eq!(rig.editor.graph[new.node].label, "Group");
+        rig.redo();
+
+        let (undone, _) = round_trip(&mut rig, |rig| {
+            rig.editor.graph[filter].user_data.pins.insert("Cutoff".into(), 1);
+        });
+        assert_eq!(undone.label, "Pin SVF Filter knob");
+        assert!(undone.commands.is_empty());
+        rig.undo();
+        assert!(rig.editor.graph[filter].user_data.pins.is_empty());
+    }
+
+    #[test]
+    fn test_deleting_a_group_brings_everything_back() {
+        let mut rig = Rig::new();
+        let (osc, filter, out) = voice(&mut rig);
+        rig.set(filter, "Cutoff", 520.0);
+        let new = group(&mut rig, &[osc, filter], "Tone");
+        rig.record();
+        let keys = [rig.engine_id(osc), rig.engine_id(filter)];
+
+        let (undone, redone) = round_trip(&mut rig, |rig| {
+            let commands = editing::delete_modules(&mut rig.editor, &mut rig.user_state, &[new.node]);
+            assert_eq!(count(&commands, |c| matches!(c, EngineCommand::RemoveModule { .. })), 2);
+        });
+        // Both modules come back under their engine IDs, with the cable out
+        // of the group to the output, through its jacks
+        for key in keys {
+            assert_eq!(count(&undone.commands, |c| matches!(c, EngineCommand::AddModule { node_id, .. } if *node_id == key)), 1);
+        }
+        assert_eq!(count(&undone.commands, |c| matches!(c, EngineCommand::Connect { .. })), 2);
+        assert_eq!(count(&redone.commands, |c| matches!(c, EngineCommand::RemoveModule { .. })), 2);
+        rig.undo();
+        assert_eq!(rig.param(rig.node(keys[1]), "Cutoff"), 520.0);
+        assert!(rig.editor.graph.nodes.contains_key(rig.node(keys[0])));
+        let _ = out;
+    }
+
+    #[test]
+    fn test_an_edit_inside_a_group_remembers_where_it_was_made() {
+        let mut rig = Rig::new();
+        let (osc, filter, _) = voice(&mut rig);
+        let new = group(&mut rig, &[osc, filter], "Tone");
+        rig.record();
+        let id = rig.editor.graph[new.node].user_data.kind.group();
+
+        rig.user_state.level = id;
+        rig.set(filter, "Cutoff", 300.0);
+        rig.record();
+        rig.user_state.level = None;
+        let undone = rig.undo();
+        assert_eq!(undone.label, "Set SVF Filter Cutoff");
+        assert_eq!(undone.level, id);
+        let redone = rig.redo();
+        assert_eq!(redone.level, id);
     }
 }

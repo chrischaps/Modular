@@ -65,7 +65,7 @@ fn patch_top_left(editor: &SynthGraphEditorState, user_state: &SynthGraphState, 
 }
 
 /// Builds a node from a template and puts it at `position`, on top of the
-/// others. It has no engine ID yet.
+/// others, on the level the editor shows. It has no engine ID yet.
 pub fn place_node(
     editor: &mut SynthGraphEditorState,
     user_state: &mut SynthGraphState,
@@ -77,6 +77,8 @@ pub fn place_node(
         template.user_data(user_state),
         |graph, node_id| template.build_node(graph, user_state, node_id),
     );
+    // On the level the editor shows
+    editor.graph[node_id].user_data.parent = user_state.level;
     editor.node_positions.insert(node_id, position);
     editor.node_order.push(node_id);
     node_id
@@ -550,5 +552,48 @@ mod tests {
         assert_eq!(describe(vec![osc, filter], vec![frame]), "2 modules and 1 frame");
         assert_eq!(describe(vec![osc], vec![frame, note]), "1 module, 1 frame and 1 note");
         assert_eq!(describe(vec![], vec![frame, note]), "1 frame and 1 note");
+    }
+
+    #[test]
+    fn a_group_duplicates_with_everything_inside_it() {
+        let mut rig = Rig::new();
+        let (osc, filter, _) = chain(&mut rig);
+        let id = rig.user_state.allocate_group_id();
+        let bounds = egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 300.0));
+        let new = groups::group(&mut rig.editor, &[osc, filter], id, "Tone", bounds).unwrap();
+        engine_sync::sync_cables(&rig.editor.graph, &mut rig.user_state);
+        assert_eq!(describe_modules(&rig.editor, &[new.node]), "group Tone");
+
+        let pasted = duplicate(&mut rig.editor, &mut rig.user_state, &Selection::modules(&[new.node])).unwrap();
+        // The copy is a group of its own, on the top level, with its own ID
+        let [copy] = pasted.nodes[..] else { panic!("expected the group alone: {:?}", pasted.nodes) };
+        let copy_id = rig.editor.graph[copy].user_data.kind.group().unwrap();
+        assert_ne!(copy_id, id);
+        assert_eq!(rig.editor.graph[copy].label, "Tone");
+        assert_eq!(rig.editor.graph[copy].user_data.parent, None);
+        let index = GroupIndex::of(&rig.editor.graph);
+        assert_eq!(groups::descendants(&rig.editor.graph, &index, copy_id).len(), 4);
+
+        // Two new modules inside it, wired as the originals, and nothing to the output
+        let adds = pasted.commands.iter().filter(|c| matches!(c, EngineCommand::AddModule { .. })).count();
+        let connects = pasted.commands.iter().filter(|c| matches!(c, EngineCommand::Connect { .. })).count();
+        assert_eq!((adds, connects), (2, 1));
+    }
+
+    #[test]
+    fn pasting_inside_a_group_lands_there() {
+        let mut rig = Rig::new();
+        let (osc, filter, out) = chain(&mut rig);
+        let id = rig.user_state.allocate_group_id();
+        let bounds = egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 300.0));
+        groups::group(&mut rig.editor, &[osc, filter], id, "Tone", bounds).unwrap();
+        let patch = copy_selection(&rig.editor, &rig.user_state, &Selection::modules(&[out])).unwrap();
+
+        rig.user_state.level = Some(id);
+        let pasted = paste(&mut rig.editor, &mut rig.user_state, &patch, pos2(50.0, 50.0)).unwrap();
+        assert_eq!(rig.editor.graph[pasted.nodes[0]].user_data.parent, Some(id));
+        // A module added from the menu lands there too
+        let added = rig.add("osc.sine", pos2(0.0, 0.0));
+        assert_eq!(rig.editor.graph[added].user_data.parent, Some(id));
     }
 }

@@ -7,6 +7,7 @@ pub mod annotation_ui;
 pub mod annotations;
 pub mod catalog;
 pub mod groups;
+mod group_face;
 mod clock_display;
 mod data_types;
 pub mod hints;

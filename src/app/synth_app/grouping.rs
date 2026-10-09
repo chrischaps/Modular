@@ -1,0 +1,397 @@
+//! Groups in the editor: making and taking them apart, naming them, going
+//! inside and back out, and the knobs pinned to their faces.
+//!
+//! The editor shows one level of the patch at a time: the top, or the
+//! inside of one group. [`SynthApp::prepare_level`] works out, before each
+//! frame is drawn, which nodes that hides, what the groups on show have on
+//! their faces, and which module output each group jack carries, so cables
+//! from jacks show the signal flowing through them.
+
+use eframe::egui::{self, vec2, FontId, RichText};
+use egui_node_graph2::NodeId;
+
+use crate::graph::groups::{self, Face, GroupIndex, Renaming};
+use crate::graph::{annotation_ui, GroupId};
+use super::super::editing;
+use super::super::theme;
+use super::SynthApp;
+
+/// The miniature on a group's face is laid out at this zoom, so it looks
+/// the same however far the view is zoomed.
+const PREVIEW_ZOOM: f32 = 1.0;
+
+impl SynthApp {
+    /// Works out what this frame shows: the nodes on the current level, the
+    /// faces of the groups on it, and what their jacks carry.
+    pub(super) fn prepare_level(&mut self) {
+        let graph = &self.graph_state.graph;
+        let index = GroupIndex::of(graph);
+        // A level that's gone (undone, or deleted) leaves for the top
+        if self.user_state.level.is_some_and(|level| index.node(level).is_none()) {
+            self.user_state.level = None;
+            self.level_trail.clear();
+        }
+        let level = self.user_state.level;
+
+        self.user_state.hidden =
+            graph.nodes.iter().filter(|(_, n)| n.user_data.parent != level).map(|(id, _)| id).collect();
+        let hidden = &self.user_state.hidden;
+        self.graph_state.selected_nodes.retain(|n| !hidden.contains(n));
+
+        // A jack's cable shows what's plugged in behind it
+        self.user_state.output_aliases.clear();
+        for (node_id, node) in graph.nodes.iter().filter(|(_, n)| !n.user_data.is_module()) {
+            for (k, (_, output)) in node.outputs.iter().enumerate() {
+                let Some(source) = groups::leaf_source(graph, &index, *output) else { continue };
+                let from = graph.get_output(source).node;
+                if let (Some(engine_id), Some(output_index)) =
+                    (self.user_state.get_engine_node_id(from), graph.get_output_index(source))
+                {
+                    self.user_state.output_aliases.insert((node_id, k), (engine_id, output_index));
+                }
+            }
+        }
+
+        // The faces of the groups on show
+        let positions = &self.graph_state.node_positions;
+        let zoom = self.graph_state.pan_zoom.zoom;
+        self.user_state.group_faces = graph
+            .nodes
+            .iter()
+            .filter(|(id, _)| !hidden.contains(id))
+            .filter_map(|(_, node)| node.user_data.kind.group())
+            .map(|id| {
+                let position = |n: NodeId| positions.get(n).map(|p| (p.to_vec2() / zoom * PREVIEW_ZOOM).to_pos2());
+                let face = Face {
+                    preview: groups::preview(graph, position, id, PREVIEW_ZOOM),
+                    knobs: groups::face_knobs(graph, |n| positions.get(n).copied(), &index, id),
+                };
+                (id, face)
+            })
+            .collect();
+
+        if self.user_state.renaming.as_ref().is_some_and(|r| index.node(r.group).is_none()) {
+            self.user_state.renaming = None;
+        }
+        if self.user_state.renaming.is_none() {
+            self.naming_group = None;
+        }
+    }
+
+    /// Groups the selected modules (and groups), and opens the new group's
+    /// name for typing. Naming it is part of the same undo step.
+    pub(super) fn group_selection(&mut self, ctx: &egui::Context, nodes: &[NodeId]) {
+        let graph = &self.graph_state.graph;
+        let nodes: Vec<NodeId> = nodes
+            .iter()
+            .copied()
+            .filter(|n| graph.nodes.get(*n).is_some_and(|node| !node.user_data.kind.is_proxy()))
+            .collect();
+        if nodes.is_empty() {
+            self.status_message = Some("Select modules to group them (Ctrl+G)".to_string());
+            return;
+        }
+        let what = editing::describe_modules(&self.graph_state, &nodes);
+
+        // Where the selection is drawn, for placing Inputs and Outputs either side
+        let zoom = self.graph_state.pan_zoom.zoom;
+        let drawn = nodes
+            .iter()
+            .filter_map(|&n| annotation_ui::module_rect(ctx, n))
+            .map(|r| egui::Rect::from_min_max(self.screen_to_node(r.min), self.screen_to_node(r.max)));
+        let placed = nodes.iter().filter_map(|&n| {
+            let at = *self.graph_state.node_positions.get(n)?;
+            Some(egui::Rect::from_min_size(at, groups::NOMINAL_NODE_SIZE * zoom))
+        });
+        let Some(bounds) = drawn.chain(placed).reduce(|a, b| a.union(b)) else { return };
+
+        let id = self.user_state.allocate_group_id();
+        let Some(new) = groups::group(&mut self.graph_state, &nodes, id, "Group", bounds) else {
+            return;
+        };
+        self.select(vec![new.node], Vec::new());
+        self.user_state.renaming = Some(Renaming { group: id, text: "Group".to_string(), fresh: true });
+        self.naming_group = Some(id);
+        self.history.name_next(format!("Group {what}"));
+        self.status_message = Some(format!("Grouped {what}: name the group, then press Enter"));
+    }
+
+    /// Takes groups apart onto the level they sit on, their modules
+    /// selected. With no group among `nodes`, inside a group, it takes that
+    /// group apart and shows the level it was on.
+    pub(super) fn ungroup(&mut self, nodes: &[NodeId]) {
+        let graph = &self.graph_state.graph;
+        let mut targets: Vec<NodeId> =
+            nodes.iter().copied().filter(|n| graph.nodes.get(*n).is_some_and(|n| n.user_data.kind.group().is_some())).collect();
+        if targets.is_empty() {
+            if let Some(level) = self.user_state.level {
+                let index = GroupIndex::of(graph);
+                if let Some(node) = index.node(level) {
+                    self.leave_group();
+                    targets.push(node);
+                }
+            }
+        }
+        if targets.is_empty() {
+            self.status_message = Some("Select a group to ungroup it (Ctrl+Alt+G)".to_string());
+            return;
+        }
+        let what = editing::describe_modules(&self.graph_state, &targets);
+        let mut out = Vec::new();
+        for node in targets {
+            out.extend(groups::ungroup(&mut self.graph_state, node).unwrap_or_default());
+        }
+        self.select(out, Vec::new());
+        self.history.name_next(format!("Ungroup {}", what.trim_start_matches("group ")));
+        self.status_message = Some(format!("Ungrouped {}", what.trim_start_matches("group ")));
+    }
+
+    /// Opens a group's name for typing.
+    pub(super) fn start_rename(&mut self, node_id: NodeId) {
+        let Some(node) = self.graph_state.graph.nodes.get(node_id) else { return };
+        let Some(group) = node.user_data.kind.group() else { return };
+        let text = node.user_data.display_name.clone();
+        self.user_state.renaming = Some(Renaming { group, text, fresh: true });
+    }
+
+    /// Names a group, as typed.
+    pub(super) fn rename_group(&mut self, node_id: NodeId, name: &str) {
+        let Some(group) = self.graph_state.graph.nodes.get(node_id).and_then(|n| n.user_data.kind.group()) else {
+            return;
+        };
+        groups::rename(&mut self.graph_state.graph, node_id, name);
+        if self.naming_group == Some(group) {
+            self.history.name_next(format!("Group {name}"));
+            self.status_message = Some(format!("Grouped as {name}: double-click it to go inside"));
+        } else {
+            self.history.name_next(format!("Rename group {name}"));
+        }
+    }
+
+    /// Shows a module's knob on the faces of the groups around it, `levels`
+    /// groups up, or with 0, on none.
+    pub(super) fn pin_knob(&mut self, node_id: NodeId, param_name: &str, levels: u8) {
+        let Some(node) = self.graph_state.graph.nodes.get_mut(node_id) else { return };
+        let data = &mut node.user_data;
+        let before = data.pin_levels(param_name);
+        if levels == 0 {
+            data.pins.remove(param_name);
+        } else {
+            data.pins.insert(param_name.to_string(), levels);
+        }
+        let label = data.knob_params.iter().find(|k| k.param_name == param_name).map_or(param_name, |k| k.label.as_str());
+        let what = format!("{} {}", data.display_name, label);
+        let (verb, done) = if levels > before { ("Pin", "on its group's face") } else { ("Unpin", "off the group's face") };
+        self.history.name_next(format!("{verb} {what}"));
+        self.status_message = Some(format!("{what} {done}"));
+    }
+
+    /// Shows the inside of a group.
+    pub(super) fn enter_group(&mut self, node_id: NodeId) {
+        let Some(id) = self.graph_state.graph.nodes.get(node_id).and_then(|n| n.user_data.kind.group()) else {
+            return;
+        };
+        // Where the group's node sits on screen, to come back out to
+        let anchor = self.graph_state.node_positions.get(node_id).map_or(egui::Vec2::ZERO, |p| p.to_vec2())
+            + self.graph_state.pan_zoom.pan;
+        self.level_trail.push((id, anchor));
+        self.show_level(Some(id));
+        self.frame_level();
+        let name = groups::name(&self.graph_state.graph, node_id).to_string();
+        self.status_message = Some(format!("Inside {name}: Esc to go back out"));
+    }
+
+    /// Goes back out of the group being shown, with its node where it was
+    /// on screen. Returns whether there was a group to leave.
+    pub(super) fn leave_group(&mut self) -> bool {
+        let Some(level) = self.user_state.level else { return false };
+        let graph = &self.graph_state.graph;
+        let index = GroupIndex::of(graph);
+        let parent = index.parent_of(graph, level);
+        let anchor = match self.level_trail.last() {
+            Some(&(id, anchor)) if id == level => {
+                self.level_trail.pop();
+                Some(anchor)
+            }
+            _ => None,
+        };
+        self.show_level(parent);
+        match (anchor, index.node(level).and_then(|n| self.graph_state.node_positions.get(n))) {
+            (Some(anchor), Some(&at)) => self.graph_state.pan_zoom.pan = anchor - at.to_vec2(),
+            _ => self.frame_level(),
+        }
+        if let Some(node) = index.node(level) {
+            self.graph_state.selected_nodes = vec![node];
+            let name = groups::name(&self.graph_state.graph, node).to_string();
+            self.status_message = Some(format!("Back out of {name}"));
+        }
+        true
+    }
+
+    /// Shows a level: back out to it if it's one the view is inside,
+    /// otherwise straight there.
+    pub(super) fn go_to_level(&mut self, target: Option<GroupId>) {
+        let graph = &self.graph_state.graph;
+        let index = GroupIndex::of(graph);
+        let Some(path) = index.path(graph, self.user_state.level) else { return };
+        if target.is_none() || target.is_some_and(|t| path.contains(&t)) {
+            while self.user_state.level != target && self.leave_group() {}
+            return;
+        }
+        if index.path(graph, target).is_none() {
+            return;
+        }
+        // Nowhere on screen to come back out to: the view frames each level
+        self.level_trail.clear();
+        self.show_level(target);
+        self.frame_level();
+    }
+
+    fn show_level(&mut self, level: Option<GroupId>) {
+        self.user_state.level = level;
+        self.graph_state.selected_nodes.clear();
+        self.user_state.annotations.selected.clear();
+        self.user_state.renaming = None;
+        self.user_state.context_menu_pos = None;
+        self.graph_state.connection_in_progress = None;
+        self.prepare_level();
+    }
+
+    /// Pans the view to the middle of what's on the current level.
+    fn frame_level(&mut self) {
+        let zoom = self.graph_state.pan_zoom.zoom;
+        let level = self.user_state.level;
+        let graph = &self.graph_state.graph;
+        let bounds = groups::level_nodes(graph, level)
+            .into_iter()
+            .filter_map(|n| self.graph_state.node_positions.get(n).copied())
+            .map(|at| egui::Rect::from_min_size(at, groups::NOMINAL_NODE_SIZE * zoom))
+            .reduce(|a, b| a.union(b));
+        if let (Some(bounds), true) = (bounds, self.editor_rect.is_positive()) {
+            self.graph_state.pan_zoom.pan = self.editor_rect.size() / 2.0 - bounds.center().to_vec2();
+        }
+    }
+
+    /// Ctrl+G groups the selection, Ctrl+Alt+G takes groups apart, F2
+    /// renames the selected group, Tab opens it and Escape comes back out.
+    /// Tab with no group selected is left for the quick-add palette.
+    pub(super) fn handle_group_shortcuts(&mut self, ctx: &egui::Context) {
+        use egui::{Key, KeyboardShortcut, Modifiers};
+        let selected_group = match self.graph_state.selected_nodes.as_slice() {
+            [one] => self.graph_state.graph.nodes.get(*one).and_then(|n| n.user_data.kind.group()).map(|_| *one),
+            _ => None,
+        };
+        let can_leave = self.user_state.level.is_some()
+            && self.user_state.context_menu_pos.is_none()
+            && !self.is_midi_learning()
+            && self.user_state.annotations.editing.is_none();
+        let (ungroup, group, rename, enter, leave) = ctx.input_mut(|i| {
+            // Ctrl+G alone would also match Ctrl+Alt+G, so that goes first
+            let ungroup = i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::ALT, Key::G));
+            let group = !ungroup && i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::G));
+            let rename = selected_group.is_some() && i.consume_key(Modifiers::NONE, Key::F2);
+            let enter = selected_group.is_some() && i.consume_key(Modifiers::NONE, Key::Tab);
+            let leave = can_leave && i.consume_key(Modifiers::NONE, Key::Escape);
+            (ungroup, group, rename, enter, leave)
+        });
+        let selection = self.graph_state.selected_nodes.clone();
+        if ungroup {
+            self.ungroup(&selection);
+        } else if group {
+            self.group_selection(ctx, &selection);
+        }
+        if let (Some(node), true) = (selected_group, rename) {
+            self.start_rename(node);
+        }
+        if let (Some(node), true) = (selected_group, enter) {
+            self.enter_group(node);
+            // egui also walks its keyboard focus on to a toolbar button with
+            // Tab, before anything can stop it: let it go next frame
+            self.release_tab_focus = true;
+        }
+        if leave {
+            self.leave_group();
+        }
+    }
+
+    /// Removes what was inside a group whose node has just been deleted.
+    pub(super) fn delete_group_contents(&mut self, id: GroupId) {
+        let graph = &self.graph_state.graph;
+        let index = GroupIndex::of(graph);
+        let inside = groups::descendants(graph, &index, id);
+        for cmd in editing::delete_modules(&mut self.graph_state, &mut self.user_state, &inside) {
+            self.send_command(cmd);
+        }
+    }
+
+    /// Whether a selection is on the top level, where frames and notes go.
+    pub(super) fn frames_allowed(&self) -> bool {
+        self.user_state.level.is_none()
+    }
+
+    /// The trail of levels shown at the top of the canvas inside a group,
+    /// "Patch › Voice › Tone": click one to go back out to it.
+    pub(super) fn draw_breadcrumbs(&mut self, ctx: &egui::Context) {
+        let Some(level) = self.user_state.level else { return };
+        let graph = &self.graph_state.graph;
+        let index = GroupIndex::of(graph);
+        let Some(path) = index.path(graph, Some(level)) else { return };
+        let mut crumbs: Vec<(Option<GroupId>, String)> = vec![(None, self.patch_title())];
+        crumbs.extend(path.into_iter().map(|id| (Some(id), index.node(id).map_or("Group", |n| groups::name(graph, n)).to_string())));
+
+        let rose = theme::module::GROUP;
+        let mut go_to = None;
+        egui::Area::new(egui::Id::new("group_breadcrumbs"))
+            .fixed_pos(self.editor_rect.left_top() + vec2(14.0, 12.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::none()
+                    .fill(theme::background::PANEL.gamma_multiply(0.96))
+                    .stroke(egui::Stroke::new(1.0, rose.gamma_multiply(0.55)))
+                    .rounding(16.0)
+                    .inner_margin(egui::Margin::symmetric(14.0, 7.0))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 8.0;
+                            let last = crumbs.len() - 1;
+                            for (i, (target, name)) in crumbs.iter().enumerate() {
+                                if i > 0 {
+                                    ui.label(RichText::new("›").color(theme::text::DISABLED).size(15.0));
+                                }
+                                if i == last {
+                                    ui.label(RichText::new(name).color(rose).strong().size(14.0));
+                                } else {
+                                    let crumb = egui::Button::new(RichText::new(name).color(theme::text::SECONDARY).size(14.0))
+                                        .frame(false);
+                                    if ui.add(crumb).on_hover_text("Back out to here").clicked() {
+                                        go_to = Some(*target);
+                                    }
+                                }
+                            }
+                            ui.add_space(6.0);
+                            ui.label(RichText::new("Esc to go back out").color(theme::text::DISABLED).small());
+                        });
+                    });
+            });
+        if let Some(target) = go_to {
+            self.go_to_level(target);
+        }
+    }
+
+    /// Inside a group, the canvas says so: the group's name set large and
+    /// faint in the corner, and a rose edge around the view.
+    pub(super) fn draw_level_backdrop(&self, painter: &egui::Painter, rect: egui::Rect) {
+        let Some(level) = self.user_state.level else { return };
+        let graph = &self.graph_state.graph;
+        let Some(node) = GroupIndex::of(graph).node(level) else { return };
+        let rose = theme::module::GROUP;
+        painter.text(
+            rect.right_bottom() + vec2(-32.0, -22.0),
+            egui::Align2::RIGHT_BOTTOM,
+            groups::name(graph, node),
+            FontId::new(72.0, egui::FontFamily::Name(theme::TITLE_FAMILY.into())),
+            rose.gamma_multiply(0.07),
+        );
+        painter.rect_stroke(rect.shrink(1.0), 0.0, egui::Stroke::new(2.0, rose.gamma_multiply(0.35)));
+    }
+}
