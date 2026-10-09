@@ -36,7 +36,7 @@ crash    on the downbeat after each fill
 | Module | Settings |
 |--------|----------|
 | [Clock](../modules/modulation/clock.md) | **BPM** 96, **Div** 1/16 |
-| [Step Sequencer](../modules/utilities/sequencer.md) ×4 (kick, snare, hats, toms) | **Steps** 16, **Gate** 99%. Steps as in the pattern above |
+| [Step Sequencer](../modules/utilities/sequencer.md) ×4 (kick, snare, hats, toms) | **Steps** 16, **Gate** 99%, **Gate of** 100 ms. Steps as in the pattern above |
 | [Oscillator](../modules/sources/oscillator.md) (kick) | **Wave** Sine, **Oct** -2, **Semi** -3 (55 Hz), **Exp FM** 2.6 oct |
 | [ADSR Envelope](../modules/modulation/adsr.md) (kick pitch) | **Atk** 1 ms, **Dec** 45 ms, **Sus** 0%, **Rel** 45 ms, **Vel** 30% |
 | [ADSR Envelope](../modules/modulation/adsr.md) (kick level) | **Atk** 1 ms, **Dec** 450 ms, **Sus** 0%, **Rel** 450 ms, **Vel** 40% |
@@ -51,7 +51,7 @@ crash    on the downbeat after each fill
 | [Oscillator](../modules/sources/oscillator.md) (toms) | **Wave** Sine, **Oct** -1, **Semi** +2, **Exp FM** 0.35 oct |
 | [ADSR Envelope](../modules/modulation/adsr.md) (toms) | **Dec** 320 ms, **Rel** 320 ms, **Vel** 60% |
 | [Clock](../modules/modulation/clock.md) (phrase) | **BPM** 24, **Div** 1, **Gate** 26% |
-| [Step Sequencer](../modules/utilities/sequencer.md) (bar counter) | **Steps** 4, only step 4 on |
+| [Step Sequencer](../modules/utilities/sequencer.md) (bar counter) | **Steps** 4, **Gate of** 100 ms, only step 4 on |
 | [Noise](../modules/sources/noise.md) + [SVF Filter](../modules/filters/svf-filter.md) (crash) | **Level** 0%; HighPass, **Cutoff** 4.2 kHz, **Res** 20% |
 | [ADSR Envelope](../modules/modulation/adsr.md) (crash) | **Dec** 1.6 s, **Rel** 1.6 s, **Vel** 0% |
 | [Attenuverter](../modules/utilities/attenuverter.md) (hat mute) | **Amount** -1.0 |
@@ -61,7 +61,7 @@ crash    on the downbeat after each fill
 | [Reverb](../modules/effects/reverb.md) | **Size** 35%, **Decay** 0.9 s, **Damp** 55%, **PreD** 8 ms, **Mix** 20% |
 | [Audio Output](../modules/output/audio-output.md) | **Vol** 72% |
 
-All drum envelopes have a 1 ms attack and 0% sustain. The sequencer's gate is at most 100 ms long, so each envelope's **Release** matches its **Decay**: the sound falls at the same rate after the gate closes.
+All drum envelopes have a 1 ms attack and 0% sustain. The sequencers' gates are a fixed 99 ms (**Gate of** 100 ms), so each envelope's **Release** matches its **Decay**: the sound falls at the same rate after the gate closes.
 
 ## How it's built
 

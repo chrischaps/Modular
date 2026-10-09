@@ -245,7 +245,7 @@ static MODULE_UI: &[ModuleUi] = &[
     ModuleUi {
         module_id: "seq.step",
         knobs: &[knob("Steps"), knob_as("Gate Length", "Gate")],
-        labels: &[("Direction", "Dir")],
+        labels: &[("Direction", "Dir"), ("Gate Mode", "Gate of")],
         hidden: &["Step *"],
         // Step drives the grid's playhead, patched or not
         monitor: &["Gate", "Step", "EOC"],

@@ -23,8 +23,8 @@ A patch that plays itself and sounds finished: a soft, plucked arpeggio rolls th
 | Module | Settings |
 |--------|----------|
 | [Clock](../modules/modulation/clock.md) | **BPM** 92, **Div** 1/16 |
-| [Step Sequencer](../modules/utilities/sequencer.md) 1 (arpeggio) | **Steps** 16, **Gate** 60%. Notes C4 G4 D5 C5 G5 D5 G4 C5 C4 G4 D5 G5 C6 G5 D5 G4, step 10 off |
-| [Step Sequencer](../modules/utilities/sequencer.md) 2 (chords) | **Steps** 4, **Gate** 99%. Notes F3 C4 G3 A3 |
+| [Step Sequencer](../modules/utilities/sequencer.md) 1 (arpeggio) | **Steps** 16, **Gate** 60%, **Gate of** 100 ms. Notes C4 G4 D5 C5 G5 D5 G4 C5 C4 G4 D5 G5 C6 G5 D5 G4, step 10 off |
+| [Step Sequencer](../modules/utilities/sequencer.md) 2 (chords) | **Steps** 4, **Gate** 99%, **Gate of** 100 ms. Notes F3 C4 G3 A3 |
 | [Oscillator](../modules/sources/oscillator.md) 1 | **Wave** Saw, **Voices** 2, **Detune** 12%, **Exp FM** 1.0 oct |
 | [Ladder Filter](../modules/filters/ladder-filter.md) | **Cutoff** 900 Hz, **Res** 35%, **Drive** 2.2x |
 | [ADSR Envelope](../modules/modulation/adsr.md) 1 | **Atk** 2 ms, **Dec** 350 ms, **Sus** 0%, **Rel** 350 ms, **Vel** 60% |

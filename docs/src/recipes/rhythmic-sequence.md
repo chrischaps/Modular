@@ -23,7 +23,7 @@ A 16-step acid bassline at 120 BPM: a saw through a resonant lowpass that snaps 
 | Module | Settings |
 |--------|----------|
 | [Clock](../modules/modulation/clock.md) | **BPM** 120, **Div** 1/16 |
-| [Step Sequencer](../modules/utilities/sequencer.md) | **Steps** 16, **Dir** Fwd, **Gate** 50% |
+| [Step Sequencer](../modules/utilities/sequencer.md) | **Steps** 16, **Dir** Fwd, **Gate** 50%, **Gate of** 100 ms |
 | [Oscillator](../modules/sources/oscillator.md) | **Wave** Saw |
 | [SVF Filter](../modules/filters/svf-filter.md) | **Cutoff** 300 Hz, **Res** 70% |
 | [ADSR Envelope](../modules/modulation/adsr.md) (filter) | **Atk** 1 ms, **Dec** 200 ms, **Sus** 10%, **Rel** 50 ms |
@@ -80,7 +80,7 @@ The filter's **Cutoff** input works in octaves, and an envelope peaks at 1.0, so
 [Stereo Delay Out R] ──> [Audio Output Right]
 ```
 
-The amp envelope is short and punchy, so each note is a distinct pluck. With **Gate** at 50%, each of the sequencer's gates lasts 50 ms (gate length is a share of a fixed 100 ms), well inside the 125 ms step.
+The amp envelope is short and punchy, so each note is a distinct pluck. With **Gate** at 50%, each of the sequencer's gates lasts 50 ms (**Gate of** is set to 100 ms, so Gate is a share of a fixed 100 ms), well inside the 125 ms step.
 
 Soft distortion at 30% drive, mixed at 70%, rounds and thickens the bass and makes the resonant peak growl.
 

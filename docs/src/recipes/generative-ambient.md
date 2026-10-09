@@ -23,7 +23,7 @@ A patch that plays itself. A slow pentatonic melody repeats every twelve seconds
 | Module | Settings |
 |--------|----------|
 | [Clock](../modules/modulation/clock.md) | **BPM** 40, **Div** 1/4 |
-| [Step Sequencer](../modules/utilities/sequencer.md) | **Steps** 8, **Dir** Fwd, **Gate** 60%. Notes C4 D4 E4 G4 A4 G4 E4 D4, step 6 off |
+| [Step Sequencer](../modules/utilities/sequencer.md) | **Steps** 8, **Dir** Fwd, **Gate** 60%, **Gate of** 100 ms. Notes C4 D4 E4 G4 A4 G4 E4 D4, step 6 off |
 | [Oscillator](../modules/sources/oscillator.md) 1 | **Wave** Tri, **Oct** −1, **Exp FM** 0.01 oct |
 | [Oscillator](../modules/sources/oscillator.md) 2 | **Wave** Sine |
 | [Noise](../modules/sources/noise.md) | **Rate** 0.2 Hz |

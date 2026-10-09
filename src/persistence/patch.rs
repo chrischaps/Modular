@@ -541,6 +541,25 @@ pub fn migrate_v4_to_v5(mut patch: Patch) -> Patch {
     patch
 }
 
+/// Keeps the Step Sequencer's old gate timing in patches saved before it had
+/// a Gate Mode.
+///
+/// Gate Length used to be a share of a fixed 100 ms; it's now a share of the
+/// step by default. A sequencer saved without Gate Mode is given the 100 ms
+/// mode, so it plays as it always did. Every sequencer saved since has the
+/// parameter, so this needs no version: older apps ignore it.
+fn keep_fixed_sequencer_gates(nodes: &mut [NodeData], groups: &mut [GroupData]) {
+    for node in nodes.iter_mut().filter(|n| n.module_id == "seq.step") {
+        if !node.parameters.iter().any(|p| p.name == "Gate Mode") {
+            let fixed = crate::modules::sequencer::GateMode::Fixed as usize;
+            node.parameters.push(NamedParameter::new("Gate Mode", ParameterValue::Select(fixed)));
+        }
+    }
+    for group in groups {
+        keep_fixed_sequencer_gates(&mut group.nodes, &mut group.groups);
+    }
+}
+
 /// Parses a patch from JSON, migrating older versions to the current format.
 pub fn patch_from_json(json: &str) -> Result<Patch, PatchError> {
     #[derive(Deserialize)]
@@ -561,7 +580,8 @@ pub fn patch_from_json(json: &str) -> Result<Patch, PatchError> {
         serde_json::from_str(json)?
     };
     let patch = if patch.version < 4 { migrate_v3_to_v4(patch) } else { patch };
-    let patch = if patch.version < 5 { migrate_v4_to_v5(patch) } else { patch };
+    let mut patch = if patch.version < 5 { migrate_v4_to_v5(patch) } else { patch };
+    keep_fixed_sequencer_gates(&mut patch.nodes, &mut patch.groups);
     Ok(patch)
 }
 
@@ -605,6 +625,34 @@ mod tests {
         let loaded = load_from_file(&path);
         std::fs::remove_file(&path).ok();
         assert_eq!(loaded.unwrap(), patch);
+    }
+
+    #[test]
+    fn test_sequencers_saved_before_gate_mode_keep_100_ms_gates() {
+        let gate_mode = |node: &NodeData| {
+            node.parameters.iter().find(|p| p.name == "Gate Mode").map(|p| p.value.clone())
+        };
+        let sequencer = |id: u64, extra: &str| {
+            format!(
+                r#"{{"id": {id}, "module_id": "seq.step", "position": [0, 0], "parameters": [
+                    {{"name": "Gate Length", "type": "Number", "value": 50.0}}{extra}]}}"#
+            )
+        };
+        let step = r#", {"name": "Gate Mode", "type": "Select", "value": 0}"#;
+        let json = format!(
+            r#"{{"name": "Old", "version": 6, "nodes": [{}, {}], "connections": [],
+                "groups": [{{"id": 9, "name": "G", "position": [0, 0], "inputs": [], "outputs": [],
+                    "inputs_position": [0, 0], "outputs_position": [0, 0],
+                    "nodes": [{}], "connections": []}}]}}"#,
+            sequencer(1, ""),
+            sequencer(2, step),
+            sequencer(3, ""),
+        );
+        let patch = patch_from_json(&json).unwrap();
+        let fixed = Some(ParameterValue::Select(crate::modules::sequencer::GateMode::Fixed as usize));
+        assert_eq!(gate_mode(&patch.nodes[0]), fixed, "saved before Gate Mode");
+        assert_eq!(gate_mode(&patch.nodes[1]), Some(ParameterValue::Select(0)), "saved with it");
+        assert_eq!(gate_mode(&patch.groups[0].nodes[0]), fixed, "inside a group");
     }
 
     #[test]

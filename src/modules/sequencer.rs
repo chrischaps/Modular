@@ -58,6 +58,37 @@ static STEP_VELOCITY_NAMES: [&str; MAX_STEPS] = [
     "Step 13 Velocity", "Step 14 Velocity", "Step 15 Velocity", "Step 16 Velocity",
 ];
 
+static STEP_TIE_IDS: [&str; MAX_STEPS] = [
+    "step_1_tie", "step_2_tie", "step_3_tie", "step_4_tie",
+    "step_5_tie", "step_6_tie", "step_7_tie", "step_8_tie",
+    "step_9_tie", "step_10_tie", "step_11_tie", "step_12_tie",
+    "step_13_tie", "step_14_tie", "step_15_tie", "step_16_tie",
+];
+
+static STEP_TIE_NAMES: [&str; MAX_STEPS] = [
+    "Step 1 Tie", "Step 2 Tie", "Step 3 Tie", "Step 4 Tie",
+    "Step 5 Tie", "Step 6 Tie", "Step 7 Tie", "Step 8 Tie",
+    "Step 9 Tie", "Step 10 Tie", "Step 11 Tie", "Step 12 Tie",
+    "Step 13 Tie", "Step 14 Tie", "Step 15 Tie", "Step 16 Tie",
+];
+
+/// What Gate Length is a share of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GateMode {
+    /// The time between the last two clock pulses.
+    Step = 0,
+    /// A fixed 100 ms, whatever the tempo. Patches saved before Gate Mode
+    /// existed load with this.
+    Fixed = 1,
+}
+
+impl GateMode {
+    /// Convert from parameter value (0-1) to mode.
+    pub fn from_param(value: f32) -> Self {
+        if value >= 0.5 { GateMode::Fixed } else { GateMode::Step }
+    }
+}
+
 /// Direction modes for sequence playback.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SequenceDirection {
@@ -129,10 +160,19 @@ pub fn note_to_name(note: u8) -> String {
 ///
 /// - **Steps** (1-16): Number of active steps in the sequence.
 /// - **Direction** (0-3): Playback direction (Forward, Backward, PingPong, Random).
-/// - **Gate Length** (1-99%): Gate duration as percentage of step length.
+/// - **Gate Length** (1-100%): Gate duration as a share of the step (or of
+///   100 ms in the Fixed gate mode). At 100% of the step the gate holds until
+///   the next clock.
 /// - **Step 1-16 Pitch** (0-127): MIDI note number for each step.
 /// - **Step 1-16 Gate** (0/1): Gate on/off for each step.
 /// - **Step 1-16 Velocity** (0-127): Velocity for each step.
+/// - **Gate Mode** (Step / 100 ms): What Gate Length is a share of.
+/// - **Step 1-16 Tie** (0/1): Holds the step's gate into the next step,
+///   which then continues the note instead of starting a new one.
+///
+/// In the Step gate mode a note always starts with a rising edge: when a new
+/// note begins while the gate is still high, the gate drops for one sample
+/// first so envelopes retrigger. Only a tie carries the gate across unbroken.
 pub struct StepSequencer {
     /// Current step index (0-based).
     current_step: usize,
@@ -147,6 +187,15 @@ pub struct StepSequencer {
     prev_reset: bool,
     /// Gate timer (samples remaining in gate).
     gate_timer: usize,
+    /// The note playing is tied into the next step.
+    tied: bool,
+    /// The gate output was high on the last sample.
+    gate_high: bool,
+    /// Samples since the last clock edge, or `None` before the first (and
+    /// after a reset, so a stopped clock's gap isn't taken for a step).
+    since_clock: Option<usize>,
+    /// The time between the last two clock edges, once known.
+    step_samples: Option<usize>,
     /// EOC timer (samples remaining in EOC pulse).
     eoc_timer: usize,
     /// Simple PRNG state for random mode.
@@ -195,10 +244,10 @@ impl StepSequencer {
                 "gate_length",
                 "Gate Length",
                 1.0,
-                99.0,
+                100.0,
                 50.0,
                 ParameterDisplay::linear("%"),
-            ).describe("How long each gate stays high, as a share of 100 ms"),
+            ).describe("How long each gate stays high, as a share of the step; 100% holds it until the next clock"),
         ];
 
         // Add per-step parameters: pitch, gate, velocity for each of 16 steps
@@ -231,6 +280,22 @@ impl StepSequencer {
             ).describe("Velocity for this step, 0 to 127"));
         }
 
+        // Added after the per-step parameters, so older parameter indices
+        // stay where they were
+        parameters.push(ParameterDefinition::choice(
+            "gate_mode",
+            "Gate Mode",
+            &["Step", "100 ms"],
+            GateMode::Step as usize,
+        ).describe("What Gate Length is a share of: the time between clock pulses, or a fixed 100 ms"));
+        for i in 0..MAX_STEPS {
+            parameters.push(ParameterDefinition::toggle(
+                STEP_TIE_IDS[i],
+                STEP_TIE_NAMES[i],
+                false,
+            ).describe("Holds this step's note into the next step, which continues it without a new attack"));
+        }
+
         Self {
             current_step: 0,
             ping_pong_direction: 1,
@@ -238,6 +303,10 @@ impl StepSequencer {
             prev_clock: false,
             prev_reset: false,
             gate_timer: 0,
+            tied: false,
+            gate_high: false,
+            since_clock: None,
+            step_samples: None,
             eoc_timer: 0,
             random_state: 12345, // Seed for PRNG
             sample_rate: 44100.0,
@@ -274,6 +343,34 @@ impl StepSequencer {
     /// Get parameter index for step velocity (0-indexed step).
     const fn step_velocity_param(step: usize) -> usize {
         3 + step * 3 + 2
+    }
+
+    /// Gate Mode comes after the per-step pitch, gate and velocity.
+    const PARAM_GATE_MODE: usize = 3 + MAX_STEPS * 3;
+
+    /// Get parameter index for step tie (0-indexed step).
+    const fn step_tie_param(step: usize) -> usize {
+        Self::PARAM_GATE_MODE + 1 + step
+    }
+
+    /// How long a new note's gate stays high, in samples.
+    ///
+    /// Gate Length is a share of the measured step, or of 100 ms in the
+    /// Fixed mode and until two clock edges have been seen. A gate held
+    /// until the next clock (a tie, or 100% of the step) still ends after
+    /// two steps, so a clock that stops doesn't leave a note hanging.
+    fn gate_samples(&self, mode: GateMode, gate_length: f32, tied: bool) -> usize {
+        let fixed = self.sample_rate * 0.1;
+        let held = 2 * self.step_samples.unwrap_or(fixed as usize);
+        if tied {
+            return held;
+        }
+        let samples = match (mode, self.step_samples) {
+            (GateMode::Step, Some(_)) if gate_length >= 1.0 => held,
+            (GateMode::Step, Some(step)) => (step as f32 * gate_length) as usize,
+            _ => (fixed * gate_length) as usize,
+        };
+        samples.max(1)
     }
 
     /// Gate threshold for edge detection.
@@ -369,6 +466,9 @@ impl DspModule for StepSequencer {
 
     fn prepare(&mut self, sample_rate: f32, _max_block_size: usize) {
         self.sample_rate = sample_rate;
+        // A step measured at another rate is the wrong number of samples
+        self.since_clock = None;
+        self.step_samples = None;
     }
 
     fn process(
@@ -382,6 +482,7 @@ impl DspModule for StepSequencer {
         let num_steps = (params[Self::PARAM_STEPS] as usize).clamp(1, MAX_STEPS);
         let direction = SequenceDirection::from_param(params[Self::PARAM_DIRECTION]);
         let gate_length_percent = params[Self::PARAM_GATE_LENGTH] / 100.0;
+        let gate_mode = GateMode::from_param(params[Self::PARAM_GATE_MODE]);
 
         // Get input buffers
         let clock_in = inputs.get(Self::PORT_CLOCK);
@@ -418,7 +519,18 @@ impl DspModule for StepSequencer {
                 self.ping_pong_direction = 1;
                 self.reset_pending = true;
                 self.gate_timer = 0;
+                self.tied = false;
+                self.since_clock = None;
             }
+
+            // Every clock edge measures the step, running or not
+            if clock_rising {
+                if let Some(samples) = self.since_clock {
+                    self.step_samples = Some(samples.max(1));
+                }
+                self.since_clock = Some(0);
+            }
+            let mut retrigger = false;
 
             // Handle clock advance. The first clock after a reset plays the
             // start step rather than moving past it, so a reset on the
@@ -432,15 +544,19 @@ impl DspModule for StepSequencer {
                     self.advance_step(num_steps, direction)
                 };
 
-                // Start gate timer based on gate length
-                // We don't know the actual step duration, so use a fixed gate time
-                // This will be retriggered on each clock, so gate_length controls duty cycle
-                let gate_samples = (self.sample_rate * 0.1 * gate_length_percent) as usize;
-
-                // Check if current step has gate enabled
+                // A step that plays starts a note, or continues the last one
+                // if that was tied. A rest ends the note
                 let step_gate = params[Self::step_gate_param(self.current_step)] > 0.5;
                 if step_gate {
-                    self.gate_timer = gate_samples.max(1);
+                    let tie = params[Self::step_tie_param(self.current_step)] > 0.5;
+                    // Fixed gates never dipped, so old patches whose notes
+                    // overlap still run them together
+                    retrigger = gate_mode == GateMode::Step && self.gate_high && !self.tied;
+                    self.gate_timer = self.gate_samples(gate_mode, gate_length_percent, tie);
+                    self.tied = tie;
+                } else {
+                    self.gate_timer = 0;
+                    self.tied = false;
                 }
 
                 // Fire EOC pulse if we hit the end of cycle
@@ -462,9 +578,12 @@ impl DspModule for StepSequencer {
             // Generate outputs (access directly by index to avoid multiple mutable borrows)
             outputs[Self::PORT_PITCH].samples[i] = note_to_voct(step_pitch);
 
-            // Gate output: high if timer > 0 and step gate is enabled
-            let gate_active = self.gate_timer > 0 && step_gate_enabled;
+            // Gate output: high if timer > 0 and step gate is enabled. A new
+            // note over a gate that's still high dips for this one sample,
+            // so it starts with a rising edge
+            let gate_active = self.gate_timer > 0 && step_gate_enabled && !retrigger;
             outputs[Self::PORT_GATE].samples[i] = if gate_active { 1.0 } else { 0.0 };
+            self.gate_high = gate_active;
 
             outputs[Self::PORT_VELOCITY].samples[i] = step_velocity;
 
@@ -481,6 +600,9 @@ impl DspModule for StepSequencer {
             if self.eoc_timer > 0 {
                 self.eoc_timer -= 1;
             }
+            if let Some(samples) = self.since_clock.as_mut() {
+                *samples = samples.saturating_add(1);
+            }
         }
     }
 
@@ -491,6 +613,10 @@ impl DspModule for StepSequencer {
         self.prev_clock = false;
         self.prev_reset = false;
         self.gate_timer = 0;
+        self.tied = false;
+        self.gate_high = false;
+        self.since_clock = None;
+        self.step_samples = None;
         self.eoc_timer = 0;
     }
 }
@@ -498,6 +624,16 @@ impl DspModule for StepSequencer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every parameter at its default (C4, gate on, velocity 100, no ties,
+    /// Step gate mode), with the given Steps, Direction and Gate Length.
+    fn params_with(steps: f32, direction: f32, gate_length: f32) -> Vec<f32> {
+        let mut params: Vec<f32> = StepSequencer::new().parameters().iter().map(|p| p.default).collect();
+        params[StepSequencer::PARAM_STEPS] = steps;
+        params[StepSequencer::PARAM_DIRECTION] = direction;
+        params[StepSequencer::PARAM_GATE_LENGTH] = gate_length;
+        params
+    }
 
     #[test]
     fn test_sequencer_info() {
@@ -541,8 +677,11 @@ mod tests {
         let seq = StepSequencer::new();
         let params = seq.parameters();
 
-        // 3 global + 16 steps * 3 params each = 51 parameters
-        assert_eq!(params.len(), 3 + MAX_STEPS * 3);
+        // 3 global + 16 steps * 3 params each, then Gate Mode and 16 ties
+        assert_eq!(params.len(), 3 + MAX_STEPS * 3 + 1 + MAX_STEPS);
+        assert_eq!(params[StepSequencer::PARAM_GATE_MODE].id, "gate_mode");
+        assert_eq!(params[StepSequencer::step_tie_param(0)].id, "step_1_tie");
+        assert_eq!(params[StepSequencer::step_tie_param(15)].id, "step_16_tie");
 
         // Global params
         assert_eq!(params[0].id, "steps");
@@ -596,13 +735,7 @@ mod tests {
         let ctx = ProcessContext::new(44100.0, 256);
 
         // Default params: 8 steps, forward, 50% gate
-        let mut params = vec![8.0, 0.0, 50.0];
-        // Add step params (all defaults: C4, gate on, vel 100)
-        for _ in 0..MAX_STEPS {
-            params.push(60.0); // pitch
-            params.push(1.0);  // gate on
-            params.push(100.0); // velocity
-        }
+        let params = params_with(8.0, 0.0, 50.0);
 
         // The first clock plays the first step rather than moving past it
         seq.process(&[&clock], &mut outputs, &params, &ctx);
@@ -630,10 +763,7 @@ mod tests {
         for (direction, start) in [(0.0, 0), (1.0, 3), (2.0, 0), (3.0, 0)] {
             let mut seq = StepSequencer::new();
             seq.prepare(44100.0, 1);
-            let mut params = vec![4.0, direction, 50.0];
-            for _ in 0..MAX_STEPS {
-                params.extend([60.0, 1.0, 100.0]);
-            }
+            let params = params_with(4.0, direction, 50.0);
 
             // Run a few steps in, then reset
             for _ in 0..3 {
@@ -674,12 +804,7 @@ mod tests {
         ];
         let ctx = ProcessContext::new(44100.0, 256);
 
-        let mut params = vec![8.0, 0.0, 50.0];
-        for _ in 0..MAX_STEPS {
-            params.push(60.0);
-            params.push(1.0);
-            params.push(100.0);
-        }
+        let params = params_with(8.0, 0.0, 50.0);
 
         seq.process(&[&clock, &reset], &mut outputs, &params, &ctx);
 
@@ -692,12 +817,7 @@ mod tests {
         let mut seq = StepSequencer::new();
         seq.prepare(44100.0, 1);
 
-        let mut params = vec![4.0, 1.0, 50.0]; // 4 steps, backward
-        for _ in 0..MAX_STEPS {
-            params.push(60.0);
-            params.push(1.0);
-            params.push(100.0);
-        }
+        let params = params_with(4.0, 1.0, 50.0); // 4 steps, backward
 
         // Advance through sequence
         let mut clock_high = SignalBuffer::control(1);
@@ -731,6 +851,152 @@ mod tests {
         seq.process(&[&clock_low], &mut outputs, &params, &ctx);
         seq.process(&[&clock_high], &mut outputs, &params, &ctx);
         assert_eq!(seq.current_step(), 1);
+    }
+
+    /// Runs the sequencer at 1 kHz (a sample a millisecond) for `ms`, with a
+    /// 1 ms clock pulse at each time in `clocks` and a reset at each time in
+    /// `resets`, and returns the Gate output.
+    fn gate_over(params: &[f32], ms: usize, clocks: &[usize], resets: &[usize]) -> Vec<f32> {
+        let mut seq = StepSequencer::new();
+        seq.prepare(1000.0, ms);
+        let mut clock = SignalBuffer::control(ms);
+        let mut reset = SignalBuffer::control(ms);
+        for &t in clocks {
+            clock.samples[t] = 1.0;
+        }
+        for &t in resets {
+            reset.samples[t] = 1.0;
+        }
+        let mut outputs: Vec<SignalBuffer> = (0..5).map(|_| SignalBuffer::control(ms)).collect();
+        seq.process(&[&clock, &reset], &mut outputs, params, &ProcessContext::new(1000.0, ms));
+        outputs[1].samples.clone()
+    }
+
+    /// Times the gate rises.
+    fn rises(gate: &[f32]) -> Vec<usize> {
+        (0..gate.len()).filter(|&t| gate[t] > 0.5 && (t == 0 || gate[t - 1] < 0.5)).collect()
+    }
+
+    /// How long the gate stays high from `t`.
+    fn high_for(gate: &[f32], t: usize) -> usize {
+        gate[t..].iter().take_while(|&&g| g > 0.5).count()
+    }
+
+    #[test]
+    fn test_gate_length_is_a_share_of_the_step() {
+        // 60 BPM in quarter notes is a clock a second; 50% is 500 ms
+        let params = params_with(8.0, 0.0, 50.0);
+        let gate = gate_over(&params, 4000, &[0, 1000, 2000, 3000], &[]);
+        assert_eq!(rises(&gate), [0, 1000, 2000, 3000]);
+        // Before a second clock there's no step to measure: 50% of 100 ms
+        assert_eq!(high_for(&gate, 0), 50);
+        assert_eq!(high_for(&gate, 1000), 500);
+        assert_eq!(high_for(&gate, 2000), 500);
+    }
+
+    #[test]
+    fn test_fixed_gate_mode_keeps_100_ms() {
+        let mut params = params_with(8.0, 0.0, 50.0);
+        params[StepSequencer::PARAM_GATE_MODE] = GateMode::Fixed as usize as f32;
+        let gate = gate_over(&params, 3000, &[0, 1000, 2000], &[]);
+        assert_eq!(high_for(&gate, 1000), 50);
+        assert_eq!(high_for(&gate, 2000), 50);
+
+        // Notes that overlap the next clock run together, as they always did
+        params[StepSequencer::PARAM_GATE_LENGTH] = 99.0;
+        let gate = gate_over(&params, 300, &[0, 60, 120], &[]);
+        assert_eq!(rises(&gate), [0]);
+        assert_eq!(high_for(&gate, 0), 120 + 99);
+    }
+
+    #[test]
+    fn test_gate_follows_the_tempo() {
+        let params = params_with(8.0, 0.0, 50.0);
+        let gate = gate_over(&params, 2000, &[0, 1000, 1200, 1400], &[]);
+        // Step 2's 500 ms gate is still up at 1200, so step 3 dips it first
+        assert_eq!(gate[1200], 0.0);
+        assert_eq!(high_for(&gate, 1400), 100, "the step got shorter, so did the gate");
+    }
+
+    #[test]
+    fn test_full_gate_holds_until_the_next_clock_and_retriggers() {
+        let mut params = params_with(4.0, 0.0, 100.0);
+        params[StepSequencer::step_gate_param(2)] = 0.0;
+        let gate = gate_over(&params, 5000, &[0, 1000, 2000, 3000, 4000], &[]);
+
+        // Step 2 holds right up to step 3's clock, which is a rest
+        assert_eq!(high_for(&gate, 1000), 1000);
+        assert_eq!(gate[2000], 0.0);
+        // Step 4 holds into step 1, which starts a new note: the gate dips
+        // for one sample so an envelope sees a new rising edge
+        assert_eq!(high_for(&gate, 3000), 1000);
+        assert_eq!(gate[4000], 0.0);
+        assert_eq!(gate[4001], 1.0);
+        assert_eq!(rises(&gate), [0, 1000, 3000, 4001]);
+    }
+
+    #[test]
+    fn test_tie_carries_the_gate_without_retriggering() {
+        let mut params = params_with(4.0, 0.0, 50.0);
+        params[StepSequencer::step_tie_param(1)] = 1.0;
+        params[StepSequencer::step_pitch_param(2)] = 67.0;
+        let gate = gate_over(&params, 4000, &[0, 1000, 2000, 3000], &[]);
+
+        // Step 2 ties into step 3: one rising edge for both, held through
+        // step 2 and then for step 3's own 50%
+        assert_eq!(rises(&gate), [0, 1000, 3000]);
+        assert_eq!(high_for(&gate, 1000), 1500);
+    }
+
+    #[test]
+    fn test_envelope_is_not_retriggered_across_a_tie() {
+        use crate::modules::envelope::AdsrEnvelope;
+
+        // A rest, then step 2 tied into step 3
+        let mut params = params_with(3.0, 0.0, 50.0);
+        params[StepSequencer::step_gate_param(0)] = 0.0;
+        params[StepSequencer::step_tie_param(1)] = 1.0;
+        let gate = gate_over(&params, 3000, &[0, 1000, 2000], &[]);
+
+        // A 1.5 s attack from step 2 crosses into step 3. Any dip in the
+        // gate would start a release, and a retrigger would restart the
+        // attack from where it was and reach the peak late
+        let mut env = AdsrEnvelope::new();
+        env.prepare(1000.0, 3000);
+        let mut env_params: Vec<f32> = env.parameters().iter().map(|p| p.default).collect();
+        for (i, p) in env.parameters().iter().enumerate() {
+            match p.name {
+                "Attack" => env_params[i] = 1.5,
+                "Sustain" => env_params[i] = 1.0,
+                _ => {}
+            }
+        }
+        let mut gate_buf = SignalBuffer::control(3000);
+        gate_buf.samples.copy_from_slice(&gate);
+        let mut out: Vec<SignalBuffer> = (0..env.ports().iter().filter(|p| p.is_output()).count())
+            .map(|_| SignalBuffer::control(3000))
+            .collect();
+        env.process(&[&gate_buf], &mut out, &env_params, &ProcessContext::new(1000.0, 3000));
+        let level = &out[0].samples;
+        assert!((1001..2500).all(|t| level[t] >= level[t - 1]), "rises without a break across the tie");
+        assert!(level[2499] > 0.95, "reaches the peak on time: {}", level[2499]);
+    }
+
+    #[test]
+    fn test_held_gate_ends_when_the_clock_stops() {
+        let params = params_with(4.0, 0.0, 100.0);
+        // The clock stops after its third pulse
+        let gate = gate_over(&params, 5000, &[0, 1000, 2000], &[]);
+        assert_eq!(high_for(&gate, 2001), 1999, "held for two steps, then let go");
+        assert!(gate[4000..].iter().all(|&g| g == 0.0));
+    }
+
+    #[test]
+    fn test_reset_does_not_measure_a_stopped_clock() {
+        let params = params_with(4.0, 0.0, 50.0);
+        // Stops for 3 s and restarts with a reset, at the same tempo
+        let gate = gate_over(&params, 6000, &[0, 1000, 4000, 5000], &[4000]);
+        assert_eq!(high_for(&gate, 4000), 500);
     }
 
     #[test]

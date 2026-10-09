@@ -274,7 +274,7 @@ in   Reset              Gate     ConnectionOnly       inline=true  port
 in   Run                Gate     ConnectionOnly       inline=true  port
 in   Steps              Control  ConstantOnly         inline=false num 8 [1..16]
 in   Direction          Control  ConstantOnly         inline=true  select 0 ["Fwd", "Bwd", "P-P", "Rnd"] "Dir"
-in   Gate Length        Control  ConstantOnly         inline=false num 50 [1..99] %
+in   Gate Length        Control  ConstantOnly         inline=false num 50 [1..100] %
 in   Step 1 Pitch       Control  ConstantOnly         inline=false num 60 [0..127]
 in   Step 1 Gate        Control  ConstantOnly         inline=false toggle true ""
 in   Step 1 Velocity    Control  ConstantOnly         inline=false num 100 [0..127]
@@ -323,6 +323,23 @@ in   Step 15 Velocity   Control  ConstantOnly         inline=false num 100 [0..1
 in   Step 16 Pitch      Control  ConstantOnly         inline=false num 60 [0..127]
 in   Step 16 Gate       Control  ConstantOnly         inline=false toggle true ""
 in   Step 16 Velocity   Control  ConstantOnly         inline=false num 100 [0..127]
+in   Gate Mode          Control  ConstantOnly         inline=true  select 0 ["Step", "100 ms"] "Gate of"
+in   Step 1 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 2 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 3 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 4 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 5 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 6 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 7 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 8 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 9 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 10 Tie        Control  ConstantOnly         inline=false toggle false ""
+in   Step 11 Tie        Control  ConstantOnly         inline=false toggle false ""
+in   Step 12 Tie        Control  ConstantOnly         inline=false toggle false ""
+in   Step 13 Tie        Control  ConstantOnly         inline=false toggle false ""
+in   Step 14 Tie        Control  ConstantOnly         inline=false toggle false ""
+in   Step 15 Tie        Control  ConstantOnly         inline=false toggle false ""
+in   Step 16 Tie        Control  ConstantOnly         inline=false toggle false ""
 out  Pitch              Control
 out  Gate               Gate
 out  Velocity           Control
