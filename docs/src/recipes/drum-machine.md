@@ -112,6 +112,7 @@ Snare, hats and toms take the Mixer's four channels. The kick comes in on **Chai
 ## Related
 
 - [Drum](../modules/sources/drum.md) – each type, what its knobs do, and how a choke works
+- [Roll Call](./roll-call.md) – eight drums on one Trigger Sequencer, with rolls and a fill every four bars
 - [Backbeat](./backbeat.md) – the same kind of kit built from oscillators, noise and envelopes, and a fill every fourth bar
 - [Step Sequencer](../modules/utilities/sequencer.md) – pitch, gate, velocity, and what the outputs carry
 - [Clock](../modules/modulation/clock.md) – tempo and swing

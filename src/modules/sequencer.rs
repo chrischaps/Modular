@@ -124,6 +124,67 @@ impl SequenceDirection {
     }
 }
 
+/// Measures a clock's steps: the time between its rising edges, in samples.
+///
+/// Shared by the sequencers, so a gate that is a share of the step, or a
+/// ratchet that divides it, follows the clock the same way in both.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct StepTimer {
+    /// Samples since the last clock edge, or `None` before the first (and
+    /// after a reset, so a stopped clock's gap isn't taken for a step).
+    since_clock: Option<usize>,
+    /// The time between the last two clock edges, once known.
+    step_samples: Option<usize>,
+    /// The two steps measured before that, newest first.
+    earlier_steps: [Option<usize>; 2],
+}
+
+impl StepTimer {
+    pub(crate) const fn new() -> Self {
+        Self { since_clock: None, step_samples: None, earlier_steps: [None; 2] }
+    }
+
+    /// A rising clock edge: measures the step it ends.
+    pub(crate) fn clock(&mut self) {
+        if let Some(samples) = self.since_clock {
+            self.earlier_steps = [self.step_samples, self.earlier_steps[0]];
+            self.step_samples = Some(samples.max(1));
+        }
+        self.since_clock = Some(0);
+    }
+
+    /// One sample has passed.
+    pub(crate) fn tick(&mut self) {
+        if let Some(samples) = self.since_clock.as_mut() {
+            *samples = samples.saturating_add(1);
+        }
+    }
+
+    /// A reset: the time until the next clock isn't a step, though the steps
+    /// measured so far still are.
+    pub(crate) fn forget_gap(&mut self) {
+        self.since_clock = None;
+    }
+
+    /// Forgets everything measured, as at another sample rate.
+    pub(crate) fn forget(&mut self) {
+        *self = Self::new();
+    }
+
+    /// How long the step starting now will last, in samples: usually the
+    /// last step measured. A swung clock's steps alternate long and short,
+    /// though, so when the step before last matches the last, the rhythm
+    /// repeats every two steps and the coming step is the one before last.
+    /// A steady clock gives the same answer either way.
+    pub(crate) fn coming_step(&self) -> Option<usize> {
+        let last = self.step_samples?;
+        match self.earlier_steps {
+            [Some(before), Some(third)] if last.abs_diff(third) <= last / 32 + 1 => Some(before),
+            _ => Some(last),
+        }
+    }
+}
+
 /// Convert a MIDI note number (0-127) to V/Oct control signal.
 /// C4 (note 60) = 0V, each semitone = 1/12 V
 fn note_to_voct(note: u8) -> f32 {
@@ -191,13 +252,8 @@ pub struct StepSequencer {
     tied: bool,
     /// The gate output was high on the last sample.
     gate_high: bool,
-    /// Samples since the last clock edge, or `None` before the first (and
-    /// after a reset, so a stopped clock's gap isn't taken for a step).
-    since_clock: Option<usize>,
-    /// The time between the last two clock edges, once known.
-    step_samples: Option<usize>,
-    /// The two steps measured before that, newest first.
-    earlier_steps: [Option<usize>; 2],
+    /// How long the clock's steps are.
+    timer: StepTimer,
     /// EOC timer (samples remaining in EOC pulse).
     eoc_timer: usize,
     /// Simple PRNG state for random mode.
@@ -307,9 +363,7 @@ impl StepSequencer {
             gate_timer: 0,
             tied: false,
             gate_high: false,
-            since_clock: None,
-            step_samples: None,
-            earlier_steps: [None; 2],
+            timer: StepTimer::new(),
             eoc_timer: 0,
             random_state: 12345, // Seed for PRNG
             sample_rate: 44100.0,
@@ -356,19 +410,6 @@ impl StepSequencer {
         Self::PARAM_GATE_MODE + 1 + step
     }
 
-    /// How long the step starting now will last, in samples: usually the
-    /// last step measured. A swung clock's steps alternate long and short,
-    /// though, so when the step before last matches the last, the rhythm
-    /// repeats every two steps and the coming step is the one before last.
-    /// A steady clock gives the same answer either way.
-    fn coming_step(&self) -> Option<usize> {
-        let last = self.step_samples?;
-        match self.earlier_steps {
-            [Some(before), Some(third)] if last.abs_diff(third) <= last / 32 + 1 => Some(before),
-            _ => Some(last),
-        }
-    }
-
     /// How long a new note's gate stays high, in samples.
     ///
     /// Gate Length is a share of the coming step (see `coming_step`), or of
@@ -378,7 +419,7 @@ impl StepSequencer {
     /// hanging.
     fn gate_samples(&self, mode: GateMode, gate_length: f32, tied: bool) -> usize {
         let fixed = self.sample_rate * 0.1;
-        let step = self.coming_step();
+        let step = self.timer.coming_step();
         let held = 2 * step.unwrap_or(fixed as usize);
         if tied {
             return held;
@@ -485,9 +526,7 @@ impl DspModule for StepSequencer {
     fn prepare(&mut self, sample_rate: f32, _max_block_size: usize) {
         self.sample_rate = sample_rate;
         // A step measured at another rate is the wrong number of samples
-        self.since_clock = None;
-        self.step_samples = None;
-        self.earlier_steps = [None; 2];
+        self.timer.forget();
     }
 
     fn process(
@@ -539,16 +578,12 @@ impl DspModule for StepSequencer {
                 self.reset_pending = true;
                 self.gate_timer = 0;
                 self.tied = false;
-                self.since_clock = None;
+                self.timer.forget_gap();
             }
 
             // Every clock edge measures the step, running or not
             if clock_rising {
-                if let Some(samples) = self.since_clock {
-                    self.earlier_steps = [self.step_samples, self.earlier_steps[0]];
-                    self.step_samples = Some(samples.max(1));
-                }
-                self.since_clock = Some(0);
+                self.timer.clock();
             }
             let mut retrigger = false;
 
@@ -620,9 +655,7 @@ impl DspModule for StepSequencer {
             if self.eoc_timer > 0 {
                 self.eoc_timer -= 1;
             }
-            if let Some(samples) = self.since_clock.as_mut() {
-                *samples = samples.saturating_add(1);
-            }
+            self.timer.tick();
         }
     }
 
@@ -635,9 +668,7 @@ impl DspModule for StepSequencer {
         self.gate_timer = 0;
         self.tied = false;
         self.gate_high = false;
-        self.since_clock = None;
-        self.step_samples = None;
-        self.earlier_steps = [None; 2];
+        self.timer.forget();
         self.eoc_timer = 0;
     }
 }

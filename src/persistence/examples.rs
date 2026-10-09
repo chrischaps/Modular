@@ -84,6 +84,12 @@ pub const EXAMPLES: &[Example] = &[
         json: include_str!("../../patches/drum-machine.json"),
     },
     Example {
+        name: "Roll Call",
+        file_name: "roll-call.json",
+        description: "Plays itself: eight drums on one Trigger Sequencer, with ratcheted rolls, ghost notes that only sometimes play, and a fill and crash every four bars from its Chain",
+        json: include_str!("../../patches/roll-call.json"),
+    },
+    Example {
         name: "Afterglow",
         file_name: "afterglow.json",
         description: "Plays itself: one sequencer transposes another's arpeggio through a chord progression, over a warm pad and dotted-eighth tape echoes",

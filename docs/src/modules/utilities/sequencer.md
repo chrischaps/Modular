@@ -135,6 +135,7 @@ The [Clock](../modulation/clock.md)'s **Run** and **Reset** outputs are made for
 ## Related modules
 
 - [Clock](../modulation/clock.md): drives the sequencer
+- [Trigger Sequencer](./trigger-sequencer.md): eight lanes of drum hits from one module, with chained patterns for fills
 - [Clock Divider](./divider.md): divides the clock, so a sequencer can play once every few bars from its **Run** and **Reset**
 - [ADSR Envelope](../modulation/adsr.md): shapes each step's note from the Gate output
 - [Oscillator](../sources/oscillator.md): plays the Pitch output

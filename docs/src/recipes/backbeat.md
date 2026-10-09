@@ -170,6 +170,7 @@ The hats, toms and crash have exactly the balance they had when the whole second
 ## Related
 
 - [Drum Machine](./drum-machine.md) – a kit like this one in 14 modules, with a [Drum](../modules/sources/drum.md) module for each drum
+- [Roll Call](./roll-call.md) – eight drums on one [Trigger Sequencer](../modules/utilities/trigger-sequencer.md), whose Chain plays the fill every fourth bar with no phrase clock
 - [Rhythmic Sequence](./rhythmic-sequence.md) – the noise hi-hat this kit's hats grew from
 - [Afterglow](./afterglow.md) – another patch where one sequencer's end of cycle drives another
 - [Step Sequencer](../modules/utilities/sequencer.md) – pitch, gate, velocity, and what the outputs carry

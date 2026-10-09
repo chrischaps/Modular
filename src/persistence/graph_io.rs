@@ -663,6 +663,47 @@ mod tests {
     }
 
     #[test]
+    fn test_trigger_patterns_survive_a_round_trip() {
+        use crate::modules::trigger_sequencer::Step;
+        use crate::persistence::{NamedParameter, ParameterValue};
+
+        // A beat in A, a ratcheted fill in D, an accent, a lane of its own
+        // length and the chain A A A D
+        let roll = Step { on: true, velocity: 63, probability: 75, ratchet: 3 };
+        let off_but_kept = Step { on: false, velocity: 12, probability: 40, ratchet: 4 };
+        let mut patch = Patch::new("trigger");
+        let mut seq = NodeData::new(1, "seq.trigger", (0.0, 0.0));
+        seq.parameters = vec![
+            NamedParameter::new("Step A1 01", ParameterValue::Number(Step { on: true, ..Step::DEFAULT }.encode())),
+            NamedParameter::new("Step D8 16", ParameterValue::Number(roll.encode())),
+            NamedParameter::new("Step C4 09", ParameterValue::Number(off_but_kept.encode())),
+            NamedParameter::new("Accent B 07", ParameterValue::Toggle(true)),
+            NamedParameter::new("Length 6", ParameterValue::Number(5.0)),
+            NamedParameter::new("Chain 4", ParameterValue::Select(4)),
+            NamedParameter::new("Chain 2", ParameterValue::Select(1)),
+            NamedParameter::new("Chain 3", ParameterValue::Select(1)),
+        ];
+        patch.nodes.push(seq);
+
+        let (saved, warnings) = reload(&patch, 0);
+        assert!(warnings.is_empty(), "{:?}", warnings);
+        let json = serde_json::to_string(&saved).unwrap();
+        let loaded = patch_from_json(&json).unwrap();
+        let step = |name| Step::decode(param(&loaded, "seq.trigger", name));
+        assert_eq!(step("Step A1 01"), Step { on: true, ..Step::DEFAULT });
+        assert_eq!(step("Step D8 16"), roll);
+        assert_eq!(step("Step C4 09"), off_but_kept);
+        assert_eq!(step("Step B2 02"), Step::DEFAULT);
+        assert_eq!(param(&loaded, "seq.trigger", "Accent B 07"), 1.0);
+        assert_eq!(param(&loaded, "seq.trigger", "Accent A 07"), 0.0);
+        assert_eq!(param(&loaded, "seq.trigger", "Length 6"), 5.0);
+        let chain: Vec<f32> = (1..=4).map(|slot| param(&loaded, "seq.trigger", &format!("Chain {slot}"))).collect();
+        assert_eq!(chain, [1.0, 1.0, 1.0, 4.0]);
+        // Saved again, it's the same file
+        assert_eq!(reload(&loaded, 0).0, loaded);
+    }
+
+    #[test]
     fn test_round_trip_keeps_graph_params_and_midi_mappings() {
         let (first, warnings) = reload(&patch_from_json(V2_FIXTURE).unwrap(), 0);
         assert!(warnings.is_empty(), "{:?}", warnings);

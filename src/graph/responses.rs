@@ -16,6 +16,14 @@ pub enum SynthResponse {
         param_name: String,
         value: f32,
     },
+    /// Parameters set together by one gesture on a node's display, such as
+    /// a click on the Trigger Sequencer's grid. Undo takes them back as one
+    /// step of their own, named `label`, however quickly the next follows.
+    EditParameters {
+        node_id: egui_node_graph2::NodeId,
+        label: String,
+        changes: Vec<(String, f32)>,
+    },
     /// A node was selected by right-clicking it, so its menu acts on it.
     NodeSelected(egui_node_graph2::NodeId),
     /// A node was deselected.

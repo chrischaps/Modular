@@ -964,6 +964,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn grid_clicks_undo_one_at_a_time() {
+        use crate::modules::trigger_sequencer::Step;
+
+        let mut rig = Rig::new();
+        let seq = rig.add("seq.trigger", pos2(100.0, 100.0));
+        rig.record();
+        let kick = Step { on: true, ..Step::DEFAULT }.encode();
+
+        // Three quick clicks, as the grid sends them: two steps, and the
+        // first one again, each a frame apart and named
+        for name in ["Step A1 01", "Step A1 05", "Step A1 01"] {
+            let on = rig.param(seq, name) < 0.0;
+            rig.set(seq, name, if on { kick } else { Step::DEFAULT.encode() });
+            rig.history.name_next(format!("Toggle {name}"));
+            rig.now += Duration::from_millis(16);
+            rig.history.record(&rig.editor, &rig.user_state, false, rig.now);
+        }
+        assert!(rig.param(seq, "Step A1 01") < 0.0);
+        assert!(rig.param(seq, "Step A1 05") > 0.0);
+
+        // Each comes back on its own
+        assert_eq!(rig.undo().label, "Toggle Step A1 01");
+        assert!(rig.param(seq, "Step A1 01") > 0.0);
+        assert_eq!(rig.undo().label, "Toggle Step A1 05");
+        assert!(rig.param(seq, "Step A1 05") < 0.0);
+        assert_eq!(rig.undo().label, "Toggle Step A1 01");
+        assert!(rig.param(seq, "Step A1 01") < 0.0);
+    }
+
     fn same(a: &Snapshot, b: &Snapshot) -> bool {
         Step::between(a, b).is_none()
     }

@@ -1734,6 +1734,26 @@ impl SynthApp {
                                 }
                             }
                         }
+                        NodeResponse::User(crate::graph::SynthResponse::EditParameters {
+                            node_id: response_node_id,
+                            label,
+                            changes,
+                        }) => {
+                            if let Some(node) = self.graph_state.graph.nodes.get(response_node_id) {
+                                let inputs: Vec<_> = changes
+                                    .iter()
+                                    .filter_map(|(name, value)| {
+                                        node.inputs.iter().find(|(input, _)| input == name).map(|(_, id)| (*id, *value))
+                                    })
+                                    .collect();
+                                for (input_id, value) in inputs {
+                                    if let Some(input) = self.graph_state.graph.inputs.get_mut(input_id) {
+                                        input.value.set_actual_value(value);
+                                    }
+                                }
+                            }
+                            self.history.name_next(label);
+                        }
                         NodeResponse::User(crate::graph::SynthResponse::MidiLearnStart {
                             engine_node_id,
                             param_index,
@@ -2406,11 +2426,16 @@ impl SynthApp {
                         // Create cache key
                         let cache_key = (engine_node_id, param_index);
 
-                        // Check if value has changed (use relative tolerance for large values like frequency)
+                        // Check if value has changed (use relative tolerance for large values like frequency).
+                        // Whole numbers change by whole steps, and a sequencer's step packs its
+                        // settings into digits, so they're compared exactly
+                        let whole = matches!(&input.value, crate::graph::SynthValueType::Number { spec, .. } if spec.stepped);
                         let needs_update = match self.cached_params.get(&cache_key) {
                             Some(&cached_value) => {
                                 let diff = (actual_value - cached_value).abs();
-                                let threshold = if actual_value.abs() > 10.0 {
+                                let threshold = if whole {
+                                    0.0
+                                } else if actual_value.abs() > 10.0 {
                                     actual_value.abs() * 0.0001 // Relative tolerance for large values
                                 } else {
                                     0.0001 // Absolute tolerance for small values

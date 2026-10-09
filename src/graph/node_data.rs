@@ -276,6 +276,9 @@ pub enum NodeDisplay {
     LogicLamps,
     /// Drum: the hit's envelope and pitch, lit as each hit plays.
     DrumHit,
+    /// Trigger Sequencer: each lane's steps beside its Gate and Vel jacks,
+    /// then the pattern tabs and the Chain.
+    TriggerGrid,
 }
 
 /// Data stored per node in the graph.
@@ -1054,7 +1057,7 @@ fn deferred_labels_id(node_id: egui_node_graph2::NodeId) -> egui::Id {
 /// Reserves the label's place in the paint order now, and its shapes for
 /// [`place_output_labels`] to move once the node's width is settled. The
 /// label is laid out at its natural width, so it never widens the node.
-fn defer_output_label(
+pub(super) fn defer_output_label(
     ui: &mut egui::Ui,
     node_id: egui_node_graph2::NodeId,
     name: &str,
@@ -2181,6 +2184,11 @@ impl NodeDataTrait for SynthNodeData {
             super::drum_display::drum_display(ui, node_id, graph, user_state, zoom);
         }
 
+        if self.display == NodeDisplay::TriggerGrid {
+            let edits = super::trigger_display::pattern_bar(ui, node_id, graph, user_state, zoom);
+            responses.extend(edits.into_iter().map(NodeResponse::User));
+        }
+
         if self.display == NodeDisplay::LogicLamps {
             if let Some((param_name, value)) = super::logic_display::logic_display(ui, node_id, graph, user_state, zoom) {
                 responses.push(NodeResponse::User(SynthResponse::ParameterChanged { node_id, param_name, value }));
@@ -2249,6 +2257,13 @@ impl NodeDataTrait for SynthNodeData {
     where
         Self::Response: UserResponseTrait,
     {
+        // The Trigger Sequencer draws each lane of its grid beside the lane's jacks
+        if self.display == NodeDisplay::TriggerGrid {
+            if let Some(edits) = super::trigger_display::output_row(ui, node_id, graph, user_state, param_name) {
+                return edits.into_iter().map(NodeResponse::User).collect();
+            }
+        }
+
         // Calculate the text width and allocate exactly that much space
         // This allows the node to be narrow while still showing the label
         let font_id = egui::TextStyle::Body.resolve(ui.style());

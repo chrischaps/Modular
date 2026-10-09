@@ -110,6 +110,7 @@ From a [Poly MIDI](../midi/poly-midi.md) module, two notes very close together e
 
 ## Related modules
 
+- [Trigger Sequencer](../utilities/trigger-sequencer.md): a whole kit's hits from one module, a lane per Drum, with velocity for Accent
 - [Step Sequencer](../utilities/sequencer.md): one lane of hits, with velocity for Accent and pitch for Tune
 - [Clock](../modulation/clock.md) and [Clock Divider](../utilities/divider.md): the pulses that play it
 - [Noise](./noise.md) and [Oscillator](./oscillator.md): build your own drum from parts, as the [Backbeat](../../recipes/backbeat.md) example does

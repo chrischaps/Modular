@@ -46,6 +46,7 @@
   - [Logic](./modules/utilities/logic.md)
   - [Oscilloscope](./modules/visualization/oscilloscope.md)
   - [Step Sequencer](./modules/utilities/sequencer.md)
+  - [Trigger Sequencer](./modules/utilities/trigger-sequencer.md)
   - [MIDI Monitor](./modules/midi/midi-monitor.md)
   - [Audio Output](./modules/output/audio-output.md)
 
@@ -59,5 +60,6 @@
 - [Rhythmic Sequence](./recipes/rhythmic-sequence.md)
 - [Backbeat](./recipes/backbeat.md)
 - [Drum Machine](./recipes/drum-machine.md)
+- [Roll Call](./recipes/roll-call.md)
 - [Afterglow](./recipes/afterglow.md)
 - [Interlock](./recipes/interlock.md)

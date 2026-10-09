@@ -286,6 +286,16 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "seq.trigger",
+        knobs: &[knob("Steps"), knob_as("Gate Length", "Gate"), knob_as("Accent Amount", "Accent")],
+        // The grid, the pattern tabs and the Chain edit these
+        hidden: &["Step *", "Accent A *", "Accent B *", "Accent C *", "Accent D *", "Length *", "Chain *"],
+        // The grid lights each lane as it plays
+        monitor: &["Accent", "Gate 1", "Gate 2", "Gate 3", "Gate 4", "Gate 5", "Gate 6", "Gate 7", "Gate 8"],
+        display: NodeDisplay::TriggerGrid,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "fx.delay",
         knobs: &[
             // CV swings Time by ±50% and adds to Feedback, around the knobs

@@ -31,6 +31,7 @@ pub mod quantizer;
 pub mod reverb;
 pub mod sample_hold;
 pub mod sequencer;
+pub mod trigger_sequencer;
 pub mod vca;
 
 // Re-export commonly used types
@@ -62,4 +63,5 @@ pub use quantizer::Quantizer;
 pub use reverb::Reverb;
 pub use sample_hold::SampleHold;
 pub use sequencer::StepSequencer;
+pub use trigger_sequencer::TriggerSequencer;
 pub use vca::Vca;
