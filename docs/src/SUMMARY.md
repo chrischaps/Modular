@@ -14,6 +14,7 @@
 - [Connections](./concepts/connections.md)
 - [Polyphony](./concepts/polyphony.md)
 - [Tempo and Sync](./concepts/tempo-and-sync.md)
+- [Groups](./concepts/groups.md)
 
 # Modules
 

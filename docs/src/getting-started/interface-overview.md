@@ -44,14 +44,14 @@ The background grid moves and zooms with the patch, with a brighter line every f
 
 ### The add menu
 
-Right-click empty canvas to open the add menu. It lists the six categories in their header colors; hover or click one to see its modules, then click a module to place it where you right-clicked. Hover a module's name to read what it does. Below the categories, **Frame** and **Note** add a [frame or a note](#frames-and-notes).
+Right-click empty canvas to open the add menu. It lists the six categories in their header colors; hover or click one to see its modules, then click a module to place it where you right-clicked. Hover a module's name to read what it does. Groups you've saved are under **My Modules**, in rose (see [Groups](../concepts/groups.md#my-modules)). Below the categories, **Frame** and **Note** add a [frame or a note](#frames-and-notes).
 
 ![The add menu, showing the Effect category](../images/interface-context-menu.png)
 *Right-click empty canvas, pick a category, then a module.*
 
 ### Quick add
 
-Press `Space` or `Tab` with the mouse over the canvas. A search box opens at the cursor, listing every module by category. Type a few letters to narrow the list, then press `Enter`, and the module appears where the box opened.
+Press `Space` or `Tab` with the mouse over the canvas. A search box opens at the cursor, listing every module by category, with your saved groups first under **My Modules**. Type a few letters to narrow the list, then press `Enter`, and the module appears where the box opened. (With a group selected, `Tab` opens the group instead.)
 
 ![The quick-add palette](../images/interface-quick-add.png)
 *Type a few letters of a module's name or category, then press Enter.*
@@ -112,6 +112,7 @@ Right-click a module's header or body (anywhere but a knob) to open its menu. **
 | **Copy** | `Ctrl + C` | Copies the module to the clipboard |
 | **Bypass** / **Switch on** | `Ctrl + B` | Takes a filter or effect out of the signal path, or puts it back |
 | **Reset to defaults** | | Returns every knob to its default |
+| **Group** | `Ctrl + G` | Collapses the module, or the selection, into a [group](#groups) |
 | **Delete** | `Delete` | Removes the module and its cables |
 
 If the module is part of a selection, the item applies to the whole selection.
@@ -156,9 +157,22 @@ Click a frame's title or a note to select it, and `Shift`-click to add to the se
 
 Frames and notes are saved with the patch. Versions of Modular Synth from before frames and notes existed open the patch without them.
 
+## Groups
+
+A group collapses modules into one node of your own, with jacks where cables crossed into it and the knobs you choose on its face. [Groups](../concepts/groups.md) has the whole story; in short:
+
+- **Group:** select modules and press `Ctrl + G`, then type a name and press `Enter`.
+- **Go inside:** double-click the group, select it and press `Tab`, or click the miniature on its face. A trail at the top of the canvas shows where you are; click it, or press `Escape`, to go back out.
+- **Pin a knob:** inside the group, right-click a knob and choose **Show on group**.
+- **Rename:** select the group and press `F2`, or right-click it and choose **Rename**.
+- **Ungroup:** select the group and press `Ctrl + Alt + G`.
+- **Keep it:** right-click the group and choose **Save to My Modules**. It's then in the add menu and quick-add palette of every patch.
+
+A group's right-click menu also has **Open**, **Duplicate**, **Copy** and **Delete**.
+
 ## Undo and redo
 
-**Undo** (`Ctrl + Z`) and **Redo** (`Ctrl + Shift + Z` or `Ctrl + Y`) cover adding, deleting, moving and bypassing modules, patching and unpatching cables, turning knobs, and every change to [frames and notes](#frames-and-notes). Hover the toolbar buttons to see which edit is next, such as *Move Oscillator*, *Set SVF Filter Cutoff* or *Move frame Voice*.
+**Undo** (`Ctrl + Z`) and **Redo** (`Ctrl + Shift + Z` or `Ctrl + Y`) cover adding, deleting, moving and bypassing modules, patching and unpatching cables, turning knobs, grouping and ungrouping, and every change to [frames and notes](#frames-and-notes). Hover the toolbar buttons to see which edit is next, such as *Move Oscillator*, *Set SVF Filter Cutoff* or *Move frame Voice*.
 
 A whole drag is one step: turning a knob from 200 Hz to 2 kHz and back undoes in one go. A deleted module comes back with its settings, its cables and its MIDI mappings. Knobs moved by a MIDI controller aren't recorded, and opening a patch starts a fresh history.
 
@@ -260,6 +274,10 @@ Recent files, the autosave, your cable style and the window's size and position 
 | Shortcut | Action |
 |----------|--------|
 | `Space` or `Tab` | Quick add a module at the cursor |
+| `Tab` | Open the selected group |
+| `Ctrl + G` | Group the selected modules |
+| `Ctrl + Alt + G` | Ungroup the selected group |
+| `F2` | Rename the selected group |
 | `Delete` or `Backspace` | Delete the selected modules, frames and notes |
 | `Ctrl + D` | Duplicate the selected modules, frames and notes |
 | `Ctrl + C` / `Ctrl + X` | Copy / cut the selected modules, frames and notes |
@@ -272,6 +290,6 @@ Recent files, the autosave, your cable style and the window's size and position 
 | `Ctrl + O` | Open a patch |
 | `Ctrl + S` | Save |
 | `Ctrl + Shift + S` | Save as |
-| `Escape` | Close the add menu or quick-add box, cancel MIDI Learn, or finish typing a frame's name or a note |
+| `Escape` | Close the add menu or quick-add box, cancel MIDI Learn, finish typing a frame's name or a note, or go back out of a group |
 | `Shift` + drag | Fine knob adjustment |
 | Double-click a knob | Reset it to its default |

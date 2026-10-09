@@ -10,6 +10,8 @@ Screenshots for the manual. This file isn't part of the book; it's a note for wh
 | `interface-context-menu.png` | The right-click add menu | Interface Overview |
 | `interface-quick-add.png` | The quick-add palette | Interface Overview |
 | `interface-frames-and-notes.png` | First Sound playing, with its Shape frame's menu open | Interface Overview |
+| `groups-outside.png` | First Sound with its envelope and VCA grouped as Voice, playing, four knobs pinned | Groups |
+| `groups-inside.png` | Inside Voice: the trail, Inputs and Outputs, zoomed to 0.8 to fit | Groups |
 | `tutorial-complete-patch.png` | The finished First Patch, playing a note | Your First Patch |
 | `module-<page>.png` | One module, playing, cropped with a margin of grid | Each module page (`module-svf-filter.png` for `svf-filter.md`) |
 | `recipe-<page>.png` | The whole example patch, playing, frames and notes included | Each recipe (`recipe-lush-pad.png` for `lush-pad.md`) |

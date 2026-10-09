@@ -592,10 +592,12 @@ pub struct Renaming {
 }
 
 /// The miniature of a group's insides, from where its nodes are in the
-/// editor (`position`) at `zoom`.
+/// editor (`position`) and how big they were last drawn (`size`, if they
+/// have been), at `zoom`.
 pub fn preview(
     graph: &SynthGraph,
     position: impl Fn(NodeId) -> Option<Pos2>,
+    size: impl Fn(NodeId) -> Option<Vec2>,
     id: GroupId,
     zoom: f32,
 ) -> Preview {
@@ -604,7 +606,7 @@ pub fn preview(
         .filter(|n| !graph[*n].user_data.kind.is_proxy())
         .collect();
     let rect = |node_id: NodeId| {
-        Rect::from_min_size(position(node_id).unwrap_or_default(), NOMINAL_NODE_SIZE * zoom)
+        Rect::from_min_size(position(node_id).unwrap_or_default(), size(node_id).unwrap_or(NOMINAL_NODE_SIZE) * zoom)
     };
     let mut preview = Preview::default();
     let Some(bounds) = members.iter().map(|&n| rect(n)).reduce(|a, b| a.union(b)) else {

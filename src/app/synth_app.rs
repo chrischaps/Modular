@@ -243,6 +243,10 @@ pub struct SynthApp {
     release_tab_focus: bool,
     /// The groups saved to My Modules, as of the last look.
     my_modules: Vec<SavedModule>,
+    /// How big each node was last drawn, unzoomed.
+    node_sizes: HashMap<egui_node_graph2::NodeId, egui::Vec2>,
+    /// The level was framed before some of its nodes had been drawn.
+    reframe_level: bool,
 }
 
 /// What a module's right-click menu asked for, handled once the graph is drawn.
@@ -395,6 +399,8 @@ impl SynthApp {
             naming_group: None,
             release_tab_focus: false,
             my_modules: Vec::new(),
+            node_sizes: HashMap::new(),
+            reframe_level: false,
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -1614,6 +1620,7 @@ impl SynthApp {
                 );
                 // Zooming moves every node; undo keeps positions that don't
                 self.history.follow_zoom(zoom_before, pan_before, &self.graph_state.pan_zoom);
+                self.remember_node_sizes(ctx);
                 self.user_state.view_origin = self.history.view_origin();
 
                 // A selection box takes in the frames and notes wholly inside it

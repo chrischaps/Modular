@@ -23,6 +23,11 @@ use super::SynthApp;
 /// the same however far the view is zoomed.
 const PREVIEW_ZOOM: f32 = 1.0;
 
+/// Space kept around a level's nodes when the view frames them.
+const FRAME_MARGIN: f32 = 40.0;
+/// Room left at the top of the canvas for the breadcrumb trail.
+const TRAIL_HEIGHT: f32 = 56.0;
+
 impl SynthApp {
     /// Works out what this frame shows: the nodes on the current level, the
     /// faces of the groups on it, and what their jacks carry.
@@ -57,6 +62,7 @@ impl SynthApp {
 
         // The faces of the groups on show
         let positions = &self.graph_state.node_positions;
+        let sizes = &self.node_sizes;
         let zoom = self.graph_state.pan_zoom.zoom;
         self.user_state.group_faces = graph
             .nodes
@@ -66,7 +72,7 @@ impl SynthApp {
             .map(|id| {
                 let position = |n: NodeId| positions.get(n).map(|p| (p.to_vec2() / zoom * PREVIEW_ZOOM).to_pos2());
                 let face = Face {
-                    preview: groups::preview(graph, position, id, PREVIEW_ZOOM),
+                    preview: groups::preview(graph, position, |n| sizes.get(&n).copied(), id, PREVIEW_ZOOM),
                     knobs: groups::face_knobs(graph, |n| positions.get(n).copied(), &index, id),
                 };
                 (id, face)
@@ -79,6 +85,30 @@ impl SynthApp {
         if self.user_state.renaming.is_none() {
             self.naming_group = None;
         }
+
+        // A level framed before its nodes had ever been drawn is framed
+        // again once they have
+        if self.reframe_level
+            && groups::level_nodes(&self.graph_state.graph, level).iter().all(|n| self.node_sizes.contains_key(n))
+        {
+            self.frame_level();
+        }
+    }
+
+    /// Notes how big each node on show was drawn, unzoomed, for framing
+    /// levels and drawing groups' miniatures true to shape.
+    pub(super) fn remember_node_sizes(&mut self, ctx: &egui::Context) {
+        let zoom = self.graph_state.pan_zoom.zoom;
+        for &node in &self.graph_state.node_order {
+            if self.user_state.hidden.contains(&node) {
+                continue;
+            }
+            if let Some(rect) = annotation_ui::module_rect(ctx, node) {
+                self.node_sizes.insert(node, rect.size() / zoom);
+            }
+        }
+        let graph = &self.graph_state.graph;
+        self.node_sizes.retain(|node, _| graph.nodes.contains_key(*node));
     }
 
     /// Groups the selected modules (and groups), and opens the new group's
@@ -265,14 +295,27 @@ impl SynthApp {
         let zoom = self.graph_state.pan_zoom.zoom;
         let level = self.user_state.level;
         let graph = &self.graph_state.graph;
-        let bounds = groups::level_nodes(graph, level)
-            .into_iter()
-            .filter_map(|n| self.graph_state.node_positions.get(n).copied())
-            .map(|at| egui::Rect::from_min_size(at, groups::NOMINAL_NODE_SIZE * zoom))
+        let nodes = groups::level_nodes(graph, level);
+        // Nodes never drawn yet are taken at a nominal size, and framed again once they are
+        self.reframe_level = nodes.iter().any(|n| !self.node_sizes.contains_key(n));
+        let bounds = nodes
+            .iter()
+            .filter_map(|&n| {
+                let size = self.node_sizes.get(&n).copied().unwrap_or(groups::NOMINAL_NODE_SIZE);
+                Some(egui::Rect::from_min_size(*self.graph_state.node_positions.get(n)?, size * zoom))
+            })
             .reduce(|a, b| a.union(b));
-        if let (Some(bounds), true) = (bounds, self.editor_rect.is_positive()) {
-            self.graph_state.pan_zoom.pan = self.editor_rect.size() / 2.0 - bounds.center().to_vec2();
-        }
+        let view = self.editor_rect.size();
+        let Some(bounds) = bounds.filter(|_| self.editor_rect.is_positive()) else { return };
+        // In the middle if it fits, otherwise from its top left, clear of the
+        // breadcrumb trail: where the signal comes in
+        let fit = |extent: f32, room: f32, start: f32, middle: f32| {
+            if extent + 2.0 * FRAME_MARGIN <= room { room / 2.0 - middle } else { FRAME_MARGIN - start }
+        };
+        self.graph_state.pan_zoom.pan = egui::vec2(
+            fit(bounds.width(), view.x, bounds.left(), bounds.center().x),
+            fit(bounds.height(), view.y - TRAIL_HEIGHT, bounds.top() - TRAIL_HEIGHT, bounds.center().y - TRAIL_HEIGHT / 2.0),
+        );
     }
 
     /// Ctrl+G groups the selection, Ctrl+Alt+G takes groups apart, F2
