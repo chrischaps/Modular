@@ -1,6 +1,6 @@
 # Module Overview
 
-Modular Synth has 25 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
+Modular Synth has 27 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
 
 The **ID** is the name a patch file uses to refer to the module.
 
@@ -62,6 +62,7 @@ The **ID** is the name a patch file uses to refer to the module.
 | [Mixer](./utilities/mixer.md) | `util.mixer` | Four-channel stereo mixer with pan, mute and poly spread |
 | [Sample & Hold](./utilities/sample-hold.md) | `util.sample_hold` | Capture a signal's value on each trigger and hold it |
 | [Quantizer](./utilities/quantizer.md) | `util.quantizer` | Snap a pitch to the nearest note of a scale |
+| [Logic](./utilities/logic.md) | `util.logic` | Divide and count a clock, combine gates, and turn a control voltage into a gate |
 | [Oscilloscope](./visualization/oscilloscope.md) | `util.oscilloscope` | Draw up to two signals as waveforms |
 | [Step Sequencer](./utilities/sequencer.md) | `seq.step` | 16 steps of pitch, gate and velocity |
 | [MIDI Monitor](./midi/midi-monitor.md) | `util.midi_monitor` | Show incoming MIDI messages |

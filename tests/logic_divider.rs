@@ -1,0 +1,96 @@
+//! The Logic module's divider can schedule a phrase on its own. Backbeat
+//! plays a tom fill every fourth bar with a second Clock at a quarter of the
+//! tempo and a bar counter to keep the two in step. The test patch
+//! `fixtures/backbeat-logic.json` replaces both with one Logic dividing the
+//! sixteenths by 64. These tests render the two and check they play the
+//! same bars.
+
+use std::path::{Path, PathBuf};
+
+use modular_synth::engine::read_wav;
+
+/// A sixteenth at Backbeat's 96 BPM, at the render tool's 48 kHz.
+const STEP: usize = 7500;
+
+/// Long enough for three fills (bars 1, 5 and 9) and the crash after the
+/// third.
+const SECONDS: &str = "26";
+
+fn repo(path: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(path)
+}
+
+fn scratch() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("modular-logic-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// Renders a patch file with the `render` binary, in a process of its own
+/// so its Noise modules get the same streams every time, and returns the
+/// RMS of each sixteenth, in dBFS, both channels together.
+fn steps_db(patch: &Path, wav: &Path) -> Vec<f32> {
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_render"))
+        .args([patch.as_os_str(), wav.as_os_str()])
+        .args(["--seconds", SECONDS])
+        .stdout(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success(), "render failed for {}", patch.display());
+    let (audio, rate) = read_wav(wav).unwrap();
+    assert_eq!(rate, 48000);
+    (0..audio.left.len() / STEP)
+        .map(|step| {
+            let range = step * STEP..(step + 1) * STEP;
+            let energy: f32 = audio.left[range.clone()].iter().chain(&audio.right[range]).map(|s| s * s).sum();
+            10.0 * (energy / (2 * STEP) as f32 + 1e-15).log10()
+        })
+        .collect()
+}
+
+/// The bars (from 1) that play the fill. Every other bar has an open hat
+/// ringing on step 7, and nothing else plays there, so a fill bar, with its
+/// hats pulled down, is silent on that step.
+fn fill_bars(steps: &[f32]) -> Vec<usize> {
+    steps.chunks_exact(16).enumerate().filter(|(_, bar)| bar[6] < -90.0).map(|(n, _)| n + 1).collect()
+}
+
+/// The test patch with its Logic's Offset changed.
+fn with_offset(offset: f32, path: &Path) -> PathBuf {
+    let mut patch: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(repo("tests/fixtures/backbeat-logic.json")).unwrap()).unwrap();
+    let logic = patch["nodes"].as_array_mut().unwrap().iter_mut().find(|n| n["module_id"] == "util.logic").unwrap();
+    let param = logic["parameters"].as_array_mut().unwrap().iter_mut().find(|p| p["name"] == "Offset").unwrap();
+    param["value"] = offset.into();
+    std::fs::write(path, serde_json::to_string_pretty(&patch).unwrap()).unwrap();
+    path.to_path_buf()
+}
+
+#[test]
+fn logic_fill_plays_the_same_bars_as_the_phrase_clock() {
+    let dir = scratch();
+    let original = steps_db(&repo("patches/backbeat.json"), &dir.join("original.wav"));
+    let logic = steps_db(&repo("tests/fixtures/backbeat-logic.json"), &dir.join("logic.wav"));
+
+    assert_eq!(fill_bars(&original), vec![1, 5, 9]);
+    assert_eq!(fill_bars(&logic), vec![1, 5, 9]);
+
+    // Step for step, the same levels. The one difference: the phrase clock
+    // closed its gate 100 ms into the bar after a fill, Logic at its second
+    // sixteenth, so the hats' fader comes back up a moment later, after the
+    // downbeat's closed hat has died away
+    assert_eq!(original.len(), logic.len());
+    for (step, (a, b)) in original.iter().zip(&logic).enumerate() {
+        if *a > -80.0 {
+            assert!((a - b).abs() < 0.1, "bar {} step {}: {a:.2} dB, Logic {b:.2} dB", step / 16 + 1, step % 16 + 1);
+        }
+    }
+
+    // A control: moved a bar later, the fill really does move, and the
+    // comparison above would have caught it
+    let moved = steps_db(&with_offset(16.0, &dir.join("moved.json")), &dir.join("moved.wav"));
+    assert_eq!(fill_bars(&moved), vec![2, 6, 10]);
+    let largest = original.iter().zip(&moved).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+    assert!(largest > 20.0, "moving the fill changed no step by more than {largest:.1} dB");
+
+    std::fs::remove_dir_all(&dir).ok();
+}

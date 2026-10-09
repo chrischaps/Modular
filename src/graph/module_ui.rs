@@ -237,6 +237,14 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "util.logic",
+        knobs: &[knob_as("Divide", "Div"), knob("Offset"), knob("Length"), knob_as("Threshold", "Thresh")],
+        // The logic lamps read their outputs; the gate outputs light up
+        monitor: &["Trig", "Gate", "AND", "OR", "XOR", "NOT A", "Above"],
+        display: NodeDisplay::LogicRing,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "util.oscilloscope",
         knobs: &[knob_as("Trigger Level", "Trig")],
         display: NodeDisplay::Scope,

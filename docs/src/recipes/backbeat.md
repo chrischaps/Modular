@@ -121,6 +121,19 @@ Two clocks running freely would slowly drift apart. The bar counter is a 4-step 
 
 The fill also plays in the very first bar, so the patch opens with a count-in down the toms and lands on a crash.
 
+### A simpler phrase: Logic
+
+The phrase clock and the bar counter take two modules and a re-sync to do one job: open a gate once every four bars. A [Logic](../modules/utilities/logic.md) module does it alone. Delete the phrase clock and the bar counter, and patch:
+
+```text
+[Clock Gate] ──> [Logic Clock]                 (Div 64, Offset 0, Length 17)
+[Logic Gate] ──> [Tom Seq Run]  [Tom Seq Reset]  [Attenuverter In]
+```
+
+Logic counts the Clock's sixteenths, and 64 of them are four bars. Its **Gate** opens on count 0, the downbeat of bar 1, and stays open for 17 clocks: the fill bar and the downbeat after it. So the toms still take one extra step, wrap round and strike the crash. Rendered side by side, the two versions play the same bars, every sixteenth within a hundredth of a decibel of the other.
+
+A divider counts the Clock's pulses, so it can't drift and needs no re-sync, and it follows the Clock to any tempo. At 72 BPM the fill stays on every fourth bar, where a phrase clock would need 18 BPM, below its slowest setting. For a fill every eighth bar, set **Div** to 128.
+
 ### Toms across the kit
 
 ```text
@@ -145,7 +158,7 @@ Kick and snare go to the first Mixer's mono **Out**, through a compressor, and i
 
 **A different fill.** The toms play steps 9 to 16. Turn on steps 1 to 8 for a whole-bar fill, or change the pitches for a different run.
 
-**Faster.** Set the Clock to 120 BPM and the phrase clock to 30. The phrase clock must always run at a quarter of the Clock's tempo. Its lowest setting is 20 BPM, so below 80 BPM the fill can't stay every fourth bar.
+**Faster.** Set the Clock to 120 BPM and the phrase clock to 30. The phrase clock must always run at a quarter of the Clock's tempo. Its lowest setting is 20 BPM, so below 80 BPM the fill can't stay every fourth bar. With [Logic](#a-simpler-phrase-logic) scheduling the fill instead, turn only the Clock, to any tempo.
 
 ## Related
 

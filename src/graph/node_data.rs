@@ -269,6 +269,9 @@ pub enum NodeDisplay {
     /// Clock: four lamps for the beats of the bar, and where the time comes
     /// from.
     ClockBeat,
+    /// Logic: the count as a ring of beads, lamps for the logic outputs, and
+    /// the CV against its Threshold.
+    LogicRing,
 }
 
 /// Data stored per node in the graph.
@@ -2162,6 +2165,12 @@ impl NodeDataTrait for SynthNodeData {
 
         if self.display == NodeDisplay::InputListen {
             if let Some((param_name, value)) = super::input_display::input_display(ui, node_id, graph, user_state, zoom) {
+                responses.push(NodeResponse::User(SynthResponse::ParameterChanged { node_id, param_name, value }));
+            }
+        }
+
+        if self.display == NodeDisplay::LogicRing {
+            if let Some((param_name, value)) = super::logic_display::logic_display(ui, node_id, graph, user_state, zoom) {
                 responses.push(NodeResponse::User(SynthResponse::ParameterChanged { node_id, param_name, value }));
             }
         }

@@ -41,6 +41,7 @@
   - [Mixer](./modules/utilities/mixer.md)
   - [Sample & Hold](./modules/utilities/sample-hold.md)
   - [Quantizer](./modules/utilities/quantizer.md)
+  - [Logic](./modules/utilities/logic.md)
   - [Oscilloscope](./modules/visualization/oscilloscope.md)
   - [Step Sequencer](./modules/utilities/sequencer.md)
   - [MIDI Monitor](./modules/midi/midi-monitor.md)

@@ -259,6 +259,31 @@ knob Transpose          "Transpose" Modulatable
 monitor [0, 1]
 display ScalePiano
 
+== util.logic "Logic" finder="Logic" Utility
+in   Clock              Gate     ConnectionOnly       inline=true  port
+in   Reset              Gate     ConnectionOnly       inline=true  port
+in   A                  Gate     ConnectionOnly       inline=true  port
+in   B                  Gate     ConnectionOnly       inline=true  port
+in   CV                 Control  ConnectionOnly       inline=true  port
+in   Divide             Control  ConstantOnly         inline=false num 4 [1..128]  stepped
+in   Offset             Control  ConstantOnly         inline=false num 0 [0..127]  stepped
+in   Length             Control  ConstantOnly         inline=false num 1 [1..128]  stepped
+in   Threshold          Control  ConstantOnly         inline=false num 0.5 [-1..1]
+out  Trig               Gate
+out  Gate               Gate
+out  Count              Control
+out  AND                Gate
+out  OR                 Gate
+out  XOR                Gate
+out  NOT A              Gate
+out  Above              Gate
+knob Divide             "Div" KnobOnly
+knob Offset             "Offset" KnobOnly
+knob Length             "Length" KnobOnly
+knob Threshold          "Thresh" KnobOnly
+monitor [0, 1, 3, 4, 5, 6, 7]
+display LogicRing
+
 == util.oscilloscope "Oscilloscope" finder="Oscilloscope" Utility
 in   In 1               Audio    ConnectionOnly       inline=true  port
 in   In 2               Audio    ConnectionOnly       inline=true  port
