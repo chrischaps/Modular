@@ -54,11 +54,13 @@ Live input passes through two devices, each with its own clock and buffer: the i
 | Part | Typical (Windows) | What it is |
 |------|-------------------|------------|
 | **Input device** | ~10 ms | The input device's own buffer: audio waits there until a packet is full |
-| **Buffer** | ~20 ms | What Modular holds between the two devices to ride out their uneven timing |
+| **Buffer** | ~13 ms | What Modular holds between the two devices to ride out their uneven timing, once settled |
 | **Output device** | ~30 ms | The output device's own buffer and the Windows audio engine behind it, before the speakers play it |
 | **Limiter** | 1 ms | The Audio Output limiter's look-ahead |
 
 Each device's figure comes from the timestamps it puts on its audio. Windows doesn't time captured audio usefully, so there the input is counted as one packet, the least it can be, and the hover marks it with **~**. If a device reports nothing at all, the label gets a **+** (**In 22+ ms**): the real round trip is longer than the parts Modular can count. Neither figure includes the converters inside the interface, usually another millisecond or two each way.
+
+The **Buffer** settles on its own. It opens holding enough for the worst timing the two devices could have, then over the first few seconds it watches how much of that they really need, and trims the rest, a frame at a time so you don't hear it. If the two devices' clocks drift apart, as separate devices' do, it eases a block a fraction faster or slower to keep in step rather than letting the audio drop out. After a dropout it holds a little more, then tries the leaner amount again after a quiet half minute. The hover shows how much it has trimmed and stretched.
 
 - **Different sample rates are fine.** Windows often runs a microphone at 48 kHz and speakers at 44.1 kHz, even on one interface. Modular converts the input to the output's rate on the way in. For the cleanest sound, set both to the same rate in your system's sound settings; the status bar tooltip says when it's converting.
 - **Changing the Output device** reopens the input at the new device's rate.

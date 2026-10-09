@@ -97,10 +97,12 @@ fn default_input_reaches_the_audio_input_module() {
     let trip = RoundTrip::of(&monitor, engine.output_latency(), engine.sample_rate());
     let ms = |delay: Option<Duration>| delay.map_or("not reported".to_string(), |d| format!("{:.1} ms", d.as_secs_f64() * 1000.0));
     println!(
-        "{readings} meter readings, input peak {:.1} dBFS; underruns {:.1} ms, overflows {:.1} ms; device glitches: input {}, output {}",
+        "{readings} meter readings, input peak {:.1} dBFS; underruns {:.1} ms, overflows {:.1} ms; settling: trimmed {:.1} ms, stretched {:.1} ms; device glitches: input {}, output {}",
         20.0 * peak.max(1e-9).log10(),
         monitor.underrun_frames() as f64 / rate * 1000.0,
         monitor.overflow_frames() as f64 / rate * 1000.0,
+        monitor.settled_frames() as f64 / rate * 1000.0,
+        monitor.stretched_frames() as f64 / rate * 1000.0,
         monitor.device_xruns(),
         engine.output_xruns(),
     );

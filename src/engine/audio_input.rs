@@ -18,8 +18,25 @@
 //!   runs a little fast, or the output stalled), the oldest frames are
 //!   dropped back down to it. Frames the ring had no room for are dropped
 //!   on the input side.
+//! - **Settling:** on separate clocks, the ring starts out holding at
+//!   least the target, often up to a buffer more, depending on where the
+//!   reads fell as it filled. The sender stamps each push, so before each
+//!   callback the feed knows the *fill*: the level, plus the input built up
+//!   since the last buffer arrived. Unlike the level, the fill doesn't jump
+//!   with each buffer, so the margin it leaves just before the next buffer
+//!   is due holds whatever the phase between the callbacks. Over a couple
+//!   of seconds, the feed trims away the margin never needed beyond the
+//!   cushion; when it dips toward empty instead (an input clock running a
+//!   little slow, or timing rougher than before), it stretches back up to
+//!   the cushion before it runs dry. Both go a frame at a time, a block
+//!   playing 0.4% fast or slow so nothing clicks, or a trim goes all at
+//!   once while the input is quiet. Clocks that drift apart are followed
+//!   this way rather than running dry or ahead. After a long run without
+//!   an underrun the cushion steps back down, so one glitch at start-up
+//!   doesn't cost latency for the rest of the session; if that runs dry
+//!   again, it waits twice as long before the next try.
 //!
-//! Both are counted, in frames, for the status bar.
+//! All of these are counted, in frames, for the status bar.
 //!
 //! **Same clock.** When one driver serves both sides (ASIO), the input and
 //! output callbacks run in lockstep, one after the other at each buffer
@@ -39,6 +56,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rtrb::{Consumer, Producer, RingBuffer};
+use web_time::Instant;
 
 use super::latency::LatencyGauge;
 
@@ -54,14 +72,22 @@ struct InputStats {
     /// Frames dropped: input with no room in the ring, or trimmed because
     /// the ring ran too far ahead.
     overflow_frames: AtomicU64,
+    /// Frames trimmed as the feed settled to the latency it needs.
+    settled_frames: AtomicU64,
+    /// Frames stretched as the ring ran low, to keep it from running dry.
+    stretched_frames: AtomicU64,
+    /// When the input last pushed, in nanoseconds from the channel's epoch.
+    pushed_at: AtomicU64,
     /// The largest buffer the input device has delivered, in frames at the
     /// output's rate.
     largest_input: AtomicUsize,
     /// The level the feed refills to, in frames.
     target_frames: AtomicUsize,
-    /// The latency the feed adds, in frames: the target, less the input
-    /// buffer that arrives just before each read when one driver runs the
-    /// input callback ahead of the output's.
+    /// The latency the feed adds, in frames: the average over the last
+    /// window, or the target until a window has passed. On separate
+    /// clocks, how long input waits from its buffer's arrival to its turn
+    /// to play; on a shared one, the level less the input buffer that
+    /// arrives just before each read when the input's callback runs first.
     added_frames: AtomicUsize,
     /// Set by the input stream's error callback (unplugged, say).
     failed: AtomicBool,
@@ -145,6 +171,8 @@ pub struct InputSender {
     stats: Arc<InputStats>,
     /// Converts the device's rate to the output's, when they differ.
     resampler: Option<Resampler>,
+    /// When the channel opened, shared with the feed.
+    epoch: Instant,
 }
 
 impl InputSender {
@@ -157,11 +185,23 @@ impl InputSender {
         if channels == 0 {
             return;
         }
+        self.write(data, channels, to_f32);
+        self.stamp(self.epoch.elapsed());
+    }
+
+    /// Notes that the input pushed at `at` from the epoch, for the feed to
+    /// tell how long ago the last buffer arrived.
+    fn stamp(&self, at: Duration) {
+        self.stats.pushed_at.store(at.as_nanos() as u64, Ordering::Relaxed);
+    }
+
+    /// Writes one callback's input into the ring: see [`push`](Self::push).
+    fn write<T: Copy>(&mut self, data: &[T], channels: usize, to_f32: impl Fn(T) -> f32) {
         let stereo = |frame: &[T]| {
             let left = to_f32(frame[0]);
             [left, if channels > 1 { to_f32(frame[1]) } else { left }]
         };
-        let Self { producer, stats, resampler } = self;
+        let Self { producer, stats, resampler, .. } = self;
 
         let Some(resampler) = resampler.as_mut() else {
             let frames = data.len() / channels;
@@ -223,13 +263,63 @@ pub struct InputFeed {
     /// Whether the ring has filled to the target since it last ran dry.
     primed: bool,
     /// Extra frames kept on top of one input and one output buffer, grown
-    /// by each underrun.
+    /// by each underrun and relaxed after a long calm.
     cushion: usize,
     /// The largest buffer the output has asked for, in frames. Some drivers
     /// vary their buffer size from one callback to the next.
     largest_output: usize,
     /// How the two callbacks are clocked.
     clock: Clock,
+    /// Output frames a second.
+    rate: usize,
+    /// When the channel opened, shared with the sender.
+    epoch: Instant,
+    /// Frames the current callback has still to read.
+    owed: usize,
+    /// How low the ring has run in the current window.
+    watch: Watch,
+    /// The latency the feed added on average over the last whole window,
+    /// once one has passed since the feed primed.
+    measured: Option<usize>,
+    /// Frames still to take in beyond those handed out (a trim, positive)
+    /// or to hold back (a stretch, negative).
+    plan: isize,
+    /// Frames read toward the next frame trimmed or stretched.
+    slew: usize,
+    /// The last frame taken from the ring, which a squeezed or stretched
+    /// read curves on from.
+    last: [f32; 2],
+    /// Whether the last frame heard was quiet enough to cut after.
+    quiet: bool,
+    /// Frames read since the last underrun or relaxed cushion.
+    calm: usize,
+    /// How many calm frames relax the cushion a step.
+    relax_after: usize,
+    /// Whether the cushion was relaxed since the last underrun, so running
+    /// dry now means it was relaxed too soon.
+    relaxed: bool,
+}
+
+/// The ring's low-water mark over a window of callbacks.
+#[derive(Clone, Copy, Debug)]
+struct Watch {
+    /// Output frames into the window.
+    frames: usize,
+    /// The latency the feed added, summed over the callbacks.
+    added: usize,
+    /// Callbacks into the window.
+    callbacks: usize,
+    /// The fewest frames a callback would have left, had the next input
+    /// buffer been just about to arrive: the margin that keeps it from
+    /// running dry whatever the phase between the callbacks.
+    margin: usize,
+    /// Whether a trim or stretch was under way, which leaves the margin out
+    /// of date.
+    settling: bool,
+}
+
+impl Watch {
+    const NEW: Self = Self { frames: 0, added: 0, callbacks: 0, margin: usize::MAX, settling: false };
 }
 
 /// How an input's callbacks are clocked against the output's.
@@ -247,8 +337,23 @@ impl InputFeed {
     const MIN_CUSHION: usize = 32;
     /// The cushion never grows past this, about 20 ms at 48 kHz.
     const MAX_CUSHION: usize = 1024;
-    /// How much each underrun adds to the cushion.
+    /// How much each underrun adds to the cushion, and each calm stretch
+    /// takes away.
     const CUSHION_STEP: usize = 64;
+    /// How long the feed watches the ring's low-water mark before trimming.
+    const WINDOW_SECONDS: usize = 2;
+    /// The fewest unneeded frames worth trimming, so trims and stretches
+    /// don't chase each other a few frames at a time.
+    const TRIM_MIN: usize = 16;
+    /// Frames read for each frame trimmed or stretched: the input plays
+    /// about 0.4% fast or slow, 7 cents, while the feed settles.
+    const SLEW: usize = 256;
+    /// Below this (-60 dBFS) a cut is inaudible, so a trim goes all at once.
+    const QUIET: f32 = 0.001;
+    /// How long without an underrun before the cushion relaxes a step.
+    const RELAX_SECONDS: usize = 30;
+    /// The longest the relaxing backs off to, after relaxed cushions ran dry.
+    const MAX_RELAX_SECONDS: usize = 240;
 
     /// The level reads start from: the largest input buffer, the largest
     /// output buffer, and the cushion. On a shared clock, the input buffer
@@ -261,12 +366,13 @@ impl InputFeed {
         }
     }
 
-    /// The latency the feed adds at `target`: all of it, unless the input
-    /// arrives just before each read.
-    fn added(&self, target: usize) -> usize {
+    /// The latency the feed adds when the ring holds `level` before a
+    /// callback on a shared clock, or at the target on any: all of it,
+    /// unless the input arrives just before each read.
+    fn added(&self, level: usize) -> usize {
         match self.clock {
-            Clock::Shared { input_first: true } => target.saturating_sub(self.stats.largest_input.load(Ordering::Relaxed)),
-            _ => target,
+            Clock::Shared { input_first: true } => level.saturating_sub(self.stats.largest_input.load(Ordering::Relaxed)),
+            _ => level,
         }
     }
 
@@ -282,66 +388,239 @@ impl InputFeed {
         }
     }
 
+    /// Starts watching afresh, for a level that has just been set: by
+    /// priming, or by a drop back to the target.
+    fn reset_watch(&mut self) {
+        self.watch = Watch::NEW;
+        self.measured = None;
+        self.plan = 0;
+        self.slew = 0;
+    }
+
     /// Call at the start of an output callback that will read
     /// `output_frames` frames: waits until the ring has filled to the
-    /// target, and trims it back to the target if it has run well ahead.
+    /// target, trims it back to the target if it has run well ahead, and
+    /// watches how low it runs.
     ///
     /// REAL-TIME SAFE.
     pub fn begin(&mut self, output_frames: usize) {
+        self.begin_at(output_frames, self.epoch.elapsed());
+    }
+
+    /// [`begin`](Self::begin), `now` from the epoch.
+    fn begin_at(&mut self, output_frames: usize, now: Duration) {
         self.largest_output = self.largest_output.max(output_frames);
+        self.owed = output_frames;
         let target = self.target();
         self.stats.target_frames.store(target, Ordering::Relaxed);
-        self.stats.added_frames.store(self.added(target), Ordering::Relaxed);
-        let level = self.level();
+        let mut level = self.level();
         if !self.primed {
+            self.stats.added_frames.store(self.added(target), Ordering::Relaxed);
             // Nothing to start from yet: on a shared clock, before the first
             // input buffer, the target is still zero
             if level < target || level == 0 {
                 return;
             }
             self.primed = true;
+            self.reset_watch();
         }
         // The level naturally swings between about target - output and
-        // target + input. Past that, the input is running ahead
-        let ceiling = target + self.stats.largest_input.load(Ordering::Relaxed) + self.largest_output;
+        // target + input. Past that, with a step to spare so a relaxed
+        // cushion doesn't tip it over, the input is running ahead
+        let input = self.stats.largest_input.load(Ordering::Relaxed);
+        let ceiling = target + input + self.largest_output + Self::CUSHION_STEP;
         if level > ceiling {
             let excess = level - target;
             self.drop_frames(excess);
             self.stats.overflow_frames.fetch_add(excess as u64, Ordering::Relaxed);
+            self.reset_watch();
+            level = target;
         }
+        match self.clock {
+            Clock::Separate => {
+                // The input that has built up since the last buffer arrived,
+                // still on its way: with it, the fill grows smoothly between
+                // buffers rather than in steps, whatever the phase
+                let since = now.saturating_sub(Duration::from_nanos(self.stats.pushed_at.load(Ordering::Relaxed)));
+                let coming = ((since.as_secs_f64() * self.rate as f64) as usize).min(input);
+                self.settle_toward(level + coming, input, output_frames);
+            }
+            Clock::Shared { .. } => {
+                self.measure(self.added(level), level.saturating_sub(output_frames));
+            }
+        }
+        self.stats.added_frames.store(self.measured.unwrap_or(self.added(target)), Ordering::Relaxed);
+    }
+
+    /// Takes in the fill before a separate-clock callback that reads
+    /// `output_frames`: the level, and the input on its way. Just before an
+    /// `input`-frame buffer arrives, the level is the fill less the buffer,
+    /// so that, less the read, is the margin whatever the phase between the
+    /// callbacks. When it dips toward empty, plans a stretch back up to the
+    /// cushion; at the end of a window in which it never fell to the
+    /// cushion, plans a trim down to it. After a long calm, relaxes the
+    /// cushion a step.
+    ///
+    /// A shared clock doesn't settle: it already holds the least it can,
+    /// and its cushion only helps in whole buffers, for a driver that swaps
+    /// the callbacks' order.
+    fn settle_toward(&mut self, fill: usize, input: usize, output_frames: usize) {
+        let added = fill.saturating_sub(input);
+        let margin = added.saturating_sub(output_frames);
+        if margin < self.cushion / 2 && self.plan >= 0 {
+            self.plan = -((self.cushion - margin) as isize);
+        }
+        if let Some(Watch { margin, settling, .. }) = self.measure(added, margin) {
+            if !settling && margin >= self.cushion + Self::TRIM_MIN {
+                self.plan = (margin - self.cushion) as isize;
+            }
+        }
+
+        self.calm += output_frames;
+        if self.calm >= self.relax_after && self.cushion > Self::MIN_CUSHION {
+            self.cushion = (self.cushion - Self::CUSHION_STEP).max(Self::MIN_CUSHION);
+            self.calm = 0;
+            self.relaxed = true;
+        }
+    }
+
+    /// Adds a callback's latency and margin to the window, returning the
+    /// window if that ended it.
+    fn measure(&mut self, added: usize, margin: usize) -> Option<Watch> {
+        let watch = &mut self.watch;
+        watch.frames += self.owed;
+        watch.added += added;
+        watch.callbacks += 1;
+        watch.margin = watch.margin.min(margin);
+        watch.settling |= self.plan != 0;
+        if watch.frames < Self::WINDOW_SECONDS * self.rate {
+            return None;
+        }
+        let ended = *watch;
+        self.watch = Watch::NEW;
+        self.measured = Some(ended.added / ended.callbacks);
+        Some(ended)
     }
 
     /// Reads the next `left.len()` frames into `left` and `right` (the same
     /// length). Until the buffer has filled, or past the input it holds,
     /// the frames are silence; running dry counts as an underrun and waits
-    /// for the buffer to refill.
+    /// for the buffer to refill. While a trim or stretch is planned, a read
+    /// takes in a frame more or less than it hands out, or a trim cuts at
+    /// once if the input is quiet.
     ///
     /// REAL-TIME SAFE.
     pub fn read(&mut self, left: &mut [f32], right: &mut [f32]) {
         let wanted = left.len().min(right.len());
         let mut got = 0;
         if self.primed {
-            got = self.level().min(wanted);
-            if let Ok(chunk) = self.consumer.read_chunk(got * 2) {
-                let (first, second) = chunk.as_slices();
-                let samples = first.iter().chain(second);
-                for (i, &sample) in samples.enumerate() {
-                    if i % 2 == 0 {
-                        left[i / 2] = sample;
-                    } else {
-                        right[i / 2] = sample;
-                    }
+            let nudge = self.settle(wanted);
+            if nudge != 0 {
+                // Taken a little faster or slower, looking two frames on
+                got = wanted;
+                let taken = wanted.saturating_add_signed(nudge);
+                if let Ok(chunk) = self.consumer.read_chunk((taken + 2) * 2) {
+                    let (first, second) = chunk.as_slices();
+                    resample(first, second, self.last, &mut left[..wanted], &mut right[..wanted], taken);
+                    let at = |i: usize| if i < first.len() { first[i] } else { second[i - first.len()] };
+                    self.last = [at(2 * taken - 2), at(2 * taken - 1)];
+                    chunk.commit(taken * 2);
                 }
-                chunk.commit_all();
+            } else {
+                got = self.level().min(wanted);
+                if let Ok(chunk) = self.consumer.read_chunk(got * 2) {
+                    let (first, second) = chunk.as_slices();
+                    let samples = first.iter().chain(second);
+                    for (i, &sample) in samples.enumerate() {
+                        if i % 2 == 0 {
+                            left[i / 2] = sample;
+                        } else {
+                            right[i / 2] = sample;
+                        }
+                    }
+                    chunk.commit_all();
+                }
+                if got > 0 {
+                    self.last = [left[got - 1], right[got - 1]];
+                }
             }
+            if got > 0 {
+                self.quiet = left[got - 1].abs() < Self::QUIET && right[got - 1].abs() < Self::QUIET;
+            }
+            self.owed = self.owed.saturating_sub(wanted);
             if got < wanted {
-                self.stats.underrun_frames.fetch_add((wanted - got) as u64, Ordering::Relaxed);
-                self.primed = false;
-                self.cushion = (self.cushion + Self::CUSHION_STEP).min(Self::MAX_CUSHION);
+                self.underrun(wanted - got);
             }
         }
         left[got..wanted].fill(0.0);
         right[got..wanted].fill(0.0);
+    }
+
+    /// Runs dry: counts the silence, grows the cushion, and waits to refill.
+    fn underrun(&mut self, frames: usize) {
+        self.stats.underrun_frames.fetch_add(frames as u64, Ordering::Relaxed);
+        self.primed = false;
+        self.last = [0.0; 2];
+        self.quiet = true;
+        self.cushion = (self.cushion + Self::CUSHION_STEP).min(Self::MAX_CUSHION);
+        self.calm = 0;
+        if self.relaxed {
+            // The relaxed cushion wasn't enough: wait longer next time
+            self.relax_after = (self.relax_after * 2).min(Self::MAX_RELAX_SECONDS * self.rate);
+            self.relaxed = false;
+        }
+    }
+
+    /// Carries out the plan for a read of `wanted` frames. Returns how many
+    /// frames more (a trim) or fewer (a stretch) than `wanted` this read
+    /// should take in, at most one in 64 and averaging one in [`SLEW`]; or
+    /// cuts the whole trim at once if the input is quiet either side.
+    ///
+    /// [`SLEW`]: Self::SLEW
+    fn settle(&mut self, wanted: usize) -> isize {
+        if self.plan == 0 || wanted < 64 {
+            return 0;
+        }
+        let level = self.level();
+        self.slew += wanted;
+        let most = (self.slew / Self::SLEW).min(wanted / 64);
+        let nudge = if self.plan > 0 {
+            // Never into the cushion the rest of the callback leaves, and
+            // with two frames to look ahead to
+            let needed = self.owed.max(wanted) + self.cushion + 2;
+            let spare = level.saturating_sub(needed).min(self.plan as usize);
+            if spare > 0 && self.quiet && self.quiet_through(spare + 1) {
+                self.drop_frames(spare);
+                self.plan -= spare as isize;
+                self.stats.settled_frames.fetch_add(spare as u64, Ordering::Relaxed);
+                0
+            } else {
+                let skip = most.min(spare);
+                self.stats.settled_frames.fetch_add(skip as u64, Ordering::Relaxed);
+                skip as isize
+            }
+        } else {
+            let short = most.min(self.plan.unsigned_abs());
+            // The frames it takes, and two to look ahead to
+            if level + short < wanted + 2 {
+                0
+            } else {
+                self.stats.stretched_frames.fetch_add(short as u64, Ordering::Relaxed);
+                -(short as isize)
+            }
+        };
+        self.plan -= nudge;
+        self.slew = (self.slew - nudge.unsigned_abs() * Self::SLEW).min(Self::SLEW);
+        nudge
+    }
+
+    /// Whether the oldest `frames` frames waiting are all quiet.
+    fn quiet_through(&mut self, frames: usize) -> bool {
+        let Ok(chunk) = self.consumer.read_chunk(frames * 2) else {
+            return false;
+        };
+        let (first, second) = chunk.as_slices();
+        first.iter().chain(second).all(|s| s.abs() < Self::QUIET)
     }
 
     /// Drops everything waiting, for a callback that won't read (the
@@ -352,6 +631,29 @@ impl InputFeed {
         let level = self.level();
         self.drop_frames(level);
         self.primed = false;
+        self.last = [0.0; 2];
+        self.quiet = true;
+    }
+}
+
+/// Plays `taken` of the interleaved stereo frames in `first` then `second`
+/// into `left` and `right`, in the time of `left.len()`: a little fast or
+/// slow, read between frames along the Hermite curve. `before` is the frame
+/// before the first. The first frame lands exactly, and the curve looks up
+/// to two frames past the last one taken, which the next read starts from.
+fn resample(first: &[f32], second: &[f32], before: [f32; 2], left: &mut [f32], right: &mut [f32], taken: usize) {
+    let sample = |i: usize| if i < first.len() { first[i] } else { second[i - first.len()] };
+    let frames = left.len();
+    for i in 0..frames {
+        // Frame i lands at i * taken / frames: frame k, and t of the way on
+        // to the next
+        let at = i * taken;
+        let (k, t) = (at / frames, (at % frames) as f32 / frames as f32);
+        let x = |n: usize, side: usize| if n == 0 { before[side] } else { sample(2 * (n - 1) + side) };
+        // x(n) is frame n - 1, so x(k + 1) is frame k
+        let curve = |side| if t == 0.0 { x(k + 1, side) } else { hermite(x(k, side), x(k + 1, side), x(k + 2, side), x(k + 3, side), t) };
+        left[i] = curve(0);
+        right[i] = curve(1);
     }
 }
 
@@ -372,14 +674,28 @@ impl InputMonitor {
         self.stats.overflow_frames.load(Ordering::Relaxed)
     }
 
+    /// Frames trimmed as the jitter buffer settled to the latency it
+    /// needs, so far: unneeded margin, not dropouts.
+    pub fn settled_frames(&self) -> u64 {
+        self.stats.settled_frames.load(Ordering::Relaxed)
+    }
+
+    /// Frames the jitter buffer has stretched (played a little slow) as it
+    /// ran low, so far: a dropout avoided, or a slow input clock kept up
+    /// with.
+    pub fn stretched_frames(&self) -> u64 {
+        self.stats.stretched_frames.load(Ordering::Relaxed)
+    }
+
     /// The largest packet the input device has delivered, in frames at the
     /// output's rate.
     pub fn packet_frames(&self) -> usize {
         self.stats.largest_input.load(Ordering::Relaxed)
     }
 
-    /// The jitter buffer's level, in frames: the latency it adds on top of
-    /// the devices' own.
+    /// The latency the jitter buffer adds on top of the devices' own, in
+    /// frames: the lowest it has run over the last couple of seconds, or
+    /// the level it refills to before then.
     pub fn buffered_frames(&self) -> usize {
         self.stats.added_frames.load(Ordering::Relaxed)
     }
@@ -446,9 +762,10 @@ fn channel(input_rate: u32, output_rate: u32, clock: Clock) -> (InputSender, Inp
     let frames = ((output_rate as f32 * RING_SECONDS) as usize).max(1024);
     let (producer, consumer) = RingBuffer::new(frames * 2);
     let stats = Arc::new(InputStats::default());
+    let epoch = Instant::now();
     let resampler = (input_rate != output_rate && input_rate > 0).then(|| Resampler::new(input_rate, output_rate));
     (
-        InputSender { producer, stats: Arc::clone(&stats), resampler },
+        InputSender { producer, stats: Arc::clone(&stats), resampler, epoch },
         InputFeed {
             consumer,
             stats: Arc::clone(&stats),
@@ -459,6 +776,18 @@ fn channel(input_rate: u32, output_rate: u32, clock: Clock) -> (InputSender, Inp
             },
             largest_output: 0,
             clock,
+            rate: output_rate.max(1) as usize,
+            epoch,
+            owed: 0,
+            watch: Watch::NEW,
+            measured: None,
+            plan: 0,
+            slew: 0,
+            last: [0.0; 2],
+            quiet: true,
+            calm: 0,
+            relax_after: InputFeed::RELAX_SECONDS * output_rate.max(1) as usize,
+            relaxed: false,
         },
         InputMonitor { stats },
     )
@@ -478,38 +807,96 @@ mod tests {
     /// runs `drift` times as fast as the output's. Returns everything read
     /// (left side), and the monitor.
     fn run(input: usize, output: usize, drift: f64, seconds: f64) -> (Vec<f32>, InputMonitor) {
+        let ran = run_jittered(input, output, drift, seconds, 0.0);
+        (ran.heard, ran.monitor)
+    }
+
+    /// What a simulated run heard.
+    struct Ran {
+        /// Everything read, left side. Frame `i` of it plays at the output's
+        /// frame `i`, and the input's frame `n` was captured at frame `n`.
+        heard: Vec<f32>,
+        monitor: InputMonitor,
+        /// Frames of silence in place of input over the second half.
+        late_underruns: u64,
+    }
+
+    /// [`run`], with each callback running up to `jitter` seconds early or
+    /// late, as a busy system's do, though never ahead of the one before.
+    /// Each input buffer is pushed as its first frame is due, so frame `n`
+    /// is heard `i - n` frames after its buffer arrived.
+    fn run_jittered(input: usize, output: usize, drift: f64, seconds: f64, jitter: f64) -> Ran {
+        // Time is in output frames, exact while nothing wobbles
+        let jitter = jitter * 48000.0;
         let (mut sender, mut feed, monitor) = input_channel(48000);
+        // A small xorshift: the same jitter every run
+        let mut seed = 0x9E37_79B9_7F4A_7C15_u64 ^ (input * 7919 + output) as u64;
+        let mut wobble = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            jitter * ((seed >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0)
+        };
         let mut pushed = 0;
         let mut heard = Vec::new();
         let (mut left, mut right) = (vec![0.0; output], vec![0.0; output]);
         let total_reads = (seconds * 48000.0 / output as f64) as usize;
-        let input_period = input as f64 / (48000.0 * drift);
-        let mut next_input = 0.0;
+        let input_period = input as f64 / drift;
+        let mut next_input = wobble();
+        let mut now = 0.0f64;
+        let mut late_underruns = 0;
         for read in 0..total_reads {
-            let now = read as f64 * output as f64 / 48000.0;
+            if read == total_reads / 2 {
+                late_underruns = monitor.underrun_frames();
+            }
+            now = now.max((read * output) as f64 + wobble());
+            let at = |frames: f64| Duration::from_secs_f64(frames.max(0.0) / 48000.0);
             while next_input <= now {
                 sender.push_f32(&ramp(pushed, input), 2);
+                sender.stamp(at(next_input));
                 pushed += input;
-                next_input += input_period;
+                let due = (pushed / input) as f64 * input_period;
+                next_input = next_input.max(due + wobble());
             }
-            feed.begin(output);
+            feed.begin_at(output, at(now));
             feed.read(&mut left, &mut right);
             heard.extend_from_slice(&left);
         }
-        (heard, monitor)
+        let late_underruns = monitor.underrun_frames() - late_underruns;
+        Ran { heard, monitor, late_underruns }
     }
 
-    /// The first frame that isn't silence, and that the ramp runs on
-    /// unbroken from there to the end.
-    fn assert_unbroken(heard: &[f32]) -> usize {
+    /// The first frame that isn't silence, and that the ramp runs on from
+    /// there to the end: see [`assert_smooth`]. Returns the start, and how
+    /// many steps were squeezed.
+    fn assert_unbroken(heard: &[f32]) -> (usize, usize) {
         let start = heard.iter().position(|&s| s != 0.0).expect("input was heard");
         // The first frame pushed is 0, which reads as silence
-        let first = heard[start] as usize;
-        assert_eq!(first, 1, "reads start at the first frame");
-        for (i, pair) in heard[start..].windows(2).enumerate() {
-            assert_eq!(pair[1], pair[0] + 1.0, "ramp broke at frame {}", start + i);
+        assert_eq!(heard[start], 1.0, "reads start at the first frame");
+        (start, assert_smooth(&heard[start..]))
+    }
+
+    /// That the ramp runs on, never backwards, at most a frame and a little
+    /// at a time: a frame now and then squeezed into a block as the feed
+    /// settles, but nothing skipped whole. Returns how many steps were
+    /// squeezed.
+    fn assert_smooth(heard: &[f32]) -> usize {
+        let mut squeezed = 0;
+        for (i, pair) in heard.windows(2).enumerate() {
+            let step = pair[1] - pair[0];
+            // Far enough inside f32's integers for a tenth of a frame
+            assert!((0.9..1.1).contains(&step), "the ramp stepped {step} at frame {i}");
+            squeezed += (step != 1.0) as usize;
         }
-        start
+        squeezed
+    }
+
+    /// The latency the feed added at the end of a run of [`run_jittered`]:
+    /// how long the last frame heard waited from its input buffer's arrival
+    /// to its turn to play.
+    fn added_latency(heard: &[f32]) -> f64 {
+        let last = heard.len() - 1;
+        last as f64 - heard[last] as f64
     }
 
     #[test]
@@ -517,12 +904,143 @@ mod tests {
         // WASAPI-like input buffers against odd output buffers
         for (input, output) in [(480, 256), (441, 512), (128, 1024), (1024, 64)] {
             let (heard, monitor) = run(input, output, 1.0, 10.0);
-            let start = assert_unbroken(&heard);
+            let (start, _) = assert_unbroken(&heard);
             assert_eq!(monitor.underrun_frames(), 0, "{input}/{output} ran dry");
             assert_eq!(monitor.overflow_frames(), 0, "{input}/{output} dropped input");
             // It waited for about one of each buffer before starting
             assert!(start <= input + output + 2 * output, "{input}/{output} started after {start} frames");
             assert!(monitor.buffered_frames() <= input + output + InputFeed::MIN_CUSHION);
+        }
+    }
+
+    #[test]
+    fn test_jittery_callbacks_settle_lower_without_running_dry() {
+        // Each callback up to 1 ms early or late, on both sides
+        for (input, output) in [(480, 256), (441, 512), (128, 1024), (1024, 64)] {
+            let ran = run_jittered(input, output, 1.0, 20.0, 0.001);
+            let squeezed = assert_smooth(&ran.heard[ran.heard.len() / 2..]);
+            assert_eq!(ran.late_underruns, 0, "{input}/{output} still ran dry once settled");
+            assert_eq!(ran.monitor.overflow_frames(), 0, "{input}/{output} dropped input");
+
+            // Lower than the bound it used to hold, measured and reported
+            let bound = (input + output + InputFeed::MIN_CUSHION) as f64;
+            let added = added_latency(&ran.heard);
+            let reported = ran.monitor.buffered_frames() as f64;
+            println!(
+                "{input}/{output}: added {added:.0} frames ({:.1} ms), reported {reported:.0}, bound {bound:.0}; \
+                 settled {} frames, {squeezed} squeezed steps in the second half, {} frames of underrun first",
+                added / 48.0,
+                ran.monitor.settled_frames(),
+                ran.monitor.underrun_frames(),
+            );
+            assert!(added < bound, "{input}/{output}: added {added} frames");
+            assert!(reported < bound, "{input}/{output}: reported {reported} frames");
+            // The status bar tells it within a millisecond
+            assert!((reported - added).abs() <= 48.0, "{input}/{output}: reported {reported}, added {added}");
+            assert!(ran.monitor.settled_frames() > 0, "{input}/{output} never trimmed");
+        }
+    }
+
+    #[test]
+    fn test_drifting_clocks_are_kept_in_step() {
+        // Two devices' crystals a little apart, as separate devices' are,
+        // with rough timing besides: the feed stretches or trims to follow,
+        // and never runs dry or drops input once settled
+        for (input, output) in [(480, 256), (441, 512), (128, 1024), (1024, 64), (480, 480)] {
+            for drift in [0.9999, 1.0001] {
+                let ran = run_jittered(input, output, drift, 60.0, 0.001);
+                assert_eq!(ran.late_underruns, 0, "{input}/{output} at {drift} ran dry");
+                assert_eq!(ran.monitor.overflow_frames(), 0, "{input}/{output} at {drift} dropped input");
+                // This far into the ramp, f32 holds it to half a frame
+                let steps = ran.heard[ran.heard.len() / 2..].windows(2).map(|w| w[1] - w[0]);
+                assert!(steps.clone().all(|step| step > 0.0), "{input}/{output} at {drift} stepped backwards");
+                assert!(steps.clone().all(|step| step <= 2.0), "{input}/{output} at {drift} skipped");
+                let followed = if drift < 1.0 { ran.monitor.stretched_frames() } else { ran.monitor.settled_frames() };
+                // 100 ppm of a minute is 288 frames, give or take settling
+                assert!(followed >= 200, "{input}/{output} at {drift} followed {followed} frames");
+            }
+        }
+    }
+
+    #[test]
+    fn test_cushion_relaxes_after_a_calm_and_waits_longer_if_that_fails() {
+        // 480-frame packets against 256-frame reads, losing 20 ms of input
+        // at 1 s and again at 45 s
+        let (mut sender, mut feed, monitor) = input_channel(48000);
+        let (mut left, mut right) = (vec![0.0; 256], vec![0.0; 256]);
+        let seconds = |s: usize| s * 48000;
+        let gap = |packet: usize| [seconds(1), seconds(45)].iter().any(|&at| (at..at + 960).contains(&(packet * 480)));
+        let mut packets = 0;
+        let mut target_at = Vec::new();
+        for read in 0..seconds(120) / 256 {
+            let now = read * 256;
+            while (packets + 1) * 480 <= now {
+                if !gap(packets) {
+                    sender.push_f32(&[0.25; 480], 1);
+                    sender.stamp(Duration::from_secs_f64(((packets + 1) * 480) as f64 / 48000.0));
+                }
+                packets += 1;
+            }
+            feed.begin_at(256, Duration::from_secs_f64(now as f64 / 48000.0));
+            feed.read(&mut left, &mut right);
+            if now % seconds(5) < 256 {
+                target_at.push((now / 48000, monitor.target_frames(), monitor.underrun_frames()));
+            }
+        }
+        let at = |s: usize| target_at.iter().find(|&&(t, ..)| t == s).copied().unwrap();
+        let (step, base) = (InputFeed::CUSHION_STEP, 480 + 256 + InputFeed::MIN_CUSHION);
+        // The first gap ran dry and grew the cushion; 30 s on, it relaxed
+        let (_, target, dry) = at(5);
+        assert!(dry > 0, "the gap ran dry");
+        assert_eq!(target, base + step);
+        assert_eq!(at(30).1, base + step, "not yet");
+        assert_eq!(at(35).1, base, "relaxed after 30 s calm");
+        assert_eq!(at(40).2, dry, "and held");
+        // The second gap ran dry soon after relaxing, so the next try
+        // waits twice as long
+        let (_, target, again) = at(50);
+        assert!(again > dry);
+        assert_eq!(target, base + step);
+        assert_eq!(at(100).1, base + step, "not after 30 s");
+        assert_eq!(at(110).1, base, "after 60 s");
+        assert_eq!(monitor.overflow_frames(), 0);
+    }
+
+    #[test]
+    fn test_quiet_input_is_trimmed_at_once() {
+        // Silence, then a tone: the trim planned after the first window
+        // lands in one cut while it's quiet. A loud input takes it a frame
+        // in 256 at a time
+        for quiet in [true, false] {
+            let (mut sender, mut feed, monitor) = input_channel(48000);
+            let (mut left, mut right) = (vec![0.0; 256], vec![0.0; 256]);
+            let level = if quiet { 0.0 } else { 0.5 };
+            let mut pushed = 0;
+            let mut settled_soon_after = 0;
+            for read in 0..1000 {
+                // 480-frame packets every 10 ms
+                let now = read * 256 + 100;
+                while pushed + 480 <= now {
+                    sender.push_f32(&[level; 480], 1);
+                    pushed += 480;
+                    sender.stamp(Duration::from_secs_f64(pushed as f64 / 48000.0));
+                }
+                feed.begin_at(256, Duration::from_secs_f64(now as f64 / 48000.0));
+                feed.read(&mut left, &mut right);
+                // The first window ends two seconds after priming
+                if read == 2 * 48000 / 256 + 10 {
+                    settled_soon_after = monitor.settled_frames();
+                }
+            }
+            let settled = monitor.settled_frames();
+            assert!(settled >= 100, "quiet {quiet}: settled {settled} frames");
+            if quiet {
+                assert_eq!(settled_soon_after, settled, "all at once");
+            } else {
+                assert!(settled_soon_after <= 12, "a frame at a time: {settled_soon_after} frames");
+                assert!(left.iter().all(|&s| (s - 0.5).abs() < 1e-6), "a squeezed tone holds its level");
+            }
+            assert_eq!(monitor.underrun_frames(), 0);
         }
     }
 
@@ -575,9 +1093,11 @@ mod tests {
         // 2 x 480 frames: enough to start, then the input goes quiet
         sender.push_f32(&ramp(1, 480), 2);
         sender.push_f32(&ramp(481, 480), 2);
+        // Each read a second on: the next buffer is long overdue
+        let late = Duration::from_secs(1);
         let mut heard = Vec::new();
         for _ in 0..5 {
-            feed.begin(256);
+            feed.begin_at(256, late);
             feed.read(&mut left, &mut right);
             heard.extend_from_slice(&left);
         }
@@ -591,28 +1111,29 @@ mod tests {
         // ring is back up to it
         let target = 480 + 256 + InputFeed::MIN_CUSHION + InputFeed::CUSHION_STEP;
         sender.push_f32(&ramp(2000, 480), 2);
-        feed.begin(256);
+        feed.begin_at(256, late);
         assert_eq!(monitor.buffered_frames(), target);
         feed.read(&mut left, &mut right);
         assert!(left.iter().all(|&s| s == 0.0), "still refilling");
         assert_eq!(monitor.underrun_frames(), (4 * 256 - 960) as u64, "refilling isn't an underrun");
 
         sender.push_f32(&ramp(2480, 480), 2);
-        feed.begin(256);
+        feed.begin_at(256, late);
         feed.read(&mut left, &mut right);
         assert_eq!(left[0], 2000.0, "reading resumes where the input did");
     }
 
     #[test]
-    fn test_a_slow_input_clock_runs_dry_now_and_then() {
-        // Input 0.2% slow: about 96 frames short a second
+    fn test_a_slow_input_clock_is_stretched_to_keep_up() {
+        // Input 0.2% slow: about 96 frames short a second. As the ring runs
+        // low, each block takes in a frame less than it plays now and then
         let (heard, monitor) = run(480, 256, 0.998, 20.0);
-        assert!(monitor.underrun_frames() > 0);
-        // Each underrun adds cushion, which is why they get rarer, but
-        // they stay brief: well under 1% of the run is silence
-        let silent = heard.iter().filter(|&&s| s == 0.0).count();
-        assert!(silent < heard.len() / 100, "{silent} silent frames");
+        assert_unbroken(&heard);
+        assert_eq!(monitor.underrun_frames(), 0, "it never runs dry");
         assert_eq!(monitor.overflow_frames(), 0);
+        // About the frames it fell short, after the trim it settled by
+        let stretched = monitor.stretched_frames();
+        assert!((1500..2500).contains(&stretched), "stretched {stretched} frames");
     }
 
     #[test]
@@ -653,7 +1174,7 @@ mod tests {
         }
         feed.begin(256);
         feed.read(&mut left, &mut right);
-        let target = monitor.buffered_frames();
+        let target = monitor.target_frames();
         assert_eq!(monitor.overflow_frames() as usize, 960 + 4800 - 256 - target);
         // What's read is the newest input, `target` frames behind
         assert_eq!(left[0] as usize, 960 + 4800 - target + 1);
@@ -686,7 +1207,8 @@ mod tests {
         for frames in [32, 64, 128, 256] {
             for input_first in [true, false] {
                 let (heard, monitor) = run_lockstep(frames, 2000, input_first);
-                let start = assert_unbroken(&heard);
+                let (start, squeezed) = assert_unbroken(&heard);
+                assert_eq!(squeezed, 0, "nothing to trim");
                 assert_eq!(monitor.underrun_frames(), 0, "{frames}, input first {input_first}");
                 assert_eq!(monitor.overflow_frames(), 0, "{frames}, input first {input_first}");
                 assert_eq!(monitor.target_frames(), frames, "one buffer, no cushion");

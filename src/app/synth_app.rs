@@ -3242,13 +3242,22 @@ impl SynthApp {
                                 0 => String::new(),
                                 n => format!("\nGlitches the input device reported: {n}"),
                             };
+                            let settling = match (monitor.settled_frames(), monitor.stretched_frames()) {
+                                (0, 0) => String::new(),
+                                (trimmed, stretched) => format!(
+                                    "\nSettling: {:.0} ms trimmed that wasn't needed, {:.0} ms stretched to keep up",
+                                    trimmed as f64 / rate * 1000.0,
+                                    stretched as f64 / rate * 1000.0,
+                                ),
+                            };
                             format!(
-                                "Input: {}{}\n{}\nDropouts so far: {:.0} ms of silence, {:.0} ms skipped{}",
+                                "Input: {}{}\n{}\nDropouts so far: {:.0} ms of silence, {:.0} ms skipped{}{}",
                                 engine.input_name().unwrap_or("?"),
                                 converted,
                                 input_device::round_trip_details(&trip),
                                 monitor.underrun_frames() as f64 / rate * 1000.0,
                                 monitor.overflow_frames() as f64 / rate * 1000.0,
+                                settling,
                                 device_glitches,
                             )
                         };
