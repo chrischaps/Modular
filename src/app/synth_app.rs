@@ -31,6 +31,7 @@ use super::capture::{Capture, CaptureAction, CaptureConfig};
 use super::editing::{self, Selection};
 use super::engine_sync;
 use super::input_device;
+use super::library::{self, SavedModule};
 use super::palette::{PaletteAction, QuickAdd};
 use super::recording::{self, RecState, Toast, ToastAction};
 use super::session::{self, Answer, Autosave, Discard, RecentFiles};
@@ -240,6 +241,8 @@ pub struct SynthApp {
     naming_group: Option<GroupId>,
     /// Tab opened a group, and egui's focus moved on with it to a button.
     release_tab_focus: bool,
+    /// The groups saved to My Modules, as of the last look.
+    my_modules: Vec<SavedModule>,
 }
 
 /// What a module's right-click menu asked for, handled once the graph is drawn.
@@ -269,6 +272,7 @@ enum NodeMenuAction {
     StartRename(egui_node_graph2::NodeId),
     Rename(egui_node_graph2::NodeId, String),
     Pin(egui_node_graph2::NodeId, String, u8),
+    SaveToLibrary(egui_node_graph2::NodeId),
 }
 
 impl SynthApp {
@@ -390,6 +394,7 @@ impl SynthApp {
             level_trail: Vec::new(),
             naming_group: None,
             release_tab_focus: false,
+            my_modules: Vec::new(),
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -1737,6 +1742,9 @@ impl SynthApp {
                         NodeResponse::User(crate::graph::SynthResponse::PinKnob { node_id, param_name, levels }) => {
                             node_menu_actions.push(NodeMenuAction::Pin(node_id, param_name, levels));
                         }
+                        NodeResponse::User(crate::graph::SynthResponse::SaveGroup(node_id)) => {
+                            node_menu_actions.push(NodeMenuAction::SaveToLibrary(node_id));
+                        }
                         _ => {
                             // Other responses not yet handled
                         }
@@ -1758,6 +1766,7 @@ impl SynthApp {
                 // so on the frame of the click, so go by where the click was
                 if let Some(click_pos) = click_pos.filter(|pos| !self.is_over_module(ctx, *pos)) {
                     self.user_state.context_menu_pos = Some(click_pos);
+                    self.my_modules = library::list();
                     menu_just_opened = true;
                 }
             }
@@ -1767,6 +1776,8 @@ impl SynthApp {
         if let Some(menu_pos) = self.user_state.context_menu_pos {
             let mut close_menu = false;
             let mut template_to_create: Option<SynthNodeTemplate> = None;
+            let mut saved_to_add: Option<SavedModule> = None;
+            let mut open_library = false;
             let mut annotation_to_create: Option<NewAnnotation> = None;
 
             // Hover delay before switching submenus (in seconds)
@@ -1782,10 +1793,15 @@ impl SynthApp {
                     egui::Frame::menu(ui.style()).show(ui, |ui| {
                         ui.set_min_width(120.0);
 
-                        for (cat_index, (category, _templates)) in categories.iter().enumerate() {
+                        // The categories, then My Modules if anything's saved there
+                        let rows: Vec<(&str, egui::Color32)> = categories
+                            .iter()
+                            .map(|(category, _)| (category.name(), category.color()))
+                            .chain((!self.my_modules.is_empty()).then_some(("My Modules", theme::module::GROUP)))
+                            .collect();
+                        for (cat_index, (name, color)) in rows.into_iter().enumerate() {
                             // Create category button with arrow indicator
-                            let button_text = egui::RichText::new(format!("{}  \u{25B6}", category.name()))
-                                .color(category.color());
+                            let button_text = egui::RichText::new(format!("{}  \u{25B6}", name)).color(color);
 
                             let response = ui.add(
                                 egui::Button::new(button_text)
@@ -1887,6 +1903,33 @@ impl SynthApp {
                         // Reset hover intent when mouse is in submenu
                         self.user_state.context_menu_hover_intent = None;
                     }
+                } else if open_cat_index == categories.len() && !self.my_modules.is_empty() {
+                    // My Modules: the groups saved there
+                    let submenu_pos = menu_response.response.rect.right_top() + egui::vec2(4.0, open_cat_index as f32 * 22.0);
+                    let submenu_response = egui::Area::new(egui::Id::new("add_node_submenu"))
+                        .fixed_pos(submenu_pos)
+                        .order(egui::Order::Foreground)
+                        .show(ctx, |ui| {
+                            egui::Frame::menu(ui.style()).show(ui, |ui| {
+                                ui.set_min_width(120.0);
+                                for saved in &self.my_modules {
+                                    let text = RichText::new(&saved.name).color(theme::module::GROUP);
+                                    if ui.button(text).on_hover_text(&saved.summary).clicked() {
+                                        saved_to_add = Some(saved.clone());
+                                        close_menu = true;
+                                    }
+                                }
+                                ui.separator();
+                                if ui.button(RichText::new("Open folder").color(theme::text::SECONDARY)).clicked() {
+                                    open_library = true;
+                                    close_menu = true;
+                                }
+                            });
+                        });
+                    submenu_rect = Some(submenu_response.response.rect);
+                    if submenu_response.response.rect.contains(ctx.input(|i| i.pointer.hover_pos().unwrap_or_default())) {
+                        self.user_state.context_menu_hover_intent = None;
+                    }
                 }
             }
 
@@ -1899,7 +1942,7 @@ impl SynthApp {
                     // Check if click was outside both main menu and submenu
                     let in_main_menu = menu_rect.contains(pos);
                     let in_submenu = submenu_rect.map_or(false, |r| r.contains(pos));
-                    if !in_main_menu && !in_submenu && template_to_create.is_none() && annotation_to_create.is_none() {
+                    if !in_main_menu && !in_submenu && template_to_create.is_none() && annotation_to_create.is_none() && saved_to_add.is_none() {
                         close_menu = true;
                     }
                 }
@@ -1914,6 +1957,12 @@ impl SynthApp {
             if let Some(template) = template_to_create {
                 self.add_module_at(template, menu_pos);
                 close_menu = true;
+            }
+            if let Some(saved) = saved_to_add {
+                self.add_saved_module(&saved, menu_pos);
+            }
+            if open_library {
+                self.open_library_folder();
             }
             match annotation_to_create {
                 Some(NewAnnotation::Frame) if !self.graph_state.selected_nodes.is_empty() => self.frame_selection(ctx),
@@ -1938,6 +1987,11 @@ impl SynthApp {
                     let anchor = palette.anchor();
                     self.quick_add = None;
                     self.add_module_at(template, anchor);
+                }
+                PaletteAction::AddSaved(saved) => {
+                    let anchor = palette.anchor();
+                    self.quick_add = None;
+                    self.add_saved_module(&saved, anchor);
                 }
             }
         }
@@ -2054,7 +2108,8 @@ impl SynthApp {
     fn open_quick_add(&mut self, ctx: &egui::Context) {
         let anchor = self.cursor_or_center(ctx);
         self.user_state.context_menu_pos = None;
-        self.quick_add = Some(QuickAdd::new(anchor));
+        self.my_modules = library::list();
+        self.quick_add = Some(QuickAdd::new(anchor, self.my_modules.clone()));
     }
 
     /// The patch position of a point on screen.
@@ -2153,6 +2208,7 @@ impl SynthApp {
             NodeMenuAction::StartRename(node_id) => self.start_rename(node_id),
             NodeMenuAction::Rename(node_id, name) => self.rename_group(node_id, &name),
             NodeMenuAction::Pin(node_id, param_name, levels) => self.pin_knob(node_id, &param_name, levels),
+            NodeMenuAction::SaveToLibrary(node_id) => self.save_to_library(node_id),
         }
     }
 

@@ -1,6 +1,7 @@
 //! The quick-add palette: press Space or Tab over the graph, type a few
 //! letters of a module's name or category, press Enter, and the module
-//! appears where the cursor was.
+//! appears where the cursor was. Groups saved to My Modules are there too,
+//! first, in their rose.
 //!
 //! Matching is fuzzy: the letters typed have to appear in order, not
 //! together, so "lfo", "svf" and "dly" all find what they should. Letters at
@@ -9,6 +10,7 @@
 use eframe::egui::{self, text::LayoutJob, Align2, Color32, FontId, Key, Modifiers, Pos2, Rect, Sense, TextFormat, Vec2};
 
 use crate::graph::{AllNodeTemplates, SynthNodeTemplate};
+use super::library::SavedModule;
 use super::theme;
 
 const WIDTH: f32 = 300.0;
@@ -74,49 +76,101 @@ fn subsequence(query: &str, text: &str) -> Option<(i32, Vec<usize>)> {
     Some((score, positions))
 }
 
-/// A module the query found, with the letters of its name that matched.
+/// The heading saved groups go under.
+const MY_MODULES: &str = "My Modules";
+
+/// Something the palette can add: a module, or a group from My Modules.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Entry {
+    Module(SynthNodeTemplate),
+    Saved(SavedModule),
+}
+
+impl Entry {
+    fn name(&self) -> &str {
+        match self {
+            Self::Module(template) => template.name(),
+            Self::Saved(saved) => &saved.name,
+        }
+    }
+
+    fn category(&self) -> &str {
+        match self {
+            Self::Module(template) => template.category().name(),
+            Self::Saved(_) => MY_MODULES,
+        }
+    }
+
+    fn color(&self) -> Color32 {
+        match self {
+            Self::Module(template) => template.category().color(),
+            Self::Saved(_) => theme::module::GROUP,
+        }
+    }
+
+    fn description(&self) -> &str {
+        match self {
+            Self::Module(template) => template.description(),
+            Self::Saved(saved) => &saved.summary,
+        }
+    }
+
+    /// Text matched only as typed: a module's ID.
+    fn id(&self) -> &str {
+        match self {
+            Self::Module(template) => template.module_id(),
+            Self::Saved(_) => "",
+        }
+    }
+}
+
+/// Something the query found, with the letters of its name that matched.
 struct Found {
-    template: SynthNodeTemplate,
+    entry: Entry,
     score: i32,
-    /// Character positions in the module's name, for highlighting.
+    /// Character positions in the name, for highlighting.
     matched: Vec<usize>,
 }
 
-/// How well one word of the query matches a module. Names match fuzzily.
-/// Categories ("eff"), module IDs ("fx.") and descriptions only match the
-/// word as typed: spread over a long ID, three letters match almost anything.
-fn match_word(word: &str, template: &SynthNodeTemplate) -> Option<(i32, Vec<usize>)> {
+/// How well one word of the query matches an entry. Names match fuzzily.
+/// Categories ("eff", "my"), module IDs ("fx.") and descriptions only match
+/// the word as typed: spread over a long ID, three letters match almost anything.
+fn match_word(word: &str, entry: &Entry) -> Option<(i32, Vec<usize>)> {
     let word_lower = word.to_lowercase();
     let contains = |text: &str| text.to_lowercase().contains(&word_lower);
     // Letters scattered far apart score at or below zero: not a match
-    let by_name = subsequence(word, template.name()).filter(|(s, _)| *s > 0).map(|(s, m)| (s * 3, m));
-    let by_category = template.category().name().to_lowercase().starts_with(&word_lower).then_some((12, Vec::new()));
-    let by_id = contains(template.module_id()).then_some((6, Vec::new()));
-    let by_description = (word.len() >= 3 && contains(template.description())).then_some((2, Vec::new()));
+    let by_name = subsequence(word, entry.name()).filter(|(s, _)| *s > 0).map(|(s, m)| (s * 3, m));
+    let by_category = entry.category().to_lowercase().starts_with(&word_lower).then_some((12, Vec::new()));
+    let by_id = (!entry.id().is_empty() && contains(entry.id())).then_some((6, Vec::new()));
+    let by_description = (word.len() >= 3 && contains(entry.description())).then_some((2, Vec::new()));
     [by_name, by_category, by_id, by_description].into_iter().flatten().max_by_key(|(s, _)| *s)
 }
 
-/// Every module matching all the words of `query`, best first. An empty
-/// query finds every module, in menu order.
-fn search(query: &str) -> Vec<Found> {
-    let menu_order: Vec<SynthNodeTemplate> =
-        AllNodeTemplates::by_category().into_iter().flat_map(|(_, templates)| templates).collect();
+/// Everything matching all the words of `query`, best first. An empty
+/// query finds everything in menu order: My Modules, then every module.
+fn search(query: &str, saved: &[SavedModule]) -> Vec<Found> {
+    let menu_order: Vec<Entry> = saved
+        .iter()
+        .cloned()
+        .map(Entry::Saved)
+        .chain(AllNodeTemplates::by_category().into_iter().flat_map(|(_, templates)| templates).map(Entry::Module))
+        .collect();
     let words: Vec<&str> = query.split_whitespace().collect();
 
     let mut found: Vec<(usize, Found)> = menu_order
         .into_iter()
         .enumerate()
-        .filter_map(|(order, template)| {
+        .filter_map(|(order, entry)| {
             let mut score = 0;
             let mut matched = Vec::new();
             for word in &words {
-                let (s, m) = match_word(word, &template)?;
+                let (s, m) = match_word(word, &entry)?;
                 score += s;
                 matched.extend(m);
             }
             matched.sort_unstable();
             matched.dedup();
-            Some((order, Found { template, score, matched }))
+            Some((order, Found { entry, score, matched }))
         })
         .collect();
     found.sort_by_key(|(order, f)| (-f.score, *order));
@@ -131,6 +185,17 @@ pub enum PaletteAction {
     Close,
     /// Chose a module to add.
     Add(SynthNodeTemplate),
+    /// Chose a group from My Modules.
+    AddSaved(SavedModule),
+}
+
+impl PaletteAction {
+    fn add(entry: &Entry) -> Self {
+        match entry {
+            Entry::Module(template) => Self::Add(*template),
+            Entry::Saved(saved) => Self::AddSaved(saved.clone()),
+        }
+    }
 }
 
 /// The open palette.
@@ -143,11 +208,13 @@ pub struct QuickAdd {
     /// The highlight moved by keyboard this frame, so the list should
     /// scroll to it.
     scroll_to_highlight: bool,
+    /// The groups in My Modules.
+    saved: Vec<SavedModule>,
 }
 
 impl QuickAdd {
-    pub fn new(anchor: Pos2) -> Self {
-        Self { anchor, query: String::new(), highlighted: 0, scroll_to_highlight: false }
+    pub fn new(anchor: Pos2, saved: Vec<SavedModule>) -> Self {
+        Self { anchor, query: String::new(), highlighted: 0, scroll_to_highlight: false, saved }
     }
 
     /// Where the palette was opened, in screen points.
@@ -169,7 +236,7 @@ impl QuickAdd {
             return PaletteAction::Close;
         }
 
-        let results = search(&self.query);
+        let results = search(&self.query, &self.saved);
         if results.is_empty() {
             self.highlighted = 0;
         } else {
@@ -184,7 +251,7 @@ impl QuickAdd {
             self.scroll_to_highlight |= up || down;
         }
         if enter {
-            return results.get(self.highlighted).map_or(PaletteAction::None, |f| PaletteAction::Add(f.template));
+            return results.get(self.highlighted).map_or(PaletteAction::None, |f| PaletteAction::add(&f.entry));
         }
 
         let mut action = PaletteAction::None;
@@ -197,11 +264,11 @@ impl QuickAdd {
                     ui.set_width(WIDTH);
                     self.search_field(ui, results.len());
                     ui.add_space(6.0);
-                    if let Some(template) = self.result_list(ui, &results) {
-                        action = PaletteAction::Add(template);
+                    if let Some(entry) = self.result_list(ui, &results) {
+                        action = PaletteAction::add(&entry);
                     }
                     if let Some(found) = results.get(self.highlighted) {
-                        footer(ui, &found.template);
+                        footer(ui, &found.entry);
                     }
                 });
             });
@@ -245,7 +312,7 @@ impl QuickAdd {
 
     /// The matching modules. With no query they're grouped under their
     /// categories, like the right-click menu.
-    fn result_list(&mut self, ui: &mut egui::Ui, results: &[Found]) -> Option<SynthNodeTemplate> {
+    fn result_list(&mut self, ui: &mut egui::Ui, results: &[Found]) -> Option<Entry> {
         if results.is_empty() {
             ui.add_space(4.0);
             ui.label(egui::RichText::new("No module matches").color(theme::text::DISABLED).italics());
@@ -259,12 +326,12 @@ impl QuickAdd {
         egui::ScrollArea::vertical().max_height(LIST_HEIGHT).auto_shrink([false, true]).show(ui, |ui| {
             let mut previous_category = None;
             for (index, found) in results.iter().enumerate() {
-                let category = found.template.category();
+                let category = found.entry.category();
                 if grouped && previous_category != Some(category) {
                     if previous_category.is_some() {
                         ui.add_space(4.0);
                     }
-                    ui.label(egui::RichText::new(category.name().to_uppercase()).small().color(category.color().gamma_multiply(0.8)));
+                    ui.label(egui::RichText::new(category.to_uppercase()).small().color(found.entry.color().gamma_multiply(0.8)));
                     previous_category = Some(category);
                 }
 
@@ -274,7 +341,7 @@ impl QuickAdd {
                     self.highlighted = index;
                 }
                 if response.clicked() {
-                    chosen = Some(found.template);
+                    chosen = Some(found.entry.clone());
                 }
                 if highlighted && self.scroll_to_highlight {
                     response.scroll_to_me(None);
@@ -306,7 +373,7 @@ fn palette_frame() -> egui::Frame {
 /// list is already grouped by category.
 fn result_row(ui: &mut egui::Ui, found: &Found, highlighted: bool, show_category: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_HEIGHT), Sense::click());
-    let color = found.template.category().color();
+    let color = found.entry.color();
     let painter = ui.painter_at(rect.expand(1.0));
 
     if highlighted {
@@ -318,7 +385,7 @@ fn result_row(ui: &mut egui::Ui, found: &Found, highlighted: bool, show_category
 
     let text_color = if highlighted { theme::text::PRIMARY } else { theme::text::PRIMARY.gamma_multiply(0.85) };
     let mut job = LayoutJob::default();
-    for (i, ch) in found.template.name().chars().enumerate() {
+    for (i, ch) in found.entry.name().chars().enumerate() {
         let lit = found.matched.contains(&i);
         let format = TextFormat {
             font_id: FontId::proportional(14.0),
@@ -334,7 +401,7 @@ fn result_row(ui: &mut egui::Ui, found: &Found, highlighted: bool, show_category
         painter.text(
             Pos2::new(rect.right() - 8.0, rect.center().y),
             Align2::RIGHT_CENTER,
-            found.template.category().name(),
+            found.entry.category(),
             FontId::proportional(11.0),
             if highlighted { color } else { theme::text::DISABLED },
         );
@@ -343,12 +410,12 @@ fn result_row(ui: &mut egui::Ui, found: &Found, highlighted: bool, show_category
 }
 
 /// What the highlighted module does, and the keys.
-fn footer(ui: &mut egui::Ui, template: &SynthNodeTemplate) {
+fn footer(ui: &mut egui::Ui, entry: &Entry) {
     ui.add_space(4.0);
     let rect = ui.min_rect();
     ui.painter().hline(rect.x_range(), ui.cursor().top(), egui::Stroke::new(1.0, theme::background::WIDGET_HOVERED));
     ui.add_space(6.0);
-    ui.label(egui::RichText::new(template.description()).small().color(theme::text::SECONDARY));
+    ui.label(egui::RichText::new(entry.description()).small().color(theme::text::SECONDARY));
     ui.add_space(2.0);
     ui.label(egui::RichText::new("Arrows or Tab to choose  ·  Enter to add  ·  Esc to close").small().color(theme::text::DISABLED));
 }
@@ -359,7 +426,17 @@ mod tests {
     use egui_node_graph2::NodeTemplateIter;
 
     fn top(query: &str) -> &'static str {
-        search(query).first().map(|f| f.template.module_id()).unwrap_or("none")
+        match search(query, &[]).first().map(|f| &f.entry) {
+            Some(Entry::Module(template)) => template.module_id(),
+            _ => "none",
+        }
+    }
+
+    fn template(entry: &Entry) -> SynthNodeTemplate {
+        match entry {
+            Entry::Module(template) => *template,
+            Entry::Saved(saved) => panic!("expected a module, found {}", saved.name),
+        }
     }
 
     #[test]
@@ -392,20 +469,20 @@ mod tests {
         assert_eq!(top("s&h"), "util.sample_hold");
         // A category's modules come before stray matches in names and descriptions
         let modulation = AllNodeTemplates.all_kinds().into_iter().filter(|t| t.category().name() == "Modulation").count();
-        assert!(search("mod").iter().take(modulation).all(|f| f.template.category().name() == "Modulation"));
+        assert!(search("mod", &[]).iter().take(modulation).all(|f| template(&f.entry).category().name() == "Modulation"));
         // Letters scattered across a name don't count ("Sample & Hold")
-        assert!(search("mod").iter().all(|f| f.template.name() != "Sample & Hold"));
+        assert!(search("mod", &[]).iter().all(|f| f.entry.name() != "Sample & Hold"));
         // Every word has to match: a category narrows the list
-        assert!(search("effect").iter().all(|f| f.template.category().name() == "Effect"));
-        assert!(search("zzzz").is_empty());
+        assert!(search("effect", &[]).iter().all(|f| template(&f.entry).category().name() == "Effect"));
+        assert!(search("zzzz", &[]).is_empty());
         // An ID's letters spread far apart aren't a match ("util.sample_hold")
-        assert!(search("lad").iter().all(|f| f.template.module_id() == "filter.ladder"));
+        assert!(search("lad", &[]).iter().all(|f| template(&f.entry).module_id() == "filter.ladder"));
         assert_eq!(top("fx.del"), "fx.delay");
     }
 
     #[test]
     fn empty_query_lists_everything_in_menu_order() {
-        let all: Vec<_> = search("").into_iter().map(|f| f.template.module_id()).collect();
+        let all: Vec<_> = search("", &[]).into_iter().map(|f| template(&f.entry).module_id()).collect();
         let menu: Vec<_> = AllNodeTemplates::by_category()
             .into_iter()
             .flat_map(|(_, t)| t)
@@ -413,5 +490,20 @@ mod tests {
             .collect();
         assert_eq!(all, menu);
         assert_eq!(all.len(), AllNodeTemplates.all_kinds().len());
+    }
+
+    #[test]
+    fn saved_groups_come_first_and_match_by_name_or_heading() {
+        let saved = vec![SavedModule {
+            name: "Acid Voice".into(),
+            path: "Acid Voice.json".into(),
+            summary: "Gate, Pitch → Out · 4 modules".into(),
+        }];
+        let all = search("", &saved);
+        assert_eq!(all[0].entry, Entry::Saved(saved[0].clone()));
+        assert_eq!(all.len(), AllNodeTemplates.all_kinds().len() + 1);
+        assert!(matches!(&search("acid", &saved)[0].entry, Entry::Saved(s) if s.name == "Acid Voice"));
+        assert!(search("my", &saved).iter().any(|f| matches!(f.entry, Entry::Saved(_))));
+        assert!(matches!(PaletteAction::add(&all[0].entry), PaletteAction::AddSaved(_)));
     }
 }

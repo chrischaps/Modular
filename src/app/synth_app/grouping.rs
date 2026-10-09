@@ -12,7 +12,10 @@ use egui_node_graph2::NodeId;
 
 use crate::graph::groups::{self, Face, GroupIndex, Renaming};
 use crate::graph::{annotation_ui, GroupId};
+use crate::persistence::{capture_level, Patch};
 use super::super::editing;
+use super::super::library::{self, SavedModule};
+use super::super::recording;
 use super::super::theme;
 use super::SynthApp;
 
@@ -321,6 +324,65 @@ impl SynthApp {
         let inside = groups::descendants(graph, &index, id);
         for cmd in editing::delete_modules(&mut self.graph_state, &mut self.user_state, &inside) {
             self.send_command(cmd);
+        }
+    }
+
+    /// Saves a group to My Modules under its name, ready to add to any
+    /// patch. One already saved under that name is updated.
+    pub(super) fn save_to_library(&mut self, node_id: NodeId) {
+        let graph = &self.graph_state.graph;
+        if graph.nodes.get(node_id).and_then(|n| n.user_data.kind.group()).is_none() {
+            return;
+        }
+        let name = groups::name(graph, node_id).to_string();
+        // In patch space, from the group's own corner
+        let zoom = self.graph_state.pan_zoom.zoom;
+        let positions = &self.graph_state.node_positions;
+        let corner = positions.get(node_id).map_or(egui::Pos2::ZERO, |&p| self.history.to_patch(p, zoom));
+        let position = |n: NodeId| {
+            let at = positions.get(n).map_or(corner, |&p| self.history.to_patch(p, zoom)) - corner;
+            (at.x, at.y)
+        };
+        let engine_id = |n: NodeId| self.user_state.get_engine_node_id(n);
+        let level = capture_level(graph, &[node_id], None, &engine_id, &position);
+        let mut patch = Patch::new(name.clone());
+        patch.groups = level.groups;
+        patch.version = patch.required_version();
+        self.status_message = Some(match library::save(&patch) {
+            Ok((_, false)) => format!("Saved {name} to My Modules: it's in the add menu and the palette"),
+            Ok((_, true)) => format!("Updated {name} in My Modules"),
+            Err(e) => format!("Couldn't save {name} to My Modules: {e}"),
+        });
+        self.my_modules = library::list();
+    }
+
+    /// Adds a group from My Modules, its corner at a point on screen.
+    pub(super) fn add_saved_module(&mut self, saved: &SavedModule, screen: egui::Pos2) {
+        let patch = match saved.load() {
+            Ok(patch) => patch,
+            Err(e) => {
+                self.status_message = Some(format!("Couldn't add {}: {e}", saved.name));
+                return;
+            }
+        };
+        let at = self.screen_to_node(screen);
+        match editing::paste(&mut self.graph_state, &mut self.user_state, &patch, at) {
+            Ok(pasted) => {
+                if !pasted.warnings.is_empty() {
+                    self.load_warnings = pasted.warnings.clone();
+                }
+                self.finish_paste(pasted, &format!("Add {}", saved.name));
+                self.status_message = Some(format!("Added {} from My Modules", saved.name));
+            }
+            Err(e) => self.status_message = Some(format!("Couldn't add {}: {e}", saved.name)),
+        }
+    }
+
+    /// Shows the My Modules folder, making it if it isn't there yet.
+    pub(super) fn open_library_folder(&mut self) {
+        let folder = library::folder();
+        if let Err(e) = std::fs::create_dir_all(&folder).and_then(|()| recording::open_folder(&folder)) {
+            self.status_message = Some(format!("Couldn't open {}: {e}", folder.display()));
         }
     }
 

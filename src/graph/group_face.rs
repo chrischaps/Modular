@@ -86,6 +86,7 @@ fn group_menu(ui: &mut egui::Ui, node_id: NodeId, responses: &mut Responses) {
     };
     item(ui, "Open", "Tab", SynthResponse::EnterGroup(node_id));
     item(ui, "Rename", "F2", SynthResponse::StartRename(node_id));
+    item(ui, "Save to My Modules", "", SynthResponse::SaveGroup(node_id));
     ui.separator();
     item(ui, "Duplicate", "Ctrl+D", SynthResponse::DuplicateNode(node_id));
     item(ui, "Copy", "Ctrl+C", SynthResponse::CopyNode(node_id));
