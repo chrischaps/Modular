@@ -2,6 +2,11 @@
 //!
 //! Provides exponential smoothing for parameters to prevent audible clicks
 //! and zipper noise when values change rapidly (from knob movements, automation, etc.).
+//!
+//! The first target a value is given is where it starts, not where it glides
+//! to. A module builds its smoothers at its defaults before it knows the
+//! patch's settings, and a Level saved at 0 must not fade down from the
+//! default 0.5 for the first few milliseconds of every load.
 
 /// A value that smoothly interpolates toward a target.
 ///
@@ -9,12 +14,19 @@
 /// parameter transitions. The smoothing factor is calculated from a time
 /// constant that defines how quickly the value reaches its target.
 ///
+/// The value it's created with is a stand-in until the first
+/// [`set_target`](Self::set_target), which jumps straight there. Only later
+/// targets glide.
+///
 /// # Example
 ///
 /// ```ignore
 /// let mut freq = SmoothedValue::new(440.0, 10.0, 44100.0);
 ///
-/// // Set a new target frequency
+/// // The first target is where it starts: the patch's setting
+/// freq.set_target(330.0);
+///
+/// // Later ones glide, as when a knob turns
 /// freq.set_target(880.0);
 ///
 /// // In the audio loop, get smoothed values sample-by-sample
@@ -35,6 +47,9 @@ pub struct SmoothedValue {
     sample_rate: f32,
     /// Time constant in milliseconds.
     time_constant_ms: f32,
+    /// Whether a target has arrived yet. Until one does, the value is only
+    /// the stand-in it was created with, and the first target is jumped to.
+    has_target: bool,
 }
 
 impl SmoothedValue {
@@ -46,7 +61,8 @@ impl SmoothedValue {
     ///
     /// # Arguments
     ///
-    /// * `initial` - Starting value (both current and target)
+    /// * `initial` - Starting value (both current and target), until the
+    ///   first [`set_target`](Self::set_target) replaces it outright
     /// * `time_constant_ms` - Time in milliseconds to reach ~63% of target (one time constant)
     /// * `sample_rate` - Audio sample rate in Hz
     pub fn new(initial: f32, time_constant_ms: f32, sample_rate: f32) -> Self {
@@ -57,6 +73,7 @@ impl SmoothedValue {
             smoothing_factor,
             sample_rate,
             time_constant_ms,
+            has_target: false,
         }
     }
 
@@ -82,8 +99,15 @@ impl SmoothedValue {
     }
 
     /// Sets a new target value to smooth toward.
+    ///
+    /// The first target is jumped to instead: it's the setting the value
+    /// should have had from the start, such as a knob's saved position.
     #[inline]
     pub fn set_target(&mut self, value: f32) {
+        if !self.has_target {
+            self.current = value;
+            self.has_target = true;
+        }
         self.target = value;
     }
 
@@ -124,6 +148,9 @@ impl SmoothedValue {
     }
 
     /// Sets the value immediately without smoothing.
+    ///
+    /// This doesn't count as the first target: a module resetting its
+    /// smoothers before it has run still jumps to the patch's settings.
     ///
     /// Use this for:
     /// - Initial setup
@@ -175,6 +202,13 @@ impl Default for SmoothedValue {
 mod tests {
     use super::*;
 
+    /// A value that has had its first target, so the next one glides.
+    fn gliding_from(start: f32, time_constant_ms: f32, sample_rate: f32) -> SmoothedValue {
+        let mut sv = SmoothedValue::new(0.0, time_constant_ms, sample_rate);
+        sv.set_target(start);
+        sv
+    }
+
     #[test]
     fn test_initial_value() {
         let sv = SmoothedValue::new(440.0, 10.0, 44100.0);
@@ -184,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_set_target() {
-        let mut sv = SmoothedValue::new(440.0, 10.0, 44100.0);
+        let mut sv = gliding_from(440.0, 10.0, 44100.0);
         sv.set_target(880.0);
         assert_eq!(sv.target(), 880.0);
         assert_eq!(sv.current(), 440.0); // Current unchanged until next()
@@ -192,7 +226,7 @@ mod tests {
 
     #[test]
     fn test_smoothing_approaches_target() {
-        let mut sv = SmoothedValue::new(0.0, 10.0, 44100.0);
+        let mut sv = gliding_from(0.0, 10.0, 44100.0);
         sv.set_target(1.0);
 
         // After many samples, should approach target
@@ -211,7 +245,7 @@ mod tests {
 
     #[test]
     fn test_smoothing_is_gradual() {
-        let mut sv = SmoothedValue::new(0.0, 10.0, 44100.0);
+        let mut sv = gliding_from(0.0, 10.0, 44100.0);
         sv.set_target(1.0);
 
         let first = sv.next();
@@ -239,7 +273,7 @@ mod tests {
 
     #[test]
     fn test_is_smoothing() {
-        let mut sv = SmoothedValue::new(0.0, 10.0, 44100.0);
+        let mut sv = gliding_from(0.0, 10.0, 44100.0);
 
         // Initially not smoothing (current == target)
         assert!(!sv.is_smoothing());
@@ -257,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_zero_time_constant_is_instant() {
-        let mut sv = SmoothedValue::new(0.0, 0.0, 44100.0);
+        let mut sv = gliding_from(0.0, 0.0, 44100.0);
         sv.set_target(1.0);
         sv.next();
 
@@ -269,7 +303,7 @@ mod tests {
     fn test_slow_smoothing_of_a_large_value_reaches_its_target() {
         // A 250 ms glide from 500 to 645.16 used to stall about 0.4 short,
         // where each step rounded away to nothing
-        let mut sv = SmoothedValue::new(500.0, 250.0, 48000.0);
+        let mut sv = gliding_from(500.0, 250.0, 48000.0);
         sv.set_target(645.161_3);
         for _ in 0..48000 * 5 {
             sv.next();
@@ -279,7 +313,7 @@ mod tests {
 
     #[test]
     fn test_sample_rate_update() {
-        let mut sv = SmoothedValue::new(0.0, 10.0, 44100.0);
+        let mut sv = gliding_from(0.0, 10.0, 44100.0);
         sv.set_sample_rate(48000.0);
 
         // Smoothing should still work correctly at new sample rate
@@ -296,7 +330,7 @@ mod tests {
 
     #[test]
     fn test_time_constant_update() {
-        let mut sv = SmoothedValue::new(0.0, 10.0, 44100.0);
+        let mut sv = gliding_from(0.0, 10.0, 44100.0);
         sv.set_time_constant(5.0); // Faster smoothing
 
         sv.set_target(1.0);
@@ -313,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_downward_smoothing() {
-        let mut sv = SmoothedValue::new(1.0, 10.0, 44100.0);
+        let mut sv = gliding_from(1.0, 10.0, 44100.0);
         sv.set_target(0.0);
 
         let first = sv.next();
@@ -327,7 +361,7 @@ mod tests {
 
     #[test]
     fn test_reset() {
-        let mut sv = SmoothedValue::new(0.5, 10.0, 44100.0);
+        let mut sv = gliding_from(0.5, 10.0, 44100.0);
         sv.set_target(1.0);
         sv.next();
         sv.next();
@@ -360,7 +394,7 @@ mod tests {
     #[test]
     fn test_exponential_curve_shape() {
         // Verify the smoothing follows an exponential curve
-        let mut sv = SmoothedValue::new(0.0, 10.0, 44100.0);
+        let mut sv = gliding_from(0.0, 10.0, 44100.0);
         sv.set_target(1.0);
 
         // After one time constant (~441 samples), should reach ~63% of target
@@ -375,5 +409,38 @@ mod tests {
             "After one time constant, expected ~0.632, got {}",
             after_one_tc
         );
+    }
+
+    #[test]
+    fn test_first_target_is_jumped_to() {
+        // A Level saved at 0 is silent from the first sample, not a fade
+        // down from the default
+        let mut sv = SmoothedValue::new(0.5, 10.0, 44100.0);
+        sv.set_target(0.0);
+        assert_eq!(sv.current(), 0.0);
+        assert_eq!(sv.next(), 0.0);
+        assert!(!sv.is_smoothing());
+    }
+
+    #[test]
+    fn test_later_targets_glide() {
+        // Turning the knob afterwards is still smoothed, even before the
+        // value has been heard
+        let mut sv = SmoothedValue::new(0.5, 10.0, 44100.0);
+        sv.set_target(0.0);
+        sv.set_target(1.0);
+        assert_eq!(sv.current(), 0.0);
+        let first = sv.next();
+        assert!(first > 0.0 && first < 0.01, "{first}");
+    }
+
+    #[test]
+    fn test_reset_before_the_first_target_still_jumps() {
+        // Modules reset their smoothers to their targets; done before the
+        // patch's settings arrive, that mustn't count as the first target
+        let mut sv = SmoothedValue::new(0.5, 10.0, 44100.0);
+        sv.reset(sv.target());
+        sv.set_target(0.0);
+        assert_eq!(sv.current(), 0.0);
     }
 }

@@ -489,6 +489,36 @@ mod tests {
     }
 
     #[test]
+    fn test_level_zero_is_silent_from_the_first_block() {
+        // Loaded at Level 0 for an envelope to play: before the first hit
+        // there's nothing, rather than a fade down from the default 0.5
+        let mut noise = Noise::new();
+        noise.prepare(SAMPLE_RATE, BLOCK);
+        let envelope = SignalBuffer::control(BLOCK);
+        let rate = SignalBuffer::unconnected(BLOCK, SignalType::Control);
+        let mut outputs: Vec<SignalBuffer> = (0..4).map(|_| SignalBuffer::audio(BLOCK)).collect();
+        let ctx = ProcessContext::new(SAMPLE_RATE, BLOCK);
+        noise.process(&[&envelope, &rate], &mut outputs, &[0.0, 1.0], &ctx);
+        for out in &outputs[..3] {
+            assert!(out.samples.iter().all(|&s| s == 0.0));
+        }
+    }
+
+    #[test]
+    fn test_level_knob_turns_are_still_smoothed() {
+        let mut noise = Noise::new();
+        noise.prepare(SAMPLE_RATE, BLOCK);
+        let unpatched = SignalBuffer::unconnected(BLOCK, SignalType::Control);
+        let mut outputs: Vec<SignalBuffer> = (0..4).map(|_| SignalBuffer::audio(BLOCK)).collect();
+        let ctx = ProcessContext::new(SAMPLE_RATE, BLOCK);
+        noise.process(&[&unpatched, &unpatched], &mut outputs, &[0.0, 1.0], &ctx);
+        noise.process(&[&unpatched, &unpatched], &mut outputs, &[1.0, 1.0], &ctx);
+        // White is uniform ±1 at full level; just after the turn it's still near 0
+        let opening = outputs[0].samples[..8].iter().fold(0.0f32, |m, s| m.max(s.abs()));
+        assert!(opening < 0.05, "Level jumped: {opening}");
+    }
+
+    #[test]
     fn test_level_cv_is_not_smoothed() {
         // A drum envelope through Level: the noise must start at once
         let mut noise = Noise::new();

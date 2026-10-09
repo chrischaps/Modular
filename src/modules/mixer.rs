@@ -131,9 +131,6 @@ pub struct Mixer {
     spread: SmoothedValue,
     /// The loudest samples of Out L and Out R since the meters were last read.
     master_peaks: [f32; 2],
-    /// Whether a block has run. The first starts the pans, spread and mutes
-    /// where the patch has them, rather than gliding there from the defaults.
-    started: bool,
 }
 
 impl Mixer {
@@ -186,7 +183,6 @@ impl Mixer {
             master: SmoothedValue::with_default_smoothing(1.0, sample_rate),
             spread: SmoothedValue::with_default_smoothing(0.0, sample_rate / PAN_STEP as f32),
             master_peaks: [0.0; 2],
-            started: false,
         }
     }
 
@@ -258,20 +254,10 @@ impl DspModule for Mixer {
         self.master.set_target(master_gain(params[Self::PARAM_MASTER]));
         self.spread.set_target(params[Self::PARAM_SPREAD]);
 
-        if !self.started {
-            // Levels still glide in from 1, as they always have, so patches
-            // from before the mixer was stereo render exactly as they did
-            self.spread.reset(params[Self::PARAM_SPREAD]);
-        }
-
         for (s, strip) in self.strips.iter_mut().enumerate() {
             strip.level.set_target(params[Self::PARAM_LEVEL + s]);
             strip.pan.set_target(params[Self::PARAM_PAN + s]);
             strip.unmuted.set_target(if params[Self::PARAM_MUTE + s] >= 0.5 { 0.0 } else { 1.0 });
-            if !self.started {
-                strip.pan.reset(strip.pan.target());
-                strip.unmuted.reset(strip.unmuted.target());
-            }
 
             let Some(input) = connected_input(inputs, Self::PORT_CH + s).filter(|buf| buf.samples.len() >= n) else {
                 strip.settle();
@@ -337,8 +323,6 @@ impl DspModule for Mixer {
                 start = end;
             }
         }
-
-        self.started = true;
 
         // Spread moved on once per stretch, as each strip's copy did
         for _ in 0..n.div_ceil(PAN_STEP) {

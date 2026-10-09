@@ -712,14 +712,15 @@ mod tests {
         // midpoint at the same time
         let mut up = Oscillator::new();
         up.prepare(SR, 1);
-        up.pitch_smooth.reset(-2.0);
+        up.pitch_smooth.set_target(-2.0);
         up.pitch_smooth.set_target(2.0);
         let mut down = Oscillator::new();
         down.prepare(SR, 1);
-        down.pitch_smooth.reset(2.0);
+        down.pitch_smooth.set_target(2.0);
         down.pitch_smooth.set_target(-2.0);
         let up_mid = (0..2000).position(|_| up.pitch_smooth.next() >= 0.0).unwrap();
         let down_mid = (0..2000).position(|_| down.pitch_smooth.next() <= 0.0).unwrap();
+        assert!(up_mid > 100, "glided to the midpoint in only {up_mid} samples");
         assert!(up_mid.abs_diff(down_mid) <= 1, "{up_mid} vs {down_mid}");
     }
 

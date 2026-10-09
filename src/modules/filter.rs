@@ -318,9 +318,9 @@ mod tests {
     fn settled_filter(sample_rate: f32, block: usize, params: [f32; 3]) -> SvfFilter {
         let mut filter = SvfFilter::new();
         filter.prepare(sample_rate, block);
-        filter.log_cutoff_smooth.reset(params[0].log2());
-        filter.resonance_smooth.reset(params[1]);
-        filter.drive_smooth.reset(params[2]);
+        filter.log_cutoff_smooth.set_target(params[0].log2());
+        filter.resonance_smooth.set_target(params[1]);
+        filter.drive_smooth.set_target(params[2]);
         filter
     }
 

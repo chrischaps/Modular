@@ -366,9 +366,9 @@ mod tests {
     fn settled(params: [f32; 3]) -> LadderFilter {
         let mut filter = LadderFilter::new();
         filter.prepare(SR, 256);
-        filter.log_cutoff_smooth.reset(params[0].log2());
-        filter.resonance_smooth.reset(params[1]);
-        filter.drive_smooth.reset(params[2]);
+        filter.log_cutoff_smooth.set_target(params[0].log2());
+        filter.resonance_smooth.set_target(params[1]);
+        filter.drive_smooth.set_target(params[2]);
         filter
     }
 
