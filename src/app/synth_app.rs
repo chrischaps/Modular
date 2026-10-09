@@ -1369,6 +1369,9 @@ impl SynthApp {
                                         actions.select_audio_system = Some(choice);
                                     }
                                 }
+                                // Steinberg's licence asks for its logo where ASIO is chosen
+                                #[cfg(feature = "asio")]
+                                super::asio_badge::show(ui);
                                 ui.separator();
                             }
                             for device in &self.audio_devices {

@@ -2,6 +2,8 @@
 //!
 //! Contains the main egui application, theme definitions, and UI state management.
 
+#[cfg(feature = "asio")]
+mod asio_badge;
 pub mod capture;
 mod editing;
 pub mod engine_sync;

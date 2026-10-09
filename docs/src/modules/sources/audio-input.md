@@ -67,9 +67,11 @@ Each device's figure comes from the timestamps it puts on its audio. Windows doe
 
 ## Low latency with ASIO (Windows)
 
+<div class="asio-badge"><img src="../../images/asio-compatible.svg" alt="ASIO Compatible"><span>ASIO is a registered trademark of Steinberg Media Technologies GmbH</span></div>
+
 Windows Audio is shared by every app, and each direction passes through the Windows audio engine: fine for a pad or a sampled loop, but a guitarist hears 60 ms as a slap-back echo of their own playing. An audio interface's **ASIO** driver skips all of that. Input and output come from one driver, on one clock, in buffers a few milliseconds long, and Modular holds nothing between them: each output buffer is computed from the input that arrived moments before.
 
-To use it, build Modular with ASIO ([Build with ASIO](../../getting-started/installation.md#build-with-asio-windows-optional)), then open the **Output** menu and choose **ASIO** under **Audio system**. The menu then lists ASIO drivers, and **Input** offers that driver's inputs. Choose it there to hear your interface.
+To use it, download the low-latency Windows build, or build Modular with ASIO yourself (both in [Build with ASIO](../../getting-started/installation.md#build-with-asio-windows-optional)), then open the **Output** menu and choose **ASIO** under **Audio system**. The menu then lists ASIO drivers, and **Input** offers that driver's inputs. Choose it there to hear your interface.
 
 **Buffer** sets how many frames the driver hands over at a time, and the closed Output menu shows it beside the driver's name:
 

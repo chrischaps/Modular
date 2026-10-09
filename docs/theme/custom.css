@@ -28,6 +28,26 @@
     margin: 1em 0 0.25em;
 }
 
+/* Steinberg's ASIO Compatible logo and trademark line, which its licence
+   asks for on every page that mentions ASIO. A dark tile keeps the white
+   logo visible in the light themes too */
+.asio-badge {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 1em 0;
+}
+.asio-badge img {
+    width: 64px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: #1a1a2e;
+}
+.asio-badge span {
+    font-size: 0.85em;
+    opacity: 0.75;
+}
+
 /* Module documentation styling */
 .module-header {
     border-radius: 4px;

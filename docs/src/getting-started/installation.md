@@ -22,6 +22,8 @@ Patches go in and out as files: **💾 Save** downloads the patch, and **📂 Op
 
 Prebuilt binaries for Windows, macOS (Intel and Apple Silicon) and Linux are attached to each [release on GitHub](https://github.com/chrischaps/Modular/releases). Download the zip for your system, unzip it, and run `modular_synth`.
 
+For playing live on Windows, download **`modular_synth-windows-asio.zip`**, the low-latency build, instead. It runs exactly like the standard one, and can also use an audio interface's ASIO driver: see [Build with ASIO](#build-with-asio-windows-optional) for what that gives you, and skip the building.
+
 Releases are cut from time to time and can trail the source. This manual describes the current source, so if a feature here is missing from your copy, build from source.
 
 ## Build from source
@@ -71,7 +73,11 @@ The app opens on the **First Sound** example. Press **▶ Play**, then play the 
 
 ### Build with ASIO (Windows, optional)
 
-For playing a guitar or singing through Modular, Windows Audio's round trip of 60 ms or so is too slow to play against. An audio interface's **ASIO** driver talks to the hardware directly and gets it down to 11–20 ms on a Scarlett 2i2. ASIO support is a build option, off by default:
+For playing a guitar or singing through Modular, Windows Audio's round trip of 60 ms or so is too slow to play against. An audio interface's **ASIO** driver talks to the hardware directly and gets it down to 11–20 ms on a Scarlett 2i2.
+
+<div class="asio-badge"><img src="../images/asio-compatible.svg" alt="ASIO Compatible"><span>ASIO is a registered trademark of Steinberg Media Technologies GmbH</span></div>
+
+The low-latency Windows download (`modular_synth-windows-asio.zip`, see [Download a release](#download-a-release)) has ASIO built in: install your interface's driver (step 1) and choose **ASIO** in the **Output** menu. To build it yourself, it's a build option, off by default:
 
 1. **Install your interface's ASIO driver** from its maker. For a Focusrite Scarlett, that's the Focusrite USB driver from [focusrite.com](https://focusrite.com/downloads). Restart, or unplug the interface and plug it back in, once it's installed: until then the driver may not find the interface.
 2. **Install LLVM**, which the build uses to read the ASIO headers:
@@ -98,7 +104,7 @@ For playing a guitar or singing through Modular, Windows Audio's round trip of 6
 
 Then choose **ASIO** at the top of the **Output** menu. See [Audio Input](../modules/sources/audio-input.md#low-latency-with-asio-windows) for choosing a buffer size.
 
-Steinberg licenses the ASIO SDK under the GPLv3 (or its own proprietary terms). Modular's source is MIT, but a binary you build with ASIO includes the SDK, so if you share one, the GPLv3 applies to it. The prebuilt releases leave ASIO out.
+Steinberg licenses the ASIO SDK under the GPLv3 (or its own proprietary terms). Modular's source is MIT, but a binary built with ASIO includes the SDK, so if you share one, the GPLv3 applies to it. The low-latency download is such a binary: it's distributed under the GPLv3, with the licence and a notice in its zip, and the exact SDK it was built from is attached to the same release (`asio-sdk-source.zip`). The other downloads leave ASIO out and stay MIT.
 
 ## Command line
 

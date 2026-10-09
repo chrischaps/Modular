@@ -18,6 +18,13 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact_name: modular_synth.exe
             asset_name: modular_synth-windows
+          # The low-latency build: ASIO as well as Windows Audio. It contains
+          # Steinberg's ASIO SDK, under the GPLv3 (see packaging/asio)
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: modular_synth.exe
+            asset_name: modular_synth-windows-asio
+            features: asio
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: modular_synth
@@ -49,13 +56,44 @@ jobs:
           sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libasound2-dev
 
       - name: Build
+        if: matrix.features == ''
         run: cargo build --release --target ${{ matrix.target }}
+
+      # The runner has LLVM for bindgen; the build fetches Steinberg's ASIO
+      # SDK, whose PowerShell unzip fails under pwsh's module path
+      - name: Build with ASIO
+        if: matrix.features == 'asio'
+        shell: bash
+        env:
+          LIBCLANG_PATH: C:\Program Files\LLVM\bin
+        run: env -u PSModulePath cargo build --release --target ${{ matrix.target }} --features asio
+
+      # The GPL text and a notice go in the zip; the SDK it was built from
+      # is published beside it as the rest of the corresponding source
+      - name: Add the ASIO build's licence and source
+        if: matrix.features == 'asio'
+        shell: pwsh
+        run: |
+          Copy-Item packaging/asio/README-LOW-LATENCY.txt, licenses/GPL-3.0.txt target/${{ matrix.target }}/release/
+          Copy-Item -Recurse "$env:TEMP/asio_sdk" asio-sdk-source
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+          path: |
+            target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
+            target/${{ matrix.target }}/release/README-LOW-LATENCY.txt
+            target/${{ matrix.target }}/release/GPL-3.0.txt
+          if-no-files-found: error
+
+      - name: Upload the ASIO SDK source
+        if: matrix.features == 'asio'
+        uses: actions/upload-artifact@v4
+        with:
+          name: asio-sdk-source
+          path: asio-sdk-source
+          if-no-files-found: error
 
   release:
     needs: build
@@ -74,7 +112,7 @@ jobs:
           cd artifacts
           for dir in */; do
             name="${dir%/}"
-            (cd "$dir" && zip "../${name}.zip" *)
+            (cd "$dir" && zip -r "../${name}.zip" .)
             rm -rf "$dir"
           done
 

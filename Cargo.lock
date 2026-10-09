@@ -2194,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "modular_synth"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "chrono",
  "cpal",
@@ -2203,6 +2203,7 @@ dependencies = [
  "egui",
  "egui_node_graph2",
  "hound",
+ "image",
  "js-sys",
  "midir",
  "rfd",
