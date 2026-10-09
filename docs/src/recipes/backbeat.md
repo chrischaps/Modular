@@ -2,6 +2,8 @@
 
 A whole drum kit with no samples in it: a kick that drops in pitch, a snare with ghost notes between the backbeats, a hi-hat that opens and gets choked shut, a run down the toms every fourth bar, and a crash where the fill lands. Every drum is an oscillator or a noise source shaped by an envelope. It plays itself; press Play and let it run.
 
+To learn how drums are made, build them like this. To make a beat quickly, use the [Drum](../modules/sources/drum.md) module, one per drum: the [Drum Machine](./drum-machine.md) example plays a kit like this in 14 modules.
+
 > **Load it:** choose **📚 Examples → Backbeat** in the toolbar and press **▶ Play**. It needs no keyboard.
 > The patch file is [`patches/backbeat.json`](https://github.com/chrischaps/Modular/blob/master/patches/backbeat.json).
 
@@ -167,6 +169,7 @@ The hats, toms and crash have exactly the balance they had when the whole second
 
 ## Related
 
+- [Drum Machine](./drum-machine.md) – a kit like this one in 14 modules, with a [Drum](../modules/sources/drum.md) module for each drum
 - [Rhythmic Sequence](./rhythmic-sequence.md) – the noise hi-hat this kit's hats grew from
 - [Afterglow](./afterglow.md) – another patch where one sequencer's end of cycle drives another
 - [Step Sequencer](../modules/utilities/sequencer.md) – pitch, gate, velocity, and what the outputs carry

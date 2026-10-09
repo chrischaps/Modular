@@ -108,11 +108,12 @@ fn render(patch: &Patch) -> Vec<f32> {
     out.left.into_iter().chain(out.right).collect()
 }
 
-/// Each Noise module takes the next random stream from a count the whole
-/// process shares, so two renders in one process never match. Patches with
-/// noise are compared with the `render` binary instead, one process each.
+/// Each Noise module, and each Drum (whose snares, claps and hats hiss),
+/// takes the next random stream from a count the whole process shares, so
+/// two renders in one process never match. Patches with noise are compared
+/// with the `render` binary instead, one process each.
 fn has_noise(patch: &Patch) -> bool {
-    patch.all_nodes().iter().any(|n| n.module_id == "source.noise")
+    patch.all_nodes().iter().any(|n| matches!(n.module_id.as_str(), "source.noise" | "source.drum"))
 }
 
 #[test]

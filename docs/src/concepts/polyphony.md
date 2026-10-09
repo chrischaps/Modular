@@ -16,6 +16,7 @@ These modules run one voice per channel of their widest input:
 |--------|-----------|
 | [Oscillator](../modules/sources/oscillator.md) | Phase, sync and unison stack |
 | [Noise](../modules/sources/noise.md) | Random stream, so no two voices hiss alike |
+| [Drum](../modules/sources/drum.md) | Hit, so fast notes ring over each other instead of cutting each other off |
 | [SVF Filter](../modules/filters/svf-filter.md) | Filter state and resonance |
 | [Ladder Filter](../modules/filters/ladder-filter.md) | Filter state and resonance |
 | [ADSR Envelope](../modules/modulation/adsr.md) | Stage and level |

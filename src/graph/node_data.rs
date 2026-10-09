@@ -274,6 +274,8 @@ pub enum NodeDisplay {
     /// Logic: lamps for its inputs and outputs, and the CV against its
     /// Threshold.
     LogicLamps,
+    /// Drum: the hit's envelope and pitch, lit as each hit plays.
+    DrumHit,
 }
 
 /// Data stored per node in the graph.
@@ -2173,6 +2175,10 @@ impl NodeDataTrait for SynthNodeData {
 
         if self.display == NodeDisplay::DividerRing {
             super::divider_display::divider_display(ui, node_id, graph, user_state, zoom);
+        }
+
+        if self.display == NodeDisplay::DrumHit {
+            super::drum_display::drum_display(ui, node_id, graph, user_state, zoom);
         }
 
         if self.display == NodeDisplay::LogicLamps {

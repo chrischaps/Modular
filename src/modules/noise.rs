@@ -28,12 +28,18 @@ static NEXT_STREAM: AtomicU64 = AtomicU64::new(0);
 /// Each stream is its own sequence rather than a shifted copy of one shared
 /// sequence, so voices on different streams never line up.
 #[derive(Clone, Copy, Debug)]
-struct Pcg32 {
+pub(crate) struct Pcg32 {
     state: u64,
     increment: u64,
 }
 
 impl Pcg32 {
+    /// A generator on the next unused stream, so no two modules (or voices)
+    /// that draw noise share a sequence.
+    pub(crate) fn next_stream() -> Self {
+        Self::new(NEXT_STREAM.fetch_add(1, Ordering::Relaxed))
+    }
+
     const MULTIPLIER: u64 = 6_364_136_223_846_793_005;
 
     fn new(stream: u64) -> Self {
@@ -54,7 +60,7 @@ impl Pcg32 {
 
     /// Uniform in [-1, 1).
     #[inline]
-    fn bipolar(&mut self) -> f32 {
+    pub(crate) fn bipolar(&mut self) -> f32 {
         self.next_u32() as i32 as f32 * (1.0 / 2_147_483_648.0)
     }
 }
@@ -87,7 +93,7 @@ impl PinkFilter {
 
 /// Holds a signal inside ±1 without touching anything below the knee.
 #[inline]
-fn soft_ceiling(x: f32) -> f32 {
+pub(crate) fn soft_ceiling(x: f32) -> f32 {
     const KNEE: f32 = 0.8;
     let magnitude = x.abs();
     if magnitude <= KNEE {
@@ -143,7 +149,7 @@ impl Noise {
     pub fn new() -> Self {
         let sample_rate = 44100.0;
         let mut noise = Self {
-            rng: Pcg32::new(NEXT_STREAM.fetch_add(1, Ordering::Relaxed)),
+            rng: Pcg32::next_stream(),
             pink: PinkFilter::default(),
             brown: 0.0,
             brown_leak: 0.0,

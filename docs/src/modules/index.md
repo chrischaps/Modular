@@ -1,6 +1,6 @@
 # Module Overview
 
-Modular Synth has 28 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
+Modular Synth has 29 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
 
 The **ID** is the name a patch file uses to refer to the module.
 
@@ -8,12 +8,13 @@ The **ID** is the name a patch file uses to refer to the module.
 
 ### Source
 
-<span class="swatch bar source"></span>Blue header. Modules that start a sound or a note: the oscillator and noise source, the audio input, and the modules that turn your playing into pitch and gate signals.
+<span class="swatch bar source"></span>Blue header. Modules that start a sound or a note: the oscillator, the noise source, the drum voice, the audio input, and the modules that turn your playing into pitch and gate signals.
 
 | Module | ID | What it does |
 |--------|----|--------------|
 | [Oscillator](./sources/oscillator.md) | `osc.sine` | Band-limited VCO with a tune section, hard sync, through-zero FM, a sub-oscillator and unison |
 | [Noise](./sources/noise.md) | `source.noise` | White, pink and brown noise, and a smooth random voltage |
+| [Drum](./sources/drum.md) | `source.drum` | An analog-style drum voice: kick, snare, tom, clap, hats, cymbal, rim or cowbell, with accent and choke |
 | [Audio Input](./sources/audio-input.md) | `source.audio_input` | A microphone, guitar or line input, with an envelope follower and a gate |
 | [Keyboard](./midi/keyboard.md) | `input.keyboard` | Play notes from your computer keyboard |
 | [MIDI Note](./midi/midi-note.md) | `input.midi_note` | One voice of pitch, gate, velocity and aftertouch from a MIDI controller |
@@ -80,7 +81,7 @@ Header colors describe what a module *is*. The colors of its jacks and cables de
 
 ## Polyphonic modules
 
-The Oscillator, Noise, both filters, the ADSR Envelope, the VCA, the Attenuverter, Sample & Hold and the Quantizer run one voice per channel when a polyphonic cable reaches them. Everything else treats a polyphonic cable as one signal. See [Polyphony](../concepts/polyphony.md).
+The Oscillator, Noise, Drum, both filters, the ADSR Envelope, the VCA, the Attenuverter, Sample & Hold and the Quantizer run one voice per channel when a polyphonic cable reaches them. Everything else treats a polyphonic cable as one signal. See [Polyphony](../concepts/polyphony.md).
 
 ## Common signal chains
 

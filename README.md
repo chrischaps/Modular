@@ -13,11 +13,11 @@ It doesn't imitate hardware panels. Every module is a node with jacks on its sid
 - **Colour-coded signals.** Blue cables carry audio, orange carry control voltage, green carry gates, and purple carry MIDI. Connections that can't work are refused as you make them.
 - **Inputs vs. knobs.** Most parameters have a knob and a jack. Patch a cable into the jack and it takes over: the knob dims and follows the incoming signal, as on an analog modular.
 - **Polyphony on a single cable.** Poly MIDI sends up to 8 voices down one cable, and every module after it plays each voice on its own. Poly cables are drawn as a bundle of strands, one per voice.
-- **28 modules:**
+- **29 modules:**
 
   | Category | Modules |
   |---|---|
-  | Sources | Oscillator (BLEP anti-aliasing, sync, through-zero FM, sub, supersaw unison), Noise (white, pink, brown, smooth random), Audio Input (mic or line in, envelope follower, gate), Keyboard, MIDI Note, Poly MIDI |
+  | Sources | Oscillator (BLEP anti-aliasing, sync, through-zero FM, sub, supersaw unison), Noise (white, pink, brown, smooth random), Drum (kick, snare, tom, clap, hats, cymbal, rim, cowbell, with accent and choke), Audio Input (mic or line in, envelope follower, gate), Keyboard, MIDI Note, Poly MIDI |
   | Filters | SVF Filter (self-oscillating, notch), Ladder Filter (oversampled) |
   | Modulation | ADSR Envelope, LFO, Clock |
   | Effects | Stereo Delay (with tape mode), Reverb (8-line FDN), Chorus, Distortion (oversampled, wavefolder), Compressor, Parametric EQ |
@@ -45,7 +45,7 @@ cargo run --release                           # opens with the First Sound examp
 cargo run --release -- patches/lush-pad.json  # or open a patch
 ```
 
-Ten example patches are in [`patches/`](patches) and in the app's **Examples** menu. Press **Play**, then hold a few keys on the computer keyboard (`Z` to `M` is a white-key octave, with the sharps on the row above).
+Eleven example patches are in [`patches/`](patches) and in the app's **Examples** menu. Press **Play**, then hold a few keys on the computer keyboard (`Z` to `M` is a white-key octave, with the sharps on the row above).
 
 ### Render a patch offline
 

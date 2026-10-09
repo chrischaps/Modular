@@ -102,5 +102,6 @@ The [Shoreline](../../recipes/shoreline.md) example builds a whole beach this wa
 - [Sample & Hold](../utilities/sample-hold.md): turns noise into stepped random values
 - [Quantizer](../utilities/quantizer.md): snaps random pitches to a scale
 - [SVF Filter](../filters/svf-filter.md): shapes noise into drums, wind and breath
+- [Drum](./drum.md): a finished drum voice, with its noise and filters built in
 - [ADSR Envelope](../modulation/adsr.md): gives noise a shape in time
 - [LFO](../modulation/lfo.md): regular movement, where Random is irregular

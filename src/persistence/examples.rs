@@ -78,6 +78,12 @@ pub const EXAMPLES: &[Example] = &[
         json: include_str!("../../patches/backbeat.json"),
     },
     Example {
+        name: "Drum Machine",
+        file_name: "drum-machine.json",
+        description: "Plays itself: Backbeat's kit in 14 modules. Five Drum voices on five lanes, a choked open hat, tuned toms and a room",
+        json: include_str!("../../patches/drum-machine.json"),
+    },
+    Example {
         name: "Afterglow",
         file_name: "afterglow.json",
         description: "Plays itself: one sequencer transposes another's arpeggio through a chord progression, over a warm pad and dotted-eighth tape echoes",

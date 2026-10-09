@@ -115,6 +115,18 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "source.drum",
+        knobs: &[
+            modulatable("Tune", "Tune"),
+            modulatable("Decay", "Decay"),
+            knob("Tone"),
+            knob("Snap"),
+            knob("Level"),
+        ],
+        display: NodeDisplay::DrumHit,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "source.audio_input",
         knobs: &[knob("Gain"), knob_as("Threshold", "Thresh"), knob("Attack"), knob("Release")],
         monitor: &["Follow", "Gate"],
