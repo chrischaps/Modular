@@ -565,10 +565,14 @@ pub fn patch_from_json(json: &str) -> Result<Patch, PatchError> {
     Ok(patch)
 }
 
+/// A patch as the JSON its files hold.
+pub fn patch_to_json(patch: &Patch) -> Result<String, PatchError> {
+    Ok(serde_json::to_string_pretty(patch)?)
+}
+
 /// Save a patch to a JSON file.
 pub fn save_to_file(patch: &Patch, path: &std::path::Path) -> Result<(), PatchError> {
-    let json = serde_json::to_string_pretty(patch)?;
-    std::fs::write(path, json)?;
+    std::fs::write(path, patch_to_json(patch)?)?;
     Ok(())
 }
 

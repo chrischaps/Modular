@@ -36,7 +36,9 @@ It doesn't imitate hardware panels. Every module is a node with jacks on its sid
 
 ## Getting started
 
-You need a [Rust toolchain](https://rustup.rs). On Linux you also need the ALSA and X11/Wayland development packages listed in `.github/workflows/ci.yml`.
+**[Try it in the browser](https://docs.chaps.dev/modular/play/)**, nothing to install: press **Play**, then play the `Z` to `M` keys or the Keyboard module's piano. The browser build has every module and example; MIDI devices, audio input and recording need the desktop app (see [`WEB.md`](WEB.md)).
+
+To run it on your computer, build it from source. You need a [Rust toolchain](https://rustup.rs). On Linux you also need the ALSA and X11/Wayland development packages listed in `.github/workflows/ci.yml`.
 
 ```bash
 cargo run --release                           # opens with the First Sound example

@@ -20,7 +20,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{fence, AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use rtrb::{Consumer, Producer, RingBuffer};
 

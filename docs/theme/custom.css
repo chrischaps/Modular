@@ -17,6 +17,17 @@
     --category-output: #7e57c2;     /* Purple */
 }
 
+/* A patch playing in the browser build (docs/src/recipes, installation) */
+.patch-embed {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    border: 1px solid #2e2e4a;
+    border-radius: 8px;
+    background: #1a1a2e;
+    margin: 1em 0 0.25em;
+}
+
 /* Module documentation styling */
 .module-header {
     border-radius: 4px;

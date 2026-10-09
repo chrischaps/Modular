@@ -5,6 +5,9 @@ A wide, slow-blooming pad for holding chords. Each note fades in over most of a 
 > **Load it:** choose **📚 Examples → Lush Pad** in the toolbar. Press **▶ Play**, then hold chords on a MIDI keyboard or on the Z to M keys.
 > The patch file is [`patches/lush-pad.json`](https://github.com/chrischaps/Modular/blob/master/patches/lush-pad.json).
 
+<iframe class="patch-embed" src="../play/?patch=lush-pad" title="Lush Pad, playable in the browser" loading="lazy"></iframe>
+*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Modular**.*
+
 ![The Lush Pad patch](../images/recipe-lush-pad.png)
 *The bundled cables carry one strand per voice.*
 

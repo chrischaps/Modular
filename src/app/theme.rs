@@ -210,6 +210,9 @@ pub fn install_fonts(ctx: &egui::Context) {
 
 /// Apply the dark synth theme to an egui context
 pub fn apply_theme(ctx: &egui::Context) {
+    // Always dark, whatever the system's preference: a browser in light
+    // mode would otherwise start this from egui's light style
+    ctx.set_theme(egui::Theme::Dark);
     let mut style = (*ctx.style()).clone();
 
     // Labels are names, not text to select. Selectable labels also take

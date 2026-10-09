@@ -1,13 +1,18 @@
 //! Modular Synth - A node-based modular audio synthesizer
 //!
-//! Entry point for the application.
+//! Entry point for the application: a window on the desktop, or a canvas
+//! in the browser (`trunk serve`, see `index.html`).
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
 use eframe::egui;
+#[cfg(not(target_arch = "wasm32"))]
 use modular_synth::app::capture::CaptureConfig;
 use modular_synth::app::SynthApp;
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
@@ -62,4 +67,49 @@ fn main() -> eframe::Result<()> {
             Ok(Box::new(app))
         }),
     )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    use eframe::wasm_bindgen::JsCast;
+    use modular_synth::app::web;
+
+    let document = web_sys::window().and_then(|w| w.document()).expect("a page to run in");
+    let canvas = document
+        .get_element_by_id("modular")
+        .and_then(|c| c.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+        .expect("index.html's canvas");
+
+    wasm_bindgen_futures::spawn_local(async move {
+        let started = eframe::WebRunner::new()
+            .start(
+                canvas,
+                eframe::WebOptions::default(),
+                Box::new(|cc| {
+                    modular_synth::app::theme::install_fonts(&cc.egui_ctx);
+                    let mut app = SynthApp::new(false);
+                    let (patch, open) = (web::query_param("patch"), web::query_param("open"));
+                    if !app.open_from_address(patch.as_deref(), open.as_deref()) {
+                        app.open_on_launch(None);
+                    }
+                    // An embed is the page's patch, not a session to pick up
+                    if patch.is_none() {
+                        app.restore_session(cc.storage);
+                    }
+                    Ok(Box::new(app))
+                }),
+            )
+            .await;
+
+        // The page says it's loading until the app takes over, or why it couldn't
+        if let Some(loading) = document.get_element_by_id("loading") {
+            match started {
+                Ok(()) => loading.remove(),
+                Err(e) => {
+                    web_sys::console::error_1(&e);
+                    loading.set_inner_html("Modular couldn't start here: it needs WebGL 2 and WebAssembly. Try a recent Chrome, Firefox or Safari.");
+                }
+            }
+        }
+    });
 }

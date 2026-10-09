@@ -52,3 +52,23 @@ jobs:
         env:
           LIBCLANG_PATH: C:\Program Files\LLVM\bin
         run: env -u PSModulePath cargo check --features asio --all-targets
+
+  # The browser build (index.html, built with trunk by the docs workflow):
+  # check it still compiles for wasm32
+  web:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check the web build
+        run: cargo check --target wasm32-unknown-unknown --bin modular_synth

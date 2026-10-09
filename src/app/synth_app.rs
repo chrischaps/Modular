@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use web_time::Instant;
 
 use eframe::egui::{self, RichText, Layout, Align};
 use egui_node_graph2::{FlowGlyph, GraphEditorState, NodeResponse, NodeTemplateTrait, InputParamKind};
@@ -26,6 +26,8 @@ use crate::persistence::{
     capture_patch, examples, load_from_file, renumber_groups, save_to_file, stage_patch, Example, MidiMapping, Patch, PatchError,
     EXAMPLES,
 };
+#[cfg(target_arch = "wasm32")]
+use crate::persistence::{patch_from_json, patch_to_json};
 use crate::widgets::{cpu_meter, CpuMeterConfig, KnobStyle};
 use super::capture::{Capture, CaptureAction, CaptureConfig};
 use super::editing::{self, Selection};
@@ -37,6 +39,9 @@ use super::recording::{self, RecState, Toast, ToastAction};
 use super::session::{self, Answer, Autosave, Discard, RecentFiles};
 use super::theme;
 use super::undo::{Applied, History};
+use super::WEB;
+#[cfg(target_arch = "wasm32")]
+use super::web;
 
 mod grouping;
 
@@ -136,7 +141,7 @@ pub struct SynthApp {
 
     /// Currently pressed keyboard keys for virtual keyboard.
     /// Stores (relative_note, egui::Key) in order of press for key priority.
-    pressed_keys: Vec<(i32, egui::Key)>,
+    pressed_keys: Vec<(i32, Option<egui::Key>)>,
 
     /// Timestamp when the gate was last triggered (for minimum gate duration).
     last_gate_on: Option<Instant>,
@@ -247,6 +252,14 @@ pub struct SynthApp {
     node_sizes: HashMap<egui_node_graph2::NodeId, egui::Vec2>,
     /// The level was framed before some of its nodes had been drawn.
     reframe_level: bool,
+
+    // --- Browser ---
+    /// Embedded in a page (`?patch=` in the address): just the canvas, with
+    /// a Play button and a way to the full app.
+    embedded: bool,
+    /// Patch files the visitor picked, which the browser hands over later.
+    #[cfg(target_arch = "wasm32")]
+    uploads: (std::sync::mpsc::Sender<web::Upload>, std::sync::mpsc::Receiver<web::Upload>),
 }
 
 /// What a module's right-click menu asked for, handled once the graph is drawn.
@@ -401,6 +414,9 @@ impl SynthApp {
             my_modules: Vec::new(),
             node_sizes: HashMap::new(),
             reframe_level: false,
+            embedded: false,
+            #[cfg(target_arch = "wasm32")]
+            uploads: std::sync::mpsc::channel(),
         };
 
         // Note: enable_test_tone is ignored - test tone was removed in favor of AudioProcessor
@@ -948,6 +964,10 @@ impl SynthApp {
 
     /// Starts or stops recording.
     fn toggle_recording(&mut self) {
+        // Takes are written by a thread to a folder: the browser has neither
+        if WEB {
+            return;
+        }
         if self.is_recording() {
             self.stop_recording();
         } else {
@@ -1148,41 +1168,44 @@ impl SynthApp {
                 actions.toggle_playing = true;
             }
 
-            // Record what you hear: the button breathes while a take runs
-            let rec_state = match &self.recording {
-                None => RecState::Idle,
-                Some(take) if take.is_stopping() => RecState::Finishing,
-                Some(take) => RecState::Recording(take.elapsed()),
-            };
-            let folder = self.recordings_folder();
-            let hint = match rec_state {
-                RecState::Recording(_) => "Stop recording and save the take (Ctrl+R)".to_string(),
-                _ => format!(
-                    "Record what you hear to a WAV in {} (Ctrl+R)\nRight-click to choose the folder",
-                    recording::short_path(&folder)
-                ),
-            };
-            let rec = recording::rec_button(ui, &rec_state).on_hover_text(hint);
-            if rec.clicked() {
-                actions.toggle_recording = true;
+            // Record what you hear: the button breathes while a take runs.
+            // The browser has no folder to write takes to
+            if !WEB {
+                let rec_state = match &self.recording {
+                    None => RecState::Idle,
+                    Some(take) if take.is_stopping() => RecState::Finishing,
+                    Some(take) => RecState::Recording(take.elapsed()),
+                };
+                let folder = self.recordings_folder();
+                let hint = match rec_state {
+                    RecState::Recording(_) => "Stop recording and save the take (Ctrl+R)".to_string(),
+                    _ => format!(
+                        "Record what you hear to a WAV in {} (Ctrl+R)\nRight-click to choose the folder",
+                        recording::short_path(&folder)
+                    ),
+                };
+                let rec = recording::rec_button(ui, &rec_state).on_hover_text(hint);
+                if rec.clicked() {
+                    actions.toggle_recording = true;
+                }
+                rec.context_menu(|ui| {
+                    ui.label(RichText::new("Recordings folder").color(theme::text::SECONDARY));
+                    ui.label(recording::short_path(&folder));
+                    ui.separator();
+                    if ui.button("📂 Open Folder").clicked() {
+                        actions.open_recordings = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("Change…").clicked() {
+                        actions.choose_recordings_folder = true;
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(self.recordings_folder.is_some(), egui::Button::new("Use Music/Modular")).clicked() {
+                        actions.reset_recordings_folder = true;
+                        ui.close_menu();
+                    }
+                });
             }
-            rec.context_menu(|ui| {
-                ui.label(RichText::new("Recordings folder").color(theme::text::SECONDARY));
-                ui.label(recording::short_path(&folder));
-                ui.separator();
-                if ui.button("📂 Open Folder").clicked() {
-                    actions.open_recordings = true;
-                    ui.close_menu();
-                }
-                if ui.button("Change…").clicked() {
-                    actions.choose_recordings_folder = true;
-                    ui.close_menu();
-                }
-                if ui.add_enabled(self.recordings_folder.is_some(), egui::Button::new("Use Music/Modular")).clicked() {
-                    actions.reset_recordings_folder = true;
-                    ui.close_menu();
-                }
-            });
 
             group_break(ui);
 
@@ -1202,7 +1225,9 @@ impl SynthApp {
                         actions.load_patch = true;
                         ui.close_menu();
                     }
-                    ui.menu_button("🕘 Recent", |ui| self.recent_menu(ui, &mut actions));
+                    if !WEB {
+                        ui.menu_button("🕘 Recent", |ui| self.recent_menu(ui, &mut actions));
+                    }
                     ui.separator();
                     if item(ui, "💾 Save", "Ctrl+S") {
                         actions.save_patch = true;
@@ -1222,7 +1247,9 @@ impl SynthApp {
                     actions.load_patch = true;
                 }
 
-                ui.menu_button("🕘 Recent", |ui| self.recent_menu(ui, &mut actions));
+                if !WEB {
+                    ui.menu_button("🕘 Recent", |ui| self.recent_menu(ui, &mut actions));
+                }
             }
 
             ui.menu_button("📚 Examples", |ui| {
@@ -1282,8 +1309,10 @@ impl SynthApp {
             .response
             .on_hover_text("How knobs are drawn");
 
-            // Device selectors (engine status lives in the status bar)
+            // Device selectors (engine status lives in the status bar). The
+            // browser plays through its own output, and has no MIDI or input yet
             match &self.audio_engine {
+                Ok(_) if WEB => {}
                 Ok(_) => {
                     group_break(ui);
 
@@ -1818,7 +1847,7 @@ impl SynthApp {
 
                             // Handle hover intent with delay
                             if response.hovered() {
-                                let now = std::time::Instant::now();
+                                let now = Instant::now();
 
                                 // Check if we're already tracking this category
                                 if let Some((tracked_cat, hover_start)) = self.user_state.context_menu_hover_intent {
@@ -2550,8 +2579,20 @@ impl SynthApp {
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
             .or(self.current_example.map(|e| e.file_name))
-            .unwrap_or("patch.json");
+            .unwrap_or("patch.json")
+            .to_string();
 
+        // The browser saves by downloading
+        #[cfg(target_arch = "wasm32")]
+        let saved = self.download_patch(&default_name);
+        #[cfg(not(target_arch = "wasm32"))]
+        let saved = self.save_patch_as(&default_name);
+        saved
+    }
+
+    /// Asks where to save the patch, offering `default_name`, and saves it there.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save_patch_as(&mut self, default_name: &str) -> bool {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("Synth Patch", &["json"])
             .set_file_name(default_name)
@@ -2579,13 +2620,60 @@ impl SynthApp {
         false
     }
 
-    /// Show a load file dialog and load the selected patch.
-    fn show_load_dialog(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Synth Patch", &["json"])
-            .pick_file()
+    /// Saves the patch as a download named `file_name`.
+    #[cfg(target_arch = "wasm32")]
+    fn download_patch(&mut self, file_name: &str) -> bool {
+        let name = file_name.strip_suffix(".json").unwrap_or(file_name);
+        let patch = self.create_patch(name);
+        match patch_to_json(&patch).map_err(|e| e.to_string()).and_then(|json| web::download(file_name, &json)) {
+            Ok(()) => {
+                self.status_message = Some(format!("Downloaded {}", file_name));
+                self.sync_history();
+                self.mark_saved();
+                true
+            }
+            Err(e) => {
+                self.status_message = Some(format!("Save failed: {}", e));
+                false
+            }
+        }
+    }
+
+    /// Show a load file dialog and load the selected patch. In the browser
+    /// the file is uploaded, and opens when it arrives (see `collect_upload`).
+    fn show_load_dialog(&mut self, ctx: &egui::Context) {
+        #[cfg(target_arch = "wasm32")]
+        web::pick_patch(ctx, self.uploads.0.clone());
+
+        #[cfg(not(target_arch = "wasm32"))]
         {
-            self.open_file(&path);
+            let _ = ctx;
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("Synth Patch", &["json"])
+                .pick_file()
+            {
+                self.open_file(&path);
+            }
+        }
+    }
+
+    /// Opens a patch file the browser has finished uploading.
+    #[cfg(target_arch = "wasm32")]
+    fn collect_upload(&mut self) {
+        let Ok(upload) = self.uploads.1.try_recv() else { return };
+        let loaded = upload
+            .text
+            .and_then(|json| patch_from_json(&json).map_err(|e| e.to_string()))
+            .and_then(|patch| Ok((self.load_patch(&patch).map_err(|e| e.to_string())?, patch.name)));
+        match loaded {
+            Ok((warnings, name)) => {
+                // Remembered by name only, to offer when it's saved again
+                self.current_patch_path = Some(PathBuf::from(&upload.name));
+                self.current_example = None;
+                self.status_message = Some(format!("Loaded: {}", name));
+                self.show_load_warnings(warnings);
+            }
+            Err(e) => self.status_message = Some(format!("Couldn't open {}: {}", upload.name, e)),
         }
     }
 
@@ -2634,6 +2722,82 @@ impl SynthApp {
         }
     }
 
+    /// Opens what the page's address asks for: `?patch=lush-pad` embeds that
+    /// example, just the canvas and a Play button, for a page to frame;
+    /// `?open=lush-pad` opens it in the full app. Returns whether the address
+    /// named an example.
+    pub fn open_from_address(&mut self, patch: Option<&str>, open: Option<&str>) -> bool {
+        let find = |name: &str| EXAMPLES.iter().find(|e| e.file_name.strip_suffix(".json") == Some(name));
+        let Some(example) = patch.or(open).and_then(find) else { return false };
+        self.embedded = patch.is_some();
+        self.open_example(example);
+        true
+    }
+
+    /// An embed's controls: Play, what's playing, and the way to the full
+    /// app. Returns whether Play or Stop was pressed.
+    fn draw_embed_bar(&mut self, ctx: &egui::Context) -> bool {
+        let status = self.audio_status(ctx);
+        let mut toggle = false;
+        egui::Area::new(egui::Id::new("embed_bar"))
+            .anchor(egui::Align2::LEFT_TOP, egui::vec2(12.0, 12.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::none()
+                    .fill(theme::background::PANEL)
+                    .stroke(egui::Stroke::new(1.0, theme::background::PANEL.gamma_multiply(1.6)))
+                    .rounding(10.0)
+                    .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+                    .shadow(egui::epaint::Shadow {
+                        offset: egui::vec2(0.0, 4.0),
+                        blur: 16.0,
+                        spread: 0.0,
+                        color: egui::Color32::from_black_alpha(90),
+                    })
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let (text, color) = if self.is_playing {
+                                ("⏹ Stop", theme::accent::WARNING)
+                            } else {
+                                ("▶ Play", theme::accent::SUCCESS)
+                            };
+                            toggle = ui.button(RichText::new(text).color(color).strong()).clicked();
+                            ui.add_space(4.0);
+                            let name = self.current_example.map_or("Modular", |e| e.name);
+                            let label = ui.label(RichText::new(name).color(theme::text::PRIMARY).strong());
+                            if let Some(example) = self.current_example {
+                                label.on_hover_text(example.description);
+                            }
+                            match status {
+                                _ if self.audio_engine.is_err() => {
+                                    ui.label(RichText::new("⚠ No sound in this browser").color(theme::accent::ERROR).small());
+                                }
+                                AudioStatus::NoAudio => {
+                                    ui.label(RichText::new("⚠ No audio").color(theme::accent::ERROR).small());
+                                }
+                                // The computer's keys play Keyboard and Poly MIDI modules
+                                _ if self.has_keyboard_modules() || self.has_poly_midi_modules() => {
+                                    ui.label(RichText::new("play its piano, or the Z–M keys").color(theme::text::SECONDARY).small());
+                                }
+                                _ => {}
+                            }
+                            #[cfg(target_arch = "wasm32")]
+                            if let Some(app) = web::full_app_url() {
+                                ui.add_space(4.0);
+                                let file = self.current_example.map_or("", |e| e.file_name.trim_end_matches(".json"));
+                                // A new tab: in the frame it would replace the page's embed
+                                ui.add(egui::Hyperlink::from_label_and_url(
+                                    RichText::new("Open in Modular ↗").color(theme::text::SECONDARY).small(),
+                                    format!("{}?open={}", app, file),
+                                ).open_in_new_tab(true))
+                                .on_hover_text("The whole app, with this patch, in a new tab");
+                            }
+                        });
+                    });
+            });
+        toggle
+    }
+
     /// Keep the problems from a load on screen (and on stderr) until dismissed.
     fn show_load_warnings(&mut self, warnings: Vec<String>) {
         for warning in &warnings {
@@ -2645,7 +2809,8 @@ impl SynthApp {
     /// Quick save to the current path, or show save dialog if no path.
     /// Returns whether the patch was saved.
     fn quick_save(&mut self) -> bool {
-        if let Some(path) = self.current_patch_path.clone() {
+        // In the browser the patch's path is just a name: saving downloads
+        if let Some(path) = self.current_patch_path.clone().filter(|_| !WEB) {
             let name = path.file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("Untitled");
@@ -2717,7 +2882,7 @@ impl SynthApp {
     fn perform(&mut self, ctx: &egui::Context, action: Discard) {
         match action {
             Discard::New => self.new_patch(),
-            Discard::Open => self.show_load_dialog(),
+            Discard::Open => self.show_load_dialog(ctx),
             Discard::OpenFile(path) => self.open_file(&path),
             Discard::OpenExample(example) => self.open_example(example),
             Discard::Quit => {
@@ -2874,6 +3039,10 @@ impl SynthApp {
         if !engine.is_running() {
             return transport;
         }
+        #[cfg(target_arch = "wasm32")]
+        if web::audio_blocked() {
+            return AudioStatus::Waiting;
+        }
 
         let now = Instant::now();
         let count = engine.callback_count();
@@ -2958,6 +3127,11 @@ impl SynthApp {
                             "⚠ No audio",
                             theme::accent::ERROR,
                             "The output device has stopped taking audio (unplugged, or taken by another app). Choose it again under Output to reconnect.",
+                        ),
+                        AudioStatus::Waiting => (
+                            "◌ Click to start sound",
+                            theme::text::SECONDARY,
+                            "Browsers keep a page quiet until you click or press a key in it",
                         ),
                     };
                     ui.label(RichText::new(status_text).color(status_color).small())
@@ -3166,14 +3340,14 @@ impl SynthApp {
                         }
                         if *pressed {
                             // Add key if not already in list
-                            if !self.pressed_keys.iter().any(|(_, k)| k == key) {
-                                self.pressed_keys.push((relative_note, *key));
+                            if !self.pressed_keys.iter().any(|(_, k)| *k == Some(*key)) {
+                                self.pressed_keys.push((relative_note, Some(*key)));
                                 keys_changed = true;
                                 midi_notes.push((relative_note, true));
                             }
                         } else {
                             // Remove key from list
-                            if let Some(pos) = self.pressed_keys.iter().position(|(_, k)| k == key) {
+                            if let Some(pos) = self.pressed_keys.iter().position(|(_, k)| *k == Some(*key)) {
                                 self.pressed_keys.remove(pos);
                                 keys_changed = true;
                                 midi_notes.push((relative_note, false));
@@ -3183,6 +3357,21 @@ impl SynthApp {
                 }
             }
         });
+
+        // A piano key held with the mouse or a finger is one more held key,
+        // with no computer key behind it (see `SynthGraphState::piano_pointer`)
+        let pointer = self.pressed_keys.iter().position(|(_, k)| k.is_none());
+        let pointed = self.user_state.piano_pointer;
+        if pointer.map(|i| self.pressed_keys[i].0) != pointed {
+            if let Some(i) = pointer {
+                midi_notes.push((self.pressed_keys.remove(i).0, false));
+            }
+            if let Some(note) = pointed {
+                self.pressed_keys.push((note, None));
+                midi_notes.push((note, true));
+            }
+            keys_changed = true;
+        }
 
         if let (true, Some(engine)) = (play_midi, self.midi_engine.as_ref()) {
             for (relative_note, pressed) in midi_notes {
@@ -3324,6 +3513,9 @@ enum AudioStatus {
     Stopped,
     /// The device errored or stopped asking for audio.
     NoAudio,
+    /// The browser holds a page's sound until it's clicked or played.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    Waiting,
 }
 
 /// Actions collected from the toolbar for deferred execution
@@ -3373,6 +3565,10 @@ impl eframe::App for SynthApp {
                 ctx.memory_mut(|m| m.surrender_focus(focused));
             }
         }
+
+        // A patch file the browser has finished uploading
+        #[cfg(target_arch = "wasm32")]
+        self.collect_upload();
 
         // Process events from the audio engine
         self.process_engine_events();
@@ -3496,27 +3692,41 @@ impl eframe::App for SynthApp {
         // Update gate timing (for minimum gate duration)
         self.update_gate_timing();
 
-        // Top toolbar panel
-        let toolbar_actions = egui::TopBottomPanel::top("toolbar")
-            .frame(egui::Frame::none()
-                .fill(theme::background::PANEL)
-                .inner_margin(egui::Margin::symmetric(8.0, 8.0)))
-            .show(ctx, |ui| {
-                self.draw_toolbar(ui)
-            })
-            .inner;
+        let toolbar_actions = if self.embedded {
+            ToolbarActions::default()
+        } else {
+            // Top toolbar panel
+            let toolbar_actions = egui::TopBottomPanel::top("toolbar")
+                .frame(egui::Frame::none()
+                    .fill(theme::background::PANEL)
+                    .inner_margin(egui::Margin::symmetric(8.0, 8.0)))
+                .show(ctx, |ui| {
+                    self.draw_toolbar(ui)
+                })
+                .inner;
 
-        // Bottom status bar
-        egui::TopBottomPanel::bottom("status_bar")
-            .frame(egui::Frame::none()
-                .fill(theme::background::PANEL)
-                .inner_margin(egui::Margin::symmetric(0.0, 4.0)))
-            .show(ctx, |ui| {
-                self.draw_status_bar(ui);
-            });
+            // Bottom status bar
+            egui::TopBottomPanel::bottom("status_bar")
+                .frame(egui::Frame::none()
+                    .fill(theme::background::PANEL)
+                    .inner_margin(egui::Margin::symmetric(0.0, 4.0)))
+                .show(ctx, |ui| {
+                    self.draw_status_bar(ui);
+                });
+            toolbar_actions
+        };
 
-        // Main content area - the node graph editor
+        // Main content area - the node graph editor. A piano held down
+        // says so as it's drawn
+        self.user_state.piano_pointer = None;
         self.draw_main_area(ctx);
+
+        // An embed's one control, over the canvas
+        let toolbar_actions = if self.embedded {
+            ToolbarActions { toggle_playing: self.draw_embed_bar(ctx), ..toolbar_actions }
+        } else {
+            toolbar_actions
+        };
 
         // Sync parameter values to the audio engine
         self.sync_parameters();
@@ -3534,6 +3744,7 @@ impl eframe::App for SynthApp {
                 self.status_message = Some(format!("Couldn't open {}: {}", folder.display(), e));
             }
         }
+        #[cfg(not(target_arch = "wasm32"))]
         if toolbar_actions.choose_recordings_folder {
             if let Some(folder) = rfd::FileDialog::new().set_directory(self.recordings_folder()).pick_folder() {
                 self.status_message = Some(format!("Recording to {}", folder.display()));
@@ -3681,8 +3892,8 @@ impl eframe::App for SynthApp {
     /// Stores recent files, and the patch while it has unsaved changes, so
     /// a crash loses at most [`session::AUTOSAVE_INTERVAL`] of work.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        // A capture's edits are the script's, not work to keep
-        if self.capture.is_some() {
+        // A capture's edits are the script's, and an embed's the page's: not work to keep
+        if self.capture.is_some() || self.embedded {
             return;
         }
         self.recent_files.store(storage);

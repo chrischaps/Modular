@@ -187,6 +187,11 @@ python tools/showcase/encode.py hero out.mp4 --loop 2 --fps 30 --crf 27 --poster
 # Open a patch at launch (otherwise the First Sound example opens)
 cargo run -- patches/fm-synthesis.json
 
+# The browser build (see WEB.md): needs `rustup target add wasm32-unknown-unknown`
+# and `cargo install --locked trunk`. ?patch=lush-pad embeds an example
+trunk serve                # http://127.0.0.1:8080
+trunk build --release      # into dist/, published at docs.chaps.dev/modular/play/
+
 # GitHub CLI
 gh issue list --state open
 gh issue view <number>

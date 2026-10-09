@@ -5,6 +5,9 @@ Surf rolls in and draws back, and a glass chime somewhere up the beach turns in 
 > **Load it:** choose **📚 Examples → Shoreline** in the toolbar and press **▶ Play**. It needs no keyboard.
 > The patch file is [`patches/shoreline.json`](https://github.com/chrischaps/Modular/blob/master/patches/shoreline.json).
 
+<iframe class="patch-embed" src="../play/?patch=shoreline" title="Shoreline, playable in the browser" loading="lazy"></iframe>
+*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Modular**.*
+
 ![The Shoreline patch](../images/recipe-shoreline.png)
 *The chime runs along the top and the surf along the bottom. The Noise module on the left feeds both.*
 

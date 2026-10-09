@@ -1,6 +1,20 @@
 # Installation
 
-Modular Synth runs on Windows, macOS and Linux. You can download a prebuilt release or build it from source with Rust.
+Modular Synth runs on Windows, macOS and Linux. You can download a prebuilt release or build it from source with Rust. Or, to hear it first, try it in the browser.
+
+## Try it in the browser
+
+**[Open Modular in the browser](../play/)**: the whole app, nothing to install. It opens on the **First Sound** example. Press **▶ Play**, then play the `Z` to `M` keys, or hold the keys of the Keyboard module's piano with the mouse or a finger.
+
+<iframe class="patch-embed" src="../play/?patch=first-sound" title="First Sound, playable in the browser" loading="lazy"></iframe>
+
+The browser version runs the same engine and modules, and every example is in its **📚 Examples** menu. A few things need the desktop app:
+
+- **MIDI devices and audio input.** In the browser, the computer keyboard and the on-screen pianos play the patch.
+- **Recording** to a WAV, and **My Modules**, which keep files in a folder.
+- **Low latency.** The browser plays sound through larger buffers, about a tenth of a second behind your playing, and twice that in Firefox. That's fine for listening and exploring, and loose for playing live.
+
+Patches go in and out as files: **💾 Save** downloads the patch, and **📂 Open** picks one to upload. Each recipe in this manual can be played on its page.
 
 ## Download a release
 

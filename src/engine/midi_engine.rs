@@ -12,7 +12,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use web_time::Instant;
 
 use midir::{MidiInput, MidiInputConnection, MidiInputPort};
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -396,16 +396,21 @@ impl MidiEngine {
         let (audio_producer, audio_consumer) = RingBuffer::new(DEFAULT_MIDI_BUFFER_SIZE);
         let (ui_producer, ui_consumer) = RingBuffer::new(DEFAULT_MIDI_BUFFER_SIZE);
 
-        // Initialize MIDI input for port enumeration
-        let midi_in = MidiInput::new("Modular Synth")
-            .map_err(|e| MidiError::InitError(e.to_string()))?;
-
-        // Get initial port list
-        let ports: Vec<MidiInputPort> = midi_in.ports().into_iter().collect();
-        let port_names: Vec<String> = ports
-            .iter()
-            .map(|p| midi_in.port_name(p).unwrap_or_else(|_| "Unknown".to_string()))
-            .collect();
+        // Get initial port list. Web MIDI needs asking for, and Safari has
+        // none: in the browser there are no devices, and the computer keyboard
+        // plays through the queues (see `send`)
+        let (ports, port_names): (Vec<MidiInputPort>, Vec<String>) = if cfg!(target_arch = "wasm32") {
+            (Vec::new(), Vec::new())
+        } else {
+            let midi_in = MidiInput::new("Modular Synth")
+                .map_err(|e| MidiError::InitError(e.to_string()))?;
+            let ports: Vec<MidiInputPort> = midi_in.ports().into_iter().collect();
+            let port_names = ports
+                .iter()
+                .map(|p| midi_in.port_name(p).unwrap_or_else(|_| "Unknown".to_string()))
+                .collect();
+            (ports, port_names)
+        };
 
         let devices: Vec<MidiDeviceInfo> = port_names
             .iter()
@@ -420,33 +425,7 @@ impl MidiEngine {
 
         // Start background thread for device scanning (hot-plug detection)
         let scan_running = Arc::new(AtomicBool::new(true));
-        let state_clone = Arc::clone(&state);
-        let running_clone = Arc::clone(&scan_running);
-
-        let scan_thread = thread::spawn(move || {
-            while running_clone.load(Ordering::Relaxed) {
-                // Sleep between scans
-                thread::sleep(Duration::from_secs(2));
-
-                if !running_clone.load(Ordering::Relaxed) {
-                    break;
-                }
-
-                // Rescan MIDI ports
-                if let Ok(midi_in) = MidiInput::new("Modular Synth Scanner") {
-                    let new_ports: Vec<MidiInputPort> = midi_in.ports().into_iter().collect();
-                    let new_names: Vec<String> = new_ports
-                        .iter()
-                        .map(|p| midi_in.port_name(p).unwrap_or_else(|_| "Unknown".to_string()))
-                        .collect();
-
-                    if let Ok(mut state) = state_clone.lock() {
-                        state.ports = new_ports;
-                        state.port_names = new_names;
-                    }
-                }
-            }
-        });
+        let scan_thread = spawn_scanner(Arc::clone(&state), Arc::clone(&scan_running));
 
         let engine = Self {
             devices,
@@ -455,7 +434,7 @@ impl MidiEngine {
             senders: Arc::new(Mutex::new(MidiSenders { audio: audio_producer, ui: ui_producer })),
             state,
             scan_running,
-            scan_thread: Some(scan_thread),
+            scan_thread,
         };
 
         Ok((engine, MidiReceivers { audio: audio_consumer, ui: ui_consumer }))
@@ -587,6 +566,43 @@ impl MidiEngine {
     pub fn is_connected(&self) -> bool {
         self.connection.is_some()
     }
+}
+
+/// Starts the thread that rescans the MIDI ports every couple of seconds,
+/// so a device plugged in later shows up (hot-plug).
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_scanner(state: Arc<Mutex<MidiState>>, running: Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
+    let scanner = thread::spawn(move || {
+        while running.load(Ordering::Relaxed) {
+            // Sleep between scans
+            thread::sleep(std::time::Duration::from_secs(2));
+
+            if !running.load(Ordering::Relaxed) {
+                break;
+            }
+
+            // Rescan MIDI ports
+            if let Ok(midi_in) = MidiInput::new("Modular Synth Scanner") {
+                let new_ports: Vec<MidiInputPort> = midi_in.ports().into_iter().collect();
+                let new_names: Vec<String> = new_ports
+                    .iter()
+                    .map(|p| midi_in.port_name(p).unwrap_or_else(|_| "Unknown".to_string()))
+                    .collect();
+
+                if let Ok(mut state) = state.lock() {
+                    state.ports = new_ports;
+                    state.port_names = new_names;
+                }
+            }
+        }
+    });
+    Some(scanner)
+}
+
+/// The browser has no threads to scan from.
+#[cfg(target_arch = "wasm32")]
+fn spawn_scanner(_state: Arc<Mutex<MidiState>>, _running: Arc<AtomicBool>) -> Option<thread::JoinHandle<()>> {
+    None
 }
 
 impl Drop for MidiEngine {

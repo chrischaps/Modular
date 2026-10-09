@@ -85,6 +85,12 @@ impl PianoConfig {
         }
     }
 
+    /// Makes the keys sense clicks and presses (see [`piano_keys`]).
+    pub fn clickable(mut self) -> Self {
+        self.clickable = true;
+        self
+    }
+
     /// Set the size of the keyboard.
     pub fn with_size(mut self, width: f32, height: f32) -> Self {
         self.width = width;
@@ -185,12 +191,15 @@ fn key_at(keyboard: Rect, pos: Pos2) -> Option<u8> {
 /// A piano keyboard, returning the key (0-11) under the pointer as well.
 ///
 /// With [`PianoConfig::clickable`] set, the keys sense clicks: a click on a
-/// key is `response.clicked()` with that key returned.
+/// key is `response.clicked()` with that key returned. They sense drags too,
+/// so a press held on the keys (`response.is_pointer_button_down_on()`)
+/// stays with the piano as it slides from key to key, rather than moving
+/// the module it's on.
 pub fn piano_keys(ui: &mut Ui, data: &PianoData, config: &PianoConfig) -> (Response, Option<u8>) {
     // Calculate total height including label
     let label_height = if config.show_octave { 12.0 } else { 0.0 };
     let total_height = config.height + label_height;
-    let sense = if config.clickable { Sense::click() } else { Sense::hover() };
+    let sense = if config.clickable { Sense::click_and_drag() } else { Sense::hover() };
 
     let (rect, response) = ui.allocate_exact_size(
         Vec2::new(config.width, total_height),

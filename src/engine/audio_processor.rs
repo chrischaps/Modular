@@ -3,7 +3,7 @@
 //! Handles audio processing in the audio callback: runs the compiled
 //! [`GraphPlan`] and applies plans and parameter changes from the UI thread.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use cpal::{FromSample, Sample};
 use rtrb::Consumer;

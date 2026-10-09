@@ -5,6 +5,9 @@ One sine wave bends the pitch of another, hundreds of times a second, and a bell
 > **Load it:** choose **📚 Examples → FM Synthesis** in the toolbar. Press **▶ Play**, then play the Z to M keys.
 > The patch file is [`patches/fm-synthesis.json`](https://github.com/chrischaps/Modular/blob/master/patches/fm-synthesis.json).
 
+<iframe class="patch-embed" src="../play/?patch=fm-synthesis" title="FM Synthesis, playable in the browser" loading="lazy"></iframe>
+*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Modular**.*
+
 ![The FM Synthesis patch](../images/recipe-fm-synthesis.png)
 *A modulator and a carrier, each with its own VCA and envelope.*
 

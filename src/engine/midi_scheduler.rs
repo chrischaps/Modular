@@ -12,7 +12,7 @@
 //! whichever buffer it happened to fall into would jitter it by up to a
 //! whole buffer instead.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use rtrb::Consumer;
 

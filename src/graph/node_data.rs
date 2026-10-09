@@ -2198,10 +2198,18 @@ impl NodeDataTrait for SynthNodeData {
             let config = PianoConfig::keyboard()
                 .with_size(140.0 * zoom, 45.0 * zoom);
 
-            ui.horizontal(|ui| {
-                ui.add_space((ui.available_width() - 140.0 * zoom) / 2.0); // Center the display
-                piano(ui, &data, &config);
-            });
+            // Playable with the mouse, or a finger on a touch screen: the key
+            // held plays like a computer key, and sliding across glides
+            let config = config.clickable();
+            let (response, key) = ui
+                .horizontal(|ui| {
+                    ui.add_space((ui.available_width() - 140.0 * zoom) / 2.0); // Center the display
+                    piano_keys(ui, &data, &config)
+                })
+                .inner;
+            if let (true, Some(key)) = (response.is_pointer_button_down_on(), key) {
+                user_state.piano_pointer = Some(key as i32);
+            }
         }
 
         // Special rendering for MIDI Note module - piano keyboard display
@@ -2253,10 +2261,28 @@ impl NodeDataTrait for SynthNodeData {
             let config = PianoConfig::midi()
                 .with_size(140.0 * zoom, 45.0 * zoom);
 
-            ui.horizontal(|ui| {
-                ui.add_space((ui.available_width() - 140.0 * zoom) / 2.0); // Center the display
-                piano(ui, &data, &config);
-            });
+            // Poly MIDI's piano plays it like the computer keys do; MIDI
+            // Note's only shows what its device plays
+            if self.module_id == "input.poly_midi" {
+
+                // Playable with the mouse, or a finger on a touch screen: the key
+                // held plays like a computer key, and sliding across glides
+                let config = config.clickable();
+                let (response, key) = ui
+                    .horizontal(|ui| {
+                        ui.add_space((ui.available_width() - 140.0 * zoom) / 2.0); // Center the display
+                        piano_keys(ui, &data, &config)
+                    })
+                    .inner;
+                if let (true, Some(key)) = (response.is_pointer_button_down_on(), key) {
+                    user_state.piano_pointer = Some(key as i32);
+                }
+            } else {
+                ui.horizontal(|ui| {
+                    ui.add_space((ui.available_width() - 140.0 * zoom) / 2.0); // Center the display
+                    piano(ui, &data, &config);
+                });
+            }
         }
 
         // Quantizer: its scale on a one-octave piano, the notes it plays

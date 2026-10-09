@@ -17,7 +17,8 @@
 //! inside a group), so undoing it can show it happening.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use egui::{Pos2, Vec2};
 use egui_node_graph2::{NodeId, PanZoom};

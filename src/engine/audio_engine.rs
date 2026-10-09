@@ -119,13 +119,47 @@ impl AudioSystem {
 
     fn host(self) -> Result<Host, AudioError> {
         match self {
-            AudioSystem::System => Ok(cpal::default_host()),
+            AudioSystem::System => system_host(),
             #[cfg(all(windows, feature = "asio"))]
             AudioSystem::Asio => cpal::host_from_id(cpal::HostId::Asio).map_err(|_| AudioError::NoAsioDriver),
             #[cfg(not(all(windows, feature = "asio")))]
             AudioSystem::Asio => Err(AudioError::SystemUnavailable(self)),
         }
     }
+}
+
+/// The computer's own audio system.
+#[cfg(not(target_arch = "wasm32"))]
+fn system_host() -> Result<Host, AudioError> {
+    Ok(cpal::default_host())
+}
+
+/// The browser's Web Audio, if it has it: cpal's default host would panic
+/// without.
+#[cfg(target_arch = "wasm32")]
+fn system_host() -> Result<Host, AudioError> {
+    cpal::available_hosts()
+        .into_iter()
+        .find_map(|id| cpal::host_from_id(id).ok())
+        .ok_or(AudioError::NoOutputDevice)
+}
+
+/// The buffer size for the browser, where the app renders sound on the
+/// page's own thread, between drawing frames. Firefox runs late now and then
+/// at the default 2048 frames (it drops a buffer every few seconds on Lush
+/// Pad), and not at all at 4096; Chrome and Safari keep up at 2048, with
+/// half the delay.
+#[cfg(target_arch = "wasm32")]
+fn web_buffer() -> BufferSize {
+    let firefox = web_sys::window()
+        .and_then(|w| w.navigator().user_agent().ok())
+        .is_some_and(|agent| agent.contains("Firefox/"));
+    if firefox { BufferSize::Fixed(4096) } else { BufferSize::Default }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn web_buffer() -> BufferSize {
+    BufferSize::Default
 }
 
 /// The buffer sizes, in frames, offered on systems that let Modular choose.
@@ -923,6 +957,7 @@ fn output_config(device: &Device, system: AudioSystem, buffer: Option<u32>) -> R
         .map_err(|e| AudioError::ConfigurationFailed(e.to_string()))?;
     let buffer_size = match (system, buffer, supported.buffer_size()) {
         (AudioSystem::Asio, Some(frames), SupportedBufferSize::Range { min, max }) => BufferSize::Fixed(frames.clamp(*min, *max)),
+        _ if cfg!(target_arch = "wasm32") => web_buffer(),
         _ => BufferSize::Default,
     };
     let channels = match system {

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  Modular in the browser. Build with trunk (https://trunkrs.dev):
+    trunk serve            # http://127.0.0.1:8080, rebuilt on save
+    trunk build --release  # into dist/, for the docs site
+  Add ?patch=lush-pad to embed an example (just the canvas and a Play
+  button), or ?open=lush-pad to open it in the full app.
+-->
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#1a1a2e" />
+    <title>Modular</title>
+    <meta name="description" content="A node-based modular synthesizer, playable in the browser." />
+
+    <link data-trunk rel="rust" data-bin="modular_synth" data-wasm-opt="2" />
+
+    <script>
+        // Browsers hold a page's sound until it's clicked or a key is pressed
+        // (their autoplay rule), and Safari only lets go inside the click
+        // itself. So every audio context the app makes is noted here and
+        // resumed from the first gesture, and the app asks
+        // modularAudioBlocked() to show "Click to start sound" until then.
+        (function () {
+            const contexts = [];
+            const Native = window.AudioContext || window.webkitAudioContext;
+            if (!Native) return;
+            class TrackedAudioContext extends Native {
+                constructor(...args) {
+                    super(...args);
+                    contexts.push(this);
+                }
+            }
+            window.AudioContext = TrackedAudioContext;
+            const resume = () => contexts.forEach((c) => c.state === "suspended" && c.resume());
+            for (const gesture of ["pointerdown", "pointerup", "keydown", "touchend"]) {
+                window.addEventListener(gesture, resume, { capture: true });
+            }
+            window.modularAudioBlocked = () => contexts.some((c) => c.state === "suspended");
+
+            // The app's sound arrives as buffers, each scheduled to start as
+            // the one before ends (cpal's WebAudio host). If the page is busy
+            // for longer than a buffer, one is scheduled for a moment already
+            // past, and cpal never catches up: every buffer after it would
+            // start early, over the one still playing. So the schedule is
+            // moved on by however late it fell, leaving one gap (a dropout)
+            // instead of garbled sound from then on. The dropouts are counted
+            // in modularAudioStats, for the browser tests.
+            const stats = { buffers: 0, late: 0, lagMs: 0, peak: 0, renderMs: 0, renderMaxMs: 0 };
+            window.modularAudioStats = () => ({ ...stats, lagMs: Math.round(stats.lagMs), renderMs: +stats.renderMs.toFixed(1), renderMaxMs: +stats.renderMaxMs.toFixed(1), contexts: contexts.map((c) => c.state) });
+            // How long the app takes to render each buffer, which is the
+            // time the page's thread is busy with sound rather than drawing
+            const listen = AudioBufferSourceNode.prototype.addEventListener;
+            AudioBufferSourceNode.prototype.addEventListener = function (type, fn, ...rest) {
+                if (type !== "ended") return listen.call(this, type, fn, ...rest);
+                return listen.call(this, type, function (...args) {
+                    const t0 = performance.now();
+                    const result = fn.apply(this, args);
+                    const ms = performance.now() - t0;
+                    stats.renderMs = stats.renderMs * 0.95 + ms * 0.05;
+                    stats.renderMaxMs = Math.max(stats.renderMaxMs, ms);
+                    return result;
+                }, ...rest);
+            };
+            const start = AudioBufferSourceNode.prototype.start;
+            const lag = new WeakMap();
+            AudioBufferSourceNode.prototype.start = function (when = 0, ...rest) {
+                const ctx = this.context;
+                if (when > 0) {
+                    let shift = lag.get(ctx) || 0;
+                    // A safety margin of 10ms, so the buffer after a dropout isn't late too
+                    if (when + shift < ctx.currentTime) {
+                        shift = ctx.currentTime - when + 0.01;
+                        lag.set(ctx, shift);
+                        stats.late += 1;
+                        stats.lagMs = shift * 1000;
+                    }
+                    when += shift;
+                }
+                stats.buffers += 1;
+                if (this.buffer && stats.buffers % 8 === 0) {
+                    for (const x of this.buffer.getChannelData(0)) stats.peak = Math.max(stats.peak, Math.abs(x));
+                }
+                return start.call(this, when, ...rest);
+            };
+        })();
+    </script>
+
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #1a1a2e;
+            color: #c8c8dc;
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        }
+
+        canvas#modular {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            outline: none;
+            touch-action: none;
+        }
+
+        /* Until the app takes over: one cable, carrying a signal */
+        #loading {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            text-align: center;
+            padding: 0 16px;
+            pointer-events: none;
+            background:
+                linear-gradient(#24243a 1px, transparent 1px) 0 0 / 24px 24px,
+                linear-gradient(90deg, #24243a 1px, transparent 1px) 0 0 / 24px 24px,
+                #1a1a2e;
+        }
+        #loading svg { width: min(280px, 70vw); height: auto; overflow: visible; }
+        #loading .cable { fill: none; stroke: #4287f5; stroke-width: 3; stroke-linecap: round; opacity: 0.35; }
+        #loading .flow {
+            fill: none; stroke: #8db6ff; stroke-width: 3; stroke-linecap: round;
+            stroke-dasharray: 2 22;
+            animation: flow 0.9s linear infinite;
+            filter: drop-shadow(0 0 4px #4287f5);
+        }
+        #loading .jack { fill: #2d2d46; stroke: #4287f5; stroke-width: 2; }
+        #loading .name { font-size: 15px; letter-spacing: 0.32em; color: #e6e6f5; font-weight: 600; }
+        #loading .hint { font-size: 13px; color: #8a8aa8; max-width: 34em; line-height: 1.5; }
+        @keyframes flow { to { stroke-dashoffset: -24; } }
+        @media (prefers-reduced-motion: reduce) { #loading .flow { animation: none; } }
+    </style>
+</head>
+
+<body>
+    <canvas id="modular"></canvas>
+    <div id="loading">
+        <svg viewBox="0 0 280 90" aria-hidden="true">
+            <path class="cable" d="M 14 20 C 120 20, 160 70, 266 70" />
+            <path class="flow" d="M 14 20 C 120 20, 160 70, 266 70" />
+            <circle class="jack" cx="14" cy="20" r="7" />
+            <circle class="jack" cx="266" cy="70" r="7" />
+        </svg>
+        <div class="name">MODULAR</div>
+        <div class="hint">Patching the cables…</div>
+    </div>
+</body>
+
+</html>

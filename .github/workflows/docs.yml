@@ -6,6 +6,14 @@ on:
       - master
     paths:
       - 'docs/**'
+      # The app in the browser, published beside the manual at /modular/play/
+      - 'src/**'
+      - 'patches/**'
+      - 'assets/**'
+      - 'index.html'
+      - 'Trunk.toml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
   workflow_dispatch:
 
 jobs:
@@ -23,6 +31,23 @@ jobs:
       - name: Build docs
         run: mdbook build docs
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # trunk fetches wasm-bindgen and wasm-opt itself
+      - name: Install trunk
+        run: |
+          curl -sSL https://github.com/trunk-rs/trunk/releases/download/v0.21.14/trunk-x86_64-unknown-linux-gnu.tar.gz | tar -xz
+          sudo mv trunk /usr/local/bin/
+
+      - name: Build the app for the browser
+        run: trunk build --release
+
       - name: Checkout docs site repo
         uses: actions/checkout@v4
         with:
@@ -34,6 +59,7 @@ jobs:
         run: |
           rm -rf docs-site/modular
           cp -r docs/book docs-site/modular
+          cp -r dist docs-site/modular/play
 
       - name: Push to docs site
         run: |

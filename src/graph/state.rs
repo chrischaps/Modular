@@ -5,7 +5,7 @@
 use egui::{Color32, Pos2, Vec2};
 use egui_node_graph2::{Backdrop, ConnectionSignalTrait, FlowGlyph, GraphEditorState, NodeId, SignalTrace};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::dsp::Readout;
 use crate::engine::{ChannelPeaks, NodeId as EngineNodeId};
@@ -164,6 +164,11 @@ pub struct SynthGraphState {
     /// Updated by the MIDI event handler.
     pub midi_active_notes: Vec<u8>,
 
+    /// The key of a Keyboard or Poly MIDI module's piano held down with the
+    /// mouse or a finger, as a note from C like a computer key's (0 is C).
+    /// Set as the piano is drawn, and played on the next frame.
+    pub piano_pointer: Option<i32>,
+
     /// Output stage meter, fed by OutputLevel events from the audio engine.
     pub output_meter: LevelMeter,
 
@@ -234,6 +239,7 @@ impl Default for SynthGraphState {
             is_playing: false,
             keyboard_active_notes: Vec::new(),
             midi_active_notes: Vec::new(),
+            piano_pointer: None,
             output_meter: LevelMeter::default(),
             module_meters: HashMap::new(),
             readouts: HashMap::new(),

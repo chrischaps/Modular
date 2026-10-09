@@ -41,6 +41,8 @@ Note:        C   D   E   F   G   A   B   C   D   E
 
 That's C4 to E5, a little over an octave. The top letter row plays too, in the same octave: **Q** is C4, **R** is E4 and **I** is B4, and **W E T Y U O P** are the black keys from C♯4 to D♯5. Turn **Oct** to move the whole range.
 
+The piano display plays too. Hold a key with the mouse, or a finger on a touch screen, and it plays like a computer key; slide across the keys and the pitch follows, legato. It's how the Keyboard is played on a phone.
+
 ## Playing
 
 The Keyboard plays legato. The first key raises the gate, and while any key is held the gate stays up: pressing another key moves **Pitch** to it without retriggering the envelope, so overlapping your key presses slurs one note into the next. To retrigger, release every key before playing the next one.

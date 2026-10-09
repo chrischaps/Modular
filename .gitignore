@@ -14,3 +14,6 @@ Thumbs.db
 # Local Claude settings (may contain user-specific paths)
 .claude/
 nul
+
+# The web build (trunk build)
+/dist/

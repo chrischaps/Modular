@@ -7,7 +7,7 @@
 
 Poly MIDI plays chords. Every note you play gets a voice of its own, and its **Pitch**, **Gate** and **Velocity** cables carry all the voices at once, one channel per voice. Patch them into the polyphonic modules (Oscillator, SVF and Ladder filters, ADSR, VCA) and each held note plays through its own oscillator, filter and envelope. Let go of one note and only that note fades. See [Polyphony](../../concepts/polyphony.md) for how polyphonic cables work.
 
-It plays from the MIDI device chosen in **MIDI In** on the toolbar (see [Choosing a MIDI device](./midi-note.md#choosing-a-midi-device)). While a Poly MIDI module is in the patch, the computer keyboard plays it too, on the same keys as the [Keyboard](./keyboard.md#key-layout) module, so you can play chords without a MIDI keyboard. Those notes arrive on channel 1 at velocity 100.
+It plays from the MIDI device chosen in **MIDI In** on the toolbar (see [Choosing a MIDI device](./midi-note.md#choosing-a-midi-device)). While a Poly MIDI module is in the patch, the computer keyboard plays it too, on the same keys as the [Keyboard](./keyboard.md#key-layout) module, so you can play chords without a MIDI keyboard. Its piano display plays a note too, held with the mouse or a finger. Those notes arrive on channel 1 at velocity 100.
 
 ## Outputs
 

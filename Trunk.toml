@@ -1,0 +1,5 @@
+[build]
+target = "index.html"
+dist = "dist"
+# Relative, so the build works from any folder it is served from (docs.chaps.dev/modular/play/)
+public_url = "./"
