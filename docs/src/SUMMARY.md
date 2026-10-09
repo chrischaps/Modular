@@ -58,3 +58,4 @@
 - [Rhythmic Sequence](./recipes/rhythmic-sequence.md)
 - [Backbeat](./recipes/backbeat.md)
 - [Afterglow](./recipes/afterglow.md)
+- [Interlock](./recipes/interlock.md)

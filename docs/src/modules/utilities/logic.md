@@ -97,7 +97,7 @@ Hits from a drummer or a microphone come through only while the clock's gate is 
 [Logic AND] ──> [ADSR Gate]
 ```
 
-Two [Clock Dividers](./divider.md) on one sixteenth clock play three against four. **AND** fires only where they meet, once every twelve sixteenths. **XOR** plays everywhere else.
+Two [Clock Dividers](./divider.md) on one sixteenth clock play three against four. **AND** fires only where they meet, once every twelve sixteenths. **XOR** fires where exactly one of them plays. XOR **OR** with the clock itself in a second Logic and you get every pulse neither played: the gaps. [Interlock](../../recipes/interlock.md) gives each of the three its own voice, so together they play every sixteenth exactly once.
 
 ### Turn a gate upside down
 
@@ -106,6 +106,7 @@ Two [Clock Dividers](./divider.md) on one sixteenth clock play three against fou
 ## Related modules
 
 - [Clock Divider](./divider.md): rhythms to combine
+- [Interlock](../../recipes/interlock.md): a gamelan-style example built around AND, OR, XOR and an empty B
 - [Clock](../modulation/clock.md): the pulse to gate
 - [Audio Input](../sources/audio-input.md): gates from a microphone or instrument
 - [Attenuverter](./attenuverter.md): scale a control signal before **CV**, or turn a gate into a control voltage

@@ -83,6 +83,12 @@ pub const EXAMPLES: &[Example] = &[
         description: "Plays itself: one sequencer transposes another's arpeggio through a chord progression, over a warm pad and dotted-eighth tape echoes",
         json: include_str!("../../patches/afterglow.json"),
     },
+    Example {
+        name: "Interlock",
+        file_name: "interlock.json",
+        description: "Plays itself: Logic splits a three-against-four rhythm between two gamelan-style parts that interlock into one fast melody, while a slow tide brings the second part in and out",
+        json: include_str!("../../patches/interlock.json"),
+    },
 ];
 
 /// The example opened when the app starts with nothing else to open.

@@ -80,7 +80,7 @@ A Sample & Hold that samples every third note, against a melody of eight, gives 
 
 ### Polyrhythm
 
-Two Clock Dividers on the same sixteenth clock, one at **Div** 3 and one at **Div** 4, play three against four. They meet again every twelve sixteenths. Patch their **Trig** outputs into **A** and **B** of a [Logic](./logic.md) module, and its **AND** fires only where they meet.
+Two Clock Dividers on the same sixteenth clock, one at **Div** 3 and one at **Div** 4, play three against four. They meet again every twelve sixteenths. Patch their **Trig** outputs into **A** and **B** of a [Logic](./logic.md) module, and its **AND** fires only where they meet. [Interlock](../../recipes/interlock.md) builds a whole piece this way.
 
 ## Related modules
 
