@@ -39,6 +39,11 @@ wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["Window", "Document", "Location", "Element", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "UrlSearchParams", "Navigator", "console"] }
 
+# Where the cursor is while a file is dragged over the window, which
+# winit doesn't say on Windows (already in the tree through winit)
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
 # cpal's ASIO clock adds 49.7 days whenever a driver's timestamp steps back
 # a little (Focusrite's do, several times a second), so it overflows after
 # about ten minutes. Release builds wrap past it harmlessly; a debug build

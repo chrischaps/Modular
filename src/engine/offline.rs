@@ -7,6 +7,9 @@
 
 use crate::dsp::denormal::DenormalGuard;
 use crate::dsp::{InputAudio, MidiEvent, MidiMessage, ProcessContext};
+use std::sync::Arc;
+
+use crate::persistence::sample_files::{self, SampleBase};
 use crate::persistence::{compile_patch, CompiledPatch, Patch, PatchError};
 
 use super::{create_module_registry, AudioGraph, EngineCommand, GraphPlan};
@@ -67,6 +70,28 @@ impl OfflineRenderer {
         Ok((renderer, compiled))
     }
 
+    /// Loads the files a compiled patch's modules play (a Sampler's),
+    /// resolving paths saved relative to the patch against `base`, and
+    /// resampling each to the renderer's rate. Returns a warning for each
+    /// file that couldn't be loaded or was cut short.
+    pub fn load_samples(&mut self, compiled: &CompiledPatch, base: SampleBase) -> Vec<String> {
+        let mut warnings = Vec::new();
+        for (node_id, file) in &compiled.files {
+            let key = sample_files::resolve(file, base);
+            match sample_files::load(&key) {
+                Ok(decoded) => {
+                    if decoded.truncated {
+                        warnings.push(format!("{file} is longer than the 5 minutes a Sampler keeps, and was cut"));
+                    }
+                    let sample = Arc::new(decoded.sample.resampled(self.context.sample_rate));
+                    self.apply(EngineCommand::LoadSample { node_id: *node_id, sample: Some(sample) });
+                }
+                Err(e) => warnings.push(format!("Couldn't load sample {file}: {e}")),
+            }
+        }
+        warnings
+    }
+
     /// Applies an engine command (add module, connect, set parameter, ...).
     pub fn apply(&mut self, command: EngineCommand) -> bool {
         // Keep the running plan in step, as the live engine does
@@ -93,6 +118,10 @@ impl OfflineRenderer {
         if let Some(mut plan) = self.graph.take_plan() {
             plan.take_over(&mut self.plan);
             self.plan = plan;
+        }
+        // Recordings for modules already running, after the plan that has them
+        for (node_id, sample) in self.graph.take_sample_loads() {
+            drop(self.plan.load_sample(node_id, sample));
         }
     }
 
@@ -271,24 +300,9 @@ pub const AUDITION: &[(u8, f32, f32)] = &[
 /// Reads a mono or stereo WAV (a bigger one gives its first two channels),
 /// returning it with its sample rate.
 pub fn read_wav(path: &std::path::Path) -> Result<(StereoBuffer, u32), String> {
-    let mut reader = hound::WavReader::open(path).map_err(|e| e.to_string())?;
-    let spec = reader.spec();
-    let samples: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => reader.samples::<f32>().collect::<Result<_, _>>(),
-        hound::SampleFormat::Int => {
-            let scale = 1.0 / (1u64 << (spec.bits_per_sample - 1)) as f32;
-            reader.samples::<i32>().map(|s| s.map(|s| s as f32 * scale)).collect::<Result<_, _>>()
-        }
-    }
-    .map_err(|e| e.to_string())?;
-
-    let channels = spec.channels.max(1) as usize;
-    let mut input = StereoBuffer::default();
-    for frame in samples.chunks_exact(channels) {
-        input.left.push(frame[0]);
-        input.right.push(if channels > 1 { frame[1] } else { frame[0] });
-    }
-    Ok((input, spec.sample_rate))
+    let sample = crate::persistence::sample_files::read_wav_file(path)?.sample;
+    let input = StereoBuffer { left: sample.left().to_vec(), right: sample.right().to_vec() };
+    Ok((input, sample.sample_rate() as u32))
 }
 
 impl StereoBuffer {
@@ -412,6 +426,50 @@ mod tests {
         let out = r.render_seconds(0.5);
         assert!(rms(&out.right) > 0.05, "right channel should carry the mono source");
         assert_eq!(out.left, out.right);
+    }
+
+    /// A Clock playing a Sampler that plays `file`, into the output.
+    fn sampler_patch(file: &str) -> Patch {
+        let mut patch = Patch::new("sampled");
+        patch.nodes.push(NodeData::new(1, "util.clock", (0.0, 0.0)));
+        let mut sampler = NodeData::new(2, "source.sampler", (100.0, 0.0));
+        sampler.file = Some(file.to_string());
+        patch.nodes.push(sampler);
+        patch.nodes.push(NodeData::new(3, "output.audio", (200.0, 0.0)));
+        patch.connections.push(ConnectionData::new(1, "Gate", 2, "Gate"));
+        patch.connections.push(ConnectionData::new(2, "L", 3, "Left"));
+        patch.connections.push(ConnectionData::new(2, "R", 3, "Right"));
+        patch
+    }
+
+    #[test]
+    fn test_a_sampler_plays_its_file_from_beside_the_patch() {
+        use crate::dsp::SampleData;
+        let folder = std::env::temp_dir().join(format!("modular-sampler-{}", std::process::id()));
+        std::fs::create_dir_all(folder.join("kit")).unwrap();
+        // A 44.1 kHz tone, played at 48 kHz: still 440 Hz
+        let tone: Vec<f32> = (0..44100).map(|n| (std::f32::consts::TAU * 440.0 * n as f32 / 44100.0).sin() * 0.5).collect();
+        let wav = crate::persistence::sample_files::encode_wav(&SampleData::mono(tone, 44100.0));
+        std::fs::write(folder.join("kit").join("tone.wav"), wav).unwrap();
+
+        let (mut r, compiled) = OfflineRenderer::from_patch(&sampler_patch("kit/tone.wav"), 48000.0, 256).unwrap();
+        assert!(compiled.warnings.is_empty(), "{:?}", compiled.warnings);
+        assert!(r.load_samples(&compiled, SampleBase::Folder(&folder)).is_empty());
+        let out = r.render_seconds(0.4);
+        assert!(rms(&out.left) > 0.1, "rms {}", rms(&out.left));
+        assert_eq!(out.left, out.right, "a mono file plays on both sides");
+        let hz = Spectrum::of(&out.left[4800..], 48000.0).dominant_frequency();
+        assert!((hz - 440.0).abs() < 3.0, "{hz}");
+        std::fs::remove_dir_all(&folder).ok();
+    }
+
+    #[test]
+    fn test_a_missing_sample_is_a_warning_and_a_silent_sampler() {
+        let (mut r, compiled) = OfflineRenderer::from_patch(&sampler_patch("gone/nowhere.wav"), 48000.0, 256).unwrap();
+        let warnings = r.load_samples(&compiled, SampleBase::Folder(&std::env::temp_dir()));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("gone/nowhere.wav"), "{warnings:?}");
+        assert_eq!(peak(&r.render_seconds(0.2).left), 0.0);
     }
 
     #[test]

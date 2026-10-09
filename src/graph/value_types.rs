@@ -47,6 +47,7 @@ impl NumberSpec {
         if self.stepped {
             return match self.unit {
                 "st" => ParamFormat::Semitones,
+                "note" => ParamFormat::Note,
                 "" => ParamFormat::Raw { decimals: 0 },
                 unit => ParamFormat::RawWithUnit { decimals: 0, unit },
             };

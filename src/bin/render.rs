@@ -16,6 +16,7 @@ use std::process::ExitCode;
 
 use modular_synth::dsp::analysis::{amp_to_db, peak, rms};
 use modular_synth::engine::{read_wav, OfflineRenderer};
+use modular_synth::persistence::sample_files::SampleBase;
 use modular_synth::persistence::load_from_file;
 
 const USAGE: &str = "usage: render <patch.json> <out.wav> [--seconds N] [--sample-rate HZ] [--block-size N] [--audition] [--input in.wav]";
@@ -78,6 +79,11 @@ fn run(args: Args) -> Result<(), String> {
         OfflineRenderer::from_patch(&patch, args.sample_rate as f32, args.block_size)
             .map_err(|e| e.to_string())?;
     for warning in &compiled.warnings {
+        eprintln!("warning: {}", warning);
+    }
+    // Samples saved relative to the patch are beside it
+    let folder = args.patch.parent().unwrap_or(std::path::Path::new("."));
+    for warning in renderer.load_samples(&compiled, SampleBase::Folder(folder)) {
         eprintln!("warning: {}", warning);
     }
     if let Some(path) = &args.input {

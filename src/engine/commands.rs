@@ -3,7 +3,9 @@
 //! Defines the messages that flow between the UI thread and the audio engine thread.
 //! All types here must be Send + 'static for safe cross-thread communication.
 
-use crate::dsp::{MeterLevels, OutputLevels, Readout, SignalBuffer, MAX_CHANNELS};
+use std::sync::Arc;
+
+use crate::dsp::{MeterLevels, OutputLevels, Readout, SampleData, SignalBuffer, MAX_CHANNELS};
 use crate::modules::oscilloscope::SCOPE_BUFFER_SIZE;
 
 use super::audio_input::InputFeed;
@@ -116,6 +118,15 @@ pub enum EngineCommand {
         /// The output port index to stop monitoring.
         output_index: PortIndex,
     },
+
+    /// Give a module a recording to play (a Sampler's file), or take it
+    /// away with `None`. Ignored by modules that don't play recordings.
+    LoadSample {
+        /// Target node.
+        node_id: NodeId,
+        /// The recording, at the engine's sample rate.
+        sample: Option<Arc<SampleData>>,
+    },
 }
 
 /// Messages delivered to the audio thread.
@@ -147,6 +158,9 @@ pub enum AudioMessage {
     ConnectInput(InputFeed),
     /// Hand the audio input's feed back to the UI.
     DisconnectInput,
+    /// Give a running module a recording to play, or take its away. The
+    /// recording it had goes back to the UI to be dropped.
+    LoadSample { node_id: NodeId, sample: Option<Arc<SampleData>> },
 }
 
 /// One oscilloscope capture, sent from the audio thread by value so that

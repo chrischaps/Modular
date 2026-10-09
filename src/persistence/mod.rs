@@ -6,6 +6,7 @@ pub mod compile;
 pub mod examples;
 pub mod graph_io;
 pub mod patch;
+pub mod sample_files;
 
 pub use compile::{compile_patch, CompiledPatch};
 pub use examples::{Example, EXAMPLES};

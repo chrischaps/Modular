@@ -11,6 +11,7 @@ use egui_node_graph2::NodeId;
 use modular_synth::engine::OfflineRenderer;
 use modular_synth::graph::groups::{self, GroupId, NodeKind};
 use modular_synth::graph::{create_editor_state, SynthGraphEditorState};
+use modular_synth::persistence::sample_files::SampleBase;
 use modular_synth::persistence::{capture_patch, patch_from_json, stage_patch, Patch, EXAMPLES};
 
 /// An editor holding a patch, its modules under their patch IDs.
@@ -104,6 +105,9 @@ fn group_awkwardly(patch: &Patch) -> Patch {
 fn render(patch: &Patch) -> Vec<f32> {
     let (mut renderer, compiled) = OfflineRenderer::from_patch(patch, 48_000.0, 256).unwrap();
     assert!(compiled.warnings.is_empty(), "{}: {:?}", patch.name, compiled.warnings);
+    // Examples' samples ship inside the app
+    let missing = renderer.load_samples(&compiled, SampleBase::Example);
+    assert!(missing.is_empty(), "{}: {:?}", patch.name, missing);
     let out = renderer.render_audition(patch, &compiled, 3.0);
     out.left.into_iter().chain(out.right).collect()
 }

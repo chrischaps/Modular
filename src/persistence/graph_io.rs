@@ -272,6 +272,7 @@ impl Builder<'_> {
             user_data.bypassed = node_data.bypassed && user_data.bypassable;
             user_data.parent = parent;
             user_data.pins = node_data.pinned.clone();
+            user_data.file = node_data.file.clone();
 
             here.insert(node_data.id, graph_id);
             self.modules.insert(node_data.id, graph_id);
@@ -501,6 +502,7 @@ pub fn capture_level(
                 let mut node_data = NodeData::new(id, data.module_id, position(node_id));
                 node_data.bypassed = data.bypassed;
                 node_data.pinned = data.pins.clone();
+                node_data.file = data.file.clone();
                 node_data.parameters = node
                     .inputs
                     .iter()
@@ -611,6 +613,23 @@ mod tests {
         assert_eq!(param(&saved, "input.midi_note", "Channel"), 3.0);
         assert_eq!(param(&saved, "input.midi_note", "Octave"), 1.0);
         assert!(node(&saved, "input.midi_note").parameters.iter().all(|p| p.name != "Note"));
+    }
+
+    #[test]
+    fn test_a_samplers_file_survives_a_round_trip() {
+        let mut patch = Patch::new("sampled");
+        let mut sampler = NodeData::new(1, "source.sampler", (0.0, 0.0));
+        sampler.file = Some("samples/choir ah.wav".to_string());
+        patch.nodes.extend([sampler, NodeData::new(2, "osc.sine", (0.0, 0.0))]);
+
+        let (saved, warnings) = reload(&patch, 0);
+        assert!(warnings.is_empty(), "{:?}", warnings);
+        assert_eq!(node(&saved, "source.sampler").file.as_deref(), Some("samples/choir ah.wav"));
+        assert_eq!(node(&saved, "osc.sine").file, None);
+        // Only modules with a file mention it
+        let json = serde_json::to_string(&saved).unwrap();
+        assert_eq!(json.matches("\"file\"").count(), 1);
+        assert_eq!(patch_from_json(&json).unwrap(), saved);
     }
 
     #[test]

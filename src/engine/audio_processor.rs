@@ -10,7 +10,7 @@ use rtrb::Consumer;
 
 use crate::dsp::denormal::DenormalGuard;
 use crate::dsp::{InputAudio, MidiEvent, ModuleRegistry, Poly, ProcessContext};
-use crate::modules::{AdsrEnvelope, Attenuverter, AudioInput, AudioOutput, Chorus, Clock, ClockDivider, Compressor, Distortion, Drum, KeyboardInput, LadderFilter, Lfo, Logic, MidiMonitor, MidiNote, Mixer, Noise, Oscilloscope, PolyMidi, ParametricEq, Quantizer, Reverb, SampleHold, Oscillator, StepSequencer, StereoDelay, TriggerSequencer, SvfFilter, Vca};
+use crate::modules::{AdsrEnvelope, Attenuverter, AudioInput, AudioOutput, Chorus, Clock, ClockDivider, Compressor, Distortion, Drum, KeyboardInput, LadderFilter, Lfo, Logic, MidiMonitor, MidiNote, Mixer, Noise, Oscilloscope, PolyMidi, ParametricEq, Quantizer, Reverb, SampleHold, Sampler, Oscillator, StepSequencer, StereoDelay, TriggerSequencer, SvfFilter, Vca};
 
 use super::audio_input::InputFeed;
 use super::channels::EngineHandle;
@@ -33,6 +33,7 @@ pub fn create_module_registry() -> ModuleRegistry {
     registry.register::<Poly<Oscillator>>();
     registry.register::<Poly<Noise>>();
     registry.register::<Poly<Drum>>();
+    registry.register::<Sampler>();
     registry.register::<AudioInput>();
     registry.register::<KeyboardInput>();
     registry.register::<MidiNote>();
@@ -422,8 +423,17 @@ impl AudioProcessor {
                         self.engine_handle.retire_input(feed);
                     }
                 }
+                AudioMessage::LoadSample { node_id, sample } => {
+                    if let Some(old) = self.plan.load_sample(node_id, sample) {
+                        self.engine_handle.retire_sample(old);
+                    }
+                }
             }
         }
+        // Recordings Samplers have finished fading out of, or let go of
+        // when stopped, go back to be freed
+        let Self { plan, engine_handle, .. } = self;
+        plan.take_retired_samples(|sample| engine_handle.retire_sample(sample));
     }
 
     /// Writes the output module's audio for one block into `output`
@@ -532,8 +542,9 @@ mod tests {
         assert!(registry.contains("util.logic"));
         assert!(registry.contains("source.audio_input"));
         assert!(registry.contains("source.drum"));
+        assert!(registry.contains("source.sampler"));
         assert!(registry.contains("seq.trigger"));
-        assert_eq!(registry.len(), 30);
+        assert_eq!(registry.len(), 31);
     }
 
     #[test]

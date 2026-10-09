@@ -6,10 +6,12 @@
 use super::context::{ProcessContext, TransportState};
 use super::parameter::ParameterDefinition;
 use super::port::PortDefinition;
+use super::sample::SampleData;
 use super::SignalBuffer;
 use egui::Color32;
 use egui_node_graph2::CategoryTrait;
 use std::fmt;
+use std::sync::Arc;
 
 /// Meter readings from an output stage, covering one measurement period.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -42,7 +44,7 @@ pub struct MeterLevels {
 }
 
 /// How many values a [`Readout`] carries.
-pub const MAX_READOUT: usize = 4;
+pub const MAX_READOUT: usize = 8;
 
 /// Live values a module shows on its node that aren't signals or meters: a
 /// Clock's received tempo and where it is in the bar, say. Fixed-size, so
@@ -357,6 +359,25 @@ pub trait DspModule: Send + 'static {
     /// summed. The default is `false`.
     fn polyphonic(&self) -> bool {
         false
+    }
+
+    /// Gives the module a recording to play (a Sampler's file), or takes
+    /// its recording away with `None`. Called on the audio thread, or on
+    /// the UI side before the module has been handed to it.
+    ///
+    /// Returns a recording the module is done with, to be dropped off the
+    /// audio thread: the one it had, or, for a module that doesn't play
+    /// recordings, the one it was given. A module that lets voices on the
+    /// old recording fade out keeps it a little longer, and hands it back
+    /// through [`take_retired_sample`](Self::take_retired_sample) instead.
+    fn load_sample(&mut self, sample: Option<Arc<SampleData>>) -> Option<Arc<SampleData>> {
+        sample
+    }
+
+    /// A recording the module has finished with since the last call, to be
+    /// dropped off the audio thread. Asked after every callback.
+    fn take_retired_sample(&mut self) -> Option<Arc<SampleData>> {
+        None
     }
 }
 

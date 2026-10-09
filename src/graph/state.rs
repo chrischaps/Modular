@@ -183,6 +183,13 @@ pub struct SynthGraphState {
     /// The input device Audio Input modules are listening to, if one is open.
     pub audio_input_name: Option<String>,
 
+    /// The files the patch's Samplers play, decoded, by sample key.
+    pub samples: super::sample_shelf::SampleShelf,
+
+    /// While a file is dragged over the window, the Sampler it would land
+    /// on, or `None` for empty canvas. `Some` only during a drag.
+    pub file_drop_target: Option<Option<NodeId>>,
+
     /// The group whose inside the editor shows, or `None` for the top of
     /// the patch.
     pub level: Option<GroupId>,
@@ -244,6 +251,8 @@ impl Default for SynthGraphState {
             module_meters: HashMap::new(),
             readouts: HashMap::new(),
             audio_input_name: None,
+            samples: Default::default(),
+            file_drop_target: None,
             level: None,
             hidden: HashSet::new(),
             output_aliases: HashMap::new(),
@@ -333,6 +342,8 @@ impl SynthGraphState {
         self.output_meter = LevelMeter::default();
         self.module_meters.clear();
         self.readouts.clear();
+        self.samples.clear();
+        self.file_drop_target = None;
         self.annotations.clear();
         self.over_annotation = false;
         self.level = None;

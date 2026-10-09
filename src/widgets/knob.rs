@@ -29,6 +29,8 @@ pub enum ParamFormat {
     Semitones,
     /// Stereo position from -1 (left) to 1 (right): "L 40", "C", "R 40".
     Pan,
+    /// A MIDI note number, by name: "C4", "F#2".
+    Note,
 }
 
 impl ParamFormat {
@@ -75,6 +77,7 @@ impl ParamFormat {
                     format!("{:.1} dB", value)
                 }
             }
+            ParamFormat::Note => crate::modules::sequencer::note_to_name(value.round().clamp(0.0, 127.0) as u8),
             ParamFormat::Pan => {
                 let percent = (value * 100.0).round();
                 if percent == 0.0 {

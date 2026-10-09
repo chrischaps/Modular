@@ -28,8 +28,9 @@
 //! block behind, so its source can run after the module it feeds.
 
 use std::ops::Range;
+use std::sync::Arc;
 
-use crate::dsp::{DspModule, MeterLevels, OutputLevels, ProcessContext, Readout, SignalBuffer, TransportState};
+use crate::dsp::{DspModule, MeterLevels, OutputLevels, ProcessContext, Readout, SampleData, SignalBuffer, TransportState};
 use crate::engine::commands::{ChannelPeaks, NodeId, PortIndex};
 
 pub use crate::dsp::module_trait::MAX_INPUTS;
@@ -228,6 +229,31 @@ impl GraphPlan {
             .and_then(|node| node.params.get_mut(param_index))
             .map(|param| *param = value)
             .is_some()
+    }
+
+    /// Gives a module a recording to play, or takes its away. Returns the
+    /// recording to drop off the audio thread: the one the module had, or
+    /// `sample` itself if the node isn't in this plan or doesn't play
+    /// recordings.
+    ///
+    /// REAL-TIME SAFE: moves pointers, never allocates or frees.
+    pub fn load_sample(&mut self, node_id: NodeId, sample: Option<Arc<SampleData>>) -> Option<Arc<SampleData>> {
+        match self.nodes.iter_mut().find(|node| node.node_id == node_id).and_then(|node| node.module.as_mut()) {
+            Some(module) => module.load_sample(sample),
+            None => sample,
+        }
+    }
+
+    /// Calls `f` with every recording a module has finished with, to be
+    /// dropped off the audio thread.
+    ///
+    /// REAL-TIME SAFE.
+    pub fn take_retired_samples(&mut self, mut f: impl FnMut(Arc<SampleData>)) {
+        for module in self.nodes.iter_mut().filter_map(|node| node.module.as_mut()) {
+            if let Some(sample) = module.take_retired_sample() {
+                f(sample);
+            }
+        }
     }
 
     /// Bypasses a module or brings it back, crossfading over the next

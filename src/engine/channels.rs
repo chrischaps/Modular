@@ -9,6 +9,8 @@
 //! - **retired taps** (audio -> UI): recording taps the audio thread is done
 //!   with, for the same reason
 //! - **retired inputs** (audio -> UI): audio input feeds, likewise
+//! - **retired samples** (audio -> UI): recordings modules have let go of,
+//!   so a long file is never freed in the audio callback
 //! - **events** (audio -> UI): metering, monitor values, status
 //! - **scope frames** (audio -> UI): oscilloscope captures, by value
 //!
@@ -24,6 +26,7 @@ use rtrb::{Consumer, Producer, PushError, RingBuffer};
 use super::audio_graph::AudioGraph;
 use super::audio_processor::create_module_registry;
 use super::commands::{AudioMessage, EngineCommand, EngineEvent, ScopeFrame};
+use crate::dsp::SampleData;
 use super::graph_plan::GraphPlan;
 use super::audio_input::InputFeed;
 use super::recorder::RecordTap;
@@ -46,6 +49,10 @@ const RETIRED_TAP_BUFFER_SIZE: usize = 4;
 /// Audio input feeds that can be on their way back at once: one for each
 /// time the input device is changed between two UI frames.
 const RETIRED_INPUT_BUFFER_SIZE: usize = 4;
+
+/// Recordings that can be on their way back at once. Each load sends at
+/// most one back, and a Sampler fading out of an old recording one more.
+const RETIRED_SAMPLE_BUFFER_SIZE: usize = 64;
 
 /// Oscilloscope captures that can wait for the UI.
 const SCOPE_FRAME_BUFFER_SIZE: usize = 8;
@@ -130,6 +137,7 @@ impl EngineChannels {
         let (scope_tx, scope_rx) = RingBuffer::new(SCOPE_FRAME_BUFFER_SIZE);
         let (retired_tap_tx, retired_tap_rx) = RingBuffer::new(RETIRED_TAP_BUFFER_SIZE);
         let (retired_input_tx, retired_input_rx) = RingBuffer::new(RETIRED_INPUT_BUFFER_SIZE);
+        let (retired_sample_tx, retired_sample_rx) = RingBuffer::new(RETIRED_SAMPLE_BUFFER_SIZE);
 
         // Placeholder settings until an AudioProcessor reports the real ones
         let graph = AudioGraph::with_registry(44100.0, 256, create_module_registry());
@@ -143,12 +151,14 @@ impl EngineChannels {
                 retired_rx,
                 retired_tap_rx,
                 retired_input_rx,
+                retired_sample_rx,
                 event_rx,
                 scope_rx,
                 config: Arc::clone(&config),
                 unsent_plan: None,
                 unsent_transport: UnsentTransport::default(),
                 unsent_handoffs: Vec::new(),
+                unsent_samples: Vec::new(),
                 // The processor starts with an empty plan of its own, which
                 // it retires to us like any other
                 plans_in_flight: 1,
@@ -158,6 +168,7 @@ impl EngineChannels {
                 retired_tx,
                 retired_tap_tx,
                 retired_input_tx,
+                retired_sample_tx,
                 event_tx,
                 scope_tx,
                 config,
@@ -189,6 +200,7 @@ pub struct UiHandle {
     retired_rx: Consumer<Box<GraphPlan>>,
     retired_tap_rx: Consumer<RecordTap>,
     retired_input_rx: Consumer<InputFeed>,
+    retired_sample_rx: Consumer<Arc<SampleData>>,
     event_rx: Consumer<EngineEvent>,
     scope_rx: Consumer<ScopeFrame>,
     config: Arc<AudioConfig>,
@@ -200,6 +212,9 @@ pub struct UiHandle {
     /// Recording starts and stops, and audio inputs connected and
     /// disconnected, that didn't fit in the queue yet, in order.
     unsent_handoffs: Vec<AudioMessage>,
+    /// Recordings for running modules, waiting until the plans holding
+    /// those modules are sent, and then for room in the queue, in order.
+    unsent_samples: Vec<AudioMessage>,
     /// Plans sent (or held by the audio thread) and not yet returned.
     plans_in_flight: usize,
 }
@@ -314,6 +329,9 @@ impl UiHandle {
         while let Ok(feed) = self.retired_input_rx.pop() {
             drop(feed);
         }
+        while let Ok(sample) = self.retired_sample_rx.pop() {
+            drop(sample);
+        }
 
         let (sample_rate, block_size) = self.config.load();
         self.graph.set_audio_config(sample_rate, block_size);
@@ -339,7 +357,31 @@ impl UiHandle {
             }
         }
 
-        self.unsent_plan.is_none() && !self.graph.is_dirty()
+        // A recording for a running module goes after the plan that has
+        // the module, or the audio thread wouldn't find it
+        if self.unsent_plan.is_some() {
+            return false;
+        }
+        let loads = self.graph.take_sample_loads();
+        self.unsent_samples.extend(loads.into_iter().map(|(node_id, sample)| AudioMessage::LoadSample { node_id, sample }));
+        if !self.send_samples() {
+            return false;
+        }
+
+        !self.graph.is_dirty()
+    }
+
+    /// Sends any recordings waiting for room in the queue. Returns true if
+    /// none are left waiting.
+    fn send_samples(&mut self) -> bool {
+        while !self.unsent_samples.is_empty() {
+            let message = self.unsent_samples.remove(0);
+            if let Err(PushError::Full(message)) = self.message_tx.push(message) {
+                self.unsent_samples.insert(0, message);
+                return false;
+            }
+        }
+        true
     }
 
     /// The UI-side graph: the patch as the engine will play it.
@@ -383,6 +425,7 @@ pub struct EngineHandle {
     retired_tx: Producer<Box<GraphPlan>>,
     retired_tap_tx: Producer<RecordTap>,
     retired_input_tx: Producer<InputFeed>,
+    retired_sample_tx: Producer<Arc<SampleData>>,
     event_tx: Producer<EngineEvent>,
     scope_tx: Producer<ScopeFrame>,
     config: Arc<AudioConfig>,
@@ -430,6 +473,18 @@ impl EngineHandle {
         if let Err(PushError::Full(feed)) = self.retired_input_tx.push(feed) {
             debug_assert!(false, "retired input queue full");
             drop(feed);
+        }
+    }
+
+    /// Hands a recording a module has let go of back to the UI thread, so
+    /// its memory is freed there.
+    ///
+    /// REAL-TIME SAFE: should the queue ever be full, the recording is
+    /// dropped here rather than lost.
+    pub fn retire_sample(&mut self, sample: Arc<SampleData>) {
+        if let Err(PushError::Full(sample)) = self.retired_sample_tx.push(sample) {
+            debug_assert!(false, "retired sample queue full");
+            drop(sample);
         }
     }
 
@@ -514,6 +569,12 @@ mod tests {
                     seen.push("input");
                 }
                 AudioMessage::DisconnectInput => seen.push("no input"),
+                AudioMessage::LoadSample { node_id, sample } => {
+                    if let Some(old) = current.load_sample(node_id, sample) {
+                        engine.retire_sample(old);
+                    }
+                    seen.push("sample");
+                }
             }
         }
         seen
@@ -800,6 +861,89 @@ mod tests {
         ui.flush();
         assert_eq!(ui.graph().sample_rate(), 48000.0);
         assert_eq!(ui.graph().block_size(), 128);
+    }
+
+    fn recording(value: f32) -> Arc<SampleData> {
+        Arc::new(SampleData::mono(vec![value; 4800], 48000.0))
+    }
+
+    /// The recording a module in `plan` holds, taken out and put back.
+    fn sample_in(plan: &mut GraphPlan, node_id: u64) -> Option<Arc<SampleData>> {
+        let held = plan.load_sample(node_id, None);
+        assert!(plan.load_sample(node_id, held.clone()).is_none());
+        held
+    }
+
+    #[test]
+    fn test_a_loaded_sample_survives_plan_swaps() {
+        let (mut ui, mut engine) = EngineChannels::with_defaults().split();
+        let mut plan = Box::new(GraphPlan::empty(256));
+        let first = recording(0.5);
+
+        // Loaded before the module ever reached the audio thread: it goes with it
+        ui.send_command(add(1, "source.sampler"));
+        ui.send_command(EngineCommand::LoadSample { node_id: 1, sample: Some(first.clone()) });
+        ui.flush();
+        assert_eq!(run_audio_side(&mut engine, &mut plan), vec!["plan"]);
+        assert!(Arc::ptr_eq(&sample_in(&mut plan, 1).unwrap(), &first));
+
+        // Other modules come and go around it
+        ui.send_command(add(2, "osc.sine"));
+        ui.flush();
+        run_audio_side(&mut engine, &mut plan);
+        ui.send_command(EngineCommand::RemoveModule { node_id: 2 });
+        ui.flush();
+        run_audio_side(&mut engine, &mut plan);
+        assert!(Arc::ptr_eq(&sample_in(&mut plan, 1).unwrap(), &first));
+        assert!(Arc::ptr_eq(ui.graph().sample(1).unwrap(), &first));
+    }
+
+    #[test]
+    fn test_a_new_sample_follows_the_plan_and_the_old_one_comes_back() {
+        let (mut ui, mut engine) = EngineChannels::with_defaults().split();
+        let mut plan = Box::new(GraphPlan::empty(256));
+        let first = recording(0.5);
+        ui.send_command(add(1, "source.sampler"));
+        ui.send_command(EngineCommand::LoadSample { node_id: 1, sample: Some(first.clone()) });
+        ui.flush();
+        run_audio_side(&mut engine, &mut plan);
+
+        // A running module's new recording goes after the plan made the same frame
+        let second = recording(-0.5);
+        ui.send_command(add(2, "osc.sine"));
+        ui.send_command(EngineCommand::LoadSample { node_id: 1, sample: Some(second.clone()) });
+        assert_eq!(engine.messages_pending(), 0, "held until flush");
+        ui.flush();
+        assert_eq!(run_audio_side(&mut engine, &mut plan), vec!["plan", "sample"]);
+        assert!(Arc::ptr_eq(&sample_in(&mut plan, 1).unwrap(), &second));
+
+        // The first is dropped on the UI side, not the audio side
+        assert_eq!(Arc::strong_count(&first), 2, "here and on its way back");
+        ui.flush();
+        assert_eq!(Arc::strong_count(&first), 1);
+    }
+
+    #[test]
+    fn test_a_sample_waits_for_a_plan_that_did_not_fit() {
+        // Room for one message: the plan takes it, the recording waits
+        let (mut ui, mut engine) = EngineChannels::new(1, 16).split();
+        let mut plan = Box::new(GraphPlan::empty(256));
+        ui.send_command(add(1, "source.sampler"));
+        ui.flush();
+        run_audio_side(&mut engine, &mut plan);
+
+        ui.send_command(add(2, "osc.sine"));
+        ui.flush();
+        ui.send_command(add(3, "osc.sine"));
+        ui.send_command(EngineCommand::LoadSample { node_id: 1, sample: Some(recording(0.5)) });
+        assert!(!ui.flush(), "the queue is full");
+        let mut seen = run_audio_side(&mut engine, &mut plan);
+        while !ui.flush() {
+            seen.extend(run_audio_side(&mut engine, &mut plan));
+        }
+        seen.extend(run_audio_side(&mut engine, &mut plan));
+        assert_eq!(seen, vec!["plan", "plan", "sample"]);
+        assert!(sample_in(&mut plan, 1).is_some());
     }
 
     #[test]

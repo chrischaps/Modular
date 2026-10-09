@@ -1,0 +1,289 @@
+{
+  "name": "Sampled Keys",
+  "version": 5,
+  "nodes": [
+    {
+      "id": 1,
+      "module_id": "input.poly_midi",
+      "position": [
+        16.0,
+        94.0
+      ],
+      "parameters": [
+        {
+          "name": "Channel",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Voices",
+          "type": "Number",
+          "value": 8.0
+        },
+        {
+          "name": "Allocation",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Octave",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Bend Range",
+          "type": "Number",
+          "value": 2.0
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "module_id": "source.sampler",
+      "position": [
+        300.0,
+        74.0
+      ],
+      "parameters": [
+        {
+          "name": "Start",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "End",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Loop",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Loop Start",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Loop End",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Mode",
+          "type": "Select",
+          "value": 1
+        },
+        {
+          "name": "Tune",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Fine",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Root",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Speed",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Attack",
+          "type": "Number",
+          "value": 0.002
+        },
+        {
+          "name": "Release",
+          "type": "Number",
+          "value": 0.7
+        },
+        {
+          "name": "Level",
+          "type": "Number",
+          "value": 0.45
+        }
+      ],
+      "file": "samples/fm-bell-c4.wav"
+    },
+    {
+      "id": 3,
+      "module_id": "filter.svf",
+      "position": [
+        640.0,
+        74.0
+      ],
+      "parameters": [
+        {
+          "name": "Cutoff",
+          "type": "Number",
+          "value": 5200.0
+        },
+        {
+          "name": "Resonance",
+          "type": "Number",
+          "value": 0.1
+        },
+        {
+          "name": "Drive",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "module_id": "fx.reverb",
+      "position": [
+        900.0,
+        74.0
+      ],
+      "parameters": [
+        {
+          "name": "Size",
+          "type": "Number",
+          "value": 0.6
+        },
+        {
+          "name": "Decay",
+          "type": "Number",
+          "value": 3.0
+        },
+        {
+          "name": "Damping",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "Pre-Delay",
+          "type": "Number",
+          "value": 25.0
+        },
+        {
+          "name": "Mix",
+          "type": "Number",
+          "value": 0.3
+        },
+        {
+          "name": "Width",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Mod",
+          "type": "Number",
+          "value": 0.3
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "module_id": "output.audio",
+      "position": [
+        1240.0,
+        114.0
+      ],
+      "parameters": [
+        {
+          "name": "Volume",
+          "type": "Number",
+          "value": 0.8
+        },
+        {
+          "name": "Limiter",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Character",
+          "type": "Toggle",
+          "value": false
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from_node": 1,
+      "from_port": "Gate",
+      "to_node": 2,
+      "to_port": "Gate"
+    },
+    {
+      "from_node": 1,
+      "from_port": "Pitch",
+      "to_node": 2,
+      "to_port": "V/Oct"
+    },
+    {
+      "from_node": 1,
+      "from_port": "Velocity",
+      "to_node": 2,
+      "to_port": "Velocity"
+    },
+    {
+      "from_node": 2,
+      "from_port": "L",
+      "to_node": 3,
+      "to_port": "In"
+    },
+    {
+      "from_node": 3,
+      "from_port": "LowPass",
+      "to_node": 4,
+      "to_port": "In L"
+    },
+    {
+      "from_node": 4,
+      "from_port": "Out L",
+      "to_node": 5,
+      "to_port": "Left"
+    },
+    {
+      "from_node": 4,
+      "from_port": "Out R",
+      "to_node": 5,
+      "to_port": "Right"
+    }
+  ],
+  "midi_mappings": [],
+  "frames": [
+    {
+      "title": "Every voice",
+      "position": [
+        276.0,
+        16.0
+      ],
+      "size": [
+        600.0,
+        700.0
+      ],
+      "color": "blue"
+    }
+  ],
+  "notes": [
+    {
+      "text": "The bell is one strike of the FM Synthesis example at C4, rendered by Modular itself. The Sampler plays it at every key's pitch, as tape would: an octave up is twice as fast and half as long.",
+      "position": [
+        300.0,
+        740.0
+      ],
+      "width": 340.0
+    },
+    {
+      "text": "Each key gets a voice of its own, so a chord rings as several playheads crossing the waveform at their own speeds. Gated mode lets a bell fade when you let go of its key.",
+      "position": [
+        680.0,
+        740.0
+      ],
+      "width": 320.0
+    }
+  ]
+}

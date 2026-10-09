@@ -276,6 +276,9 @@ pub enum NodeDisplay {
     LogicLamps,
     /// Drum: the hit's envelope and pitch, lit as each hit plays.
     DrumHit,
+    /// Sampler: the recording's waveform, its markers, and a playhead for
+    /// every voice playing it.
+    SamplerWave,
     /// Trigger Sequencer: each lane's steps beside its Gate and Vel jacks,
     /// then the pattern tabs and the Chain.
     TriggerGrid,
@@ -319,6 +322,9 @@ pub struct SynthNodeData {
     /// Knobs shown on the faces of the groups around the module: parameter
     /// name to how many groups up it shows (1 is the group it's in).
     pub pins: BTreeMap<String, u8>,
+    /// The file the module plays (a Sampler's), by sample key: an absolute
+    /// path, or an example's (see [`crate::persistence::sample_files`]).
+    pub file: Option<String>,
 }
 
 /// How much of the node body shows through while it's bypassed.
@@ -359,6 +365,7 @@ impl SynthNodeData {
             kind: NodeKind::Module,
             parent: None,
             pins: BTreeMap::new(),
+            file: None,
         }
     }
 
@@ -2182,6 +2189,11 @@ impl NodeDataTrait for SynthNodeData {
 
         if self.display == NodeDisplay::DrumHit {
             super::drum_display::drum_display(ui, node_id, graph, user_state, zoom);
+        }
+
+        if self.display == NodeDisplay::SamplerWave {
+            let actions = super::sampler_display::sampler_display(ui, node_id, graph, user_state, zoom);
+            responses.extend(actions.into_iter().map(NodeResponse::User));
         }
 
         if self.display == NodeDisplay::TriggerGrid {

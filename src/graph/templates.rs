@@ -374,6 +374,27 @@ mod tests {
     }
 
     #[test]
+    fn test_every_jack_lies_on_its_own_row() {
+        // The node editor keeps a row height for each input shown beside the
+        // jacks, but lays the jacks along every input in turn: past an input
+        // with nothing to show there (a knob-only parameter), each jack sits
+        // a row too high and the last is never drawn. So jacks come first
+        for template in AllNodeTemplates.all_kinds() {
+            let (graph, node_id) = build(template);
+            let inputs: Vec<_> = graph.nodes[node_id].inputs.iter().map(|(name, id)| (name, graph.get_input(*id))).collect();
+            let Some(first_hidden) = inputs.iter().position(|(_, input)| !input.shown_inline) else { continue };
+            for (name, input) in &inputs[first_hidden..] {
+                assert!(
+                    matches!(input.kind, InputParamKind::ConstantOnly),
+                    "{}: the {name} jack comes after {}, which has no row beside the jacks",
+                    template.module_id(),
+                    inputs[first_hidden].0
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_templates_match_snapshot() {
         // Every module's editor node, rendered as text. Regenerate with
         // UPDATE_SNAPSHOTS=1 and review the diff before committing it
@@ -524,8 +545,8 @@ mod tests {
     #[test]
     fn test_all_templates() {
         let ids: Vec<&str> = AllNodeTemplates.all_kinds().iter().map(|t| t.module_id()).collect();
-        assert_eq!(ids.len(), 30);
-        for id in ["osc.sine", "source.noise", "source.drum", "source.audio_input", "util.quantizer", "util.divider", "util.logic", "output.audio", "mod.lfo", "util.mixer", "filter.svf", "filter.ladder", "fx.compressor", "seq.step", "seq.trigger"] {
+        assert_eq!(ids.len(), 31);
+        for id in ["osc.sine", "source.noise", "source.drum", "source.sampler", "source.audio_input", "util.quantizer", "util.divider", "util.logic", "output.audio", "mod.lfo", "util.mixer", "filter.svf", "filter.ladder", "fx.compressor", "seq.step", "seq.trigger"] {
             assert!(ids.contains(&id), "{id}");
         }
     }

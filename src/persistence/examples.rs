@@ -27,6 +27,13 @@ impl Example {
     }
 }
 
+/// The samples the examples play, as (path in `patches/`, the WAV),
+/// compiled in with them.
+pub const EXAMPLE_SAMPLES: &[(&str, &[u8])] = &[
+    // One strike of the FM Synthesis bell at C4, rendered by Modular
+    ("samples/fm-bell-c4.wav", include_bytes!("../../patches/samples/fm-bell-c4.wav")),
+];
+
 /// Every example, in menu order: from a first note to self-playing patches.
 pub const EXAMPLES: &[Example] = &[
     Example {
@@ -52,6 +59,12 @@ pub const EXAMPLES: &[Example] = &[
         file_name: "lush-pad.json",
         description: "A polyphonic unison saw pad with slow attack, chorus and reverb. Hold chords",
         json: include_str!("../../patches/lush-pad.json"),
+    },
+    Example {
+        name: "Sampled Keys",
+        file_name: "sampled-keys.json",
+        description: "A bell, sampled from the FM Synthesis example, played across the keyboard: a Sampler voice for every key you hold",
+        json: include_str!("../../patches/sampled-keys.json"),
     },
     Example {
         name: "Generative Ambient",
@@ -160,6 +173,8 @@ mod tests {
         for example in EXAMPLES {
             let patch = example.patch().unwrap();
             let (mut renderer, compiled) = OfflineRenderer::from_patch(&patch, 48_000.0, 256).unwrap();
+            let missing = renderer.load_samples(&compiled, super::super::sample_files::SampleBase::Example);
+            assert!(missing.is_empty(), "{}: {:?}", example.name, missing);
             let audio = renderer.render_audition(&patch, &compiled, 5.0);
 
             for (side, channel) in [("left", &audio.left), ("right", &audio.right)] {

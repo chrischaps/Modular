@@ -182,6 +182,11 @@ pub struct NodeData {
     /// written when there are some.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub pinned: BTreeMap<String, u8>,
+    /// The file the module plays (a Sampler's): relative to the patch, with
+    /// forward slashes, when it's beside or below it, and absolute
+    /// otherwise. Only written when there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
 }
 
 impl NodeData {
@@ -194,6 +199,7 @@ impl NodeData {
             parameters: Vec::new(),
             bypassed: false,
             pinned: BTreeMap::new(),
+            file: None,
         }
     }
 }
@@ -445,6 +451,7 @@ pub fn migrate_v2_to_v3(old: PatchV2) -> Patch {
                     .collect(),
                 bypassed: false,
                 pinned: BTreeMap::new(),
+                file: None,
             }
         })
         .collect();
@@ -698,6 +705,7 @@ mod tests {
             ],
             bypassed: false,
             pinned: BTreeMap::new(),
+            file: None,
         });
         patch.connections.push(ConnectionData::new(1, "Out", 2, "In"));
 

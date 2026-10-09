@@ -58,6 +58,38 @@ knob Snap               "Snap" KnobOnly
 knob Level              "Level" KnobOnly
 display DrumHit
 
+== source.sampler "Sampler" finder="Sampler" Source
+in   Gate               Gate     ConnectionOnly       inline=true  port
+in   V/Oct              Control  ConnectionOnly       inline=true  port
+in   Velocity           Control  ConnectionOnly       inline=true  port
+in   Start              Control  ConnectionOrConstant inline=true  num 0 [0..1] %
+in   Speed              Control  ConnectionOrConstant inline=true  num 1 [-2..2] x
+in   Loop               Control  ConstantOnly         inline=true  select 0 ["Off", "Forward", "Ping-Pong"] "Loop"
+in   Mode               Control  ConstantOnly         inline=true  select 0 ["One-Shot", "Gated"] "Mode"
+in   End                Control  ConstantOnly         inline=false num 1 [0..1] %
+in   Loop Start         Control  ConstantOnly         inline=false num 0 [0..1] %
+in   Loop End           Control  ConstantOnly         inline=false num 1 [0..1] %
+in   Tune               Control  ConstantOnly         inline=false num 0 [-24..24] st stepped
+in   Fine               Control  ConstantOnly         inline=false num 0 [-100..100] ct
+in   Root               Control  ConstantOnly         inline=false num 60 [0..127] note stepped
+in   Attack             Control  ConstantOnly         inline=false num 0.002 [0.001..2] s log
+in   Release            Control  ConstantOnly         inline=false num 0.01 [0.001..5] s log
+in   Level              Control  ConstantOnly         inline=false num 0.8 [0..1]
+out  L                  Audio
+out  R                  Audio
+knob Start              "Start" Modulatable
+knob End                "End" KnobOnly
+knob Loop Start         "Lp St" KnobOnly
+knob Loop End           "Lp End" KnobOnly
+knob Tune               "Tune" KnobOnly
+knob Fine               "Fine" KnobOnly
+knob Root               "Root" KnobOnly
+knob Speed              "Speed" Modulatable
+knob Attack             "Atk" KnobOnly
+knob Release            "Rel" KnobOnly
+knob Level              "Level" KnobOnly
+display SamplerWave
+
 == source.audio_input "Audio Input" finder="Audio Input" Source
 in   Gain               Control  ConstantOnly         inline=false num 0 [-24..24] dB
 in   Threshold          Control  ConstantOnly         inline=false num -30 [-60..0] dB

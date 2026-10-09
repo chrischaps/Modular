@@ -14,6 +14,7 @@ pub mod poly;
 pub mod port;
 pub mod primitives;
 pub mod registry;
+pub mod sample;
 pub mod signal;
 pub mod smoothed_value;
 
@@ -24,5 +25,6 @@ pub use parameter::{ParameterDefinition, ParameterDisplay};
 pub use poly::Poly;
 pub use port::{PortDefinition, PortDirection};
 pub use registry::{ModuleFactory, ModuleRegistry};
+pub use sample::{SampleData, MAX_SAMPLE_SECONDS};
 pub use signal::{connected_input, MidiEvent, MidiMessage, SignalBuffer, SignalType, MAX_CHANNELS};
 pub use smoothed_value::SmoothedValue;

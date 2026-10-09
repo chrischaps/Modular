@@ -76,6 +76,8 @@ pub enum SynthResponse {
     },
     /// Save a group to My Modules.
     SaveGroup(egui_node_graph2::NodeId),
+    /// Ask for a file for a Sampler to play.
+    OpenSample(egui_node_graph2::NodeId),
 }
 
 impl SynthResponse {

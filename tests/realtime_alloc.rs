@@ -6,14 +6,18 @@
 //! its Clock changes tempo under a tempo-synced Delay and its effects are
 //! bypassed and brought back, live MIDI plays its MIDI Note modules, a live
 //! audio input feeds its Audio Input module (the input device switched
-//! midway), and the output is recorded (one take stopped and a new one
-//! started midway). Edits are compiled on the "UI" side (outside the counted
+//! midway), the output is recorded (one take stopped and a new one
+//! started midway), and its Sampler is given new recordings while it plays
+//! them. Edits are compiled on the "UI" side (outside the counted
 //! region); installing them happens inside it. The input device's callback
 //! is counted too.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+
+use modular_synth::dsp::SampleData;
 
 use modular_synth::engine::{
     create_module_registry, input_channel, input_channel_same_clock, AudioProcessor, EngineChannels, EngineCommand, MidiEvent, NodeId,
@@ -141,6 +145,23 @@ fn audio_callback_never_allocates() {
     }
     ui.send_command(EngineCommand::SetPlaying(true));
 
+    // A Sampler playing on the Clock's beat, given a new recording every so
+    // often, mid-note or not. The test keeps no copy, so if the audio thread
+    // dropped a recording it replaced, freeing it would count
+    let sampler = node_of(&nodes, "source.sampler");
+    ui.send_command(EngineCommand::Connect {
+        from_node: clock,
+        from_port: port("util.clock", "Gate"),
+        to_node: sampler,
+        to_port: port("source.sampler", "Gate"),
+    });
+    let tone = |hz: f32| {
+        let samples: Vec<f32> = (0..24000).map(|n| (n as f32 * hz / 48000.0 * std::f32::consts::TAU).sin() * 0.5).collect();
+        Some(Arc::new(SampleData::stereo(samples.clone(), samples, 44100.0)))
+    };
+    ui.send_command(EngineCommand::LoadSample { node_id: sampler, sample: tone(220.0) });
+    let mut loads = 1;
+
     // Record the whole run: the tap copies every callback into its ring
     let takes = std::env::temp_dir().join("modular-realtime-alloc");
     std::fs::create_dir_all(&takes).unwrap();
@@ -206,6 +227,10 @@ fn audio_callback_never_allocates() {
                 ui.send_command(EngineCommand::SetBypass { node_id, bypassed: round % 16 == 3 });
             }
         }
+        if round % 37 == 11 {
+            ui.send_command(EngineCommand::LoadSample { node_id: sampler, sample: tone(220.0 + round as f32) });
+            loads += 1;
+        }
         if round % 50 == 25 {
             let (node_id, module_id) = nodes[round / 50 % nodes.len()];
             ui.send_command(EngineCommand::RemoveModule { node_id });
@@ -251,6 +276,7 @@ fn audio_callback_never_allocates() {
     assert_eq!(monitor.overflow_frames(), 0);
     assert!(monitor.device_latency().is_some(), "the input's timestamps were taken in");
     assert!(output.iter().all(|s| s.is_finite()));
+    assert!(loads > 25);
     assert_eq!(allocations, 0, "audio callback allocated {allocations} times over {blocks} callbacks");
 }
 

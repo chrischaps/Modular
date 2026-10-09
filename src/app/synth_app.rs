@@ -28,6 +28,7 @@ use crate::persistence::{
 };
 #[cfg(target_arch = "wasm32")]
 use crate::persistence::{patch_from_json, patch_to_json};
+use crate::persistence::sample_files::SampleBase;
 use crate::widgets::{cpu_meter, CpuMeterConfig, KnobStyle};
 use super::capture::{Capture, CaptureAction, CaptureConfig};
 use super::editing::{self, Selection};
@@ -44,6 +45,7 @@ use super::WEB;
 use super::web;
 
 mod grouping;
+mod samples;
 
 /// Type alias for our graph editor state
 type SynthGraphEditorState = GraphEditorState<SynthNodeData, SynthDataType, SynthValueType, SynthNodeTemplate, SynthGraphState>;
@@ -297,6 +299,7 @@ enum NodeMenuAction {
     Rename(egui_node_graph2::NodeId, String),
     Pin(egui_node_graph2::NodeId, String, u8),
     SaveToLibrary(egui_node_graph2::NodeId),
+    OpenSample(egui_node_graph2::NodeId),
 }
 
 impl SynthApp {
@@ -487,6 +490,7 @@ impl SynthApp {
 
         // Ship the frame's edits before rendering it
         self.sync_parameters();
+        self.sync_samples();
         if let Some(handle) = self.ui_handle.as_mut() {
             handle.flush();
         }
@@ -1040,8 +1044,9 @@ impl SynthApp {
 
     /// Saves the patch beside a take, as `<take>.json`.
     fn save_take_patch(&mut self, wav: &Path) {
-        let patch = self.create_patch(&self.patch_title());
-        if let Err(e) = save_to_file(&patch, &wav.with_extension("json")) {
+        let path = wav.with_extension("json");
+        let patch = self.patch_for_file(&self.patch_title(), &path);
+        if let Err(e) = save_to_file(&patch, &path) {
             eprintln!("Couldn't save the patch beside {}: {}", wav.display(), e);
         }
     }
@@ -1821,6 +1826,9 @@ impl SynthApp {
                         NodeResponse::User(crate::graph::SynthResponse::SaveGroup(node_id)) => {
                             node_menu_actions.push(NodeMenuAction::SaveToLibrary(node_id));
                         }
+                        NodeResponse::User(crate::graph::SynthResponse::OpenSample(node_id)) => {
+                            node_menu_actions.push(NodeMenuAction::OpenSample(node_id));
+                        }
                         _ => {
                             // Other responses not yet handled
                         }
@@ -2285,6 +2293,7 @@ impl SynthApp {
             NodeMenuAction::Rename(node_id, name) => self.rename_group(node_id, &name),
             NodeMenuAction::Pin(node_id, param_name, levels) => self.pin_knob(node_id, &param_name, levels),
             NodeMenuAction::SaveToLibrary(node_id) => self.save_to_library(node_id),
+            NodeMenuAction::OpenSample(node_id) => self.open_sample_dialog(node_id),
         }
     }
 
@@ -2506,7 +2515,9 @@ impl SynthApp {
     /// The whole patch is built into a staging graph first, and the current
     /// graph is only replaced once that has succeeded. Anything that couldn't
     /// be restored is skipped and returned as warnings.
-    fn load_patch(&mut self, patch: &Patch) -> Result<Vec<String>, PatchError> {
+    ///
+    /// Samplers' files saved relative to the patch are found from `base`.
+    fn load_patch(&mut self, patch: &Patch, base: SampleBase) -> Result<Vec<String>, PatchError> {
         let mut staged = stage_patch(patch)?;
 
         // Stop playback during load
@@ -2551,6 +2562,10 @@ impl SynthApp {
                 self.send_command(cmd);
             }
         }
+
+        // Samplers' files, found from where the patch is
+        let sample_warnings = self.resolve_samples(&staged.nodes, base);
+        staged.warnings.extend(sample_warnings);
 
         // Frames and notes are already in patch space
         self.user_state.annotations.add_from_patch(&patch.frames, &patch.notes, egui::Vec2::ZERO);
@@ -2648,9 +2663,14 @@ impl SynthApp {
                 .and_then(|s| s.to_str())
                 .unwrap_or("Untitled");
 
-            let patch = self.create_patch(name);
+            // Samples from elsewhere go beside the patch, so its folder holds everything
+            let copy_problem = self.gather_samples(&path);
+            let patch = self.patch_for_file(name, &path);
             match save_to_file(&patch, &path) {
                 Ok(()) => {
+                    if let Some(problem) = copy_problem {
+                        self.load_warnings = vec![problem];
+                    }
                     self.current_patch_path = Some(path.clone());
                     self.current_example = None;
                     self.status_message = Some(format!("Saved: {}", path.display()));
@@ -2719,7 +2739,7 @@ impl SynthApp {
         let loaded = upload
             .text
             .and_then(|json| patch_from_json(&json).map_err(|e| e.to_string()))
-            .and_then(|patch| Ok((self.load_patch(&patch).map_err(|e| e.to_string())?, patch.name)));
+            .and_then(|patch| Ok((self.load_patch(&patch, SampleBase::Keys).map_err(|e| e.to_string())?, patch.name)));
         match loaded {
             Ok((warnings, name)) => {
                 self.fit_on_web();
@@ -2735,7 +2755,8 @@ impl SynthApp {
 
     /// Load the patch file at `path`, replacing the current graph.
     fn open_file(&mut self, path: &Path) {
-        match load_from_file(path).and_then(|patch| Ok((self.load_patch(&patch)?, patch.name))) {
+        let folder = path.parent().unwrap_or(Path::new("")).to_path_buf();
+        match load_from_file(path).and_then(|patch| Ok((self.load_patch(&patch, SampleBase::Folder(&folder))?, patch.name))) {
             Ok((warnings, name)) => {
                 self.current_patch_path = Some(path.to_path_buf());
                 self.current_example = None;
@@ -2756,7 +2777,7 @@ impl SynthApp {
     /// Open one of the bundled example patches. It has no file, so saving
     /// it asks where to put the copy.
     fn open_example(&mut self, example: &'static Example) {
-        match example.patch().and_then(|patch| self.load_patch(&patch)) {
+        match example.patch().and_then(|patch| self.load_patch(&patch, SampleBase::Example)) {
             Ok(warnings) => {
                 self.fit_on_web();
                 self.current_patch_path = None;
@@ -2910,7 +2931,7 @@ impl SynthApp {
                 .and_then(|s| s.to_str())
                 .unwrap_or("Untitled");
 
-            let patch = self.create_patch(name);
+            let patch = self.patch_for_file(name, &path);
             match save_to_file(&patch, &path) {
                 Ok(()) => {
                     self.status_message = Some(format!("Saved: {}", path.display()));
@@ -3026,7 +3047,8 @@ impl SynthApp {
 
     /// Brings back the patch an autosave holds. It's still unsaved.
     fn recover(&mut self, autosave: &Autosave) {
-        match autosave.patch().and_then(|patch| self.load_patch(&patch)) {
+        // An autosave keeps samples by key, as the editor does
+        match autosave.patch().and_then(|patch| self.load_patch(&patch, SampleBase::Keys)) {
             Ok(warnings) => {
                 self.current_patch_path = autosave.path.clone();
                 self.current_example = autosave.example.as_deref()
@@ -3828,6 +3850,8 @@ impl eframe::App for SynthApp {
         // Main content area - the node graph editor. A piano held down
         // says so as it's drawn
         self.user_state.piano_pointer = None;
+        // WAV files dragged in from outside: where they'd land, and taking them
+        self.handle_file_drops(ctx);
         self.draw_main_area(ctx);
 
         // An embed's one control, over the canvas
@@ -3944,6 +3968,8 @@ impl eframe::App for SynthApp {
 
         // The engine's cables follow whatever this frame did to the graph's
         self.sync_cables();
+        // ...and its Samplers the files their nodes name
+        self.sync_samples();
 
         // Whatever this frame changed becomes an undo step, once the mouse
         // button is up: a knob turn or a drag is one step, not one per frame

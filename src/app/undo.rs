@@ -71,6 +71,8 @@ enum Body {
         params: Vec<f32>,
         bypassed: bool,
         pins: BTreeMap<String, u8>,
+        /// The file it plays, by sample key.
+        file: Option<String>,
     },
     /// A group's own node.
     Group { name: String, inputs: Vec<Jack>, outputs: Vec<Jack> },
@@ -101,9 +103,9 @@ impl NodeState {
         self.parent == other.parent
             && match (&self.body, &other.body) {
                 (
-                    Body::Module { template: t1, bypassed: b1, pins: p1, .. },
-                    Body::Module { template: t2, bypassed: b2, pins: p2, .. },
-                ) => t1 == t2 && b1 == b2 && p1 == p2,
+                    Body::Module { template: t1, bypassed: b1, pins: p1, file: f1, .. },
+                    Body::Module { template: t2, bypassed: b2, pins: p2, file: f2, .. },
+                ) => t1 == t2 && b1 == b2 && p1 == p2 && f1 == f2,
                 (a, b) => a == b,
             }
     }
@@ -191,7 +193,7 @@ impl Snapshot {
                         .into_iter()
                         .map(|input| graph.get_input(input).value.actual_value())
                         .collect();
-                    Body::Module { template, params, bypassed: data.bypassed, pins: data.pins.clone() }
+                    Body::Module { template, params, bypassed: data.bypassed, pins: data.pins.clone(), file: data.file.clone() }
                 }
                 NodeKind::Group(_) => Body::Group {
                     name: data.display_name.clone(),
@@ -412,11 +414,13 @@ impl Step {
             let Some(state) = &diff.after else { continue };
             let position = anchor.zoomed(state.position, zoom);
             let node_id = match (&state.body, diff.key) {
-                (Body::Module { template, bypassed, pins, .. }, NodeKey::Module(engine_id)) => {
+                (Body::Module { template, bypassed, pins, file, .. }, NodeKey::Module(engine_id)) => {
                     let node_id = editing::place_node(editor, user_state, *template, position);
                     let data = &mut editor.graph[node_id].user_data;
                     data.bypassed = *bypassed;
                     data.pins = pins.clone();
+                    // Its recording follows from the file, as the app syncs samples
+                    data.file = file.clone();
                     user_state.assign_engine_node_id(node_id, engine_id);
                     commands.extend(engine_sync::add_module(&editor.graph, node_id, engine_id));
 
@@ -454,7 +458,11 @@ impl Step {
                 }
             }
             match &after.body {
-                Body::Module { pins, .. } => editor.graph[node_id].user_data.pins = pins.clone(),
+                Body::Module { pins, file, .. } => {
+                    let data = &mut editor.graph[node_id].user_data;
+                    data.pins = pins.clone();
+                    data.file = file.clone();
+                }
                 Body::Group { name, .. } => groups::rename(&mut editor.graph, node_id, name),
                 Body::Jacks(_) => {}
             }
@@ -579,14 +587,20 @@ fn describe(nodes: &[NodeDiff], cables: &[CableDiff], before: &Snapshot, after: 
     let only = |same: fn(&NodeState, &NodeState) -> bool| {
         pairs().all(|(_, a, b)| changed_params(a, b).next().is_none() && !moved(a.position, b.position) && same(a, b))
     };
-    if only(|a, b| a.parent == b.parent && pins(a) == pins(b)) {
+    if only(|a, b| a.parent == b.parent && pins(a) == pins(b) && a.bypassed() == b.bypassed() && file(a) != file(b)) {
+        return match changed.as_slice() {
+            [one] => format!("Load sample into {}", one.name()),
+            many => format!("Load samples into {}", modules(many.len())),
+        };
+    }
+    if only(|a, b| a.parent == b.parent && pins(a) == pins(b) && file(a) == file(b)) {
         return match (changed.as_slice(), pairs().next()) {
             ([one], Some((_, _, b))) if b.bypassed() => format!("Bypass {}", one.name()),
             ([one], Some(_)) => format!("Switch on {}", one.name()),
             _ => format!("Bypass {}", modules(changed.len())),
         };
     }
-    if only(|a, b| a.parent == b.parent && a.bypassed() == b.bypassed()) {
+    if only(|a, b| a.parent == b.parent && a.bypassed() == b.bypassed() && file(a) == file(b)) {
         return match pairs().next() {
             Some((one, a, b)) if changed.len() == 1 => {
                 let (was, is) = (pins(a).len(), pins(b).len());
@@ -618,6 +632,14 @@ fn pins(state: &NodeState) -> BTreeMap<String, u8> {
     match &state.body {
         Body::Module { pins, .. } => pins.clone(),
         _ => BTreeMap::new(),
+    }
+}
+
+/// The file a module plays.
+fn file(state: &NodeState) -> Option<&str> {
+    match &state.body {
+        Body::Module { file, .. } => file.as_deref(),
+        _ => None,
     }
 }
 
@@ -1202,6 +1224,31 @@ mod tests {
         assert_eq!(undone.label, "Bypass Stereo Delay");
         assert!(matches!(undone.commands[..], [EngineCommand::SetBypass { bypassed: false, .. }]));
         assert!(matches!(redone.commands[..], [EngineCommand::SetBypass { bypassed: true, .. }]));
+    }
+
+    #[test]
+    fn test_loading_a_sample_round_trips() {
+        let mut rig = Rig::new();
+        let sampler = rig.add("source.sampler", pos2(0.0, 0.0));
+        rig.record();
+        let (undone, _) = round_trip(&mut rig, |rig| rig.editor.graph[sampler].user_data.file = Some("C:/kit/kick.wav".into()));
+        assert_eq!(undone.label, "Load sample into Sampler");
+        // The app sends the recording when it sees the file change
+        assert!(undone.commands.is_empty());
+        rig.undo();
+        assert_eq!(rig.editor.graph[sampler].user_data.file, None);
+    }
+
+    #[test]
+    fn test_a_deleted_sampler_comes_back_with_its_file() {
+        let mut rig = Rig::new();
+        let sampler = rig.add("source.sampler", pos2(0.0, 0.0));
+        rig.editor.graph[sampler].user_data.file = Some("C:/kit/kick.wav".into());
+        rig.record();
+        let key = rig.engine_id(sampler);
+        round_trip(&mut rig, |rig| rig.delete(sampler));
+        rig.undo();
+        assert_eq!(rig.editor.graph[rig.node(key)].user_data.file.as_deref(), Some("C:/kit/kick.wav"));
     }
 
     #[test]

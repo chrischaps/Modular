@@ -127,6 +127,27 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "source.sampler",
+        // What plays (the markers on the waveform), then pitch, then the
+        // envelope and level
+        knobs: &[
+            modulatable("Start", "Start"),
+            knob("End"),
+            knob_as("Loop Start", "Lp St"),
+            knob_as("Loop End", "Lp End"),
+            knob("Tune"),
+            knob("Fine"),
+            knob("Root"),
+            modulatable("Speed", "Speed"),
+            knob_as("Attack", "Atk"),
+            knob_as("Release", "Rel"),
+            knob("Level"),
+        ],
+        display: NodeDisplay::SamplerWave,
+        knobs_per_row: 4,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "source.audio_input",
         knobs: &[knob("Gain"), knob_as("Threshold", "Thresh"), knob("Attack"), knob("Release")],
         monitor: &["Follow", "Gate"],

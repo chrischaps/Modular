@@ -25,6 +25,9 @@ pub struct CompiledPatch {
     /// Problems that were skipped rather than failing the whole patch,
     /// e.g. an unknown module or a connection naming a port that no longer exists.
     pub warnings: Vec<String>,
+    /// The file each module plays (a Sampler's), as the patch saved it:
+    /// relative paths still need resolving against where the patch is.
+    pub files: Vec<(EngineNodeId, String)>,
 }
 
 /// Compiles a patch into engine commands.
@@ -66,6 +69,10 @@ pub fn compile_patch(patch: &Patch) -> Result<CompiledPatch, PatchError> {
                 param_index,
                 value: graph.get_input(input_id).value.actual_value(),
             });
+        }
+
+        if let Some(file) = &graph[node.graph_id].user_data.file {
+            compiled.files.push((engine_node_id, file.clone()));
         }
 
         if graph[node.graph_id].user_data.bypassed {

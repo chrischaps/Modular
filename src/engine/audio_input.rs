@@ -59,6 +59,7 @@ use rtrb::{Consumer, Producer, RingBuffer};
 use web_time::Instant;
 
 use super::latency::LatencyGauge;
+use crate::dsp::primitives::hermite;
 
 /// How much audio the ring can hold, in seconds. Far more than the jitter
 /// buffer ever keeps: room for the output to stall without losing input.
@@ -138,15 +139,6 @@ impl Resampler {
             self.position += self.step;
         }
     }
-}
-
-/// The 4-point, 3rd-order Hermite curve through `x1` (at 0) and `x2` (at 1).
-#[inline]
-fn hermite(x0: f32, x1: f32, x2: f32, x3: f32, t: f32) -> f32 {
-    let c1 = 0.5 * (x2 - x0);
-    let c2 = x0 - 2.5 * x1 + 2.0 * x2 - 0.5 * x3;
-    let c3 = 0.5 * (x3 - x0) + 1.5 * (x1 - x2);
-    ((c3 * t + c2) * t + c1) * t + x1
 }
 
 /// Writes interleaved stereo frames into the ring, as many as fit, counting

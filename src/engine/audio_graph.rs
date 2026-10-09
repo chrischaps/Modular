@@ -12,9 +12,10 @@
 //! allocate freely.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::dsp::bypass::{bypass_routes, can_bypass};
-use crate::dsp::{DspModule, ModuleRegistry, PortDefinition, SignalBuffer, SignalType};
+use crate::dsp::{DspModule, ModuleRegistry, PortDefinition, SampleData, SignalBuffer, SignalType};
 use crate::engine::commands::{EngineCommand, NodeId, PortIndex};
 use crate::engine::graph_plan::{
     GraphPlan, InputSource, InputTap, LateLine, MonitorSource, OutputTap, PlanNode, MAX_INPUTS,
@@ -63,6 +64,8 @@ struct NodeSpec {
     /// Once compiled into a plan it lives on the audio thread, and later
     /// plans take it over from their predecessor.
     fresh: Option<Box<dyn DspModule>>,
+    /// The recording last given to the module (a Sampler's file).
+    sample: Option<Arc<SampleData>>,
 }
 
 impl NodeSpec {
@@ -81,6 +84,7 @@ impl NodeSpec {
             bypassed: false,
             polyphonic: module.polyphonic(),
             fresh: Some(module),
+            sample: None,
         }
     }
 
@@ -130,6 +134,9 @@ pub struct AudioGraph {
     /// Outputs that should report values back to UI for LED indicators.
     /// Key: (node_id, output_port_index).
     monitored_outputs: HashSet<(NodeId, PortIndex)>,
+    /// Recordings for modules already on the audio thread, in the order
+    /// they were loaded, waiting to be sent after the plan that has them.
+    sample_loads: Vec<(NodeId, Option<Arc<SampleData>>)>,
 }
 
 impl AudioGraph {
@@ -146,6 +153,7 @@ impl AudioGraph {
             dirty: false,
             monitored_inputs: HashSet::new(),
             monitored_outputs: HashSet::new(),
+            sample_loads: Vec::new(),
         }
     }
 
@@ -269,6 +277,7 @@ impl AudioGraph {
         if self.nodes.remove(&node_id).is_none() {
             return false;
         }
+        self.sample_loads.retain(|(id, _)| *id != node_id);
 
         // Remove all connections involving this node
         self.connections.retain(|conn| {
@@ -419,6 +428,37 @@ impl AudioGraph {
         self.dirty = true;
         self.monitored_inputs.clear();
         self.monitored_outputs.clear();
+        self.sample_loads.clear();
+    }
+
+    /// Gives a module a recording to play, or takes its away with `None`.
+    /// A module not yet handed to a plan gets it at once; one already on
+    /// the audio thread gets it through [`take_sample_loads`](Self::take_sample_loads).
+    ///
+    /// Returns false if there is no such module.
+    pub fn load_sample(&mut self, node_id: NodeId, sample: Option<Arc<SampleData>>) -> bool {
+        let Some(spec) = self.nodes.get_mut(&node_id) else {
+            return false;
+        };
+        spec.sample = sample.clone();
+        match spec.fresh.as_mut() {
+            // Whatever it hands back is dropped here, off the audio thread
+            Some(module) => drop(module.load_sample(sample)),
+            None => self.sample_loads.push((node_id, sample)),
+        }
+        true
+    }
+
+    /// The recording a module was last given, if any.
+    pub fn sample(&self, node_id: NodeId) -> Option<&Arc<SampleData>> {
+        self.nodes.get(&node_id).and_then(|spec| spec.sample.as_ref())
+    }
+
+    /// Recordings loaded into modules already on the audio thread, in
+    /// order, for the caller to deliver. They must arrive after the plan
+    /// that holds their module.
+    pub fn take_sample_loads(&mut self) -> Vec<(NodeId, Option<Arc<SampleData>>)> {
+        std::mem::take(&mut self.sample_loads)
     }
 
     /// Start monitoring an input port for UI feedback.
@@ -596,6 +636,7 @@ impl AudioGraph {
                 self.unmonitor_output(node_id, output_index);
                 true
             }
+            EngineCommand::LoadSample { node_id, sample } => self.load_sample(node_id, sample),
         }
     }
 

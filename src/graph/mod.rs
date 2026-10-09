@@ -21,6 +21,8 @@ mod module_ui;
 mod node_data;
 pub mod port_mapping;
 mod responses;
+pub mod sample_shelf;
+mod sampler_display;
 pub mod signal_history;
 mod state;
 mod templates;
