@@ -42,6 +42,10 @@ pub struct PortDefinition {
     pub default_value: f32,
     /// What the port is for, in one line, shown as its tooltip.
     pub description: &'static str,
+    /// For inputs: whether a cable may close a loop through this port. It
+    /// then hears its source a block late, as a return from an effect fed
+    /// by this module does. See [`late`](Self::late).
+    pub late: bool,
 }
 
 impl PortDefinition {
@@ -54,6 +58,7 @@ impl PortDefinition {
             signal_type,
             default_value: 0.0,
             description: "",
+            late: false,
         }
     }
 
@@ -71,6 +76,7 @@ impl PortDefinition {
             signal_type,
             default_value,
             description: "",
+            late: false,
         }
     }
 
@@ -83,12 +89,26 @@ impl PortDefinition {
             signal_type,
             default_value: 0.0,
             description: "",
+            late: false,
         }
     }
 
     /// Sets what the port is for, shown as its tooltip.
     pub fn describe(mut self, description: &'static str) -> Self {
         self.description = description;
+        self
+    }
+
+    /// Lets a cable into this input close a loop, as a mixer's effect return
+    /// does when the effect is fed from the same mixer's send.
+    ///
+    /// The graph refuses loops, because every module needs its inputs
+    /// before it runs. A late input is the exception: when its cable would
+    /// close a loop, it hears its source one block late (a constant delay,
+    /// about 6 ms at 256 samples), summed to one channel. A cable that
+    /// closes no loop is heard at once, like any other.
+    pub fn late(mut self) -> Self {
+        self.late = true;
         self
     }
 

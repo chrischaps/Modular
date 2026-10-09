@@ -22,6 +22,10 @@
 //! Polyphonic modules set how many each block, and the count flows
 //! downstream with the signal. A module that isn't polyphonic hears a
 //! polyphonic cable on an audio input as all its channels summed.
+//!
+//! A cable into a late input that closes a loop (a mixer's effect return,
+//! fed from the same mixer's send) is heard through a [`LateLine`]: one
+//! block behind, so its source can run after the module it feeds.
 
 use std::ops::Range;
 
@@ -47,6 +51,9 @@ pub(crate) enum InputSource {
     /// by a mono audio input as the sum of its channels, written into a
     /// buffer of its own (index into `GraphPlan::mixdowns`).
     Mixdown { source: usize, mix: usize },
+    /// A cable closing a loop into a late input, heard one block behind
+    /// (index into `GraphPlan::late`).
+    Late(usize),
 }
 
 /// What a monitored input reports.
@@ -79,6 +86,48 @@ pub(crate) struct PlanNode {
     pub(crate) dry: Vec<Option<usize>>,
 }
 
+/// A cable that closes a loop, heard a constant one block behind.
+///
+/// Its source runs after the module it feeds, so the module hears what the
+/// source played a block ago. The delay is the plan's largest block rather
+/// than the last block's length, so it holds steady when blocks vary.
+pub(crate) struct LateLine {
+    /// The output buffer it hears (index into `GraphPlan::outputs`), once
+    /// the plan has laid it out. Silent until then.
+    pub(crate) source: Option<usize>,
+    /// The source's recent samples, its channels summed, oldest overwritten.
+    ring: Vec<f32>,
+    /// Where in `ring` the next block is written.
+    write: usize,
+    /// What the input hears this block.
+    heard: SignalBuffer,
+}
+
+impl LateLine {
+    pub(crate) fn new(max_block_size: usize, signal_type: crate::dsp::SignalType) -> Self {
+        Self { source: None, ring: vec![0.0; 2 * max_block_size.max(1)], write: 0, heard: SignalBuffer::new(max_block_size, signal_type) }
+    }
+
+    /// Fills `heard` with the samples from one largest block ago.
+    fn read(&mut self, max_block_size: usize) {
+        let len = self.ring.len();
+        let start = self.write + len - max_block_size;
+        for (i, sample) in self.heard.samples.iter_mut().enumerate() {
+            *sample = self.ring[(start + i) % len];
+        }
+    }
+
+    /// Records the block `source` just played.
+    fn write(&mut self, source: &SignalBuffer) {
+        let len = self.ring.len();
+        for i in 0..self.heard.samples.len() {
+            let sum: f32 = (0..source.channels()).map(|c| source.voice(c).samples[i]).sum();
+            self.ring[(self.write + i) % len] = sum;
+        }
+        self.write = (self.write + self.heard.samples.len()) % len;
+    }
+}
+
 /// A monitored input port, reported to the UI for knob animation.
 pub(crate) struct InputTap {
     pub(crate) node_id: NodeId,
@@ -106,6 +155,8 @@ pub struct GraphPlan {
     pub(crate) default_values: Vec<f32>,
     /// Sums of polyphonic cables, for mono audio inputs.
     pub(crate) mixdowns: Vec<SignalBuffer>,
+    /// Cables closing loops, heard a block behind.
+    pub(crate) late: Vec<LateLine>,
     pub(crate) input_taps: Vec<InputTap>,
     pub(crate) output_taps: Vec<OutputTap>,
     /// The number of samples every buffer currently holds.
@@ -123,6 +174,7 @@ impl GraphPlan {
             defaults: Vec::new(),
             default_values: Vec::new(),
             mixdowns: Vec::new(),
+            late: Vec::new(),
             input_taps: Vec::new(),
             output_taps: Vec::new(),
             block_len: max_block_size,
@@ -197,6 +249,10 @@ impl GraphPlan {
         for module in self.nodes.iter_mut().filter_map(|node| node.module.as_mut()) {
             module.reset();
         }
+        // A loop's return restarts silent too, not with the old tail
+        for line in &mut self.late {
+            line.ring.fill(0.0);
+        }
     }
 
     /// Re-prepares every module for a new sample rate.
@@ -229,7 +285,10 @@ impl GraphPlan {
         let context = &context;
         let fade_step = 1.0 / (BYPASS_FADE_SECONDS * context.sample_rate).max(1.0);
 
-        let Self { nodes, outputs, defaults, mixdowns, .. } = self;
+        let Self { nodes, outputs, defaults, mixdowns, late, max_block_size, .. } = self;
+        for line in late.iter_mut() {
+            line.read(*max_block_size);
+        }
         for node in nodes.iter_mut() {
             // Inputs come from earlier nodes, whose buffers all precede ours
             let (upstream, rest) = outputs.split_at_mut(node.outputs.start);
@@ -260,6 +319,7 @@ impl GraphPlan {
                         &upstream[source]
                     }
                     InputSource::Mixdown { mix, .. } => &mixdowns[mix],
+                    InputSource::Late(index) => &late[index].heard,
                 };
             }
 
@@ -281,6 +341,13 @@ impl GraphPlan {
             let target = if node.bypassed { 0.0 } else { 1.0 };
             if node.wet != target {
                 node.wet = crossfade(own, &node.dry, inputs, node.wet, target, fade_step);
+            }
+        }
+
+        // Every source has played: keep their blocks for next time
+        for line in late.iter_mut() {
+            if let Some(source) = line.source {
+                line.write(&outputs[source]);
             }
         }
     }
@@ -329,7 +396,8 @@ impl GraphPlan {
         if len == self.block_len {
             return;
         }
-        for buffer in self.outputs.iter_mut().chain(&mut self.mixdowns) {
+        let late = self.late.iter_mut().map(|line| &mut line.heard);
+        for buffer in self.outputs.iter_mut().chain(&mut self.mixdowns).chain(late) {
             buffer.set_len(len);
         }
         for (buffer, &value) in self.defaults.iter_mut().zip(&self.default_values) {

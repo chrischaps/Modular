@@ -17,7 +17,7 @@ use crate::dsp::bypass::{bypass_routes, can_bypass};
 use crate::dsp::{DspModule, ModuleRegistry, PortDefinition, SignalBuffer, SignalType};
 use crate::engine::commands::{EngineCommand, NodeId, PortIndex};
 use crate::engine::graph_plan::{
-    GraphPlan, InputSource, InputTap, MonitorSource, OutputTap, PlanNode, MAX_INPUTS,
+    GraphPlan, InputSource, InputTap, LateLine, MonitorSource, OutputTap, PlanNode, MAX_INPUTS,
 };
 
 /// A connection between two ports in the audio graph.
@@ -445,15 +445,42 @@ impl AudioGraph {
     // Topological Sort
     // ========================================================================
 
-    /// Checks if the current graph has a cycle.
+    /// Checks if the current graph has a cycle. A loop closed through a late
+    /// input isn't one: that cable hears its source a block late.
     fn has_cycle(&self) -> bool {
         // Use Kahn's algorithm - if we can't process all nodes, there's a cycle
         let sorted = self.compute_topological_order();
         sorted.len() != self.nodes.len()
     }
 
-    /// Computes the topological order using Kahn's algorithm.
+    /// Whether a connection ends at a late input, which may close a loop.
+    fn is_late(&self, conn: &Connection) -> bool {
+        self.nodes
+            .get(&conn.to_node)
+            .and_then(|spec| spec.ports.get(conn.to_port))
+            .is_some_and(|port| port.late)
+    }
+
+    /// Computes the processing order.
+    ///
+    /// Every cable's source comes before the module it feeds, except a cable
+    /// into a late input that would close a loop. Late cables that close no
+    /// loop are ordered like the rest, so they're heard without delay.
     fn compute_topological_order(&self) -> Vec<NodeId> {
+        let mut kept: Vec<bool> = self.connections.iter().map(|conn| !self.is_late(conn)).collect();
+        for index in 0..self.connections.len() {
+            if !kept[index] {
+                kept[index] = true;
+                kept[index] = self.order_by(&kept).len() == self.nodes.len();
+            }
+        }
+        self.order_by(&kept)
+    }
+
+    /// Kahn's algorithm over the connections marked in `kept`. Comes up
+    /// short of every node when they form a cycle.
+    fn order_by(&self, kept: &[bool]) -> Vec<NodeId> {
+        let connections = || self.connections.iter().zip(kept).filter(|(_, &kept)| kept).map(|(conn, _)| conn);
         // Build in-degree map
         let mut in_degree: HashMap<NodeId, usize> = HashMap::new();
 
@@ -463,7 +490,7 @@ impl AudioGraph {
         }
 
         // Count incoming edges for each node
-        for conn in &self.connections {
+        for conn in connections() {
             if let Some(degree) = in_degree.get_mut(&conn.to_node) {
                 *degree += 1;
             }
@@ -485,7 +512,7 @@ impl AudioGraph {
             result.push(node_id);
 
             // Find all nodes that depend on this one
-            for conn in &self.connections {
+            for conn in connections() {
                 if conn.from_node == node_id {
                     if let Some(degree) = in_degree.get_mut(&conn.to_node) {
                         *degree -= 1;
@@ -608,6 +635,9 @@ impl AudioGraph {
             Some(base + source.output_index(conn.from_port)?)
         };
 
+        // Late cables whose sources come later, waiting for their buffers
+        let mut late_cables: Vec<(usize, &Connection)> = Vec::new();
+
         for &node_id in &self.processing_order {
             let Some(spec) = self.nodes.get(&node_id) else {
                 continue;
@@ -617,9 +647,16 @@ impl AudioGraph {
             for (port_index, port) in spec.inputs() {
                 // Sources precede this node in processing order, so their
                 // output buffers are already laid out
-                let source = feeds
-                    .get(&(node_id, port_index))
-                    .and_then(|conn| Some((conn, source_buffer(conn, &output_base)?)));
+                let cable = feeds.get(&(node_id, port_index)).copied();
+                let source = cable.and_then(|conn| Some((conn, source_buffer(conn, &output_base)?)));
+                // ...except a cable closing a loop: its source runs later,
+                // so this node hears it a block behind
+                if let (None, Some(conn)) = (source, cable.filter(|_| port.late)) {
+                    late_cables.push((plan.late.len(), conn));
+                    plan.late.push(LateLine::new(block_size, port.signal_type));
+                    inputs.push(InputSource::Late(plan.late.len() - 1));
+                    continue;
+                }
                 inputs.push(match source {
                     // A mono module hears a polyphonic cable into an audio
                     // input as the sum of its voices
@@ -679,6 +716,11 @@ impl AudioGraph {
                 wet: if spec.bypassed { 0.0 } else { 1.0 },
                 dry,
             });
+        }
+
+        // Every output has its buffer now
+        for (index, conn) in late_cables {
+            plan.late[index].source = source_buffer(conn, &output_base);
         }
 
         // Monitor taps, in a stable order
@@ -773,6 +815,7 @@ mod tests {
                 direction: crate::dsp::PortDirection::Output,
                 default_value: 0.0,
                 description: "",
+                late: false,
             }];
             PORTS
         }
@@ -826,6 +869,7 @@ mod tests {
                 direction: crate::dsp::PortDirection::Input,
                 default_value: 0.0,
                 description: "",
+                late: false,
             }];
             PORTS
         }
@@ -888,6 +932,7 @@ mod tests {
                     direction: crate::dsp::PortDirection::Input,
                     default_value: 0.0,
                     description: "",
+                    late: false,
                 },
                 PortDefinition {
                     id: "out",
@@ -896,6 +941,7 @@ mod tests {
                     direction: crate::dsp::PortDirection::Output,
                     default_value: 0.0,
                     description: "",
+                    late: false,
                 },
             ];
             PORTS
@@ -948,6 +994,7 @@ mod tests {
                 direction: crate::dsp::PortDirection::Output,
                 default_value: 0.0,
                 description: "",
+                late: false,
             }];
             PORTS
         }
@@ -1001,6 +1048,7 @@ mod tests {
                     direction: crate::dsp::PortDirection::Input,
                     default_value: 0.0,
                     description: "",
+                    late: false,
                 },
                 PortDefinition {
                     id: "out",
@@ -1009,6 +1057,7 @@ mod tests {
                     direction: crate::dsp::PortDirection::Output,
                     default_value: 0.0,
                     description: "",
+                    late: false,
                 },
             ];
             PORTS
@@ -1232,6 +1281,93 @@ mod tests {
         assert_eq!(graph.connection_count(), 1);
     }
 
+    /// A Mixer (node 2) with a constant on channel 1, panned hard left and
+    /// sent in full to an effect (node 3, a passthrough) that returns to
+    /// the same mixer: a loop through its late Return L.
+    fn send_and_return_loop() -> AudioGraph {
+        use crate::modules::Mixer;
+        const SEND_L: PortIndex = 21;
+        const RETURN_L: PortIndex = 16;
+        let mut graph = AudioGraph::new(44100.0, 256);
+        graph.add_module_instance(1, Box::new(TestOscillator::new(0.25)));
+        graph.add_module_instance(2, Box::new(Mixer::new()));
+        graph.add_module_instance(3, Box::new(TestPassthrough));
+        let mixer = Mixer::new();
+        for (index, param) in mixer.parameters().iter().enumerate() {
+            graph.set_parameter(2, index, param.default);
+        }
+        graph.set_parameter(2, 4, -1.0); // Pan 1 hard left
+        graph.set_parameter(2, 14, 1.0); // Send 1 full
+        assert!(graph.connect(1, 0, 2, 0));
+        assert!(graph.connect(2, SEND_L, 3, 0));
+        assert!(graph.connect(3, 1, 2, RETURN_L), "a late input may close a loop");
+        graph
+    }
+
+    /// Out L of node 2, the loop's mixer, after the last block.
+    fn mixer_out_l(plan: &GraphPlan) -> &[f32] {
+        let node = plan.nodes.iter().find(|node| node.node_id == 2).unwrap();
+        &plan.outputs[node.outputs.start + 1].samples
+    }
+
+    #[test]
+    fn test_late_input_closes_a_loop_one_block_behind() {
+        let mut graph = send_and_return_loop();
+        assert_eq!(graph.processing_order(), [] as [NodeId; 0], "not sorted yet");
+        let mut plan = graph.compile();
+        assert_eq!(graph.processing_order(), [1, 2, 3], "the effect runs after the mixer it returns to");
+        assert!(plan.nodes[1].inputs.contains(&InputSource::Late(0)));
+
+        // The first block hears only the dry channel, the return still silent
+        let block = ProcessContext::new(44100.0, 256);
+        plan.process(&block);
+        assert!(mixer_out_l(&plan).iter().all(|&s| s == 0.25));
+        // The next block hears the send come back, exactly one block on
+        plan.process(&block);
+        assert!(mixer_out_l(&plan).iter().all(|&s| s == 0.5));
+
+        // Smaller blocks: the delay stays one full block, 256 samples
+        let mut plan = send_and_return_loop().compile();
+        let small = ProcessContext::new(44100.0, 64);
+        let heard: Vec<f32> = (0..6).flat_map(|_| {
+            plan.process(&small);
+            mixer_out_l(&plan).to_vec()
+        }).collect();
+        assert!(heard[..256].iter().all(|&s| s == 0.25));
+        assert!(heard[256..].iter().all(|&s| s == 0.5));
+
+        // Starting over silences the loop
+        plan.reset_modules();
+        plan.process(&block);
+        assert!(mixer_out_l(&plan).iter().all(|&s| s == 0.25));
+    }
+
+    #[test]
+    fn test_late_input_without_a_loop_hears_at_once() {
+        // The same return fed from upstream closes no loop: no delay
+        use crate::modules::Mixer;
+        let mut graph = AudioGraph::new(44100.0, 256);
+        graph.add_module_instance(1, Box::new(TestOscillator::new(0.25)));
+        graph.add_module_instance(2, Box::new(Mixer::new()));
+        graph.add_module_instance(3, Box::new(TestPassthrough));
+        graph.set_parameter(2, 18, 1.0); // Return at full
+        assert!(graph.connect(1, 0, 3, 0));
+        assert!(graph.connect(3, 1, 2, 16));
+        // Node 3 has the higher ID, yet runs first, as its cable asks
+        let plan = run_block(&mut graph, 256);
+        assert_eq!(graph.processing_order(), [1, 3, 2]);
+        assert!(plan.late.is_empty());
+        assert!(mixer_out_l(&plan).iter().all(|&s| s == 0.25));
+    }
+
+    #[test]
+    fn test_loop_through_an_ordinary_input_is_still_refused() {
+        let mut graph = send_and_return_loop();
+        // Into channel 2 instead of the return: no way round it
+        assert!(!graph.connect(3, 1, 2, 1));
+        assert_eq!(graph.connection_count(), 3);
+    }
+
     #[test]
     fn test_new_cable_replaces_existing_one() {
         let mut graph = AudioGraph::new(44100.0, 256);
@@ -1351,6 +1487,7 @@ mod tests {
                     direction: crate::dsp::PortDirection::Input,
                     default_value: 0.25,
                     description: "",
+                    late: false,
                 }];
                 PORTS
             }
@@ -1711,6 +1848,7 @@ mod tests {
                     direction: crate::dsp::PortDirection::Output,
                     default_value: 0.0,
                     description: "",
+                    late: false,
                 },
                 PortDefinition {
                     id: "cv",
@@ -1719,6 +1857,7 @@ mod tests {
                     direction: crate::dsp::PortDirection::Output,
                     default_value: 0.0,
                     description: "",
+                    late: false,
                 },
             ];
             PORTS
@@ -1807,6 +1946,7 @@ mod tests {
                     direction: crate::dsp::PortDirection::Input,
                     default_value: 0.0,
                     description: "",
+                    late: false,
                 }];
                 PORTS
             }

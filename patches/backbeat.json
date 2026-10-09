@@ -1961,8 +1961,8 @@
       "id": 31,
       "module_id": "util.attenuverter",
       "position": [
-        2150.0,
-        1988.0
+        2440.0,
+        1580.0
       ],
       "parameters": [
         {
@@ -2054,6 +2054,31 @@
           "name": "Spread",
           "type": "Number",
           "value": 0.0
+        },
+        {
+          "name": "Send 1",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 2",
+          "type": "Number",
+          "value": 0.3
+        },
+        {
+          "name": "Send 3",
+          "type": "Number",
+          "value": 0.3
+        },
+        {
+          "name": "Send 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Return",
+          "type": "Number",
+          "value": 1.0
         }
       ]
     },
@@ -2111,29 +2136,29 @@
       "id": 34,
       "module_id": "util.mixer",
       "position": [
-        1820.0,
-        1678.0
+        2700.0,
+        1100.0
       ],
       "parameters": [
         {
           "name": "Level 1",
           "type": "Number",
-          "value": 0.55
+          "value": 0.44
         },
         {
           "name": "Level 2",
           "type": "Number",
-          "value": 0.55
+          "value": 0.44
         },
         {
           "name": "Level 3",
           "type": "Number",
-          "value": 0.5
+          "value": 0.4
         },
         {
           "name": "Level 4",
           "type": "Number",
-          "value": 0.45
+          "value": 0.36
         },
         {
           "name": "Pan 1",
@@ -2178,12 +2203,37 @@
         {
           "name": "Master",
           "type": "Number",
-          "value": 0.0
+          "value": -2.0
         },
         {
           "name": "Spread",
           "type": "Number",
           "value": 0.0
+        },
+        {
+          "name": "Send 1",
+          "type": "Number",
+          "value": 0.25
+        },
+        {
+          "name": "Send 2",
+          "type": "Number",
+          "value": 0.25
+        },
+        {
+          "name": "Send 3",
+          "type": "Number",
+          "value": 0.25
+        },
+        {
+          "name": "Send 4",
+          "type": "Number",
+          "value": 0.25
+        },
+        {
+          "name": "Return",
+          "type": "Number",
+          "value": 1.0
         }
       ]
     },
@@ -2191,8 +2241,8 @@
       "id": 35,
       "module_id": "fx.reverb",
       "position": [
-        2150.0,
-        1678.0
+        3030.0,
+        1396.0
       ],
       "parameters": [
         {
@@ -2213,12 +2263,12 @@
         {
           "name": "Pre-Delay",
           "type": "Number",
-          "value": 8.0
+          "value": 2.5
         },
         {
           "name": "Mix",
           "type": "Number",
-          "value": 0.2
+          "value": 1.0
         },
         {
           "name": "Width",
@@ -2236,14 +2286,14 @@
       "id": 36,
       "module_id": "output.audio",
       "position": [
-        2640.0,
-        974.0
+        3030.0,
+        1100.0
       ],
       "parameters": [
         {
           "name": "Volume",
           "type": "Number",
-          "value": 0.72
+          "value": 0.9064
         },
         {
           "name": "Limiter",
@@ -2604,29 +2654,53 @@
     {
       "from_node": 33,
       "from_port": "Out",
-      "to_node": 36,
-      "to_port": "Mono"
+      "to_node": 34,
+      "to_port": "Chain L"
+    },
+    {
+      "from_node": 32,
+      "from_port": "Send L",
+      "to_node": 34,
+      "to_port": "Chain Send L"
+    },
+    {
+      "from_node": 32,
+      "from_port": "Send R",
+      "to_node": 34,
+      "to_port": "Chain Send R"
     },
     {
       "from_node": 34,
-      "from_port": "Out L",
+      "from_port": "Send L",
       "to_node": 35,
       "to_port": "In L"
     },
     {
       "from_node": 34,
-      "from_port": "Out R",
+      "from_port": "Send R",
       "to_node": 35,
       "to_port": "In R"
     },
     {
       "from_node": 35,
       "from_port": "Out L",
+      "to_node": 34,
+      "to_port": "Return L"
+    },
+    {
+      "from_node": 35,
+      "from_port": "Out R",
+      "to_node": 34,
+      "to_port": "Return R"
+    },
+    {
+      "from_node": 34,
+      "from_port": "Out L",
       "to_node": 36,
       "to_port": "Left"
     },
     {
-      "from_node": 35,
+      "from_node": 34,
       "from_port": "Out R",
       "to_node": 36,
       "to_port": "Right"
@@ -2726,19 +2800,19 @@
       ],
       "size": [
         764.0,
-        705.0
+        947.0
       ],
       "color": "cyan"
     },
     {
-      "title": "Room",
+      "title": "Mix and room",
       "position": [
-        1796.0,
-        1620.0
+        2416.0,
+        1042.0
       ],
       "size": [
-        608.0,
-        721.0
+        868.0,
+        961.0
       ],
       "color": "cyan"
     }

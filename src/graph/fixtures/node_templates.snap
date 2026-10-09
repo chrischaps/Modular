@@ -221,15 +221,28 @@ in   Pan 1              Control  ConnectionOrConstant inline=true  num 0 [-1..1]
 in   Pan 2              Control  ConnectionOrConstant inline=true  num 0 [-1..1] pan
 in   Pan 3              Control  ConnectionOrConstant inline=true  num 0 [-1..1] pan
 in   Pan 4              Control  ConnectionOrConstant inline=true  num 0 [-1..1] pan
+in   Chain L            Audio    ConnectionOnly       inline=true  port
+in   Chain R            Audio    ConnectionOnly       inline=true  port
+in   Chain Send L       Audio    ConnectionOnly       inline=true  port
+in   Chain Send R       Audio    ConnectionOnly       inline=true  port
+in   Return L           Audio    ConnectionOnly       inline=true  port
+in   Return R           Audio    ConnectionOnly       inline=true  port
 in   Mute 1             Control  ConstantOnly         inline=false toggle false ""
 in   Mute 2             Control  ConstantOnly         inline=false toggle false ""
 in   Mute 3             Control  ConstantOnly         inline=false toggle false ""
 in   Mute 4             Control  ConstantOnly         inline=false toggle false ""
 in   Master             Control  ConstantOnly         inline=false num 0 [-60..6] dB
 in   Spread             Control  ConstantOnly         inline=false num 0 [0..1]
+in   Send 1             Control  ConstantOnly         inline=false num 0 [0..1]
+in   Send 2             Control  ConstantOnly         inline=false num 0 [0..1]
+in   Send 3             Control  ConstantOnly         inline=false num 0 [0..1]
+in   Send 4             Control  ConstantOnly         inline=false num 0 [0..1]
+in   Return             Control  ConstantOnly         inline=false num 1 [0..1]
 out  Out                Audio
 out  Out L              Audio
 out  Out R              Audio
+out  Send L             Audio
+out  Send R             Audio
 knob Level 1            "Lv 1" Modulatable
 knob Level 2            "Lv 2" Modulatable
 knob Level 3            "Lv 3" Modulatable
@@ -240,6 +253,11 @@ knob Pan 2              "Pan 2" Modulatable
 knob Pan 3              "Pan 3" Modulatable
 knob Pan 4              "Pan 4" Modulatable
 knob Spread             "Spread" KnobOnly
+knob Send 1             "Send 1" KnobOnly
+knob Send 2             "Send 2" KnobOnly
+knob Send 3             "Send 3" KnobOnly
+knob Send 4             "Send 4" KnobOnly
+knob Return             "Return" KnobOnly
 display MixerStrips
 
 == util.sample_hold "Sample & Hold" finder="Sample & Hold" Utility

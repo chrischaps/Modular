@@ -3,7 +3,8 @@
 //!
 //! The panorama has a lane per channel, and a light on it wherever that
 //! channel sounds: one for a mono cable, one per voice for a polyphonic one,
-//! fanned out by Spread. It's drawn from the same pan law and spread rule the
+//! fanned out by Spread. A channel sent to an effect blooms sideways along
+//! its lane, wider the more it sends, as a sound spreads into a room. It's drawn from the same pan law and spread rule the
 //! audio uses, so what you see is where you hear it.
 //!
 //! The meters sit in the knob columns below them, so each channel reads as a
@@ -37,6 +38,8 @@ struct StripView {
     muted: bool,
     /// Pan with any CV added, from -1 to 1.
     pan: f32,
+    /// The Send knob, from 0 to 1.
+    send: f32,
     /// Each voice's last peak, or `None` before any reading.
     voices: Vec<Option<f32>>,
 }
@@ -86,6 +89,7 @@ pub fn mixer_strips(
                 patched: source.is_some(),
                 muted: value_of(&format!("Mute {n}")) >= 0.5,
                 pan: (value_of(&format!("Pan {n}")) + cv(&format!("Pan {n}"), PAN_CV_PORT + s)).clamp(-1.0, 1.0),
+                send: value_of(&format!("Send {n}")),
                 voices,
             }
         })
@@ -158,6 +162,17 @@ pub fn mixer_strips(
             let x = x_at(voice_pan(strip.pan, spread, v, count));
             let center = Pos2::new(x, y);
             let sounding = !user_state.is_playing || peak.is_none_or(|p| p.abs() > 1e-4);
+            if !strip.muted && strip.send > 0.01 {
+                // The send: a soft smear along the lane, brightest at the
+                // light, that swells as the channel plays
+                let amount = strip.send.sqrt();
+                let alpha = amount * (0.07 + 0.1 * glow);
+                for layer in 1..=3 {
+                    let reach = (2.0 + 16.0 * amount * layer as f32 / 3.0) * z;
+                    let bloom = Rect::from_center_size(center, Vec2::new(2.0 * reach, 3.0 * z));
+                    painter.rect_filled(bloom, 1.5 * z, hue.gamma_multiply(alpha));
+                }
+            }
             if strip.muted {
                 painter.circle_stroke(center, 2.2 * z, Stroke::new(1.0 * z, theme::text::DISABLED));
             } else if !sounding {
@@ -173,7 +188,7 @@ pub fn mixer_strips(
     }
     let field_response = ui.interact(field, ui.id().with(("mixer_field", node_id)), Sense::hover());
     field_response.on_hover_text(
-        "Where each channel sits, left to right, a lane per channel. A polyphonic channel shows a light per voice, fanned out by Spread",
+        "Where each channel sits, left to right, a lane per channel. A polyphonic channel shows a light per voice, fanned out by Spread. A channel with its Send up blooms along its lane",
     );
 
     // --- Strip meters and mutes, in the knob columns ---

@@ -208,8 +208,9 @@ static MODULE_UI: &[ModuleUi] = &[
     },
     ModuleUi {
         module_id: "util.mixer",
-        // A column per channel strip, its level over its pan, and a fifth
-        // for the master section. The display's meters sit over the columns
+        // A column per channel strip, its level over its pan over its send,
+        // and a fifth for the master section and the return. The display's
+        // meters sit over the columns
         knobs: &[
             modulatable("Level 1", "Lv 1"),
             modulatable("Level 2", "Lv 2"),
@@ -221,6 +222,11 @@ static MODULE_UI: &[ModuleUi] = &[
             modulatable("Pan 3", "Pan 3"),
             modulatable("Pan 4", "Pan 4"),
             knob("Spread"),
+            knob("Send 1"),
+            knob("Send 2"),
+            knob("Send 3"),
+            knob("Send 4"),
+            knob("Return"),
         ],
         // Each strip's mute is a button under its meter
         hidden: &["Mute *"],

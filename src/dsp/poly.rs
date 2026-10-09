@@ -205,6 +205,7 @@ mod tests {
                     direction: crate::dsp::PortDirection::Input,
                     default_value: 0.0,
                     description: "",
+                    late: false,
                 },
                 PortDefinition {
                     id: "offset",
@@ -213,6 +214,7 @@ mod tests {
                     direction: crate::dsp::PortDirection::Input,
                     default_value: 0.0,
                     description: "",
+                    late: false,
                 },
                 PortDefinition {
                     id: "out",
@@ -221,6 +223,7 @@ mod tests {
                     direction: crate::dsp::PortDirection::Output,
                     default_value: 0.0,
                     description: "",
+                    late: false,
                 },
             ];
             PORTS

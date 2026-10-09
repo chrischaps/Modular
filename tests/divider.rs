@@ -4,6 +4,11 @@
 //! keeps that version. The example now uses one Clock Divider dividing the
 //! sixteenths by 64. These tests render the two and check they play the
 //! same bars.
+//!
+//! Since the snare joined the kit's room (#100), its reverb tail rings into
+//! the step the fill is detected on. The renders take the snare out of the
+//! room again, and time the room's return exactly, which makes the mix the
+//! fixture's, the old one.
 
 use std::path::{Path, PathBuf};
 
@@ -55,12 +60,35 @@ fn fill_bars(steps: &[f32]) -> Vec<usize> {
     steps.chunks_exact(16).enumerate().filter(|(_, bar)| bar[6] < -90.0).map(|(n, _)| n + 1).collect()
 }
 
-/// Backbeat with its divider's Offset changed.
-fn with_offset(offset: f32, path: &Path) -> PathBuf {
+/// Backbeat with its divider's Offset set, and its snare kept out of the
+/// room: the Mixer whose sends chain into another sends nothing. The
+/// reverb returns through a loop, a 256-sample block late at 48 kHz, so its
+/// pre-delay gives back exactly that much of the fixture's 8 ms.
+fn backbeat(offset: f32, path: &Path) -> PathBuf {
     let mut patch: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(repo("patches/backbeat.json")).unwrap()).unwrap();
-    let divider = patch["nodes"].as_array_mut().unwrap().iter_mut().find(|n| n["module_id"] == "util.divider").unwrap();
-    let param = divider["parameters"].as_array_mut().unwrap().iter_mut().find(|p| p["name"] == "Offset").unwrap();
-    param["value"] = offset.into();
+    let chained = patch["connections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["to_port"] == "Chain Send L")
+        .map(|c| c["from_node"].clone())
+        .expect("the kick and snare Mixer's sends chain into the main Mixer");
+    for node in patch["nodes"].as_array_mut().unwrap() {
+        let (divider, kick_and_snare) = (node["module_id"] == "util.divider", node["id"] == chained);
+        if node["module_id"] == "fx.reverb" {
+            let pre_delay = node["parameters"].as_array_mut().unwrap().iter_mut().find(|p| p["name"] == "Pre-Delay").unwrap();
+            pre_delay["value"] = (8.0 - 256.0 / 48.0).into();
+        }
+        let params = node["parameters"].as_array_mut().unwrap();
+        if divider {
+            params.iter_mut().find(|p| p["name"] == "Offset").unwrap()["value"] = offset.into();
+        }
+        if kick_and_snare {
+            for param in params.iter_mut().filter(|p| p["name"].as_str().unwrap().starts_with("Send ")) {
+                param["value"] = 0.0.into();
+            }
+        }
+    }
     std::fs::write(path, serde_json::to_string_pretty(&patch).unwrap()).unwrap();
     path.to_path_buf()
 }
@@ -69,7 +97,7 @@ fn with_offset(offset: f32, path: &Path) -> PathBuf {
 fn backbeat_divider_plays_the_same_bars_as_the_phrase_clock() {
     let dir = scratch();
     let phrase_clock = steps_db(&repo("tests/fixtures/backbeat-phrase-clock.json"), &dir.join("phrase-clock.wav"));
-    let divider = steps_db(&repo("patches/backbeat.json"), &dir.join("divider.wav"));
+    let divider = steps_db(&backbeat(0.0, &dir.join("divider.json")), &dir.join("divider.wav"));
 
     assert_eq!(fill_bars(&phrase_clock), vec![1, 5, 9]);
     assert_eq!(fill_bars(&divider), vec![1, 5, 9]);
@@ -87,7 +115,7 @@ fn backbeat_divider_plays_the_same_bars_as_the_phrase_clock() {
 
     // A control: moved a bar later, the fill really does move, and the
     // comparison above would have caught it
-    let moved = steps_db(&with_offset(16.0, &dir.join("moved.json")), &dir.join("moved.wav"));
+    let moved = steps_db(&backbeat(16.0, &dir.join("moved.json")), &dir.join("moved.wav"));
     assert_eq!(fill_bars(&moved), vec![2, 6, 10]);
     let largest = phrase_clock.iter().zip(&moved).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
     assert!(largest > 20.0, "moving the fill changed no step by more than {largest:.1} dB");
