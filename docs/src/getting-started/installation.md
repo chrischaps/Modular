@@ -14,6 +14,8 @@ The browser version runs the same engine and modules, and every example is in it
 - **Recording** to a WAV, and **My Modules**, which keep files in a folder.
 - **Low latency.** The browser plays sound through larger buffers, about a tenth of a second behind your playing, and twice that in Firefox. That's fine for listening and exploring, and loose for playing live.
 
+On a phone or tablet, a patch opens zoomed out to fit the screen: pinch to zoom in, and drag the canvas to move around.
+
 Patches go in and out as files: **💾 Save** downloads the patch, and **📂 Open** picks one to upload. Each recipe in this manual can be played on its page.
 
 ## Download a release

@@ -32,8 +32,9 @@ If a patch loads with problems (a module this version doesn't know, a cable to a
 
 | To | Do this |
 |----|---------|
-| Zoom | Scroll the mouse wheel |
+| Zoom | Scroll the mouse wheel. A trackpad pinch, or `Ctrl` and scroll, zooms about the pointer |
 | Pan | Drag with the middle mouse button, or hold `Ctrl` and drag empty canvas |
+| On a touch screen | Pinch to zoom; drag empty canvas with one finger, or two, to pan |
 | Select a module | Click it |
 | Select several | Drag a box across empty canvas. It also takes in any frames and notes wholly inside it |
 | Move modules | Drag a module by its body; a selection moves together |

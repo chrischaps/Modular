@@ -290,23 +290,48 @@ impl SynthApp {
         self.prepare_level();
     }
 
-    /// Pans the view to the middle of what's on the current level.
-    fn frame_level(&mut self) {
+    /// Where the current level's modules are, at the current zoom, relative
+    /// to the editor. Nodes never drawn yet are taken at a nominal size.
+    fn level_bounds(&self) -> Option<egui::Rect> {
         let zoom = self.graph_state.pan_zoom.zoom;
-        let level = self.user_state.level;
         let graph = &self.graph_state.graph;
-        let nodes = groups::level_nodes(graph, level);
-        // Nodes never drawn yet are taken at a nominal size, and framed again once they are
-        self.reframe_level = nodes.iter().any(|n| !self.node_sizes.contains_key(n));
-        let bounds = nodes
+        groups::level_nodes(graph, self.user_state.level)
             .iter()
             .filter_map(|&n| {
                 let size = self.node_sizes.get(&n).copied().unwrap_or(groups::NOMINAL_NODE_SIZE);
                 Some(egui::Rect::from_min_size(*self.graph_state.node_positions.get(n)?, size * zoom))
             })
-            .reduce(|a, b| a.union(b));
+            .reduce(|a, b| a.union(b))
+    }
+
+    /// Whether every module on the current level has been drawn, so its size is known.
+    pub(super) fn level_measured(&self) -> bool {
+        groups::level_nodes(&self.graph_state.graph, self.user_state.level)
+            .iter()
+            .all(|n| self.node_sizes.contains_key(n))
+    }
+
+    /// Zooms out until the current level fits the view (never in past 1:1),
+    /// and frames it: for a patch opened on a small screen, where the
+    /// signal path would otherwise run off the edge.
+    pub(super) fn fit_level(&mut self, ui: &egui::Ui) {
+        let Some(bounds) = self.level_bounds().filter(|_| self.editor_rect.is_positive()) else { return };
         let view = self.editor_rect.size();
-        let Some(bounds) = bounds.filter(|_| self.editor_rect.is_positive()) else { return };
+        let room = vec2(view.x - 2.0 * FRAME_MARGIN, view.y - TRAIL_HEIGHT - 2.0 * FRAME_MARGIN);
+        let scale = (room.x / bounds.width()).min(room.y / bounds.height()).min(1.0);
+        if scale < 1.0 {
+            self.graph_state.zoom(ui, scale);
+        }
+        self.frame_level();
+    }
+
+    /// Pans the view to the middle of what's on the current level.
+    fn frame_level(&mut self) {
+        let nodes = groups::level_nodes(&self.graph_state.graph, self.user_state.level);
+        // Nodes never drawn yet are taken at a nominal size, and framed again once they are
+        self.reframe_level = nodes.iter().any(|n| !self.node_sizes.contains_key(n));
+        let view = self.editor_rect.size();
+        let Some(bounds) = self.level_bounds().filter(|_| self.editor_rect.is_positive()) else { return };
         // In the middle if it fits, otherwise from its top left, clear of the
         // breadcrumb trail: where the signal comes in
         let fit = |extent: f32, room: f32, start: f32, middle: f32| {

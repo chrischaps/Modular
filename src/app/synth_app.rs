@@ -257,6 +257,13 @@ pub struct SynthApp {
     /// Embedded in a page (`?patch=` in the address): just the canvas, with
     /// a Play button and a way to the full app.
     embedded: bool,
+    /// Frames left to wait for a just-opened patch's modules to be measured
+    /// before it's zoomed to fit the view; 0 when no fit is waiting. Patches
+    /// opened in the browser fit, where a phone shows only a corner of one.
+    fit_pending: u8,
+    /// A finger is dragging the canvas: on a touch screen that pans, where a
+    /// mouse would draw a selection box.
+    touch_panning: bool,
     /// Patch files the visitor picked, which the browser hands over later.
     #[cfg(target_arch = "wasm32")]
     uploads: (std::sync::mpsc::Sender<web::Upload>, std::sync::mpsc::Receiver<web::Upload>),
@@ -415,6 +422,8 @@ impl SynthApp {
             node_sizes: HashMap::new(),
             reframe_level: false,
             embedded: false,
+            fit_pending: 0,
+            touch_panning: false,
             #[cfg(target_arch = "wasm32")]
             uploads: std::sync::mpsc::channel(),
         };
@@ -1631,6 +1640,14 @@ impl SynthApp {
 
                 // Draw the node graph editor
                 let (zoom_before, pan_before) = (self.graph_state.pan_zoom.zoom, self.graph_state.pan_zoom.pan);
+                if self.fit_pending > 0 {
+                    self.fit_pending -= 1;
+                    if self.level_measured() || self.fit_pending == 0 {
+                        self.fit_pending = 0;
+                        self.fit_level(ui);
+                    }
+                }
+                self.follow_gestures(ui, editor_rect);
                 // A capture script moves the view like a camera
                 if let Some(capture) = self.capture.as_mut() {
                     let zoom = capture.take_zoom();
@@ -1649,6 +1666,7 @@ impl SynthApp {
                 );
                 // Zooming moves every node; undo keeps positions that don't
                 self.history.follow_zoom(zoom_before, pan_before, &self.graph_state.pan_zoom);
+                self.follow_touch_pan(ctx);
                 self.remember_node_sizes(ctx);
                 self.user_state.view_origin = self.history.view_origin();
 
@@ -2657,6 +2675,16 @@ impl SynthApp {
         }
     }
 
+    /// In the browser, zooms a just-opened patch out to fit the view once
+    /// its modules are drawn (see `fit_level`). On the desktop, a patch
+    /// opens where it was laid out.
+    fn fit_on_web(&mut self) {
+        if WEB {
+            // A few frames for its modules to be drawn and measured
+            self.fit_pending = 4;
+        }
+    }
+
     /// Opens a patch file the browser has finished uploading.
     #[cfg(target_arch = "wasm32")]
     fn collect_upload(&mut self) {
@@ -2667,6 +2695,7 @@ impl SynthApp {
             .and_then(|patch| Ok((self.load_patch(&patch).map_err(|e| e.to_string())?, patch.name)));
         match loaded {
             Ok((warnings, name)) => {
+                self.fit_on_web();
                 // Remembered by name only, to offer when it's saved again
                 self.current_patch_path = Some(PathBuf::from(&upload.name));
                 self.current_example = None;
@@ -2702,6 +2731,7 @@ impl SynthApp {
     fn open_example(&mut self, example: &'static Example) {
         match example.patch().and_then(|patch| self.load_patch(&patch)) {
             Ok(warnings) => {
+                self.fit_on_web();
                 self.current_patch_path = None;
                 self.current_example = Some(example);
                 self.status_message = Some(format!("Opened example: {}", example.name));
@@ -2719,6 +2749,44 @@ impl SynthApp {
         match path {
             Some(path) => self.open_file(path),
             None => self.open_example(examples::first_sound()),
+        }
+    }
+
+    /// Zooms and pans the view with a pinch, as on a map: two fingers on a
+    /// touch screen, or a trackpad pinch (or Ctrl+scroll), about the point
+    /// between the fingers or under the pointer. The node graph zooms about
+    /// its middle on its own, with the wheel.
+    fn follow_gestures(&mut self, ui: &egui::Ui, editor_rect: egui::Rect) {
+        let (zoom, touch, pointer) = ui.input(|i| (i.zoom_delta(), i.multi_touch(), i.pointer.hover_pos()));
+        let focus = touch.as_ref().map(|t| t.center_pos).or(pointer);
+        let Some(focus) = focus.filter(|at| editor_rect.contains(*at)) else { return };
+        // Zoom first: frames and notes follow a zoom from where the view was
+        if zoom != 1.0 {
+            let before = self.graph_state.pan_zoom.zoom;
+            self.graph_state.zoom(ui, zoom);
+            let scale = self.graph_state.pan_zoom.zoom / before;
+            // Zoomed about the editor's middle; moved so the point under the
+            // fingers stays put
+            let middle = self.graph_state.pan_zoom.clip_rect.size() / 2.0;
+            self.graph_state.pan_zoom.pan += (focus - editor_rect.min - middle) * (1.0 - scale);
+        }
+        if let Some(touch) = touch {
+            self.graph_state.pan_zoom.pan += touch.translation_delta;
+        }
+    }
+
+    /// On a touch screen, a finger dragged across empty canvas pans rather
+    /// than drawing a selection box. (Two fingers pan in `follow_gestures`.)
+    fn follow_touch_pan(&mut self, ctx: &egui::Context) {
+        let (touching, pinching, held, delta) =
+            ctx.input(|i| (i.any_touches(), i.multi_touch().is_some(), i.pointer.primary_down(), i.pointer.delta()));
+        if touching && self.graph_state.ongoing_box_selection.take().is_some() {
+            self.touch_panning = true;
+        }
+        if !held {
+            self.touch_panning = false;
+        } else if self.touch_panning && !pinching {
+            self.graph_state.pan_zoom.pan += delta;
         }
     }
 

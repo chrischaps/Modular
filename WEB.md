@@ -40,6 +40,7 @@ One `wasm32` cfg gate keeps the desktop build exactly as it was; the
 | **Files** | `rfd`'s dialogs are async on the web, and there's no file system | **Save** downloads the patch; **Open** uploads one (`app/web.rs`). Examples were already `include_str!`. Recent files and the recordings folder are hidden; **My Modules** can't save (it needs a folder) |
 | **Theme** | eframe follows the browser's light/dark preference, and a light browser started the theme from egui's light style | `apply_theme` pins egui to Dark first |
 | **Phones** | First Sound is played from computer keys | The Keyboard and Poly MIDI modules' pianos play when held with the mouse or a finger, sliding legato (on the desktop too) |
+| **Small screens** | The node graph zooms only with the wheel and pans only with the middle button, so a phone saw the left of a patch and no way past it | A patch opened in the browser zooms out to fit (`fit_level`). Pinch zooms about the fingers, two fingers pan, and one finger on empty canvas pans instead of drawing a selection box (`follow_gestures`, `follow_touch_pan`). A trackpad pinch or `Ctrl`+scroll zooms about the pointer, on the desktop too |
 
 ### cpal's WebAudio scheduling, and a fix in the page
 
@@ -108,8 +109,6 @@ the step to take if the browser build is ever for playing live.
 ## Next steps
 
 - Check Safari and a phone on real hardware.
-- Fit the patch to an embed's frame: in a narrow iframe, the right of a
-  patch (often the output) is off screen until the visitor pans.
 - Scrolling: over an embed, the wheel and a dragging finger move the patch,
   not the page.
 - Recording in the browser: render to memory and download the WAV.
