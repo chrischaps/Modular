@@ -3,7 +3,7 @@
 **Module ID** `util.clock` · **Category** Utility
 
 ![Clock Module](../../images/module-clock.png)
-*Four lamps count the beats of the bar, and INT says the Clock keeps its own time. Jacks light while their gates are high.*
+*Four lamps count the beats of the bar, and INT says the Clock keeps its own time. The dots under the lamps are its sixteenths, swung at 62%: each orange one lands late. Jacks light while their gates are high.*
 
 The Clock is the patch's metronome. It sends a steady stream of gate pulses at a tempo you set, for stepping a [Sequencer](../utilities/sequencer.md), firing envelopes on the beat, or triggering a [Sample & Hold](../utilities/sample-hold.md).
 
@@ -13,7 +13,7 @@ The Clock can keep its own time, or follow the **MIDI clock** of a DAW, drum mac
 
 ## The display
 
-Four lamps show the beats of the bar. The lamp of the beat playing flashes as the beat lands and fades through it, and the downbeat flashes brightest. A thin line under the lamps sweeps across the bar. When the Clock stops, the beat it stopped on keeps a faint outline.
+Four lamps show the beats of the bar. The lamp of the beat playing flashes as the beat lands and fades through it, and the downbeat flashes brightest. A thin line under the lamps sweeps across the bar, with a dot where each pulse falls. With **Swing** turned up, the late pulses are drawn in orange, pushed along towards the next one. When the Clock stops, the beat it stopped on keeps a faint outline.
 
 Beside the lamps, a badge shows where the time comes from: **INT** for the Clock's own **BPM**, or **MIDI** when it follows a MIDI clock. The MIDI badge fills in while clock ticks are coming in. Hover over the display to see what the Clock is doing.
 
@@ -40,6 +40,7 @@ Beside the lamps, a badge shows where the time comes from: **INT** for the Clock
 | **Div** | 1, 1/2, 1/4, 1/8, 1/16 | 1/4 | Dropdown on the node. Pulse rate relative to the beat |
 | **Run** | On / Off | On | Checkbox on the node. Off holds the gate low and pauses the clock; on starts it from the top |
 | **Source** | Internal / MIDI | Internal | Dropdown on the node. Internal keeps time at **BPM**; MIDI follows the MIDI clock on the MIDI input |
+| **Swing** | 50 – 75% | 50% | Delays every second pulse. 50% is straight; see [Swing](#swing) |
 
 ## Divisions
 
@@ -58,6 +59,23 @@ A Clock has one output. For a second rhythm, divide its pulses with a [Clock Div
 ## Gate length
 
 **Gate** sets how long each pulse stays high, as a share of the time between pulses. At 50% the gate is high for half of each pulse. Short gates (5 to 20%) suit drums and plucks: the envelope gets its attack and goes straight to release. Long gates (80 to 99%) hold an envelope in its sustain, so notes run nearly into one another.
+
+## Swing
+
+Straight pulses are metronomic. **Swing** makes them shuffle, the way drum machines do: the pulses come in pairs, and the second of each pair arrives late. The knob says where it lands, as a share of the pair.
+
+| Swing | The second pulse lands | Feel |
+|-------|------------------------|------|
+| **50%** | Halfway: straight | A grid |
+| **54 – 60%** | A little late | A pocket: the groove most hip-hop, house and funk sits in |
+| **66.7%** | Two thirds of the way | A triplet shuffle, as in a blues or a swing band |
+| **75%** | Three quarters of the way | A dotted shuffle, hard and bouncy |
+
+At **Div** 1/16 the pairs are eighth notes, so the off-beat sixteenths swing; at 1/8 the pairs are beats, and the off-beat eighths swing. The first pulse of every pair stays on the grid, so the downbeats, the bar length, a sequencer's **EOC** and a synced Delay or LFO are exactly where they'd be without swing. Only the late pulses move.
+
+Each late pulse's gate is shortened with its slot: **Gate** is a share of the time left before the next pulse, so even at 99% and 75% swing every pulse has its own edge. A [Sequencer](../utilities/sequencer.md) on a swung clock does the same with its notes, long on the beat and short off it.
+
+Swing moves everything the Clock drives. To swing one part and not another, such as hats against a straight kick, give the swung part its own Clock at the same **BPM**, then press Stop and Play so both start from the top together. From then on they stay locked to the sample.
 
 ## Sync and Run
 
@@ -120,6 +138,10 @@ A drone that sounds once per pulse. Lower the **BPM** to 40 to 60 and lengthen t
 ```
 
 Untick and tick the Clock's **Run**, or press Stop and Play in your DAW with **Source** on MIDI, and the sequence starts again from step 1 on the downbeat.
+
+### A shuffled groove
+
+Set **Div** to 1/16 and **Swing** to about 58% under a drum pattern. Every off-beat sixteenth lands a little late, and the hats stop sounding like a metronome. The [Backbeat](../../recipes/backbeat.md) recipe has one to try it on.
 
 ### An LFO in time
 

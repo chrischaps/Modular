@@ -190,7 +190,7 @@ static MODULE_UI: &[ModuleUi] = &[
     },
     ModuleUi {
         module_id: "util.clock",
-        knobs: &[knob_as("Tempo", "BPM"), knob_as("Gate Length", "Gate")],
+        knobs: &[knob_as("Tempo", "BPM"), knob_as("Gate Length", "Gate"), knob("Swing")],
         labels: &[("Division", "Div")],
         monitor: &["Gate", "Run", "Reset"],
         display: NodeDisplay::ClockBeat,

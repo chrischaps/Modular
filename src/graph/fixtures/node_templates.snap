@@ -181,11 +181,13 @@ in   Gate Length        Control  ConstantOnly         inline=false num 50 [1..99
 in   Division           Control  ConstantOnly         inline=true  select 2 ["1", "1/2", "1/4", "1/8", "1/16"] "Div"
 in   Run                Control  ConstantOnly         inline=true  toggle true "Run"
 in   Source             Control  ConstantOnly         inline=true  select 0 ["Internal", "MIDI"] "Source"
+in   Swing              Control  ConstantOnly         inline=false num 50 [50..75] %
 out  Gate               Gate
 out  Run                Gate
 out  Reset              Gate
 knob Tempo              "BPM" KnobOnly
 knob Gate Length        "Gate" KnobOnly
+knob Swing              "Swing" KnobOnly
 monitor [0, 1, 2]
 display ClockBeat
 

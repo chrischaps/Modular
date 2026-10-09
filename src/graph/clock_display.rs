@@ -2,7 +2,9 @@
 //!
 //! The Clock's display is a bar of four beat lamps. The lamp of the beat
 //! playing flashes as the beat lands and fades through it, the downbeat's a
-//! little brighter, and a thin line sweeps under them across the bar. Beside
+//! little brighter, and a thin line sweeps under them across the bar. Dots
+//! on that line mark where the pulses fall; with Swing, the late ones are
+//! drawn in orange, pushed along towards the next pulse. Beside
 //! them a badge says where the time comes from: INT for the Clock's own
 //! Tempo, MIDI for a clock master, lit while its ticks are coming in.
 //!
@@ -16,7 +18,7 @@ use egui_node_graph2::NodeId;
 
 use crate::app::theme;
 use crate::dsp::Readout;
-use crate::modules::clock::Clock;
+use crate::modules::clock::{Clock, ClockDivision};
 use crate::modules::lfo::{Lfo, SYNC_DIVISIONS};
 
 use super::{SynthGraph, SynthGraphState, SynthValueType};
@@ -32,6 +34,29 @@ fn selected(graph: &SynthGraph, node_id: NodeId, name: &str) -> Option<usize> {
         SynthValueType::Select { value, .. } => Some(value),
         _ => None,
     }
+}
+
+/// The value of the Number parameter `name` on a node, if it has one.
+fn number(graph: &SynthGraph, node_id: NodeId, name: &str) -> Option<f32> {
+    let node = graph.nodes.get(node_id)?;
+    let (_, input) = node.inputs.iter().find(|(input, _)| input == name)?;
+    match graph.get_input(*input).value {
+        SynthValueType::Number { value, .. } => Some(value),
+        _ => None,
+    }
+}
+
+/// Where a clock's pulses fall in the bar, in beats, and whether each is
+/// swung late: pulses `division` beats apart, every second one pushed to
+/// `swing` (0.5-0.75) of its pair.
+fn pulses_in_bar(division: f32, swing: f32) -> impl Iterator<Item = (f32, bool)> {
+    let delay = (2.0 * swing - 1.0) * division;
+    (0..)
+        .map(move |n| {
+            let late = n % 2 == 1;
+            (n as f32 * division + if late { delay } else { 0.0 }, late && delay > 1e-4)
+        })
+        .take_while(|&(beat, _)| beat < BEATS_PER_BAR as f32)
 }
 
 /// Whether a Clock node follows MIDI.
@@ -173,6 +198,15 @@ pub fn clock_display(ui: &mut egui::Ui, node_id: NodeId, graph: &SynthGraph, use
         painter.hline(lamps.left()..=x, sweep_y, Stroke::new(1.5 * z, ink));
     }
 
+    // --- Where the pulses fall: on the grid in grey, swung late in orange ---
+    let division = ClockDivision::from_param(selected(graph, node_id, "Division").unwrap_or(2) as f32).beat_multiplier();
+    let swing = number(graph, node_id, "Swing").unwrap_or(50.0) / 100.0;
+    for (at, swung) in pulses_in_bar(division, swing) {
+        let x = lamps.left() + lamps.width() * at / BEATS_PER_BAR as f32;
+        let (ink, radius) = if swung { (theme::signal::CONTROL, 1.8) } else { (theme::text::SECONDARY.gamma_multiply(0.7), 1.2) };
+        painter.circle_filled(Pos2::new(x, sweep_y), radius * z, ink);
+    }
+
     let state = match (midi, running, receiving) {
         (true, true, _) => "Following MIDI clock".to_string(),
         (true, false, true) => "The MIDI clock master is stopped".to_string(),
@@ -180,5 +214,25 @@ pub fn clock_display(ui: &mut egui::Ui, node_id: NodeId, graph: &SynthGraph, use
         (false, true, _) => "Keeping its own time at Tempo".to_string(),
         (false, false, _) => "Stopped".to_string(),
     };
-    response.on_hover_text(format!("{state}\nBeat {} of the bar", current + 1));
+    let swing_text = if swing > 0.5005 { format!("\nSwing {:.0}%", swing * 100.0) } else { String::new() };
+    response.on_hover_text(format!("{state}\nBeat {} of the bar{swing_text}", current + 1));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pulses_in_bar_mark_the_swung_ones() {
+        let straight: Vec<_> = pulses_in_bar(0.25, 0.5).collect();
+        assert_eq!(straight.len(), 16);
+        assert!(straight.iter().all(|&(_, swung)| !swung));
+
+        // Eighths at 75%: the off-beats land three quarters through each beat
+        let swung: Vec<_> = pulses_in_bar(0.5, 0.75).collect();
+        assert_eq!(swung, [(0.0, false), (0.75, true), (1.0, false), (1.75, true), (2.0, false), (2.75, true), (3.0, false), (3.75, true)]);
+
+        // Whole notes: one pulse in the bar; its pair's other is in the next
+        assert_eq!(pulses_in_bar(4.0, 0.66).collect::<Vec<_>>(), [(0.0, false)]);
+    }
 }

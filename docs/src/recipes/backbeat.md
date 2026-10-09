@@ -141,6 +141,8 @@ Kick and snare go to the first Mixer's mono **Out**, through a compressor, and i
 
 **A different fill.** The toms play steps 9 to 16. Turn on steps 1 to 8 for a whole-bar fill, or change the pitches for a different run.
 
+**Swing it.** Turn the Clock's **Swing** to about 58%. Every off-beat sixteenth lands a little late, while the downbeats and the backbeat stay on the grid. The pattern stops sounding programmed and starts to sit in a pocket. At 66% it becomes a full triplet shuffle.
+
 **Faster or slower.** Turn the Clock's **BPM**. The fill stays on every fourth bar at any tempo, because the divider counts the Clock's own sixteenths.
 
 **A longer phrase.** Set the Clock Divider's **Div** to 128 for a fill every eighth bar. Set **Offset** to 48, or 112 with **Div** 128, and the fill moves to the last bar of the phrase, with the crash on the first bar of the next one, the way drummers usually phrase it.

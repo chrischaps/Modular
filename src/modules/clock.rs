@@ -291,6 +291,9 @@ impl MidiClockFollower {
 /// - **Run** (toggle): Whether the clock is running.
 /// - **Source** (choice): Internal keeps its own time at Tempo; MIDI follows
 ///   the MIDI clock coming in (its ticks, Start, Continue and Stop).
+/// - **Swing** (50-75%): Where the second pulse of each pair lands, as a
+///   share of the pair. 50% is straight; 66% is a triplet shuffle. The first
+///   pulse of each pair stays on the grid, so bars keep their length.
 pub struct Clock {
     /// Beats since the clock started. Kept in `f64` and counted from the
     /// start, so even the slowest clock lands every edge on its sample.
@@ -368,6 +371,15 @@ impl Clock {
                     &["Internal", "MIDI"],
                     0,
                 ).describe("Internal keeps time at Tempo; MIDI follows the clock of a DAW or drum machine on the MIDI input"),
+                // Where the second pulse of each pair lands
+                ParameterDefinition::new(
+                    "swing",
+                    "Swing",
+                    50.0,
+                    75.0,
+                    50.0,
+                    ParameterDisplay::linear("%"),
+                ).describe("Delays every second pulse; 50% is straight, 66% a triplet shuffle"),
             ],
         }
     }
@@ -384,6 +396,7 @@ impl Clock {
     const PARAM_DIVISION: usize = 2;
     const PARAM_RUN: usize = 3;
     const PARAM_SOURCE: usize = 4;
+    const PARAM_SWING: usize = 5;
 
     /// Sync threshold for detecting high/low states.
     const SYNC_THRESHOLD: f32 = 0.5;
@@ -413,14 +426,26 @@ impl Clock {
     }
 
     /// Whether the gate is high at `beats`, for pulses `division` beats apart
-    /// that stay high for `gate_length` (0-1) of each.
+    /// that stay high for `gate_length` (0-1) of each, swung by `swing`
+    /// (0.5-0.75).
+    ///
+    /// Pulses come in pairs. The first of each pair is on the grid; the
+    /// second lands at `swing` of the way through the pair. Each gate lasts
+    /// `gate_length` of a straight pulse, or of the swung pulse's shorter
+    /// slot, so the pulses keep the same proportion of on to off.
     #[inline]
-    fn gate_at(beats: f64, division: f64, gate_length: f64) -> bool {
+    pub fn gate_at(beats: f64, division: f64, gate_length: f64, swing: f64) -> bool {
         let cycles = beats / division;
         // A beat a hair under a whole number of cycles, after rounding, is
         // on the edge, not a whole cycle before it
-        let phase = cycles - (cycles + 1e-9).floor();
-        phase < gate_length
+        let pulse = (cycles + 1e-9).floor();
+        let phase = cycles - pulse;
+        if pulse.rem_euclid(2.0) < 0.5 {
+            return phase < gate_length;
+        }
+        // The swung pulse starts `delay` into its slot, and has the rest
+        let delay = 2.0 * swing - 1.0;
+        phase + 1e-9 >= delay && phase - delay < gate_length * (1.0 - delay)
     }
 
     /// Restarts from the top and fires Reset.
@@ -471,6 +496,7 @@ impl DspModule for Clock {
         let division = ClockDivision::from_param(params[Self::PARAM_DIVISION]).beat_multiplier() as f64;
         let run = params[Self::PARAM_RUN] > 0.5;
         let source = Self::source(params);
+        let swing = params.get(Self::PARAM_SWING).map_or(0.5, |&swing| (swing as f64 / 100.0).clamp(0.5, 0.75));
 
         // Switching Run on starts from the top, as a drum machine's Play does
         if source == ClockSource::Internal && run && self.prev_run == Some(false) {
@@ -512,7 +538,7 @@ impl DspModule for Clock {
                     ClockSource::Midi => self.midi.is_running(),
                 };
 
-            let gate = self.running && Self::gate_at(self.beats, division, gate_length);
+            let gate = self.running && Self::gate_at(self.beats, division, gate_length, swing);
             outputs[Self::PORT_GATE].samples[i] = if gate { 1.0 } else { 0.0 };
             if let Some(out) = outputs.get_mut(Self::PORT_RUN) {
                 out.samples[i] = if self.running { 1.0 } else { 0.0 };
@@ -616,7 +642,7 @@ mod tests {
         let clock = Clock::new();
         let params = clock.parameters();
 
-        assert_eq!(params.len(), 5);
+        assert_eq!(params.len(), 6);
 
         // Tempo
         assert_eq!(params[0].id, "tempo");
@@ -637,6 +663,12 @@ mod tests {
         // Run
         assert_eq!(params[3].id, "run");
         assert_eq!(params[3].default, 1.0); // Running by default
+
+        // Swing: straight by default
+        assert_eq!(params[5].id, "swing");
+        assert_eq!(params[5].min, 50.0);
+        assert_eq!(params[5].max, 75.0);
+        assert_eq!(params[5].default, 50.0);
     }
 
     #[test]
@@ -873,7 +905,7 @@ mod tests {
         assert_eq!(module.info().id, "util.clock");
         assert_eq!(module.info().name, "Clock");
         assert_eq!(module.ports().len(), 4);
-        assert_eq!(module.parameters().len(), 5);
+        assert_eq!(module.parameters().len(), 6);
     }
 
     #[test]
@@ -981,6 +1013,92 @@ mod tests {
         // 300 BPM sixteenths: one edge every 50 ms
         let edges = rising_edges(&[300.0, 50.0, 4.0, 1.0, 0.0], 48000.0, 600.0);
         assert_edges_on_grid(&edges, 2400.0, 12_000);
+    }
+
+    // --- Swing (#99) ---
+
+    /// 120 BPM sixteenths, 50% gates, swung by `swing` percent.
+    fn sixteenths(swing: f32) -> [f32; 6] {
+        [120.0, 50.0, 4.0, 1.0, 0.0, swing]
+    }
+
+    #[test]
+    fn test_swing_lands_even_sixteenths_at_its_share_of_the_eighth() {
+        // At 48 kHz, 120 BPM: a sixteenth is 6000 samples, an eighth 12000
+        for (swing, at) in [(200.0 / 3.0, 8000.0), (66.0, 7920.0), (58.0, 6960.0), (75.0, 9000.0)] {
+            let edges = rising_edges(&sixteenths(swing), 48000.0, 120.0);
+            assert!(edges.len() >= 960, "{} edges at {swing}%", edges.len());
+            for (n, &edge) in edges.iter().enumerate() {
+                let pair = (n / 2) as f64 * 12000.0;
+                let ideal = if n % 2 == 0 { pair } else { pair + at };
+                assert!((edge as f64 - ideal).abs() <= 1.0, "edge {n} at {edge}, ideal {ideal}, swing {swing}%");
+            }
+        }
+    }
+
+    #[test]
+    fn test_swing_leaves_the_grid_pulses_and_bars_alone() {
+        let straight = rising_edges(&sixteenths(50.0), 48000.0, 60.0);
+        let swung = rising_edges(&sixteenths(66.0), 48000.0, 60.0);
+        assert_eq!(straight.len(), swung.len());
+        // Every first pulse of a pair, the downbeats among them, on the same
+        // sample as straight
+        for n in (0..straight.len()).step_by(2) {
+            assert_eq!(straight[n], swung[n], "pulse {n}");
+        }
+    }
+
+    #[test]
+    fn test_straight_swing_is_the_clock_without_it() {
+        // Patches saved before Swing have five parameters
+        let before = rising_edges(&[120.0, 50.0, 4.0, 1.0, 0.0], 44100.0, 30.0);
+        assert_eq!(before, rising_edges(&sixteenths(50.0), 44100.0, 30.0));
+    }
+
+    #[test]
+    fn test_swung_gates_keep_their_shape_and_never_run_together() {
+        // At 99% gates and the hardest swing, every pulse still has its edge
+        let edges = rising_edges(&[120.0, 99.0, 4.0, 1.0, 0.0, 75.0], 48000.0, 5.99);
+        assert_eq!(edges.len(), 6 * 8);
+
+        // At 50% the grid pulse keeps its 3000 samples; the swung one gets
+        // half its 3000-sample slot
+        let mut clock = Clock::new();
+        clock.prepare(48000.0, 24000);
+        let mut outs = outputs(24000);
+        clock.process(&[], &mut outs, &sixteenths(75.0), &ProcessContext::new(48000.0, 24000));
+        let gate = &outs[0].samples;
+        let high = |from: usize| gate[from..].iter().take_while(|&&s| s == 1.0).count();
+        assert!(high(0).abs_diff(3000) <= 1, "grid gate {}", high(0));
+        assert!(high(9000).abs_diff(1500) <= 1, "swung gate {}", high(9000));
+        assert_eq!(gate[8999], 0.0);
+    }
+
+    #[test]
+    fn test_swing_keeps_the_sequencers_end_of_cycle() {
+        use crate::modules::StepSequencer;
+        // A 16-step sequencer on the clock, its EOC once a bar
+        let eoc = |swing: f32| {
+            let mut clock = Clock::new();
+            let mut seq = StepSequencer::new();
+            clock.prepare(48000.0, 512);
+            seq.prepare(48000.0, 512);
+            let mut seq_params: Vec<f32> = seq.parameters().iter().map(|p| p.default).collect();
+            seq_params[0] = 16.0; // Steps
+            let mut clock_outs = outputs(512);
+            let mut seq_outs = vec![SignalBuffer::control(512); 5];
+            let ctx = ProcessContext::new(48000.0, 512);
+            let mut eoc = Vec::new();
+            for _ in 0..48000 * 10 / 512 {
+                clock.process(&[], &mut clock_outs, &sixteenths(swing), &ctx);
+                seq.process(&[&clock_outs[0]], &mut seq_outs, &seq_params, &ctx);
+                eoc.extend_from_slice(&seq_outs[4].samples);
+            }
+            rises(&eoc)
+        };
+        let straight = eoc(50.0);
+        assert_eq!(straight.len(), 4, "a bar every 2 s at 120 BPM: {straight:?}");
+        assert_eq!(straight, eoc(66.0));
     }
 
     // --- Run and Reset ---

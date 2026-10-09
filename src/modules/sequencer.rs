@@ -196,6 +196,8 @@ pub struct StepSequencer {
     since_clock: Option<usize>,
     /// The time between the last two clock edges, once known.
     step_samples: Option<usize>,
+    /// The two steps measured before that, newest first.
+    earlier_steps: [Option<usize>; 2],
     /// EOC timer (samples remaining in EOC pulse).
     eoc_timer: usize,
     /// Simple PRNG state for random mode.
@@ -307,6 +309,7 @@ impl StepSequencer {
             gate_high: false,
             since_clock: None,
             step_samples: None,
+            earlier_steps: [None; 2],
             eoc_timer: 0,
             random_state: 12345, // Seed for PRNG
             sample_rate: 44100.0,
@@ -353,19 +356,34 @@ impl StepSequencer {
         Self::PARAM_GATE_MODE + 1 + step
     }
 
+    /// How long the step starting now will last, in samples: usually the
+    /// last step measured. A swung clock's steps alternate long and short,
+    /// though, so when the step before last matches the last, the rhythm
+    /// repeats every two steps and the coming step is the one before last.
+    /// A steady clock gives the same answer either way.
+    fn coming_step(&self) -> Option<usize> {
+        let last = self.step_samples?;
+        match self.earlier_steps {
+            [Some(before), Some(third)] if last.abs_diff(third) <= last / 32 + 1 => Some(before),
+            _ => Some(last),
+        }
+    }
+
     /// How long a new note's gate stays high, in samples.
     ///
-    /// Gate Length is a share of the measured step, or of 100 ms in the
-    /// Fixed mode and until two clock edges have been seen. A gate held
-    /// until the next clock (a tie, or 100% of the step) still ends after
-    /// two steps, so a clock that stops doesn't leave a note hanging.
+    /// Gate Length is a share of the coming step (see `coming_step`), or of
+    /// 100 ms in the Fixed mode and until two clock edges have been seen. A
+    /// gate held until the next clock (a tie, or 100% of the step) still
+    /// ends after two steps, so a clock that stops doesn't leave a note
+    /// hanging.
     fn gate_samples(&self, mode: GateMode, gate_length: f32, tied: bool) -> usize {
         let fixed = self.sample_rate * 0.1;
-        let held = 2 * self.step_samples.unwrap_or(fixed as usize);
+        let step = self.coming_step();
+        let held = 2 * step.unwrap_or(fixed as usize);
         if tied {
             return held;
         }
-        let samples = match (mode, self.step_samples) {
+        let samples = match (mode, step) {
             (GateMode::Step, Some(_)) if gate_length >= 1.0 => held,
             (GateMode::Step, Some(step)) => (step as f32 * gate_length) as usize,
             _ => (fixed * gate_length) as usize,
@@ -469,6 +487,7 @@ impl DspModule for StepSequencer {
         // A step measured at another rate is the wrong number of samples
         self.since_clock = None;
         self.step_samples = None;
+        self.earlier_steps = [None; 2];
     }
 
     fn process(
@@ -526,6 +545,7 @@ impl DspModule for StepSequencer {
             // Every clock edge measures the step, running or not
             if clock_rising {
                 if let Some(samples) = self.since_clock {
+                    self.earlier_steps = [self.step_samples, self.earlier_steps[0]];
                     self.step_samples = Some(samples.max(1));
                 }
                 self.since_clock = Some(0);
@@ -617,6 +637,7 @@ impl DspModule for StepSequencer {
         self.gate_high = false;
         self.since_clock = None;
         self.step_samples = None;
+        self.earlier_steps = [None; 2];
         self.eoc_timer = 0;
     }
 }
@@ -892,6 +913,21 @@ mod tests {
         assert_eq!(high_for(&gate, 0), 50);
         assert_eq!(high_for(&gate, 1000), 500);
         assert_eq!(high_for(&gate, 2000), 500);
+    }
+
+    #[test]
+    fn test_gates_follow_a_swung_clock() {
+        // Straight, a step would be 500 ms; swung at 66%, the steps go
+        // 660, 340, 660, 340
+        let params = params_with(8.0, 0.0, 50.0);
+        let clocks = [0, 660, 1000, 1660, 2000, 2660, 3000, 3660];
+        let gate = gate_over(&params, 4000, &clocks, &[]);
+        assert_eq!(rises(&gate), clocks);
+        // Once the rhythm shows, each note is half of its own step: long on
+        // the grid, short on the swung step
+        assert_eq!(high_for(&gate, 2000), 330);
+        assert_eq!(high_for(&gate, 2660), 170);
+        assert_eq!(high_for(&gate, 3000), 330);
     }
 
     #[test]
