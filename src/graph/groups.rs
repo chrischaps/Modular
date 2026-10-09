@@ -1,0 +1,859 @@
+//! Groups: modules collapsed into one node, with jacks of its own and
+//! whichever knobs are pinned to its face.
+//!
+//! # How a group lives in the graph
+//!
+//! Every module stays in the editor graph whether or not it's in a group,
+//! and the editor shows one level at a time. A group is three nodes:
+//!
+//! - the **group node**, on the level the group sits on, whose inputs and
+//!   outputs are the group's jacks;
+//! - **Inputs**, inside the group, with an output for each input jack;
+//! - **Outputs**, inside the group, with an input for each output jack.
+//!
+//! A cable into a group's input jack carries on, inside, from the same jack
+//! on Inputs; one into a jack on Outputs carries on out of the group's output
+//! jack. [`leaf_source`] follows those hops, so [`leaf_cables`] are the
+//! module-to-module cables the patch adds up to. That's all the engine ever
+//! hears of: groups cost nothing to run, and grouping or ungrouping doesn't
+//! change a sample.
+
+use std::collections::{HashMap, HashSet};
+
+use egui::{Color32, Pos2, Rect, Vec2};
+use egui_node_graph2::{InputId, InputParamKind, NodeId, OutputId};
+
+use crate::app::theme;
+use crate::dsp::{ModuleCategory, SignalType};
+use super::{SynthDataType, SynthGraph, SynthGraphEditorState, SynthNodeData, SynthValueType};
+
+/// The `module_id` the three nodes of a group carry. No module has these.
+pub const GROUP_ID: &str = "group";
+pub const INPUTS_ID: &str = "group.inputs";
+pub const OUTPUTS_ID: &str = "group.outputs";
+
+/// Most groups inside groups that are followed, in case a bad patch makes
+/// a loop of them.
+const MAX_DEPTH: usize = 64;
+
+/// How big a module is taken to be where its real size isn't known (it's
+/// hidden inside a group), in unzoomed points.
+pub const NOMINAL_NODE_SIZE: Vec2 = Vec2::new(180.0, 120.0);
+
+/// Space between a group's modules and its Inputs and Outputs, unzoomed.
+const PROXY_GAP: f32 = 70.0;
+/// Room for the Inputs node, left of the modules, unzoomed.
+const INPUTS_WIDTH: f32 = 110.0;
+
+/// Identifies a group. Taken from the same counter as engine node IDs, so a
+/// patch file can use both as node IDs without them colliding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct GroupId(pub u64);
+
+/// What a node in the editor graph is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NodeKind {
+    /// A module, which the engine runs.
+    #[default]
+    Module,
+    /// A group seen from outside.
+    Group(GroupId),
+    /// Inside a group: where its input jacks come in.
+    Inputs(GroupId),
+    /// Inside a group: where its output jacks go out.
+    Outputs(GroupId),
+}
+
+impl NodeKind {
+    /// The group this is the outside of.
+    pub fn group(self) -> Option<GroupId> {
+        match self {
+            Self::Group(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// Inputs or Outputs, which exist only as part of their group.
+    pub fn is_proxy(self) -> bool {
+        matches!(self, Self::Inputs(_) | Self::Outputs(_))
+    }
+}
+
+/// One of a group's jacks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Jack {
+    pub name: String,
+    pub signal: SignalType,
+}
+
+/// The nodes that make up one group.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Parts {
+    pub node: Option<NodeId>,
+    pub inputs: Option<NodeId>,
+    pub outputs: Option<NodeId>,
+}
+
+/// Where each group's nodes are in a graph.
+#[derive(Clone, Debug, Default)]
+pub struct GroupIndex {
+    parts: HashMap<GroupId, Parts>,
+}
+
+impl GroupIndex {
+    pub fn of(graph: &SynthGraph) -> Self {
+        let mut parts: HashMap<GroupId, Parts> = HashMap::new();
+        for (node_id, node) in graph.nodes.iter() {
+            match node.user_data.kind {
+                NodeKind::Module => {}
+                NodeKind::Group(id) => parts.entry(id).or_default().node = Some(node_id),
+                NodeKind::Inputs(id) => parts.entry(id).or_default().inputs = Some(node_id),
+                NodeKind::Outputs(id) => parts.entry(id).or_default().outputs = Some(node_id),
+            }
+        }
+        Self { parts }
+    }
+
+    pub fn parts(&self, id: GroupId) -> Parts {
+        self.parts.get(&id).copied().unwrap_or_default()
+    }
+
+    /// The group's own node, if the group exists.
+    pub fn node(&self, id: GroupId) -> Option<NodeId> {
+        self.parts(id).node
+    }
+
+    /// Every group in the graph.
+    pub fn ids(&self) -> impl Iterator<Item = GroupId> + '_ {
+        self.parts.iter().filter(|(_, p)| p.node.is_some()).map(|(id, _)| *id)
+    }
+
+    /// The group a group sits in, or `None` if it's at the top.
+    pub fn parent_of(&self, graph: &SynthGraph, id: GroupId) -> Option<GroupId> {
+        graph.nodes.get(self.node(id)?)?.user_data.parent
+    }
+
+    /// The groups from the top of the patch down to `level`, outermost
+    /// first. Empty at the top. A level that no longer exists has no path.
+    pub fn path(&self, graph: &SynthGraph, level: Option<GroupId>) -> Option<Vec<GroupId>> {
+        let mut path = Vec::new();
+        let mut at = level;
+        while let Some(id) = at {
+            self.node(id)?;
+            path.push(id);
+            if path.len() > MAX_DEPTH {
+                return None;
+            }
+            at = self.parent_of(graph, id);
+        }
+        path.reverse();
+        Some(path)
+    }
+
+    /// How many groups down from `outer` a node sitting in `level` is: 1
+    /// directly inside it, 2 inside a group inside it, and so on. `None` if
+    /// it isn't inside `outer` at all.
+    pub fn depth_below(&self, graph: &SynthGraph, outer: GroupId, level: Option<GroupId>) -> Option<u8> {
+        let mut at = level?;
+        for depth in 1..=MAX_DEPTH as u8 {
+            if at == outer {
+                return Some(depth);
+            }
+            at = self.parent_of(graph, at)?;
+        }
+        None
+    }
+}
+
+/// The module output a cable from `output` really carries, through any
+/// number of group jacks. `None` if the trail ends at a jack with nothing
+/// plugged into it.
+pub fn leaf_source(graph: &SynthGraph, index: &GroupIndex, mut output: OutputId) -> Option<OutputId> {
+    for _ in 0..MAX_DEPTH {
+        let node = graph.nodes.get(graph.outputs.get(output)?.node)?;
+        let position = node.outputs.iter().position(|(_, id)| *id == output)?;
+        let jack = match node.user_data.kind {
+            NodeKind::Module => return Some(output),
+            // Inside a group, a jack carries what's plugged into the group outside
+            NodeKind::Inputs(id) => graph.nodes.get(index.node(id)?)?.inputs.get(position)?.1,
+            // Outside, a group's output carries what's plugged into it inside
+            NodeKind::Group(id) => graph.nodes.get(index.parts(id).outputs?)?.inputs.get(position)?.1,
+            NodeKind::Outputs(_) => return None,
+        };
+        output = graph.connections.get(jack)?.first().copied()?;
+    }
+    None
+}
+
+/// Every cable from one module's output to another module's input, through
+/// any groups between them: the patch as the engine hears it.
+pub fn leaf_cables(graph: &SynthGraph) -> Vec<(OutputId, InputId)> {
+    let index = GroupIndex::of(graph);
+    graph
+        .iter_connections()
+        .filter(|(input, _)| {
+            graph.inputs.get(*input).and_then(|i| graph.nodes.get(i.node)).is_some_and(|n| n.user_data.is_module())
+        })
+        .filter_map(|(input, output)| Some((leaf_source(graph, &index, output)?, input)))
+        .collect()
+}
+
+/// Gives groups new IDs, wherever the graph names them: as groups, and as
+/// where nodes sit. IDs `new` doesn't mention stay as they are.
+pub fn renumber(graph: &mut SynthGraph, new: &HashMap<GroupId, GroupId>) {
+    let renumbered = |id: GroupId| new.get(&id).copied().unwrap_or(id);
+    for node in graph.nodes.values_mut() {
+        let data = &mut node.user_data;
+        data.kind = match data.kind {
+            NodeKind::Module => NodeKind::Module,
+            NodeKind::Group(id) => NodeKind::Group(renumbered(id)),
+            NodeKind::Inputs(id) => NodeKind::Inputs(renumbered(id)),
+            NodeKind::Outputs(id) => NodeKind::Outputs(renumbered(id)),
+        };
+        data.parent = data.parent.map(renumbered);
+    }
+}
+
+/// The nodes on one level: at the top of the patch, or directly inside a group.
+pub fn level_nodes(graph: &SynthGraph, level: Option<GroupId>) -> Vec<NodeId> {
+    graph.nodes.iter().filter(|(_, n)| n.user_data.parent == level).map(|(id, _)| id).collect()
+}
+
+/// Every node inside a group, however deep, including its Inputs and
+/// Outputs and the nodes of groups inside it, but not the group's own node.
+pub fn descendants(graph: &SynthGraph, index: &GroupIndex, id: GroupId) -> Vec<NodeId> {
+    graph
+        .nodes
+        .iter()
+        .filter(|(_, node)| index.depth_below(graph, id, node.user_data.parent).is_some())
+        .map(|(node_id, _)| node_id)
+        .collect()
+}
+
+/// A group's name, as its node shows it.
+pub fn name(graph: &SynthGraph, node_id: NodeId) -> &str {
+    graph.nodes.get(node_id).map_or("", |n| n.user_data.display_name.as_str())
+}
+
+/// Renames a group.
+pub fn rename(graph: &mut SynthGraph, node_id: NodeId, name: &str) {
+    if let Some(node) = graph.nodes.get_mut(node_id) {
+        node.label = name.to_string();
+        node.user_data.display_name = name.to_string();
+    }
+}
+
+/// A node's input jacks, as jacks.
+pub fn input_jacks(graph: &SynthGraph, node_id: NodeId) -> Vec<Jack> {
+    graph.nodes.get(node_id).map_or_else(Vec::new, |node| {
+        node.inputs
+            .iter()
+            .map(|(name, id)| Jack { name: name.clone(), signal: graph.get_input(*id).typ.signal_type() })
+            .collect()
+    })
+}
+
+/// A node's output jacks, as jacks.
+pub fn output_jacks(graph: &SynthGraph, node_id: NodeId) -> Vec<Jack> {
+    graph.nodes.get(node_id).map_or_else(Vec::new, |node| {
+        node.outputs
+            .iter()
+            .map(|(name, id)| Jack { name: name.clone(), signal: graph.get_output(*id).typ.signal_type() })
+            .collect()
+    })
+}
+
+fn node_data(module_id: &'static str, name: &str, kind: NodeKind, parent: Option<GroupId>) -> SynthNodeData {
+    let mut data = SynthNodeData::new(module_id, name, ModuleCategory::Utility);
+    data.kind = kind;
+    data.parent = parent;
+    data
+}
+
+fn add_jack_inputs(graph: &mut SynthGraph, node_id: NodeId, jacks: &[Jack]) {
+    for jack in jacks {
+        graph.add_input_param(
+            node_id,
+            jack.name.clone(),
+            SynthDataType::new(jack.signal),
+            SynthValueType::Port,
+            InputParamKind::ConnectionOnly,
+            true,
+        );
+    }
+}
+
+fn add_jack_outputs(graph: &mut SynthGraph, node_id: NodeId, jacks: &[Jack]) {
+    for jack in jacks {
+        graph.add_output_param(node_id, jack.name.clone(), SynthDataType::new(jack.signal));
+    }
+}
+
+/// Adds a group's own node, on the level `parent`.
+pub fn add_group_node(
+    graph: &mut SynthGraph,
+    id: GroupId,
+    name: &str,
+    parent: Option<GroupId>,
+    inputs: &[Jack],
+    outputs: &[Jack],
+) -> NodeId {
+    let data = node_data(GROUP_ID, name, NodeKind::Group(id), parent)
+        .with_description("Modules grouped into one. Double-click to open it (or Tab)");
+    graph.add_node(name.to_string(), data, |graph, node_id| {
+        add_jack_inputs(graph, node_id, inputs);
+        add_jack_outputs(graph, node_id, outputs);
+    })
+}
+
+/// Adds the Inputs node inside a group, with an output for each input jack.
+pub fn add_inputs_node(graph: &mut SynthGraph, id: GroupId, jacks: &[Jack]) -> NodeId {
+    let data = node_data(INPUTS_ID, "Inputs", NodeKind::Inputs(id), Some(id))
+        .with_description("What's plugged into the group's input jacks, outside");
+    graph.add_node("Inputs".to_string(), data, |graph, node_id| add_jack_outputs(graph, node_id, jacks))
+}
+
+/// Adds the Outputs node inside a group, with an input for each output jack.
+pub fn add_outputs_node(graph: &mut SynthGraph, id: GroupId, jacks: &[Jack]) -> NodeId {
+    let data = node_data(OUTPUTS_ID, "Outputs", NodeKind::Outputs(id), Some(id))
+        .with_description("What the group's output jacks carry, outside");
+    graph.add_node("Outputs".to_string(), data, |graph, node_id| add_jack_inputs(graph, node_id, jacks))
+}
+
+/// Puts a node on the canvas, on top of the others.
+fn place(editor: &mut SynthGraphEditorState, node_id: NodeId, position: Pos2) {
+    editor.node_positions.insert(node_id, position);
+    editor.node_order.push(node_id);
+}
+
+/// Names made unique by numbering repeats: "In", "In 2", "In 3".
+fn unique_names(names: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut seen: HashSet<String> = HashSet::new();
+    names
+        .into_iter()
+        .map(|name| {
+            let mut candidate = name.clone();
+            let mut n = 2;
+            while !seen.insert(candidate.clone()) {
+                candidate = format!("{name} {n}");
+                n += 1;
+            }
+            candidate
+        })
+        .collect()
+}
+
+/// The three nodes a new group is made of.
+#[derive(Clone, Copy, Debug)]
+pub struct NewGroup {
+    pub node: NodeId,
+    pub inputs: NodeId,
+    pub outputs: NodeId,
+}
+
+/// Collapses nodes on one level into a group called `name`.
+///
+/// Every cable crossing the selection's edge becomes a jack: one input jack
+/// for each output outside that feeds the selection, named after the first
+/// input it feeds; one output jack for each output inside that feeds
+/// something outside, named after that output. Jacks are ordered top to
+/// bottom by where their modules sit. The cables outside plug into the
+/// group's jacks, and those inside into Inputs and Outputs, so the modules
+/// still hear exactly what they did.
+///
+/// The group's node takes the top-left corner of the selection, and
+/// `bounds` (the selection as drawn, in editor coordinates) places Inputs
+/// and Outputs either side of it. Nodes not on the same level as the first
+/// one, and other groups' Inputs and Outputs, are left out. Returns `None`
+/// if nothing could be grouped.
+pub fn group(
+    editor: &mut SynthGraphEditorState,
+    nodes: &[NodeId],
+    id: GroupId,
+    name: &str,
+    bounds: Rect,
+) -> Option<NewGroup> {
+    let graph = &editor.graph;
+    let groupable = |n: &NodeId| graph.nodes.get(*n).is_some_and(|node| !node.user_data.kind.is_proxy());
+    let level = graph.nodes.get(*nodes.iter().find(|n| groupable(n))?)?.user_data.parent;
+    let inside: Vec<NodeId> = nodes
+        .iter()
+        .copied()
+        .filter(|n| groupable(n) && graph[*n].user_data.parent == level)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let is_inside = |node_id: NodeId| inside.contains(&node_id);
+    let position = |node_id: NodeId| editor.node_positions.get(node_id).copied().unwrap_or_default();
+    // Top to bottom, then left to right, then in port order
+    let place_key = |node_id: NodeId, port: usize| {
+        let p = position(node_id);
+        ((p.y * 4.0) as i64, (p.x * 4.0) as i64, port)
+    };
+
+    let mut inbound = Vec::new();
+    let mut outbound = Vec::new();
+    for (input, output) in graph.iter_connections() {
+        let (to, from) = (graph.get_input(input).node, graph.get_output(output).node);
+        match (is_inside(from), is_inside(to)) {
+            (false, true) => inbound.push((input, output)),
+            (true, false) => outbound.push((input, output)),
+            _ => {}
+        }
+    }
+    let input_position = |input: InputId| {
+        let node = graph.get_input(input).node;
+        place_key(node, graph[node].inputs.iter().position(|(_, id)| *id == input).unwrap_or(0))
+    };
+    let output_position = |output: OutputId| {
+        let node = graph.get_output(output).node;
+        place_key(node, graph[node].outputs.iter().position(|(_, id)| *id == output).unwrap_or(0))
+    };
+    inbound.sort_by_key(|&(input, _)| input_position(input));
+    outbound.sort_by_key(|&(_, output)| output_position(output));
+
+    // One input jack per output outside, one output jack per output inside
+    let mut in_sources: Vec<OutputId> = Vec::new();
+    let mut in_names = Vec::new();
+    let mut in_signals = Vec::new();
+    for &(input, output) in &inbound {
+        if !in_sources.contains(&output) {
+            in_sources.push(output);
+            let node = &graph[graph.get_input(input).node];
+            in_names.push(node.inputs.iter().find(|(_, id)| *id == input).map_or_else(String::new, |(n, _)| n.clone()));
+            in_signals.push(graph.get_input(input).typ.signal_type());
+        }
+    }
+    let mut out_sources: Vec<OutputId> = Vec::new();
+    let mut out_names = Vec::new();
+    let mut out_signals = Vec::new();
+    for &(_, output) in &outbound {
+        if !out_sources.contains(&output) {
+            out_sources.push(output);
+            let node = &graph[graph.get_output(output).node];
+            out_names.push(node.outputs.iter().find(|(_, id)| *id == output).map_or_else(String::new, |(n, _)| n.clone()));
+            out_signals.push(graph.get_output(output).typ.signal_type());
+        }
+    }
+    let jacks = |names: Vec<String>, signals: Vec<SignalType>| -> Vec<Jack> {
+        unique_names(names).into_iter().zip(signals).map(|(name, signal)| Jack { name, signal }).collect()
+    };
+    let input_jacks = jacks(in_names, in_signals);
+    let output_jacks = jacks(out_names, out_signals);
+
+    let corner = inside.iter().map(|&n| position(n)).reduce(|a, b| a.min(b))?;
+    let zoom = editor.pan_zoom.zoom;
+    let graph = &mut editor.graph;
+    let node = add_group_node(graph, id, name, level, &input_jacks, &output_jacks);
+    let inputs = add_inputs_node(graph, id, &input_jacks);
+    let outputs = add_outputs_node(graph, id, &output_jacks);
+
+    // Rewire through the jacks
+    for (input, output) in inbound {
+        let k = in_sources.iter().position(|o| *o == output)?;
+        graph.remove_connection(input, output);
+        let (jack_in, jack_out) = (graph[node].inputs[k].1, graph[inputs].outputs[k].1);
+        graph.add_connection(output, jack_in, 0);
+        graph.add_connection(jack_out, input, 0);
+    }
+    for (input, output) in outbound {
+        let k = out_sources.iter().position(|o| *o == output)?;
+        graph.remove_connection(input, output);
+        let (jack_in, jack_out) = (graph[outputs].inputs[k].1, graph[node].outputs[k].1);
+        graph.add_connection(output, jack_in, 0);
+        graph.add_connection(jack_out, input, 0);
+    }
+    for &node_id in &inside {
+        graph[node_id].user_data.parent = Some(id);
+    }
+
+    let inputs_at = Pos2::new(bounds.left() - (PROXY_GAP + INPUTS_WIDTH) * zoom, bounds.top());
+    let outputs_at = Pos2::new(bounds.right() + PROXY_GAP * zoom, bounds.top());
+    place(editor, inputs, inputs_at);
+    place(editor, outputs, outputs_at);
+    place(editor, node, corner);
+    Some(NewGroup { node, inputs, outputs })
+}
+
+/// Opens a group back out onto the level it sits on: its modules (and the
+/// groups inside it) come out where the group's node is, and every cable
+/// through its jacks becomes a cable straight from source to destination.
+/// Returns the nodes that came out, or `None` if `node_id` isn't a group.
+pub fn ungroup(editor: &mut SynthGraphEditorState, node_id: NodeId) -> Option<Vec<NodeId>> {
+    let graph = &editor.graph;
+    let node = graph.nodes.get(node_id)?;
+    let id = node.user_data.kind.group()?;
+    let level = node.user_data.parent;
+    let index = GroupIndex::of(graph);
+    let parts = index.parts(id);
+    let members: Vec<NodeId> = level_nodes(graph, Some(id))
+        .into_iter()
+        .filter(|n| !graph[*n].user_data.kind.is_proxy())
+        .collect();
+
+    // What each jack carries, from the side it's fed
+    let fed = |jack: InputId| graph.connections.get(jack).and_then(|c| c.first().copied());
+    let outer_source = |k: usize| fed(graph[node_id].inputs.get(k)?.1);
+    let inner_source = |k: usize| {
+        let source = fed(graph[parts.outputs?].inputs.get(k)?.1)?;
+        // Straight through from an input jack: whatever feeds that jack outside
+        match graph.nodes.get(graph.get_output(source).node)?.user_data.kind {
+            NodeKind::Inputs(_) => outer_source(graph.get_output_index(source)?),
+            _ => Some(source),
+        }
+    };
+    let mut cables = Vec::new();
+    for (input, output) in graph.iter_connections() {
+        let from = graph.get_output(output).node;
+        let k = graph.get_output_index(output);
+        let source = if Some(from) == parts.inputs && members.contains(&graph.get_input(input).node) {
+            k.and_then(outer_source)
+        } else if from == node_id {
+            k.and_then(inner_source)
+        } else {
+            continue;
+        };
+        cables.extend(source.map(|source| (source, input)));
+    }
+
+    // The modules come out with their layout, its corner where the group was
+    let corner = members.iter().filter_map(|&n| editor.node_positions.get(n).copied()).reduce(|a, b| a.min(b));
+    let offset = match (corner, editor.node_positions.get(node_id)) {
+        (Some(corner), Some(&at)) => at - corner,
+        _ => Vec2::ZERO,
+    };
+
+    for part in [Some(node_id), parts.inputs, parts.outputs].into_iter().flatten() {
+        if editor.graph.nodes.contains_key(part) {
+            editor.graph.remove_node(part);
+        }
+        editor.node_positions.remove(part);
+        editor.node_order.retain(|n| *n != part);
+        editor.selected_nodes.retain(|n| *n != part);
+    }
+    for (output, input) in cables {
+        editor.graph.add_connection(output, input, 0);
+    }
+    for &member in &members {
+        editor.graph[member].user_data.parent = level;
+        if let Some(position) = editor.node_positions.get_mut(member) {
+            *position += offset;
+        }
+    }
+    Some(members)
+}
+
+/// A miniature of what's inside a group, which its node shows on its face:
+/// a box for each module in its header's colour, and the cables between
+/// them. Coordinates are the editor's; the face scales them to fit.
+#[derive(Clone, Debug)]
+pub struct Preview {
+    /// Each module's box and colour.
+    pub boxes: Vec<(Rect, Color32)>,
+    /// Each cable's ends and colour. Cables through the group's jacks run
+    /// to the edge of the miniature.
+    pub wires: Vec<([Pos2; 2], Color32)>,
+    /// Everything the miniature covers.
+    pub bounds: Rect,
+}
+
+impl Default for Preview {
+    fn default() -> Self {
+        Self { boxes: Vec::new(), wires: Vec::new(), bounds: Rect::NOTHING }
+    }
+}
+
+/// What a group's node shows on its face, worked out once a frame.
+#[derive(Clone, Debug, Default)]
+pub struct Face {
+    pub preview: Preview,
+    /// The knobs pinned to it: (module, parameter).
+    pub knobs: Vec<(NodeId, String)>,
+}
+
+/// A group's name being typed, in a field on its face.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Renaming {
+    pub group: GroupId,
+    pub text: String,
+    /// The field hasn't been drawn yet: it takes the keys, with the old
+    /// name selected so typing replaces it.
+    pub fresh: bool,
+}
+
+/// The miniature of a group's insides, from where its nodes are in the
+/// editor (`position`) at `zoom`.
+pub fn preview(
+    graph: &SynthGraph,
+    position: impl Fn(NodeId) -> Option<Pos2>,
+    id: GroupId,
+    zoom: f32,
+) -> Preview {
+    let members: Vec<NodeId> = level_nodes(graph, Some(id))
+        .into_iter()
+        .filter(|n| !graph[*n].user_data.kind.is_proxy())
+        .collect();
+    let rect = |node_id: NodeId| {
+        Rect::from_min_size(position(node_id).unwrap_or_default(), NOMINAL_NODE_SIZE * zoom)
+    };
+    let mut preview = Preview::default();
+    let Some(bounds) = members.iter().map(|&n| rect(n)).reduce(|a, b| a.union(b)) else {
+        return preview;
+    };
+    let pad = 24.0 * zoom;
+    preview.bounds = bounds.expand2(Vec2::new(pad, 0.0));
+
+    for &member in &members {
+        let data = &graph[member].user_data;
+        let color = if data.kind.group().is_some() { theme::module::GROUP } else { data.header_color() };
+        preview.boxes.push((rect(member), color));
+    }
+    for (input, output) in graph.iter_connections() {
+        let (to, from) = (graph.get_input(input).node, graph.get_output(output).node);
+        let color = graph.get_output(output).typ.signal_type().color();
+        let start = if members.contains(&from) {
+            rect(from).right_center()
+        } else if graph[from].user_data.kind == NodeKind::Inputs(id) {
+            Pos2::new(preview.bounds.left(), rect(to).center().y)
+        } else {
+            continue;
+        };
+        let end = if members.contains(&to) {
+            rect(to).left_center()
+        } else if graph[to].user_data.kind == NodeKind::Outputs(id) {
+            Pos2::new(preview.bounds.right(), rect(from).center().y)
+        } else {
+            continue;
+        };
+        preview.wires.push(([start, end], color));
+    }
+    preview
+}
+
+/// The knobs a group shows on its face: (module, parameter) for each knob
+/// pinned to it, from modules directly inside it or deeper down, top to
+/// bottom by where the modules sit.
+pub fn face_knobs(
+    graph: &SynthGraph,
+    position: impl Fn(NodeId) -> Option<Pos2>,
+    index: &GroupIndex,
+    id: GroupId,
+) -> Vec<(NodeId, String)> {
+    let mut modules: Vec<(NodeId, u8)> = graph
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.user_data.is_module() && !node.user_data.pins.is_empty())
+        .filter_map(|(node_id, node)| Some((node_id, index.depth_below(graph, id, node.user_data.parent)?)))
+        .collect();
+    let position = |n: NodeId| position(n).unwrap_or_default();
+    modules.sort_by(|a, b| {
+        (a.1, position(a.0).y, position(a.0).x).partial_cmp(&(b.1, position(b.0).y, position(b.0).x)).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut knobs = Vec::new();
+    for (node_id, depth) in modules {
+        let data = &graph[node_id].user_data;
+        for knob in &data.knob_params {
+            if data.pin_levels(&knob.param_name) >= depth {
+                knobs.push((node_id, knob.param_name.clone()));
+            }
+        }
+    }
+    knobs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{pos2, vec2};
+    use egui_node_graph2::NodeTemplateTrait;
+    use crate::graph::{create_editor_state, SynthGraphState, SynthNodeTemplate};
+
+    struct Rig {
+        editor: SynthGraphEditorState,
+        next_group: u64,
+    }
+
+    impl Rig {
+        fn new() -> Self {
+            Self { editor: create_editor_state(), next_group: 1000 }
+        }
+
+        fn add(&mut self, module_id: &str, at: Pos2) -> NodeId {
+            let template = SynthNodeTemplate::from_module_id(module_id).unwrap();
+            let mut user_state = SynthGraphState::new();
+            let node_id = self.editor.graph.add_node(
+                template.node_graph_label(&mut user_state),
+                template.user_data(&mut user_state),
+                |graph, node_id| template.build_node(graph, &mut user_state, node_id),
+            );
+            place(&mut self.editor, node_id, at);
+            node_id
+        }
+
+        fn connect(&mut self, from: NodeId, output: &str, to: NodeId, input: &str) {
+            let graph = &mut self.editor.graph;
+            let (output, input) = (graph[from].get_output(output).unwrap(), graph[to].get_input(input).unwrap());
+            graph.add_connection(output, input, 0);
+        }
+
+        fn group(&mut self, nodes: &[NodeId], name: &str) -> NewGroup {
+            let id = GroupId(self.next_group);
+            self.next_group += 1;
+            let bounds = Rect::from_min_size(pos2(0.0, 0.0), vec2(600.0, 300.0));
+            group(&mut self.editor, nodes, id, name, bounds).expect("grouped")
+        }
+
+        /// Module-to-module cables, as (from node, output, to node, input) names.
+        fn leaf(&self) -> Vec<(String, String, String, String)> {
+            let graph = &self.editor.graph;
+            let name = |n: NodeId| graph[n].label.clone();
+            let mut cables: Vec<_> = leaf_cables(graph)
+                .into_iter()
+                .map(|(output, input)| {
+                    let (from, to) = (graph.get_output(output).node, graph.get_input(input).node);
+                    let out_name = graph[from].outputs.iter().find(|(_, id)| *id == output).unwrap().0.clone();
+                    let in_name = graph[to].inputs.iter().find(|(_, id)| *id == input).unwrap().0.clone();
+                    (name(from), out_name, name(to), in_name)
+                })
+                .collect();
+            cables.sort();
+            cables
+        }
+    }
+
+    /// Keyboard → (Oscillator → SVF Filter → VCA ← ADSR) → Output, with the
+    /// keyboard's gate into the envelope and the VCA into both output sides.
+    fn voice(rig: &mut Rig) -> [NodeId; 6] {
+        let keys = rig.add("input.keyboard", pos2(0.0, 0.0));
+        let osc = rig.add("osc.sine", pos2(200.0, 0.0));
+        let filter = rig.add("filter.svf", pos2(400.0, 0.0));
+        let env = rig.add("mod.adsr", pos2(400.0, 200.0));
+        let vca = rig.add("util.vca", pos2(600.0, 0.0));
+        let out = rig.add("output.audio", pos2(800.0, 0.0));
+        rig.connect(keys, "Pitch", osc, "V/Oct");
+        rig.connect(keys, "Gate", env, "Gate");
+        rig.connect(osc, "Out", filter, "In");
+        rig.connect(filter, "LowPass", vca, "In");
+        rig.connect(env, "Out", vca, "CV");
+        rig.connect(vca, "Out", out, "Left");
+        rig.connect(vca, "Out", out, "Right");
+        [keys, osc, filter, env, vca, out]
+    }
+
+    #[test]
+    fn grouping_makes_jacks_from_crossing_cables_and_keeps_the_sound() {
+        let mut rig = Rig::new();
+        let [_, osc, filter, env, vca, _] = voice(&mut rig);
+        let before = rig.leaf();
+        let new = rig.group(&[osc, filter, env, vca], "Voice");
+
+        let graph = &rig.editor.graph;
+        let names = |jacks: Vec<Jack>| jacks.into_iter().map(|j| j.name).collect::<Vec<_>>();
+        // The oscillator sits above the envelope, so its jack comes first
+        assert_eq!(names(input_jacks(graph, new.node)), ["V/Oct", "Gate"]);
+        // Two cables from the VCA's one output make one jack
+        assert_eq!(names(output_jacks(graph, new.node)), ["Out"]);
+        assert_eq!(input_jacks(graph, new.node)[1].signal, SignalType::Gate);
+        assert_eq!(graph[new.inputs].outputs.len(), 2);
+        assert_eq!(graph[new.outputs].inputs.len(), 1);
+        assert_eq!(graph[osc].user_data.parent, Some(GroupId(1000)));
+        assert_eq!(graph[new.node].user_data.parent, None);
+
+        // The engine hears the same patch
+        assert_eq!(rig.leaf(), before);
+    }
+
+    #[test]
+    fn ungrouping_restores_the_cables_and_the_layout() {
+        let mut rig = Rig::new();
+        let [_, osc, filter, env, vca, _] = voice(&mut rig);
+        let before = rig.leaf();
+        let positions: Vec<Pos2> = [osc, filter, env, vca].iter().map(|&n| rig.editor.node_positions[n]).collect();
+        let cables_before = rig.editor.graph.iter_connections().count();
+
+        let new = rig.group(&[osc, filter, env, vca], "Voice");
+        let members = ungroup(&mut rig.editor, new.node).unwrap();
+        assert_eq!(members.len(), 4);
+        assert_eq!(rig.leaf(), before);
+        // Every cable is a plain one again, and nothing of the group is left
+        assert_eq!(rig.editor.graph.iter_connections().count(), cables_before);
+        assert_eq!(rig.editor.graph.nodes.len(), 6);
+        assert_eq!(rig.editor.node_order.len(), 6);
+        assert!(rig.editor.graph.nodes.values().all(|n| n.user_data.parent.is_none()));
+        let after: Vec<Pos2> = [osc, filter, env, vca].iter().map(|&n| rig.editor.node_positions[n]).collect();
+        assert_eq!(after, positions);
+    }
+
+    #[test]
+    fn groups_nest_and_cables_follow_every_hop() {
+        let mut rig = Rig::new();
+        let [_, osc, filter, env, vca, _] = voice(&mut rig);
+        let before = rig.leaf();
+        let inner = rig.group(&[osc, filter], "Tone");
+        let outer = rig.group(&[inner.node, env, vca], "Voice");
+        assert_eq!(rig.leaf(), before);
+
+        let graph = &rig.editor.graph;
+        let index = GroupIndex::of(graph);
+        let (tone, voice) = (GroupId(1000), GroupId(1001));
+        assert_eq!(index.path(graph, Some(tone)), Some(vec![voice, tone]));
+        assert_eq!(index.depth_below(graph, voice, graph[osc].user_data.parent), Some(2));
+        assert_eq!(index.depth_below(graph, tone, graph[env].user_data.parent), None);
+        // The inner group's three nodes and its two modules, and the outer
+        // group's Inputs and Outputs, the envelope and the VCA
+        assert_eq!(descendants(graph, &index, voice).len(), 3 + 2 + 2 + 2);
+
+        // Taking the outer group apart leaves the inner one whole
+        ungroup(&mut rig.editor, outer.node).unwrap();
+        assert_eq!(rig.leaf(), before);
+        assert_eq!(rig.editor.graph[inner.node].user_data.parent, None);
+        ungroup(&mut rig.editor, inner.node).unwrap();
+        assert_eq!(rig.leaf(), before);
+        assert_eq!(rig.editor.graph.nodes.len(), 6);
+    }
+
+    #[test]
+    fn an_unplugged_jack_carries_nothing_and_a_new_cable_reaches_inside() {
+        let mut rig = Rig::new();
+        let [keys, osc, filter, _, _, _] = voice(&mut rig);
+        let new = rig.group(&[osc, filter], "Tone");
+        let graph = &mut rig.editor.graph;
+        let pitch_jack = graph[new.node].get_input("V/Oct").unwrap();
+        let keys_pitch = graph[keys].get_output("Pitch").unwrap();
+        assert!(graph.remove_connection(pitch_jack, keys_pitch));
+        assert!(!rig.leaf().iter().any(|c| c.3 == "V/Oct"));
+
+        // Plugging the keyboard's gate into the jack instead reaches the oscillator
+        let graph = &mut rig.editor.graph;
+        let keys_gate = graph[keys].get_output("Gate").unwrap();
+        graph.add_connection(keys_gate, pitch_jack, 0);
+        assert!(rig.leaf().contains(&("Keyboard".into(), "Gate".into(), "Oscillator".into(), "V/Oct".into())));
+    }
+
+    #[test]
+    fn jack_names_repeat_with_numbers() {
+        assert_eq!(
+            unique_names(["In", "In", "Cutoff", "In"].map(String::from)),
+            ["In", "In 2", "Cutoff", "In 3"]
+        );
+    }
+
+    #[test]
+    fn pinned_knobs_show_on_the_groups_they_reach() {
+        let mut rig = Rig::new();
+        let [_, osc, filter, env, vca, _] = voice(&mut rig);
+        rig.editor.graph[filter].user_data.pins.insert("Cutoff".into(), 1);
+        rig.editor.graph[osc].user_data.pins.insert("Octave".into(), 2);
+        rig.group(&[osc, filter], "Tone");
+        let outer = rig.group(&[env, vca], "Amp");
+        let graph = &rig.editor.graph;
+        let index = GroupIndex::of(graph);
+        let positions = &rig.editor.node_positions;
+        let knobs = |id| face_knobs(graph, |n| positions.get(n).copied(), &index, id);
+        // Oscillator (left) before the filter, both directly inside Tone
+        assert_eq!(knobs(GroupId(1000)), [(osc, "Octave".to_string()), (filter, "Cutoff".to_string())]);
+        assert!(knobs(GroupId(1001)).is_empty());
+        let _ = outer;
+    }
+}

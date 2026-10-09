@@ -1200,7 +1200,7 @@ dependencies = [
 [[package]]
 name = "egui_node_graph2"
 version = "0.7.0"
-source = "git+https://github.com/chrischaps/egui_node_graph2#90fd9ad636e0f9bad2e235f85789679a2483abeb"
+source = "git+https://github.com/chrischaps/egui_node_graph2#2d248b96c743a98ce5bf0237446f47d30b6fa837"
 dependencies = [
  "egui",
  "slotmap",

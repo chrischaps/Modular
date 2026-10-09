@@ -6,6 +6,7 @@
 pub mod annotation_ui;
 pub mod annotations;
 pub mod catalog;
+pub mod groups;
 mod clock_display;
 mod data_types;
 pub mod hints;
@@ -22,6 +23,7 @@ mod validation;
 mod value_types;
 
 pub use data_types::SynthDataType;
+pub use groups::{GroupId, NodeKind};
 pub use port_mapping::SynthGraph;
 pub use node_data::{KnobParam, LedIndicator, NodeDisplay, SynthNodeData};
 pub use responses::SynthResponse;

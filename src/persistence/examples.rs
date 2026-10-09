@@ -95,7 +95,7 @@ mod tests {
     use super::*;
     use crate::dsp::analysis::{amp_to_db, peak, rms};
     use crate::engine::OfflineRenderer;
-    use crate::persistence::{compile_patch, PATCH_VERSION};
+    use crate::persistence::compile_patch;
 
     #[test]
     fn test_every_patch_file_is_an_example() {
@@ -117,7 +117,7 @@ mod tests {
             let patch = example.patch().unwrap_or_else(|e| panic!("{}: {}", example.name, e));
             assert_eq!(patch.name, example.name);
             // Saved by the current build, so loading never has to migrate them
-            assert_eq!(patch.version, PATCH_VERSION, "{}", example.name);
+            assert_eq!(patch.version, patch.required_version(), "{}", example.name);
             let compiled = compile_patch(&patch).unwrap();
             assert!(compiled.warnings.is_empty(), "{}: {:?}", example.name, compiled.warnings);
         }

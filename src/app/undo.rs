@@ -4,14 +4,17 @@
 //! patch as of the last step, and once a gesture is over (no mouse button
 //! held) compares the editor with it. Whatever differs becomes one [`Step`]:
 //! adding, deleting, connecting, disconnecting, moving and bypassing modules,
-//! turning their knobs, and adding, moving, resizing, renaming and deleting
-//! frames and notes. Nothing is compared while a button is down, so a whole
-//! knob turn, node drag or cable repatch is a single step.
+//! turning their knobs, grouping and ungrouping them, and adding, moving,
+//! resizing, renaming and deleting frames and notes. Nothing is compared
+//! while a button is down, so a whole knob turn, node drag or cable repatch
+//! is a single step.
 //!
 //! A step holds both sides of what it changed, so it can be applied in either
 //! direction. Applying one edits the editor graph and returns the engine
 //! commands for the same edit, so the sound follows. A deleted module comes
 //! back under its old engine ID, so its MIDI mappings come back with it.
+//! A step remembers the level it was made on (the top of the patch, or
+//! inside a group), so undoing it can show it happening.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::time::{Duration, Instant};
@@ -21,7 +24,8 @@ use egui_node_graph2::{NodeId, PanZoom};
 
 use crate::engine::{EngineCommand, NodeId as EngineNodeId};
 use crate::graph::annotations::{self, Annotation, AnnotationId};
-use crate::graph::{port_mapping, SynthGraphEditorState, SynthGraphState, SynthNodeTemplate};
+use crate::graph::groups::{self, GroupId, Jack, NodeKind};
+use crate::graph::{port_mapping, SynthGraph, SynthGraphEditorState, SynthGraphState, SynthNodeTemplate};
 use super::{editing, engine_sync};
 
 /// Most steps kept. The oldest are dropped first.
@@ -36,19 +40,84 @@ const MERGE_WINDOW: Duration = Duration::from_millis(1000);
 /// moved. Zooming rescales every position, which leaves rounding behind.
 const MOVE_TOLERANCE: f32 = 0.5;
 
-/// Nodes are known by their engine ID, which survives being deleted and
-/// brought back. Their graph IDs don't.
-type NodeKey = EngineNodeId;
+/// How undo knows a node. Modules go by their engine ID, which survives
+/// being deleted and brought back, and a group's nodes by the group's ID.
+/// Graph IDs don't survive either.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum NodeKey {
+    Module(EngineNodeId),
+    Group(GroupId),
+    Inputs(GroupId),
+    Outputs(GroupId),
+}
 
-/// One module, as far as undo cares.
+/// The key of a graph node, if undo keeps track of it.
+fn key_of(graph: &SynthGraph, user_state: &SynthGraphState, node_id: NodeId) -> Option<NodeKey> {
+    Some(match graph.nodes.get(node_id)?.user_data.kind {
+        NodeKind::Module => NodeKey::Module(user_state.get_engine_node_id(node_id)?),
+        NodeKind::Group(id) => NodeKey::Group(id),
+        NodeKind::Inputs(id) => NodeKey::Inputs(id),
+        NodeKind::Outputs(id) => NodeKey::Outputs(id),
+    })
+}
+
+/// What a node is, as far as undo cares.
+#[derive(Clone, Debug, PartialEq)]
+enum Body {
+    Module {
+        template: SynthNodeTemplate,
+        /// Every parameter's value in real units, in parameter order.
+        params: Vec<f32>,
+        bypassed: bool,
+        pins: BTreeMap<String, u8>,
+    },
+    /// A group's own node.
+    Group { name: String, inputs: Vec<Jack>, outputs: Vec<Jack> },
+    /// A group's Inputs or Outputs.
+    Jacks(Vec<Jack>),
+}
+
+/// One node, as far as undo cares.
 #[derive(Clone, Debug, PartialEq)]
 struct NodeState {
-    template: SynthNodeTemplate,
+    body: Body,
     /// Editor position in unzoomed points, from [`ViewAnchor`].
     position: Vec2,
-    /// Every parameter's value in real units, in parameter order.
-    params: Vec<f32>,
-    bypassed: bool,
+    /// The group it sits in.
+    parent: Option<GroupId>,
+}
+
+impl NodeState {
+    fn params(&self) -> &[f32] {
+        match &self.body {
+            Body::Module { params, .. } => params,
+            _ => &[],
+        }
+    }
+
+    /// Everything but the knobs and the position.
+    fn same_but_knobs(&self, other: &Self) -> bool {
+        self.parent == other.parent
+            && match (&self.body, &other.body) {
+                (
+                    Body::Module { template: t1, bypassed: b1, pins: p1, .. },
+                    Body::Module { template: t2, bypassed: b2, pins: p2, .. },
+                ) => t1 == t2 && b1 == b2 && p1 == p2,
+                (a, b) => a == b,
+            }
+    }
+
+    fn bypassed(&self) -> bool {
+        matches!(self.body, Body::Module { bypassed: true, .. })
+    }
+
+    fn name(&self) -> String {
+        match &self.body {
+            Body::Module { template, .. } => template.name().to_string(),
+            Body::Group { name, .. } => format!("group {name}"),
+            Body::Jacks(_) => "group jacks".to_string(),
+        }
+    }
 }
 
 /// A cable, by node and by port position on each node.
@@ -105,38 +174,46 @@ impl ViewAnchor {
 }
 
 impl Snapshot {
-    /// Takes the editor's patch. Nodes without an engine ID are left out.
+    /// Takes the editor's patch. Modules without an engine ID are left out.
     pub fn capture(editor: &SynthGraphEditorState, user_state: &SynthGraphState, anchor: &ViewAnchor) -> Self {
         let graph = &editor.graph;
         let zoom = editor.pan_zoom.zoom;
         let mut snapshot = Self::default();
 
         for (node_id, node) in graph.nodes.iter() {
-            let (Some(key), Some(template)) = (
-                user_state.get_engine_node_id(node_id),
-                SynthNodeTemplate::from_module_id(node.user_data.module_id),
-            ) else {
-                continue;
+            let Some(key) = key_of(graph, user_state, node_id) else { continue };
+            let data = &node.user_data;
+            let body = match data.kind {
+                NodeKind::Module => {
+                    let Some(template) = SynthNodeTemplate::from_module_id(data.module_id) else { continue };
+                    let params = port_mapping::parameter_inputs(graph, node_id)
+                        .into_iter()
+                        .map(|input| graph.get_input(input).value.actual_value())
+                        .collect();
+                    Body::Module { template, params, bypassed: data.bypassed, pins: data.pins.clone() }
+                }
+                NodeKind::Group(_) => Body::Group {
+                    name: data.display_name.clone(),
+                    inputs: groups::input_jacks(graph, node_id),
+                    outputs: groups::output_jacks(graph, node_id),
+                },
+                NodeKind::Inputs(_) => Body::Jacks(groups::output_jacks(graph, node_id)),
+                NodeKind::Outputs(_) => Body::Jacks(groups::input_jacks(graph, node_id)),
             };
             let position = editor.node_positions.get(node_id).copied().unwrap_or_default();
-            let params = port_mapping::parameter_inputs(graph, node_id)
-                .into_iter()
-                .map(|input| graph.get_input(input).value.actual_value())
-                .collect();
             snapshot.nodes.insert(key, NodeState {
-                template,
+                body,
                 position: anchor.unzoomed(position, zoom),
-                params,
-                bypassed: node.user_data.bypassed,
+                parent: data.parent,
             });
         }
 
         for (input, output) in graph.iter_connections() {
             let (from, to) = (graph.get_output(output).node, graph.get_input(input).node);
             let cable = (|| Some(Cable {
-                from: user_state.get_engine_node_id(from)?,
+                from: key_of(graph, user_state, from)?,
                 output: graph.get_output_index(output)?,
-                to: user_state.get_engine_node_id(to)?,
+                to: key_of(graph, user_state, to)?,
                 input: graph.nodes[to].inputs.iter().position(|(_, id)| *id == input)?,
             }))();
             snapshot.cables.extend(cable);
@@ -146,9 +223,11 @@ impl Snapshot {
     }
 
     /// Records a value MIDI CC set, so it isn't mistaken for an edit.
-    fn set_param(&mut self, key: NodeKey, param_index: usize, value: f32) {
-        if let Some(param) = self.nodes.get_mut(&key).and_then(|n| n.params.get_mut(param_index)) {
-            *param = value;
+    fn set_param(&mut self, key: EngineNodeId, param_index: usize, value: f32) {
+        if let Some(NodeState { body: Body::Module { params, .. }, .. }) = self.nodes.get_mut(&NodeKey::Module(key)) {
+            if let Some(param) = params.get_mut(param_index) {
+                *param = value;
+            }
         }
     }
 }
@@ -183,6 +262,8 @@ pub struct Step {
     cables: Vec<CableDiff>,
     annotations: Vec<AnnotationDiff>,
     label: String,
+    /// The level the edit was made on: the top of the patch, or inside a group.
+    level: Option<GroupId>,
 }
 
 fn moved(a: Vec2, b: Vec2) -> bool {
@@ -191,7 +272,7 @@ fn moved(a: Vec2, b: Vec2) -> bool {
 
 /// Positions of the parameters that differ between two states of a node.
 fn changed_params<'a>(a: &'a NodeState, b: &'a NodeState) -> impl Iterator<Item = usize> + 'a {
-    a.params.iter().zip(&b.params).enumerate().filter(|(_, (x, y))| x != y).map(|(i, _)| i)
+    a.params().iter().zip(b.params()).enumerate().filter(|(_, (x, y))| x != y).map(|(i, _)| i)
 }
 
 impl NodeDiff {
@@ -199,7 +280,7 @@ impl NodeDiff {
     fn is_noop(&self) -> bool {
         match (&self.before, &self.after) {
             (Some(a), Some(b)) => {
-                !moved(a.position, b.position) && a.bypassed == b.bypassed && changed_params(a, b).next().is_none()
+                !moved(a.position, b.position) && a.same_but_knobs(b) && changed_params(a, b).next().is_none()
             }
             (None, None) => true,
             _ => false,
@@ -210,15 +291,15 @@ impl NodeDiff {
     /// it changed.
     fn params_only(&self) -> Option<Vec<usize>> {
         match (&self.before, &self.after) {
-            (Some(a), Some(b)) if !moved(a.position, b.position) && a.bypassed == b.bypassed => {
+            (Some(a), Some(b)) if !moved(a.position, b.position) && a.same_but_knobs(b) => {
                 Some(changed_params(a, b).collect())
             }
             _ => None,
         }
     }
 
-    fn name(&self) -> &'static str {
-        self.before.as_ref().or(self.after.as_ref()).map_or("module", |n| n.template.name())
+    fn name(&self) -> String {
+        self.before.as_ref().or(self.after.as_ref()).map_or_else(|| "module".to_string(), NodeState::name)
     }
 }
 
@@ -258,7 +339,7 @@ impl Step {
         } else {
             describe_annotations(&annotations, &nodes, &cables)
         };
-        Some(Self { nodes, cables, annotations, label })
+        Some(Self { nodes, cables, annotations, label, level: None })
     }
 
     /// What the step did, for the Edit buttons and status bar,
@@ -278,6 +359,7 @@ impl Step {
                 .map(|diff| AnnotationDiff { id: diff.id, before: diff.after.clone(), after: diff.before.clone() })
                 .collect(),
             label: self.label.clone(),
+            level: self.level,
         }
     }
 
@@ -305,53 +387,79 @@ impl Step {
     fn apply(&self, editor: &mut SynthGraphEditorState, user_state: &mut SynthGraphState, anchor: &ViewAnchor) -> Vec<EngineCommand> {
         let mut commands = Vec::new();
         let zoom = editor.pan_zoom.zoom;
-        let mut graph_ids: HashMap<NodeKey, NodeId> =
-            user_state.node_id_map.iter().map(|(&graph_id, &key)| (key, graph_id)).collect();
+        let mut graph_ids: HashMap<NodeKey, NodeId> = editor.graph.nodes.keys()
+            .filter_map(|node_id| Some((key_of(&editor.graph, user_state, node_id)?, node_id)))
+            .collect();
 
-        // Cables come out first, so neither a removed module nor a cable
+        // Cables come out first, so neither a removed node nor a cable
         // about to take their input is still attached to them
         for diff in self.cables.iter().filter(|d| !d.added) {
             let graph = &mut editor.graph;
             if let Some((output, input)) = cable_ports(graph, &graph_ids, diff.cable) {
-                if graph.remove_connection(input, output) {
-                    commands.extend(engine_sync::cable_disconnected(graph, user_state, output, input));
-                }
+                graph.remove_connection(input, output);
             }
         }
 
-        // Modules that go
+        // Nodes that go
         for diff in self.nodes.iter().filter(|d| d.after.is_none()) {
             let Some(node_id) = graph_ids.remove(&diff.key) else { continue };
             commands.extend(editing::remove_module(editor, user_state, node_id));
         }
 
-        // Modules that come (back), under the engine ID they had
+        // Nodes that come (back), modules under the engine ID they had
         for diff in self.nodes.iter().filter(|d| d.before.is_none()) {
             let Some(state) = &diff.after else { continue };
             let position = anchor.zoomed(state.position, zoom);
-            let node_id = editing::place_node(editor, user_state, state.template, position);
-            editor.graph[node_id].user_data.bypassed = state.bypassed;
-            user_state.assign_engine_node_id(node_id, diff.key);
-            graph_ids.insert(diff.key, node_id);
-            commands.extend(engine_sync::add_module(&editor.graph, node_id, diff.key));
+            let node_id = match (&state.body, diff.key) {
+                (Body::Module { template, bypassed, pins, .. }, NodeKey::Module(engine_id)) => {
+                    let node_id = editing::place_node(editor, user_state, *template, position);
+                    let data = &mut editor.graph[node_id].user_data;
+                    data.bypassed = *bypassed;
+                    data.pins = pins.clone();
+                    user_state.assign_engine_node_id(node_id, engine_id);
+                    commands.extend(engine_sync::add_module(&editor.graph, node_id, engine_id));
 
-            // Every value goes to the new module, since it starts at defaults
-            let all = 0..state.params.len();
-            commands.extend(set_params(editor, node_id, diff.key, state, all));
+                    // Every value goes to the new module, since it starts at defaults
+                    let all = 0..state.params().len();
+                    commands.extend(set_params(editor, node_id, engine_id, *template, state.params(), all));
+                    node_id
+                }
+                (Body::Group { name, inputs, outputs }, NodeKey::Group(id)) => {
+                    user_state.claim_group_id(id);
+                    groups::add_group_node(&mut editor.graph, id, name, state.parent, inputs, outputs)
+                }
+                (Body::Jacks(jacks), NodeKey::Inputs(id)) => groups::add_inputs_node(&mut editor.graph, id, jacks),
+                (Body::Jacks(jacks), NodeKey::Outputs(id)) => groups::add_outputs_node(&mut editor.graph, id, jacks),
+                _ => continue,
+            };
+            if !editor.node_order.contains(&node_id) {
+                editor.node_order.push(node_id);
+            }
+            editor.node_positions.insert(node_id, position);
+            editor.graph[node_id].user_data.parent = state.parent;
+            graph_ids.insert(diff.key, node_id);
         }
 
-        // Modules that stay but changed
+        // Nodes that stay but changed
         for diff in &self.nodes {
             let (Some(before), Some(after)) = (&diff.before, &diff.after) else { continue };
             let Some(&node_id) = graph_ids.get(&diff.key) else { continue };
-            let changed: Vec<usize> = changed_params(before, after).collect();
-            commands.extend(set_params(editor, node_id, diff.key, after, changed));
+            if let (Body::Module { template, .. }, NodeKey::Module(engine_id)) = (&after.body, diff.key) {
+                let changed: Vec<usize> = changed_params(before, after).collect();
+                commands.extend(set_params(editor, node_id, engine_id, *template, after.params(), changed));
+                if before.bypassed() != after.bypassed() {
+                    editor.graph[node_id].user_data.bypassed = after.bypassed();
+                    commands.push(EngineCommand::SetBypass { node_id: engine_id, bypassed: after.bypassed() });
+                }
+            }
+            match &after.body {
+                Body::Module { pins, .. } => editor.graph[node_id].user_data.pins = pins.clone(),
+                Body::Group { name, .. } => groups::rename(&mut editor.graph, node_id, name),
+                Body::Jacks(_) => {}
+            }
+            editor.graph[node_id].user_data.parent = after.parent;
             if moved(before.position, after.position) {
                 editor.node_positions.insert(node_id, anchor.zoomed(after.position, zoom));
-            }
-            if before.bypassed != after.bypassed {
-                editor.graph[node_id].user_data.bypassed = after.bypassed;
-                commands.push(EngineCommand::SetBypass { node_id: diff.key, bypassed: after.bypassed });
             }
         }
 
@@ -360,9 +468,11 @@ impl Step {
             let graph = &mut editor.graph;
             if let Some((output, input)) = cable_ports(graph, &graph_ids, diff.cable) {
                 graph.add_connection(output, input, 0);
-                commands.extend(engine_sync::cable_connected(graph, user_state, output, input));
             }
         }
+        // Whatever the cables add up to now, module to module, is what the
+        // engine should have
+        commands.extend(engine_sync::sync_cables(&editor.graph, user_state));
 
         // Frames and notes make no sound, so the engine hears nothing of them
         let annotations = &mut user_state.annotations;
@@ -381,7 +491,7 @@ impl Step {
 
 /// The graph ports at the ends of a cable, if both nodes and ports exist.
 fn cable_ports(
-    graph: &crate::graph::SynthGraph,
+    graph: &SynthGraph,
     graph_ids: &HashMap<NodeKey, NodeId>,
     cable: Cable,
 ) -> Option<(egui_node_graph2::OutputId, egui_node_graph2::InputId)> {
@@ -390,24 +500,25 @@ fn cable_ports(
     Some((from.outputs.get(cable.output)?.1, to.inputs.get(cable.input)?.1))
 }
 
-/// Sets some of a node's parameters to `state`'s values, and returns the
+/// Sets some of a module's parameters to `values`, and returns the
 /// SetParameter commands for them. Live parameters (a Keyboard's Note and
 /// Gate) are the player's, so they're left alone.
 fn set_params(
     editor: &mut SynthGraphEditorState,
     node_id: NodeId,
-    key: NodeKey,
-    state: &NodeState,
+    key: EngineNodeId,
+    template: SynthNodeTemplate,
+    values: &[f32],
     indices: impl IntoIterator<Item = usize>,
 ) -> Vec<EngineCommand> {
     let inputs = port_mapping::parameter_inputs(&editor.graph, node_id);
-    let live = state.template.live_parameter_count();
+    let live = template.live_parameter_count();
     indices
         .into_iter()
         .filter(|&i| i >= live)
         .filter_map(|param_index| {
             let input = editor.graph.inputs.get_mut(*inputs.get(param_index)?)?;
-            input.value.set_actual_value(*state.params.get(param_index)?);
+            input.value.set_actual_value(*values.get(param_index)?);
             Some(EngineCommand::SetParameter { node_id: key, param_index, value: input.value.actual_value() })
         })
         .collect()
@@ -432,7 +543,7 @@ fn describe(nodes: &[NodeDiff], cables: &[CableDiff], before: &Snapshot, after: 
 
     if changed.is_empty() {
         let name = |key: NodeKey| {
-            after.nodes.get(&key).or(before.nodes.get(&key)).map_or("module", |n| n.template.name())
+            after.nodes.get(&key).or(before.nodes.get(&key)).map_or_else(|| "module".to_string(), NodeState::name)
         };
         let ends = |c: &Cable| format!("{} → {}", name(c.from), name(c.to));
         let made: Vec<&Cable> = cables.iter().filter(|d| d.added).map(|d| &d.cable).collect();
@@ -447,31 +558,66 @@ fn describe(nodes: &[NodeDiff], cables: &[CableDiff], before: &Snapshot, after: 
     if !cables.is_empty() {
         return "Edit patch".to_string();
     }
+    if let [one] = changed.as_slice() {
+        if let (Some(a), Some(b)) = (&one.before, &one.after) {
+            if let (Body::Group { name: was, .. }, Body::Group { name: is, .. }) = (&a.body, &b.body) {
+                if was != is {
+                    return format!("Rename group {is}");
+                }
+            }
+        }
+    }
 
     let pairs = || changed.iter().filter_map(|d| Some((d, d.before.as_ref()?, d.after.as_ref()?)));
-    if pairs().all(|(_, a, b)| changed_params(a, b).next().is_none() && a.bypassed == b.bypassed) {
+    if pairs().all(|(_, a, b)| changed_params(a, b).next().is_none() && a.same_but_knobs(b)) {
         return match changed.as_slice() {
             [one] => format!("Move {}", one.name()),
             many => format!("Move {}", modules(many.len())),
         };
     }
-    if pairs().all(|(_, a, b)| changed_params(a, b).next().is_none() && !moved(a.position, b.position)) {
+    let only = |same: fn(&NodeState, &NodeState) -> bool| {
+        pairs().all(|(_, a, b)| changed_params(a, b).next().is_none() && !moved(a.position, b.position) && same(a, b))
+    };
+    if only(|a, b| a.parent == b.parent && pins(a) == pins(b)) {
         return match (changed.as_slice(), pairs().next()) {
-            ([one], Some((_, _, b))) if b.bypassed => format!("Bypass {}", one.name()),
+            ([one], Some((_, _, b))) if b.bypassed() => format!("Bypass {}", one.name()),
             ([one], Some(_)) => format!("Switch on {}", one.name()),
             _ => format!("Bypass {}", modules(changed.len())),
         };
     }
+    if only(|a, b| a.parent == b.parent && a.bypassed() == b.bypassed()) {
+        return match pairs().next() {
+            Some((one, a, b)) if changed.len() == 1 => {
+                let (was, is) = (pins(a).len(), pins(b).len());
+                if is >= was {
+                    format!("Pin {} knob", one.name())
+                } else {
+                    format!("Unpin {} knob", one.name())
+                }
+            }
+            _ => "Pin knobs".to_string(),
+        };
+    }
     if let ([one], Some((_, a, b))) = (changed.as_slice(), pairs().next()) {
         let params: Vec<usize> = changed_params(a, b).collect();
-        if let ([param], false, true) = (params.as_slice(), moved(a.position, b.position), a.bypassed == b.bypassed) {
-            if let Some(param_name) = b.template.parameter_names().get(*param) {
-                return format!("Set {} {}", one.name(), param_name);
+        if let ([param], false, true) = (params.as_slice(), moved(a.position, b.position), a.same_but_knobs(b)) {
+            if let Body::Module { template, .. } = &b.body {
+                if let Some(param_name) = template.parameter_names().get(*param) {
+                    return format!("Set {} {}", one.name(), param_name);
+                }
             }
         }
         return format!("Change {}", one.name());
     }
     "Change modules".to_string()
+}
+
+/// A module's pinned knobs.
+fn pins(state: &NodeState) -> BTreeMap<String, u8> {
+    match &state.body {
+        Body::Module { pins, .. } => pins.clone(),
+        _ => BTreeMap::new(),
+    }
 }
 
 /// Names a step that changed frames or notes: "Move frame Voice" (with the
@@ -480,7 +626,7 @@ fn describe_annotations(annotations: &[AnnotationDiff], nodes: &[NodeDiff], cabl
     // Modules moving along with a frame dragged by its title
     let modules_only_moved = cables.is_empty()
         && nodes.iter().all(|d| match (&d.before, &d.after) {
-            (Some(a), Some(b)) => a.bypassed == b.bypassed && changed_params(a, b).next().is_none(),
+            (Some(a), Some(b)) => a.same_but_knobs(b) && changed_params(a, b).next().is_none(),
             _ => false,
         });
     if !modules_only_moved {
@@ -524,11 +670,12 @@ fn describe_annotations(annotations: &[AnnotationDiff], nodes: &[NodeDiff], cabl
     }
 }
 
-/// What undo or redo did: the step's label, and the engine commands that
-/// make the audio graph match.
+/// What undo or redo did: the step's label, the engine commands that make
+/// the audio graph match, and the level the edit was made on.
 pub struct Applied {
     pub label: String,
     pub commands: Vec<EngineCommand>,
+    pub level: Option<GroupId>,
 }
 
 /// The undo and redo stacks, and the patch as of the last step.
@@ -620,6 +767,7 @@ impl History {
         let Some(mut step) = Step::between(&self.baseline, &current) else {
             return;
         };
+        step.level = user_state.level;
         self.baseline = current;
         self.redo.clear();
 
@@ -678,7 +826,7 @@ impl History {
         let commands = step.apply(editor, user_state, &self.anchor);
         self.baseline = Snapshot::capture(editor, user_state, &self.anchor);
         self.open_since = None;
-        Applied { label: step.label.clone(), commands }
+        Applied { label: step.label.clone(), commands, level: step.level }
     }
 
     /// What Undo would undo.
@@ -773,15 +921,18 @@ mod tests {
             self.user_state.node_id_map.iter().find(|(_, &k)| k == key).map(|(&id, _)| id).unwrap()
         }
 
-        /// Ends a gesture, a second after the last.
+        /// Ends a gesture, a second after the last. The engine hears about
+        /// the frame's cables first, as it does at the end of every frame.
         fn record(&mut self) {
             self.now += Duration::from_secs(1);
+            engine_sync::sync_cables(&self.editor.graph, &mut self.user_state);
             self.history.record(&self.editor, &self.user_state, false, self.now);
         }
 
         /// A frame in the middle of a gesture.
         fn record_held(&mut self) {
             self.now += Duration::from_millis(16);
+            engine_sync::sync_cables(&self.editor.graph, &mut self.user_state);
             self.history.record(&self.editor, &self.user_state, true, self.now);
         }
 

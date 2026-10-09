@@ -72,6 +72,10 @@ pub mod module {
 
     /// Effect modules - cyan
     pub const EFFECT: Color32 = ModuleCategory::Effect.color();
+
+    /// Groups, and the modules you've made from them - rose, the one header
+    /// colour no built-in module wears
+    pub const GROUP: Color32 = Color32::from_rgb(236, 127, 169);
 }
 
 /// Node styling constants

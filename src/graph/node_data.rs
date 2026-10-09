@@ -10,6 +10,8 @@
 //! - Horizontal knob row at the bottom for controllable parameters
 //! - Category labels in the footer
 
+use std::collections::BTreeMap;
+
 use eframe::egui::{self, Color32, RichText};
 use egui_node_graph2::{ConnectionSignalTrait, NodeDataTrait, NodeResponse, UserResponseTrait};
 
@@ -17,6 +19,7 @@ use crate::dsp::ModuleCategory;
 use crate::engine::midi_engine::MidiEvent;
 use crate::modules::{LadderFilter, SvfFilter};
 use crate::widgets::{knob, led, KnobStyle, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, FrequencyPoint, SpectrumConfig, SpectrumStyle, piano, piano_keys, PianoConfig, PianoData, noise_display, NoiseDisplayConfig};
+use super::groups::{GroupId, NodeKind};
 use super::hints::{self, Hint};
 use super::{SynthResponse, SynthValueType};
 
@@ -283,6 +286,13 @@ pub struct SynthNodeData {
     /// Whether the module is bypassed: its audio input passes straight
     /// through, and the node is drawn dimmed.
     pub bypassed: bool,
+    /// A module, or one of the nodes that make up a group.
+    pub kind: NodeKind,
+    /// The group this node sits inside, or `None` at the top of the patch.
+    pub parent: Option<GroupId>,
+    /// Knobs shown on the faces of the groups around the module: parameter
+    /// name to how many groups up it shows (1 is the group it's in).
+    pub pins: BTreeMap<String, u8>,
 }
 
 /// How much of the node body shows through while it's bypassed.
@@ -320,7 +330,20 @@ impl SynthNodeData {
             monitored_outputs: Vec::new(),
             bypassable: false,
             bypassed: false,
+            kind: NodeKind::Module,
+            parent: None,
+            pins: BTreeMap::new(),
         }
+    }
+
+    /// Whether this node is a module, not part of a group.
+    pub fn is_module(&self) -> bool {
+        self.kind == NodeKind::Module
+    }
+
+    /// How many groups up a knob shows, or 0 if only on the module.
+    pub fn pin_levels(&self, param_name: &str) -> u8 {
+        self.pins.get(param_name).copied().unwrap_or(0)
     }
 
     /// Builder method to set the tooltip description.

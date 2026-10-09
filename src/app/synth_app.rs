@@ -23,7 +23,7 @@ use crate::graph::{
 };
 use crate::modules::keyboard::{key_to_note, relative_to_midi, KeyPriority, KeyboardInput};
 use crate::persistence::{
-    capture_patch, examples, load_from_file, save_to_file, stage_patch, Example, MidiMapping, Patch, PatchError,
+    capture_patch, examples, load_from_file, renumber_groups, save_to_file, stage_patch, Example, MidiMapping, Patch, PatchError,
     EXAMPLES,
 };
 use crate::widgets::{cpu_meter, CpuMeterConfig, KnobStyle};
@@ -1625,22 +1625,8 @@ impl SynthApp {
                                 invalid_connections.push((output, input));
                                 // Show error message
                                 self.user_state.set_validation_error(error_msg);
-                            } else {
-                                commands_to_send.extend(engine_sync::cable_connected(
-                                    &self.graph_state.graph,
-                                    &self.user_state,
-                                    output,
-                                    input,
-                                ));
                             }
-                        }
-                        NodeResponse::DisconnectEvent { output, input } => {
-                            commands_to_send.extend(engine_sync::cable_disconnected(
-                                &self.graph_state.graph,
-                                &self.user_state,
-                                output,
-                                input,
-                            ));
+                            // The engine hears about it with the frame's other cables
                         }
                         NodeResponse::User(crate::graph::SynthResponse::ParameterChanged {
                             node_id: response_node_id,
@@ -1920,6 +1906,14 @@ impl SynthApp {
         // Remove invalid connections outside the UI closure
         for (output, input) in invalid_connections {
             self.graph_state.graph.remove_connection(input, output);
+        }
+    }
+
+    /// Sends the engine whatever cables have changed since it last heard,
+    /// module to module through any groups.
+    fn sync_cables(&mut self) {
+        for cmd in engine_sync::sync_cables(&self.graph_state.graph, &mut self.user_state) {
+            self.send_command(cmd);
         }
     }
 
@@ -2327,8 +2321,14 @@ impl SynthApp {
         self.graph_state.pan_zoom = egui_node_graph2::PanZoom::default();
         self.history.reset_view();
 
-        // Swap in the staged graph. Its node IDs stay valid.
+        // Swap in the staged graph. Its node IDs stay valid; its groups get
+        // IDs from this session's count
         self.graph_state.graph = std::mem::take(&mut staged.graph);
+        renumber_groups(&mut self.graph_state.graph, || self.user_state.allocate_group_id());
+        for part in &staged.parts {
+            self.graph_state.node_positions.insert(part.graph_id, egui::pos2(part.position.0, part.position.1));
+            self.graph_state.node_order.push(part.graph_id);
+        }
 
         for node in &staged.nodes {
             let pos = egui::pos2(node.position.0, node.position.1);
@@ -2349,13 +2349,8 @@ impl SynthApp {
         // Frames and notes are already in patch space
         self.user_state.annotations.add_from_patch(&patch.frames, &patch.notes, egui::Vec2::ZERO);
 
-        // Send the staged connections to the engine
-        let connections: Vec<_> = self.graph_state.graph.iter_connections().collect();
-        for (input_id, output_id) in connections {
-            for cmd in engine_sync::cable_connected(&self.graph_state.graph, &self.user_state, output_id, input_id) {
-                self.send_command(cmd);
-            }
-        }
+        // The staged connections, module to module, for the engine
+        self.sync_cables();
 
         // Load MIDI mappings, retargeted from the patch's node IDs to the new ones
         self.midi_mappings = staged.remap_midi_mappings(|graph_id| self.user_state.get_engine_node_id(graph_id));
@@ -3487,6 +3482,9 @@ impl eframe::App for SynthApp {
 
         // "Save changes?" and crash recovery, over everything else
         self.show_prompts(ctx);
+
+        // The engine's cables follow whatever this frame did to the graph's
+        self.sync_cables();
 
         // Whatever this frame changed becomes an undo step, once the mouse
         // button is up: a knob turn or a drag is one step, not one per frame

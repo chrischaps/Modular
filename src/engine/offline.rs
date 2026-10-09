@@ -197,8 +197,8 @@ impl OfflineRenderer {
     pub fn render_audition(&mut self, patch: &Patch, compiled: &CompiledPatch, seconds: f32) -> StereoBuffer {
         let nodes_of = |module_id: &str| -> Vec<_> {
             patch
-                .nodes
-                .iter()
+                .all_nodes()
+                .into_iter()
                 .filter(|n| n.module_id == module_id)
                 .filter_map(|n| compiled.node_ids.get(&n.id).copied())
                 .collect()

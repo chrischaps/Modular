@@ -4,6 +4,8 @@
 //! to JSON files. A patch captures the complete state of the node graph including
 //! all nodes, their positions, parameter values, and connections.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::graph::SynthNodeTemplate;
@@ -18,7 +20,12 @@ use crate::modules::Oscillator;
 /// - v4: every value is in the parameter's real units (filter Drive was 0-1)
 /// - v5: the oscillator's Frequency becomes Octave / Semitone / Fine, and
 ///   FM Depth becomes an index relative to the pitch
-pub const PATCH_VERSION: u32 = 5;
+/// - v6: adds `groups`. Only patches that have groups are written as v6, so
+///   versions before groups still open the rest
+pub const PATCH_VERSION: u32 = 6;
+
+/// The version a patch without groups is written as.
+const VERSION_WITHOUT_GROUPS: u32 = 5;
 
 /// A MIDI CC to parameter mapping.
 ///
@@ -100,6 +107,10 @@ pub struct Patch {
     /// Text cards on the canvas. Only written when there are some.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<NoteData>,
+    /// Groups of modules collapsed into one node, each holding its own
+    /// modules, cables and groups. Only written when there are some.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<GroupData>,
 }
 
 impl Patch {
@@ -113,12 +124,32 @@ impl Patch {
             midi_mappings: Vec::new(),
             frames: Vec::new(),
             notes: Vec::new(),
+            groups: Vec::new(),
         }
     }
 
     /// Check if this patch version is compatible with the current format.
     pub fn is_compatible(&self) -> bool {
         self.version <= PATCH_VERSION
+    }
+
+    /// The oldest version that can read this patch, which is what it's
+    /// written as: only a patch with groups needs v6.
+    pub fn required_version(&self) -> u32 {
+        if self.groups.is_empty() { VERSION_WITHOUT_GROUPS } else { PATCH_VERSION }
+    }
+
+    /// Every module in the patch, in groups or not.
+    pub fn all_nodes(&self) -> Vec<&NodeData> {
+        fn collect<'a>(nodes: &'a [NodeData], groups: &'a [GroupData], out: &mut Vec<&'a NodeData>) {
+            out.extend(nodes);
+            for group in groups {
+                collect(&group.nodes, &group.groups, out);
+            }
+        }
+        let mut out = Vec::new();
+        collect(&self.nodes, &self.groups, &mut out);
+        out
     }
 }
 
@@ -146,6 +177,11 @@ pub struct NodeData {
     /// without bypassed modules read the same as before.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub bypassed: bool,
+    /// Knobs shown on the faces of the groups around the module: parameter
+    /// name to how many groups up it shows (1 is the group it's in). Only
+    /// written when there are some.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub pinned: BTreeMap<String, u8>,
 }
 
 impl NodeData {
@@ -157,8 +193,42 @@ impl NodeData {
             position,
             parameters: Vec::new(),
             bypassed: false,
+            pinned: BTreeMap::new(),
         }
     }
+}
+
+/// A group: modules collapsed into one node, with jacks of its own. It holds
+/// its own small patch of modules, cables and groups, nested to any depth.
+///
+/// Its `id` is unique among the patch's module and group IDs. Outside, a
+/// cable to or from it plugs into one of its jacks, by name. Inside, a cable
+/// from it comes in through an input jack, and one to it goes out through an
+/// output jack.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GroupData {
+    pub id: u64,
+    pub name: String,
+    /// Where the group's node sits, on the level outside it.
+    pub position: (f32, f32),
+    pub inputs: Vec<JackData>,
+    pub outputs: Vec<JackData>,
+    /// Where the Inputs and Outputs nodes sit, inside.
+    pub inputs_position: (f32, f32),
+    pub outputs_position: (f32, f32),
+    pub nodes: Vec<NodeData>,
+    pub connections: Vec<ConnectionData>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<GroupData>,
+}
+
+/// One of a group's jacks: its name and the signal it carries
+/// ("Audio", "Control", "Gate" or "MIDI").
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JackData {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub signal: String,
 }
 
 /// A frame: a titled, tinted backdrop drawn behind a group of modules.
@@ -374,6 +444,7 @@ pub fn migrate_v2_to_v3(old: PatchV2) -> Patch {
                     .map(|(name, value)| NamedParameter { name, value })
                     .collect(),
                 bypassed: false,
+                pinned: BTreeMap::new(),
             }
         })
         .collect();
@@ -386,6 +457,7 @@ pub fn migrate_v2_to_v3(old: PatchV2) -> Patch {
         midi_mappings: old.midi_mappings,
         frames: Vec::new(),
         notes: Vec::new(),
+        groups: Vec::new(),
     }
 }
 
@@ -548,7 +620,7 @@ mod tests {
         // How an older version reads a patch with frames and notes: the same
         // way this one reads a field from the future
         let newer = r#"{"name": "New", "version": 5, "nodes": [], "connections": [],
-            "frames": [], "groups": [{"title": "Later"}]}"#;
+            "frames": [], "sketches": [{"title": "Later"}]}"#;
         assert!(patch_from_json(newer).is_ok());
     }
 
@@ -573,6 +645,7 @@ mod tests {
                 NamedParameter::new("Amplitude", ParameterValue::Scalar(0.5)),
             ],
             bypassed: false,
+            pinned: BTreeMap::new(),
         });
         patch.connections.push(ConnectionData::new(1, "Out", 2, "In"));
 
@@ -597,6 +670,7 @@ mod tests {
             midi_mappings: vec![],
             frames: vec![],
             notes: vec![],
+            groups: vec![],
         };
         assert!(!future_patch.is_compatible());
     }
@@ -627,7 +701,7 @@ mod tests {
             "connections": []
         }"#;
         let patch = patch_from_json(json).unwrap();
-        assert_eq!(patch.version, PATCH_VERSION);
+        assert_eq!(patch.version, patch.required_version());
         assert_eq!(patch.nodes[0].parameters, vec![NamedParameter::new("Volume", ParameterValue::Scalar(0.25))]);
         assert!(patch.midi_mappings.is_empty());
     }
@@ -674,7 +748,7 @@ mod tests {
             ]
         }"#;
         let patch = patch_from_json(json).unwrap();
-        assert_eq!(patch.version, PATCH_VERSION);
+        assert_eq!(patch.version, patch.required_version());
         let filter = &patch.nodes[0].parameters;
         assert_eq!(filter[0], NamedParameter::new("Cutoff", ParameterValue::Frequency(800.0)));
         assert_eq!(filter[1], NamedParameter::new("Drive", ParameterValue::Number(5.5)));

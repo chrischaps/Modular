@@ -8,20 +8,24 @@
 //! Both the editor and headless compilation load through [`stage_patch`], so
 //! they agree on how names, IDs and problems are resolved.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use egui_node_graph2::{NodeId, NodeTemplateTrait};
 
+use crate::dsp::SignalType;
 use crate::engine::NodeId as EngineNodeId;
+use crate::graph::groups::{self, GroupIndex, Jack};
 use crate::graph::{
-    port_mapping, validate_connection, SynthGraph, SynthGraphState, SynthNodeTemplate, SynthValueType,
+    port_mapping, validate_connection, GroupId, NodeKind, SynthGraph, SynthGraphState, SynthNodeTemplate,
+    SynthValueType,
 };
 
 use super::{
-    ConnectionData, MidiMapping, NamedParameter, NodeData, ParameterValue, Patch, PatchError, PATCH_VERSION,
+    ConnectionData, GroupData, JackData, MidiMapping, NamedParameter, NodeData, ParameterValue, Patch, PatchError,
+    PATCH_VERSION,
 };
 
-/// A node of a staged patch.
+/// A module of a staged patch.
 #[derive(Debug, Clone, Copy)]
 pub struct StagedNode {
     /// The node's ID in the patch file.
@@ -32,14 +36,31 @@ pub struct StagedNode {
     pub template: SynthNodeTemplate,
     /// Saved editor position.
     pub position: (f32, f32),
+    /// Inside one of the patch's groups, rather than on its top level.
+    pub nested: bool,
+}
+
+/// One of the nodes a staged group is made of: the group's own node, or
+/// its Inputs or Outputs.
+#[derive(Debug, Clone, Copy)]
+pub struct StagedPart {
+    pub graph_id: NodeId,
+    /// Saved editor position.
+    pub position: (f32, f32),
+    /// Inside one of the patch's groups, rather than on its top level.
+    pub nested: bool,
 }
 
 /// A patch built into its own graph, ready to be swapped in.
 pub struct StagedPatch {
     /// The patch's nodes, parameter values and connections.
     pub graph: SynthGraph,
-    /// Every node that was built, in patch order. Skipped nodes are missing.
+    /// Every module that was built, in patch order, a group's modules after
+    /// the ones beside the group. Skipped modules are missing.
     pub nodes: Vec<StagedNode>,
+    /// The nodes of every group that was built. Their group IDs are only
+    /// the staging's own; see [`renumber_groups`].
+    pub parts: Vec<StagedPart>,
     /// MIDI mappings whose `param_index` has been resolved by name, but whose
     /// `node_id` is still the patch node ID. See [`StagedPatch::remap_midi_mappings`].
     midi_mappings: Vec<MidiMapping>,
@@ -73,6 +94,15 @@ impl StagedPatch {
     }
 }
 
+/// Gives every group in `graph` a new ID from `allocate`: the ones a
+/// staging made up are only good within the staged graph.
+pub fn renumber_groups(graph: &mut SynthGraph, mut allocate: impl FnMut() -> GroupId) {
+    let mut ids: Vec<GroupId> = GroupIndex::of(graph).ids().collect();
+    ids.sort();
+    let new: HashMap<GroupId, GroupId> = ids.into_iter().map(|id| (id, allocate())).collect();
+    groups::renumber(graph, &new);
+}
+
 /// Builds a patch into a fresh graph.
 ///
 /// Only an incompatible version fails the load. Everything else that can't be
@@ -86,20 +116,46 @@ impl StagedPatch {
 pub fn stage_patch(patch: &Patch) -> Result<StagedPatch, PatchError> {
     check_version(patch)?;
     let mut graph = SynthGraph::default();
-    let (nodes, midi_mappings, warnings) = build_into(&mut graph, patch);
-    Ok(StagedPatch { graph, nodes, midi_mappings, warnings })
+    let mut next = 0;
+    let built = build_into(&mut graph, patch, None, &mut || {
+        next += 1;
+        GroupId(next)
+    });
+    Ok(StagedPatch {
+        graph,
+        nodes: built.nodes,
+        parts: built.parts,
+        midi_mappings: built.midi_mappings,
+        warnings: built.warnings,
+    })
+}
+
+/// What [`merge_patch`] added.
+pub struct Merged {
+    /// The modules, in patch order.
+    pub nodes: Vec<StagedNode>,
+    /// The groups' nodes.
+    pub parts: Vec<StagedPart>,
+    /// Anything that was skipped.
+    pub warnings: Vec<String>,
 }
 
 /// Adds a patch's nodes and the connections between them to a graph that
-/// already has nodes, e.g. to paste copied modules. Returns the nodes that
-/// were added and anything that was skipped, as [`stage_patch`] does.
+/// already has nodes, e.g. to paste copied modules, on the level `parent`.
+/// New groups take their IDs from `allocate`. Returns what was added and
+/// anything that was skipped, as [`stage_patch`] does.
 ///
 /// MIDI mappings are left behind: one controller turning both the original
 /// and the copy is rarely what anyone wants.
-pub fn merge_patch(graph: &mut SynthGraph, patch: &Patch) -> Result<(Vec<StagedNode>, Vec<String>), PatchError> {
+pub fn merge_patch(
+    graph: &mut SynthGraph,
+    patch: &Patch,
+    parent: Option<GroupId>,
+    allocate: &mut dyn FnMut() -> GroupId,
+) -> Result<Merged, PatchError> {
     check_version(patch)?;
-    let (nodes, _, warnings) = build_into(graph, patch);
-    Ok((nodes, warnings))
+    let built = build_into(graph, patch, parent, allocate);
+    Ok(Merged { nodes: built.nodes, parts: built.parts, warnings: built.warnings })
 }
 
 fn check_version(patch: &Patch) -> Result<(), PatchError> {
@@ -110,92 +166,46 @@ fn check_version(patch: &Patch) -> Result<(), PatchError> {
     }
 }
 
-/// Builds a patch's nodes, connections and MIDI mappings into `graph`.
-/// Connections only join nodes built here, never ones already in the graph.
-fn build_into(graph: &mut SynthGraph, patch: &Patch) -> (Vec<StagedNode>, Vec<MidiMapping>, Vec<String>) {
-    // Templates don't keep anything in the user state while building
-    let mut user_state = SynthGraphState::new();
-    let mut nodes = Vec::with_capacity(patch.nodes.len());
-    let mut warnings = Vec::new();
+/// What [`build_into`] built.
+struct Built {
+    nodes: Vec<StagedNode>,
+    parts: Vec<StagedPart>,
+    midi_mappings: Vec<MidiMapping>,
+    warnings: Vec<String>,
+}
 
-    for node_data in &patch.nodes {
-        let Some(template) = SynthNodeTemplate::from_module_id(&node_data.module_id) else {
-            warnings.push(format!(
-                "Skipped node {}: unknown module '{}'",
-                node_data.id, node_data.module_id
-            ));
-            continue;
-        };
-
-        let graph_id = graph.add_node(
-            template.node_graph_label(&mut user_state),
-            template.user_data(&mut user_state),
-            |graph, node_id| template.build_node(graph, &mut user_state, node_id),
-        );
-        restore_parameters(graph, graph_id, node_data, &mut warnings);
-        let user_data = &mut graph[graph_id].user_data;
-        user_data.bypassed = node_data.bypassed && user_data.bypassable;
-
-        nodes.push(StagedNode {
-            patch_id: node_data.id,
-            graph_id,
-            template,
-            position: node_data.position,
-        });
-    }
-
-    let graph_ids: HashMap<u64, NodeId> = nodes.iter().map(|n| (n.patch_id, n.graph_id)).collect();
-
-    for conn in &patch.connections {
-        let (Some(&from), Some(&to)) = (graph_ids.get(&conn.from_node), graph_ids.get(&conn.to_node)) else {
-            warnings.push(format!(
-                "Skipped connection {} -> {}: a node wasn't loaded",
-                conn.from_node, conn.to_node
-            ));
-            continue;
-        };
-
-        let output = graph.nodes[from]
-            .outputs
-            .iter()
-            .find(|(name, _)| *name == conn.from_port)
-            .map(|(_, id)| *id);
-        let input = graph.nodes[to]
-            .inputs
-            .iter()
-            .find(|(name, id)| *name == conn.to_port && port_mapping::is_connectable(graph.get_input(*id).kind))
-            .map(|(_, id)| *id);
-        let (Some(output), Some(input)) = (output, input) else {
-            warnings.push(format!(
-                "Skipped connection '{}' -> '{}': no such port",
-                conn.from_port, conn.to_port
-            ));
-            continue;
-        };
-
-        let result = validate_connection(graph.get_output(output).typ.0, graph.get_input(input).typ.0);
-        if let Some(error) = result.error_message() {
-            warnings.push(format!(
-                "Skipped connection '{}' -> '{}': {}",
-                conn.from_port, conn.to_port, error
-            ));
-            continue;
-        }
-
-        graph.add_connection(output, input, 0);
-    }
+/// Builds a patch's nodes, groups, connections and MIDI mappings into
+/// `graph`, its top level in `parent`. Connections only join nodes built
+/// here, never ones already in the graph.
+fn build_into(
+    graph: &mut SynthGraph,
+    patch: &Patch,
+    parent: Option<GroupId>,
+    allocate: &mut dyn FnMut() -> GroupId,
+) -> Built {
+    let mut builder = Builder {
+        graph,
+        allocate,
+        // Templates don't keep anything in the user state while building
+        user_state: SynthGraphState::new(),
+        nodes: Vec::with_capacity(patch.nodes.len()),
+        parts: Vec::new(),
+        modules: HashMap::new(),
+        warnings: Vec::new(),
+    };
+    builder.level(&patch.nodes, &patch.groups, &patch.connections, parent, None);
 
     let mut midi_mappings = Vec::with_capacity(patch.midi_mappings.len());
     for mapping in &patch.midi_mappings {
-        let Some(&graph_id) = graph_ids.get(&mapping.node_id) else {
-            warnings.push(format!(
+        let Some(&graph_id) = builder.modules.get(&mapping.node_id) else {
+            builder.warnings.push(format!(
                 "Dropped MIDI CC {} mapping: node {} wasn't loaded",
                 mapping.cc_number, mapping.node_id
             ));
             continue;
         };
-        let Some(param_index) = parameter_index(graph, graph_id, &mapping.param_name) else {
-            warnings.push(format!(
+        let Some(param_index) = parameter_index(builder.graph, graph_id, &mapping.param_name) else {
+            builder.warnings.push(format!(
                 "Dropped MIDI CC {} mapping: no parameter '{}'",
                 mapping.cc_number, mapping.param_name
             ));
@@ -204,7 +214,168 @@ fn build_into(graph: &mut SynthGraph, patch: &Patch) -> (Vec<StagedNode>, Vec<Mi
         midi_mappings.push(MidiMapping { param_index, ..mapping.clone() });
     }
 
-    (nodes, midi_mappings, warnings)
+    Built { nodes: builder.nodes, parts: builder.parts, midi_mappings, warnings: builder.warnings }
+}
+
+/// A group's inside being built: its ID in the patch, and its Inputs and
+/// Outputs, which cables to and from that ID mean.
+#[derive(Clone, Copy)]
+struct Inside {
+    patch_id: u64,
+    inputs: NodeId,
+    outputs: NodeId,
+}
+
+struct Builder<'a> {
+    graph: &'a mut SynthGraph,
+    allocate: &'a mut dyn FnMut() -> GroupId,
+    user_state: SynthGraphState,
+    nodes: Vec<StagedNode>,
+    parts: Vec<StagedPart>,
+    /// Every module built, by patch ID, for MIDI mappings.
+    modules: HashMap<u64, NodeId>,
+    warnings: Vec<String>,
+}
+
+impl Builder<'_> {
+    /// Builds one level of the patch: its modules, its groups (and their
+    /// insides), and the cables between them.
+    fn level(
+        &mut self,
+        nodes: &[NodeData],
+        groups: &[GroupData],
+        connections: &[ConnectionData],
+        parent: Option<GroupId>,
+        inside: Option<Inside>,
+    ) {
+        let nested = inside.is_some();
+        // The node each patch ID stands for on this level
+        let mut here: HashMap<u64, NodeId> = HashMap::new();
+
+        for node_data in nodes {
+            let Some(template) = SynthNodeTemplate::from_module_id(&node_data.module_id) else {
+                self.warnings.push(format!(
+                    "Skipped node {}: unknown module '{}'",
+                    node_data.id, node_data.module_id
+                ));
+                continue;
+            };
+
+            let user_state = &mut self.user_state;
+            let graph_id = self.graph.add_node(
+                template.node_graph_label(user_state),
+                template.user_data(user_state),
+                |graph, node_id| template.build_node(graph, user_state, node_id),
+            );
+            restore_parameters(self.graph, graph_id, node_data, &mut self.warnings);
+            let user_data = &mut self.graph[graph_id].user_data;
+            user_data.bypassed = node_data.bypassed && user_data.bypassable;
+            user_data.parent = parent;
+            user_data.pins = node_data.pinned.clone();
+
+            here.insert(node_data.id, graph_id);
+            self.modules.insert(node_data.id, graph_id);
+            self.nodes.push(StagedNode {
+                patch_id: node_data.id,
+                graph_id,
+                template,
+                position: node_data.position,
+                nested,
+            });
+        }
+
+        for group in groups {
+            let id = (self.allocate)();
+            let inputs = self.jacks(&group.name, &group.inputs);
+            let outputs = self.jacks(&group.name, &group.outputs);
+            let node = groups::add_group_node(self.graph, id, &group.name, parent, &inputs, &outputs);
+            let inputs_node = groups::add_inputs_node(self.graph, id, &inputs);
+            let outputs_node = groups::add_outputs_node(self.graph, id, &outputs);
+            self.parts.extend([
+                StagedPart { graph_id: node, position: group.position, nested },
+                StagedPart { graph_id: inputs_node, position: group.inputs_position, nested: true },
+                StagedPart { graph_id: outputs_node, position: group.outputs_position, nested: true },
+            ]);
+            here.insert(group.id, node);
+
+            let inside = Inside { patch_id: group.id, inputs: inputs_node, outputs: outputs_node };
+            self.level(&group.nodes, &group.groups, &group.connections, Some(id), Some(inside));
+        }
+
+        for conn in connections {
+            // Inside a group, its own ID is its jacks: in from Inputs, out to Outputs
+            let from = match inside {
+                Some(inside) if conn.from_node == inside.patch_id => Some(inside.inputs),
+                _ => here.get(&conn.from_node).copied(),
+            };
+            let to = match inside {
+                Some(inside) if conn.to_node == inside.patch_id => Some(inside.outputs),
+                _ => here.get(&conn.to_node).copied(),
+            };
+            let (Some(from), Some(to)) = (from, to) else {
+                self.warnings.push(format!(
+                    "Skipped connection {} -> {}: a node wasn't loaded",
+                    conn.from_node, conn.to_node
+                ));
+                continue;
+            };
+
+            let graph = &mut *self.graph;
+            let output = graph.nodes[from]
+                .outputs
+                .iter()
+                .find(|(name, _)| *name == conn.from_port)
+                .map(|(_, id)| *id);
+            let input = graph.nodes[to]
+                .inputs
+                .iter()
+                .find(|(name, id)| *name == conn.to_port && port_mapping::is_connectable(graph.get_input(*id).kind))
+                .map(|(_, id)| *id);
+            let (Some(output), Some(input)) = (output, input) else {
+                self.warnings.push(format!(
+                    "Skipped connection '{}' -> '{}': no such port",
+                    conn.from_port, conn.to_port
+                ));
+                continue;
+            };
+
+            let result = validate_connection(graph.get_output(output).typ.0, graph.get_input(input).typ.0);
+            if let Some(error) = result.error_message() {
+                self.warnings.push(format!(
+                    "Skipped connection '{}' -> '{}': {}",
+                    conn.from_port, conn.to_port, error
+                ));
+                continue;
+            }
+
+            graph.add_connection(output, input, 0);
+        }
+    }
+
+    /// A group's saved jacks. One naming a signal this version doesn't know
+    /// carries Control.
+    fn jacks(&mut self, group: &str, jacks: &[JackData]) -> Vec<Jack> {
+        jacks
+            .iter()
+            .map(|jack| {
+                let signal = signal_named(&jack.signal).unwrap_or_else(|| {
+                    self.warnings.push(format!(
+                        "Group '{}': jack '{}' carries unknown signal '{}', taken as Control",
+                        group, jack.name, jack.signal
+                    ));
+                    SignalType::Control
+                });
+                Jack { name: jack.name.clone(), signal }
+            })
+            .collect()
+    }
+}
+
+/// The signal type a jack names.
+fn signal_named(name: &str) -> Option<SignalType> {
+    [SignalType::Audio, SignalType::Control, SignalType::Gate, SignalType::Midi]
+        .into_iter()
+        .find(|signal| signal.name().eq_ignore_ascii_case(name))
 }
 
 /// Parameters modules no longer have, which older patches still carry.
@@ -264,12 +435,21 @@ fn port_name<Id: PartialEq>(ports: &[(String, Id)], wanted: Id) -> Option<String
     ports.iter().find(|(_, id)| *id == wanted).map(|(name, _)| name.clone())
 }
 
+/// One level of a patch, captured: modules, cables and groups.
+#[derive(Debug, Default)]
+pub struct CapturedLevel {
+    pub nodes: Vec<NodeData>,
+    pub connections: Vec<ConnectionData>,
+    pub groups: Vec<GroupData>,
+}
+
 /// Captures a graph as a patch.
 ///
-/// Nodes are saved under their engine IDs (`engine_id`); nodes without one
-/// are left out. `position` gives each node's canonical editor position.
-/// Nodes and connections are sorted so that saving the same graph twice
-/// gives the same file.
+/// Modules are saved under their engine IDs (`engine_id`), and groups under
+/// their group IDs; modules without an engine ID are left out. `position`
+/// gives each node's canonical editor position. Everything is sorted so
+/// that saving the same graph twice gives the same file. The patch is
+/// marked with the oldest version that can read it.
 pub fn capture_patch(
     name: &str,
     graph: &SynthGraph,
@@ -278,27 +458,93 @@ pub fn capture_patch(
     midi_mappings: &[MidiMapping],
 ) -> Patch {
     let mut patch = Patch::new(name);
+    let top: Vec<NodeId> = groups::level_nodes(graph, None);
+    let level = capture_level(graph, &top, None, &engine_id, &position);
+    (patch.nodes, patch.connections, patch.groups) = (level.nodes, level.connections, level.groups);
 
-    for (node_id, node) in graph.nodes.iter() {
-        let Some(id) = engine_id(node_id) else {
-            continue;
-        };
-        let mut node_data = NodeData::new(id, node.user_data.module_id, position(node_id));
-        node_data.bypassed = node.user_data.bypassed;
-        node_data.parameters = node
-            .inputs
-            .iter()
-            .filter(|(_, input_id)| port_mapping::is_parameter(graph.get_input(*input_id).kind))
-            .map(|(name, input_id)| NamedParameter::new(name.clone(), parameter_value(&graph.get_input(*input_id).value)))
-            .collect();
-        patch.nodes.push(node_data);
+    // Mappings to deleted nodes would only come back as load warnings
+    let saved: HashSet<u64> = patch.all_nodes().into_iter().map(|n| n.id).collect();
+    patch.midi_mappings = midi_mappings.iter().filter(|m| saved.contains(&m.node_id)).cloned().collect();
+    patch.version = patch.required_version();
+    patch
+}
+
+/// Captures some nodes on one level, the cables between them, and
+/// everything inside any groups among them. With `inside`, the level is
+/// that group's inside, and cables through its jacks are kept too, to and
+/// from the group's own ID. A group's Inputs and Outputs among `members`
+/// are left out: they only go with their group.
+pub fn capture_level(
+    graph: &SynthGraph,
+    members: &[NodeId],
+    inside: Option<GroupId>,
+    engine_id: &dyn Fn(NodeId) -> Option<EngineNodeId>,
+    position: &dyn Fn(NodeId) -> (f32, f32),
+) -> CapturedLevel {
+    let index = GroupIndex::of(graph);
+    let mut level = CapturedLevel::default();
+    // The ID each captured node is saved under, as a source and as a destination
+    let mut sources: HashMap<NodeId, u64> = HashMap::new();
+    let mut targets: HashMap<NodeId, u64> = HashMap::new();
+    if let Some(id) = inside {
+        let parts = index.parts(id);
+        sources.extend(parts.inputs.map(|n| (n, id.0)));
+        targets.extend(parts.outputs.map(|n| (n, id.0)));
     }
-    patch.nodes.sort_by_key(|n| n.id);
+
+    for &node_id in members {
+        let Some(node) = graph.nodes.get(node_id) else { continue };
+        let data = &node.user_data;
+        match data.kind {
+            NodeKind::Module => {
+                let Some(id) = engine_id(node_id) else { continue };
+                let mut node_data = NodeData::new(id, data.module_id, position(node_id));
+                node_data.bypassed = data.bypassed;
+                node_data.pinned = data.pins.clone();
+                node_data.parameters = node
+                    .inputs
+                    .iter()
+                    .filter(|(_, input_id)| port_mapping::is_parameter(graph.get_input(*input_id).kind))
+                    .map(|(name, input_id)| {
+                        NamedParameter::new(name.clone(), parameter_value(&graph.get_input(*input_id).value))
+                    })
+                    .collect();
+                level.nodes.push(node_data);
+                sources.insert(node_id, id);
+                targets.insert(node_id, id);
+            }
+            NodeKind::Group(id) => {
+                let parts = index.parts(id);
+                let inner: Vec<NodeId> = groups::level_nodes(graph, Some(id));
+                let captured = capture_level(graph, &inner, Some(id), engine_id, position);
+                let jacks = |jacks: Vec<Jack>| {
+                    jacks.into_iter().map(|j| JackData { name: j.name, signal: j.signal.name().to_string() }).collect()
+                };
+                level.groups.push(GroupData {
+                    id: id.0,
+                    name: data.display_name.clone(),
+                    position: position(node_id),
+                    inputs: jacks(groups::input_jacks(graph, node_id)),
+                    outputs: jacks(groups::output_jacks(graph, node_id)),
+                    inputs_position: parts.inputs.map(position).unwrap_or_default(),
+                    outputs_position: parts.outputs.map(position).unwrap_or_default(),
+                    nodes: captured.nodes,
+                    connections: captured.connections,
+                    groups: captured.groups,
+                });
+                sources.insert(node_id, id.0);
+                targets.insert(node_id, id.0);
+            }
+            NodeKind::Inputs(_) | NodeKind::Outputs(_) => {}
+        }
+    }
+    level.nodes.sort_by_key(|n| n.id);
+    level.groups.sort_by_key(|g| g.id);
 
     for (input_id, output_id) in graph.iter_connections() {
         let from = graph.get_output(output_id).node;
         let to = graph.get_input(input_id).node;
-        let (Some(from_id), Some(to_id)) = (engine_id(from), engine_id(to)) else {
+        let (Some(&from_id), Some(&to_id)) = (sources.get(&from), targets.get(&to)) else {
             continue;
         };
         let (Some(from_port), Some(to_port)) = (
@@ -307,19 +553,12 @@ pub fn capture_patch(
         ) else {
             continue;
         };
-        patch.connections.push(ConnectionData::new(from_id, from_port, to_id, to_port));
+        level.connections.push(ConnectionData::new(from_id, from_port, to_id, to_port));
     }
-    patch.connections.sort_by(|a, b| {
+    level.connections.sort_by(|a, b| {
         (a.from_node, &a.from_port, a.to_node, &a.to_port).cmp(&(b.from_node, &b.from_port, b.to_node, &b.to_port))
     });
-
-    // Mappings to deleted nodes would only come back as load warnings
-    patch.midi_mappings = midi_mappings
-        .iter()
-        .filter(|m| patch.nodes.iter().any(|n| n.id == m.node_id))
-        .cloned()
-        .collect();
-    patch
+    level
 }
 
 #[cfg(test)]
@@ -454,7 +693,7 @@ mod tests {
     #[test]
     fn test_v2_fixture_loads() {
         let patch = patch_from_json(V2_FIXTURE).unwrap();
-        assert_eq!(patch.version, PATCH_VERSION);
+        assert_eq!(patch.version, patch.required_version());
         let (saved, warnings) = reload(&patch, 40);
         assert!(warnings.is_empty(), "{:?}", warnings);
 

@@ -4,7 +4,7 @@
 
 pub mod capture;
 mod editing;
-mod engine_sync;
+pub mod engine_sync;
 mod input_device;
 mod palette;
 mod recording;

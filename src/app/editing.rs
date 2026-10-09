@@ -18,8 +18,9 @@ use egui_node_graph2::{NodeId, NodeTemplateTrait};
 
 use crate::engine::EngineCommand;
 use crate::graph::annotations::{Annotation, AnnotationId};
-use crate::graph::{port_mapping, SynthGraphEditorState, SynthGraphState, SynthNodeTemplate};
-use crate::persistence::{capture_patch, merge_patch, Patch, PatchError};
+use crate::graph::groups::{self, GroupIndex};
+use crate::graph::{port_mapping, NodeKind, SynthGraphEditorState, SynthGraphState, SynthNodeTemplate};
+use crate::persistence::{capture_level, merge_patch, Patch, PatchError};
 use super::engine_sync;
 
 /// How far a duplicate lands from its original, in unzoomed points.
@@ -93,7 +94,8 @@ pub fn add_module(
     (node_id, engine_sync::add_module(&editor.graph, node_id, engine_node_id))
 }
 
-/// Removes a node, its cables and its module.
+/// Removes a node and its cables, and its module if it's a module. The
+/// engine's cables aren't brought in line: see [`delete_modules`].
 pub fn remove_module(
     editor: &mut SynthGraphEditorState,
     user_state: &mut SynthGraphState,
@@ -102,27 +104,48 @@ pub fn remove_module(
     if !editor.graph.nodes.contains_key(node_id) {
         return Vec::new();
     }
-    let (_, cut) = editor.graph.remove_node(node_id);
-    let mut commands: Vec<EngineCommand> = cut
-        .into_iter()
-        .flat_map(|(input, output)| engine_sync::cable_disconnected(&editor.graph, user_state, output, input))
-        .collect();
+    editor.graph.remove_node(node_id);
     editor.node_positions.remove(node_id);
     editor.node_order.retain(|id| *id != node_id);
     editor.selected_nodes.retain(|id| *id != node_id);
-    if let Some(engine_node_id) = user_state.remove_node(node_id) {
-        commands.push(EngineCommand::RemoveModule { node_id: engine_node_id });
-    }
-    commands
+    user_state.remove_node(node_id)
+        .map(|engine_node_id| EngineCommand::RemoveModule { node_id: engine_node_id })
+        .into_iter()
+        .collect()
 }
 
-/// Removes several nodes, with their cables and modules.
+/// The nodes deleting these takes away: each group goes with everything in
+/// it. A group's Inputs and Outputs only go with the group.
+pub fn deleted_with(graph: &crate::graph::SynthGraph, nodes: &[NodeId]) -> Vec<NodeId> {
+    let index = GroupIndex::of(graph);
+    let mut doomed = Vec::new();
+    for &node_id in nodes {
+        let Some(node) = graph.nodes.get(node_id) else { continue };
+        match node.user_data.kind {
+            NodeKind::Inputs(_) | NodeKind::Outputs(_) => continue,
+            NodeKind::Group(id) => doomed.extend(groups::descendants(graph, &index, id)),
+            NodeKind::Module => {}
+        }
+        doomed.push(node_id);
+    }
+    let mut seen = HashSet::new();
+    doomed.retain(|n| seen.insert(*n));
+    doomed
+}
+
+/// Removes several nodes, with their cables and modules, and groups with
+/// everything inside them.
 pub fn delete_modules(
     editor: &mut SynthGraphEditorState,
     user_state: &mut SynthGraphState,
     nodes: &[NodeId],
 ) -> Vec<EngineCommand> {
-    nodes.iter().flat_map(|&node_id| remove_module(editor, user_state, node_id)).collect()
+    let mut commands: Vec<EngineCommand> = deleted_with(&editor.graph, nodes)
+        .into_iter()
+        .flat_map(|node_id| remove_module(editor, user_state, node_id))
+        .collect();
+    commands.extend(engine_sync::sync_cables(&editor.graph, user_state));
+    commands
 }
 
 /// Removes a selection: modules with their cables, frames and notes.
@@ -167,27 +190,30 @@ pub fn top_left(editor: &SynthGraphEditorState, nodes: &[NodeId]) -> Option<Pos2
         .reduce(|a, b| a.min(b))
 }
 
-/// Captures a selection as a patch, ready to paste: modules with the cables
-/// between them, frames and notes. Positions are in unzoomed points from
-/// the selection's top-left corner, so the copies keep their layout at any
-/// zoom. MIDI mappings stay behind.
+/// Captures a selection as a patch, ready to paste: modules and groups
+/// (with everything inside them) and the cables between them, frames and
+/// notes. Positions are in unzoomed points from the selection's top-left
+/// corner, so the copies keep their layout at any zoom. MIDI mappings stay
+/// behind.
 pub fn copy_selection(editor: &SynthGraphEditorState, user_state: &SynthGraphState, selection: &Selection) -> Option<Patch> {
     let corner = patch_top_left(editor, user_state, selection)?;
-    let nodes = &selection.nodes;
     let position = |node_id| {
         let at = editor.node_positions.get(node_id).map_or(corner, |&p| to_patch(editor, user_state, p));
         ((at - corner).x, (at - corner).y)
     };
-    let engine_id = |node_id| nodes.contains(&node_id).then(|| user_state.get_engine_node_id(node_id)).flatten();
-    let mut patch = capture_patch(CLIPBOARD_NAME, &editor.graph, engine_id, position, &[]);
+    let engine_id = |node_id| user_state.get_engine_node_id(node_id);
+    let level = capture_level(&editor.graph, &selection.nodes, None, &engine_id, &position);
+    let mut patch = Patch::new(CLIPBOARD_NAME);
+    (patch.nodes, patch.connections, patch.groups) = (level.nodes, level.connections, level.groups);
+    patch.version = patch.required_version();
     (patch.frames, patch.notes) = user_state.annotations.to_patch(&selection.annotations, -corner.to_vec2());
-    let empty = patch.nodes.is_empty() && patch.frames.is_empty() && patch.notes.is_empty();
+    let empty = patch.nodes.is_empty() && patch.groups.is_empty() && patch.frames.is_empty() && patch.notes.is_empty();
     (!empty).then_some(patch)
 }
 
 /// What a paste or duplicate added.
 pub struct Pasted {
-    /// The new nodes, in patch order.
+    /// The new modules and groups on the level pasted into, in patch order.
     pub nodes: Vec<NodeId>,
     /// The new frames and notes.
     pub annotations: Vec<AnnotationId>,
@@ -197,48 +223,58 @@ pub struct Pasted {
     pub warnings: Vec<String>,
 }
 
-/// Adds a patch's modules, the cables between them, and its frames and
-/// notes, with their top-left corner at `at`. Any patch works, not only
-/// copied modules: its layout is kept, scaled to the current zoom.
+/// Adds a patch's modules and groups, the cables between them, and its
+/// frames and notes, with their top-left corner at `at`, on the level the
+/// editor shows. Any patch works, not only copied modules: its layout is
+/// kept, scaled to the current zoom. Frames and notes only go on the top
+/// level of the patch.
 pub fn paste(
     editor: &mut SynthGraphEditorState,
     user_state: &mut SynthGraphState,
     patch: &Patch,
     at: Pos2,
 ) -> Result<Pasted, PatchError> {
-    let (staged, warnings) = merge_patch(&mut editor.graph, patch)?;
+    let level = user_state.level;
+    let merged = merge_patch(&mut editor.graph, patch, level, &mut || user_state.allocate_group_id())?;
     let zoom = editor.pan_zoom.zoom;
-    let corner = staged
-        .iter()
-        .map(|node| Vec2::new(node.position.0, node.position.1))
-        .chain(patch.frames.iter().map(|frame| Vec2::new(frame.position.0, frame.position.1)))
-        .chain(patch.notes.iter().map(|note| Vec2::new(note.position.0, note.position.1)))
+    let at_top = level.is_none();
+    let vec = |p: (f32, f32)| Vec2::new(p.0, p.1);
+    // Only what lands on this level counts: a group's insides have their own places
+    let corner = merged.nodes.iter().filter(|n| !n.nested).map(|n| vec(n.position))
+        .chain(merged.parts.iter().filter(|p| !p.nested).map(|p| vec(p.position)))
+        .chain(patch.frames.iter().filter(|_| at_top).map(|frame| vec(frame.position)))
+        .chain(patch.notes.iter().filter(|_| at_top).map(|note| vec(note.position)))
         .reduce(|a, b| a.min(b))
         .unwrap_or_default();
     let offset = to_patch(editor, user_state, at).to_vec2() - corner;
-    let annotations = user_state.annotations.add_from_patch(&patch.frames, &patch.notes, offset);
+    let annotations = if at_top {
+        user_state.annotations.add_from_patch(&patch.frames, &patch.notes, offset)
+    } else {
+        Vec::new()
+    };
 
     let mut commands = Vec::new();
-    let mut nodes = Vec::with_capacity(staged.len());
-    for node in &staged {
-        let offset = Vec2::new(node.position.0, node.position.1) - corner;
-        editor.node_positions.insert(node.graph_id, at + offset * zoom);
+    let mut nodes = Vec::new();
+    for node in &merged.nodes {
+        editor.node_positions.insert(node.graph_id, at + (vec(node.position) - corner) * zoom);
         editor.node_order.push(node.graph_id);
         let engine_node_id = user_state.allocate_engine_node_id(node.graph_id);
         commands.extend(engine_sync::add_module(&editor.graph, node.graph_id, engine_node_id));
-        nodes.push(node.graph_id);
+        if !node.nested {
+            nodes.push(node.graph_id);
+        }
+    }
+    for part in &merged.parts {
+        editor.node_positions.insert(part.graph_id, at + (vec(part.position) - corner) * zoom);
+        editor.node_order.push(part.graph_id);
+        if !part.nested {
+            nodes.push(part.graph_id);
+        }
     }
 
-    // The patch's cables only join its own nodes, so any cable into a new
-    // node is one of them
-    let new: HashSet<NodeId> = nodes.iter().copied().collect();
-    let cables: Vec<_> = editor.graph.iter_connections()
-        .filter(|(input, _)| new.contains(&editor.graph.get_input(*input).node))
-        .collect();
-    for (input, output) in cables {
-        commands.extend(engine_sync::cable_connected(&editor.graph, user_state, output, input));
-    }
-    Ok(Pasted { nodes, annotations, commands, warnings })
+    // The patch's cables only join its own nodes
+    commands.extend(engine_sync::sync_cables(&editor.graph, user_state));
+    Ok(Pasted { nodes, annotations, commands, warnings: merged.warnings })
 }
 
 /// Copies a selection and pastes it a little down and to the right, with
@@ -254,12 +290,18 @@ pub fn duplicate(
     paste(editor, user_state, &patch, at).ok()
 }
 
-/// "Oscillator" for one module, "3 modules" for several.
+/// "Oscillator" for one module, "group Voice" for a group, "3 modules" for
+/// several.
 pub fn describe_modules(editor: &SynthGraphEditorState, nodes: &[NodeId]) -> String {
     match nodes {
-        [one] => editor.graph.nodes.get(*one)
-            .and_then(|node| SynthNodeTemplate::from_module_id(node.user_data.module_id))
-            .map_or_else(|| "module".to_string(), |t| t.name().to_string()),
+        [one] => editor.graph.nodes.get(*one).map_or_else(
+            || "module".to_string(),
+            |node| match node.user_data.kind {
+                NodeKind::Group(_) => format!("group {}", node.user_data.display_name),
+                _ => SynthNodeTemplate::from_module_id(node.user_data.module_id)
+                    .map_or_else(|| "module".to_string(), |t| t.name().to_string()),
+            },
+        ),
         many => format!("{} modules", many.len()),
     }
 }
@@ -354,6 +396,8 @@ mod tests {
         rig.connect(osc, "Out", filter, "In");
         rig.connect(filter, "LowPass", out, "Left");
         rig.set(filter, "Cutoff", 2400.0);
+        // The engine has heard about the cables, as it would by the end of the frame
+        engine_sync::sync_cables(&rig.editor.graph, &mut rig.user_state);
         (osc, filter, out)
     }
 

@@ -8,8 +8,10 @@
 
 use std::collections::HashMap;
 
+use egui_node_graph2::NodeId;
+
 use crate::engine::{EngineCommand, NodeId as EngineNodeId};
-use crate::graph::port_mapping;
+use crate::graph::{groups, port_mapping};
 
 use super::{stage_patch, Patch, PatchError};
 
@@ -39,7 +41,11 @@ pub fn compile_patch(patch: &Patch) -> Result<CompiledPatch, PatchError> {
     };
     let mut engine_ids = HashMap::new();
 
-    for (engine_node_id, node) in (0..).zip(&staged.nodes) {
+    // Modules in patch ID order, so a patch numbers its modules the same
+    // whether or not some of them are in groups
+    let mut modules: Vec<_> = staged.nodes.iter().collect();
+    modules.sort_by_key(|node| node.patch_id);
+    for (engine_node_id, node) in (0..).zip(modules) {
         engine_ids.insert(node.graph_id, engine_node_id);
         compiled.node_ids.insert(node.patch_id, engine_node_id);
 
@@ -67,7 +73,22 @@ pub fn compile_patch(patch: &Patch) -> Result<CompiledPatch, PatchError> {
         }
     }
 
-    for (input_id, output_id) in graph.iter_connections() {
+    // Module to module, through any groups between them. The engine turns
+    // away a cable that would close a loop, so which one of a loop's cables
+    // goes is down to their order: it's the order a patch without groups
+    // saves them in, by module ID and port name, whatever groups they cross
+    let patch_ids: HashMap<NodeId, u64> = staged.nodes.iter().map(|n| (n.graph_id, n.patch_id)).collect();
+    let mut cables = groups::leaf_cables(graph);
+    cables.sort_by_cached_key(|&(output_id, input_id)| {
+        let (from, to) = (graph.get_output(output_id).node, graph.get_input(input_id).node);
+        (
+            patch_ids.get(&from).copied(),
+            port_name(&graph[from].outputs, output_id),
+            patch_ids.get(&to).copied(),
+            port_name(&graph[to].inputs, input_id),
+        )
+    });
+    for (output_id, input_id) in cables {
         let from = graph.get_output(output_id).node;
         let to = graph.get_input(input_id).node;
         // Staging only keeps connections between ports that map to the engine
@@ -86,6 +107,11 @@ pub fn compile_patch(patch: &Patch) -> Result<CompiledPatch, PatchError> {
     }
 
     Ok(compiled)
+}
+
+/// The name of the port with the given ID.
+fn port_name<Id: PartialEq>(ports: &[(String, Id)], id: Id) -> Option<String> {
+    ports.iter().find(|(_, p)| *p == id).map(|(name, _)| name.clone())
 }
 
 #[cfg(test)]

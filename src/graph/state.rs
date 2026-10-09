@@ -4,7 +4,7 @@
 
 use egui::{Color32, Pos2, Vec2};
 use egui_node_graph2::{Backdrop, ConnectionSignalTrait, FlowGlyph, GraphEditorState, NodeId, SignalTrace};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 
 use crate::dsp::Readout;
@@ -13,6 +13,7 @@ use crate::engine::midi_engine::MidiEvent;
 use crate::widgets::{LevelMeter, ModuleMeters};
 use super::annotation_ui::{self, View};
 use super::annotations::{self, Annotations};
+use super::groups::{Face, GroupId, Renaming};
 use super::signal_history::{OutputHistory, TraceShape};
 use super::{SynthDataType, SynthGraph, SynthNodeData, SynthValueType};
 use super::templates::SynthNodeTemplate;
@@ -176,6 +177,30 @@ pub struct SynthGraphState {
 
     /// The input device Audio Input modules are listening to, if one is open.
     pub audio_input_name: Option<String>,
+
+    /// The group whose inside the editor shows, or `None` for the top of
+    /// the patch.
+    pub level: Option<GroupId>,
+
+    /// Nodes on other levels than [`Self::level`], which aren't drawn. Set
+    /// by the app before each frame is drawn.
+    pub hidden: HashSet<NodeId>,
+
+    /// Outputs of groups' nodes, standing for the module output each one
+    /// really carries, so cables from a jack show that module's signal.
+    /// Key: (graph node, output index). Set by the app before drawing.
+    pub output_aliases: HashMap<(NodeId, usize), (EngineNodeId, usize)>,
+
+    /// What each group on the shown level has on its face. Set by the app
+    /// before drawing.
+    pub group_faces: HashMap<GroupId, Face>,
+
+    /// A group being named, in a field on its face.
+    pub renaming: Option<Renaming>,
+
+    /// The cables the engine was last sent, module to module. See
+    /// [`crate::app::engine_sync::sync_cables`].
+    pub engine_cables: crate::app::engine_sync::LeafCables,
 }
 
 impl Default for SynthGraphState {
@@ -213,6 +238,12 @@ impl Default for SynthGraphState {
             module_meters: HashMap::new(),
             readouts: HashMap::new(),
             audio_input_name: None,
+            level: None,
+            hidden: HashSet::new(),
+            output_aliases: HashMap::new(),
+            group_faces: HashMap::new(),
+            renaming: None,
+            engine_cables: Default::default(),
         }
     }
 }
@@ -236,6 +267,29 @@ impl SynthGraphState {
     pub fn assign_engine_node_id(&mut self, graph_node_id: NodeId, engine_node_id: EngineNodeId) {
         self.next_engine_node_id = self.next_engine_node_id.max(engine_node_id + 1);
         self.node_id_map.insert(graph_node_id, engine_node_id);
+    }
+
+    /// A new group's ID, from the same count as engine node IDs, so a patch
+    /// file can name modules and groups alike without them colliding.
+    pub fn allocate_group_id(&mut self) -> GroupId {
+        let id = self.next_engine_node_id;
+        self.next_engine_node_id += 1;
+        GroupId(id)
+    }
+
+    /// Notes a group ID already in use (undo bringing a group back), so
+    /// it's never handed out again.
+    pub fn claim_group_id(&mut self, id: GroupId) {
+        self.next_engine_node_id = self.next_engine_node_id.max(id.0 + 1);
+    }
+
+    /// The module output a graph node's output carries: its own, or for a
+    /// group's jack, the module output plugged in behind it.
+    pub fn resolve_output(&self, graph_node_id: NodeId, output_index: usize) -> Option<(EngineNodeId, usize)> {
+        if let Some(&alias) = self.output_aliases.get(&(graph_node_id, output_index)) {
+            return Some(alias);
+        }
+        Some((self.get_engine_node_id(graph_node_id)?, output_index))
     }
 
     /// Get the engine node ID for a graph node.
@@ -275,6 +329,12 @@ impl SynthGraphState {
         self.readouts.clear();
         self.annotations.clear();
         self.over_annotation = false;
+        self.level = None;
+        self.hidden.clear();
+        self.output_aliases.clear();
+        self.group_faces.clear();
+        self.renaming = None;
+        self.engine_cables.clear();
     }
 
     /// Get the MIDI mapping info for a parameter, if any.
@@ -382,8 +442,7 @@ impl SynthGraphState {
 
     /// The last per-channel reading of a graph node's output, if any.
     pub fn output_peaks(&self, graph_node_id: NodeId, output_index: usize) -> Option<&ChannelPeaks> {
-        let engine_node_id = self.get_engine_node_id(graph_node_id)?;
-        self.output_channels.get(&(engine_node_id, output_index))
+        self.output_channels.get(&self.resolve_output(graph_node_id, output_index)?)
     }
 
     /// Add a MIDI event for display in MIDI Monitor modules.
@@ -480,8 +539,8 @@ impl ConnectionSignalTrait for SynthGraphState {
         if !self.is_playing {
             return Some(0.0);
         }
-        // Map graph NodeId to engine NodeId
-        let engine_node_id = self.get_engine_node_id(graph_node_id)?;
+        // The module output this one carries, through any group jacks
+        let (engine_node_id, output_index) = self.resolve_output(graph_node_id, output_index)?;
         // Get the output signal value from the audio engine feedback
         self.get_output_value(engine_node_id, output_index)
     }
@@ -498,15 +557,23 @@ impl ConnectionSignalTrait for SynthGraphState {
     }
 
     fn output_trace(&self, graph_node_id: NodeId, output_index: usize, channel: usize) -> Option<SignalTrace<'_>> {
-        let engine_node_id = self.get_engine_node_id(graph_node_id)?;
-        self.signal_history.get(&(engine_node_id, output_index))?.trace(channel)
+        self.signal_history.get(&self.resolve_output(graph_node_id, output_index)?)?.trace(channel)
     }
 
     fn flow_glyph(&self) -> FlowGlyph {
         self.flow_glyph
     }
 
+    fn node_shown(&self, node_id: NodeId) -> bool {
+        !self.hidden.contains(&node_id)
+    }
+
     fn backdrop_ui(&mut self, ui: &mut egui::Ui, backdrop: Backdrop<'_>) {
+        // Frames and notes are on the top level of the patch
+        if self.level.is_some() {
+            self.over_annotation = false;
+            return;
+        }
         // A scroll this frame has already zoomed the nodes, after the app set
         // the view origin, so the origin follows them here
         let mut view_origin = self.view_origin;
