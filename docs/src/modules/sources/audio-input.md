@@ -3,7 +3,7 @@
 **Module ID** `source.audio_input` · **Category** Source
 
 ![Audio Input Module](../../images/module-audio-input.png)
-*A drum loop coming in. Follow scrolls past the Threshold line, turning green wherever the gate opened: the kicks get through, the snares stay under.*
+*A drum loop coming in on input 1, with **Channel** on **1** so both meters carry it. Follow scrolls past the Threshold line, turning green wherever the gate opened: the kicks get through, the snares stay under.*
 
 Audio Input brings sound from outside into the patch: a microphone, a guitar, a synth on a line input. Put your voice through the reverb, a guitar through the ladder filter and a tape delay, or let a drum loop play a synth.
 
@@ -15,8 +15,8 @@ Alongside the audio, the module listens to how loud the input is. **Follow** tra
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **L** | Audio (Blue) | The input's left side, after **Gain**. A mono microphone is heard on both **L** and **R** |
-| **R** | Audio (Blue) | The input's right side, after **Gain** |
+| **L** | Audio (Blue) | Input 1, after **Gain**; or, with **Channel** on **1** or **2**, that input |
+| **R** | Audio (Blue) | Input 2, after **Gain**; or, with **Channel** on **1** or **2**, that input |
 | **Follow** | Control (Orange) | How loud the input is, on a dB scale: 0 at -60 dB, 1 at full scale |
 | **Gate** | Gate (Green) | High while **Follow** is above the **Threshold** |
 
@@ -24,12 +24,31 @@ The module has no inputs: its signal comes from the device.
 
 ## Parameters
 
-| Knob | Range | Default | Description |
-|------|-------|---------|-------------|
+| Control | Range | Default | Description |
+|---------|-------|---------|-------------|
+| **Channel** | Stereo, 1, 2 | Stereo | Which of the device's inputs the module hears, on a menu at the top of the node. See [Choosing a channel](#choosing-a-channel) |
 | **Gain** | -24 – +24 dB | 0 dB | Level of the input, before everything else. Follow and Gate hear it too |
 | **Thresh** | -60 – 0 dB | -30 dB | Where the gate opens |
 | **Attack** | 0.1 – 100 ms | 5 ms | How fast **Follow** rises when the input gets louder |
 | **Release** | 5 – 2000 ms | 150 ms | How fast **Follow** falls when the input gets quieter |
+
+## Choosing a channel
+
+An audio interface hands its inputs over as a pair: input 1 on the left, input 2 on the right. That's right for a stereo source, like a synth's two outputs, but a guitar or a microphone plugged into input 1 alone would play only in your left ear, and a stereo delay or reverb after it would get a lopsided signal. **Channel** picks what the module hears:
+
+| Channel | L hears | R hears | For |
+|---------|---------|---------|-----|
+| **Stereo** | input 1 | input 2 | A stereo source across both inputs, or a device with a single input (see below) |
+| **1** | input 1 | input 1 | A guitar or microphone in input 1, heard in the centre |
+| **2** | input 2 | input 2 | The same, in input 2 |
+
+**Follow** and **Gate** hear what the module puts out. On **1** or **2** they follow that input alone. On **Stereo** they follow whichever side is louder.
+
+Each Audio Input module chooses for itself, so two of them can split an interface: one on **1** for a guitar through a filter and an echo, one on **2** for a voice through a reverb, each in its own chain.
+
+A device that has only one input, like a laptop's built-in microphone or a USB mic, already plays on both sides, whichever **Channel** you pick.
+
+Only inputs 1 and 2 reach the patch. On an interface with more, like a Scarlett 18i20, plug what you want to play into the first two.
 
 ## The display
 
@@ -65,7 +84,7 @@ The **Buffer** settles on its own. It opens holding enough for the worst timing 
 - **Different sample rates are fine.** Windows often runs a microphone at 48 kHz and speakers at 44.1 kHz, even on one interface. Modular converts the input to the output's rate on the way in. For the cleanest sound, set both to the same rate in your system's sound settings; the status bar tooltip says when it's converting.
 - **Changing the Output device** reopens the input at the new device's rate.
 - If the input device is unplugged, the status bar shows **⚠ Input lost**. Choose it again under **Input**.
-- A mono device is heard on both sides. An interface with more than two inputs gives its first two.
+- A mono device is heard on both sides. With a two-input interface, set **Channel** to the input you're using; see [Choosing a channel](#choosing-a-channel).
 
 ## Low latency with ASIO (Windows)
 
@@ -116,7 +135,7 @@ The file plays from the start of the render. It must be at the render's sample r
 [Reverb Out R] ──> [Audio Output Right]
 ```
 
-Talk or sing into the microphone. Raise the Reverb's **Size** and **Decay** for a hall, or a cathedral. Use headphones.
+Talk or sing into the microphone. If it's plugged into an interface, set **Channel** to its input, so it sits in the middle of the room rather than off to one side. Raise the Reverb's **Size** and **Decay** for a hall, or a cathedral. Use headphones.
 
 ### Guitar through a ladder filter and tape echo
 
@@ -127,7 +146,7 @@ Talk or sing into the microphone. Raise the Reverb's **Size** and **Decay** for 
 [Stereo Delay Out L / Out R] ──> [Audio Output Left / Right]
 ```
 
-**Follow** opens the filter as you dig in, like an auto-wah: each pick attack sweeps it up, and it closes as the note decays. Start with the Ladder's cutoff low and its **Resonance** around 50%. **Attack** at 5 ms and **Release** at 200 ms give a classic quack. The tape echo then repeats each sweep, darker every time.
+Set **Channel** to the input the guitar is plugged into. **Follow** opens the filter as you dig in, like an auto-wah: each pick attack sweeps it up, and it closes as the note decays. Start with the Ladder's cutoff low and its **Resonance** around 50%. **Attack** at 5 ms and **Release** at 200 ms give a classic quack. The tape echo then repeats each sweep, darker every time.
 
 ### Drums that play a synth
 

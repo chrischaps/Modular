@@ -594,6 +594,39 @@ mod tests {
     }
 
     #[test]
+    fn test_two_audio_inputs_each_hear_their_own_channel() {
+        // A guitar in input 1 and a voice in input 2, each Audio Input on
+        // its own channel, one to each side of the output
+        let mut patch = Patch::new("two inputs");
+        for (id, channel) in [(1, 1), (2, 2)] {
+            let mut input = NodeData::new(id, "source.audio_input", (0.0, 0.0));
+            input.parameters = vec![NamedParameter::new("Channel", ParameterValue::Select(channel))];
+            patch.nodes.push(input);
+        }
+        patch.nodes.push(NodeData::new(3, "output.audio", (200.0, 0.0)));
+        patch.connections.push(ConnectionData::new(1, "R", 3, "Left"));
+        patch.connections.push(ConnectionData::new(2, "L", 3, "Right"));
+        let (mut r, _) = OfflineRenderer::from_patch(&patch, 48000.0, 256).unwrap();
+
+        // Input 1 a tone, input 2 a quieter one an octave down
+        let sr = 48000.0;
+        let wave = |amplitude: f32, hz: f32| -> Vec<f32> {
+            (0..(sr as usize)).map(|n| amplitude * (2.0 * std::f32::consts::PI * hz * n as f32 / sr).sin()).collect()
+        };
+        r.set_audio_input(StereoBuffer { left: wave(0.25, 1000.0), right: wave(0.125, 500.0) });
+        let out = r.render_seconds(1.0);
+        let middle = |side: &[f32]| side[(0.5 * sr) as usize..(0.9 * sr) as usize].to_vec();
+        let (left, right) = (middle(&out.left), middle(&out.right));
+        // Each side has its own input's level, at the output's 0.8 volume
+        assert!((rms(&left) / (0.8 * 0.25 / 2f32.sqrt()) - 1.0).abs() < 0.02, "left at {}", rms(&left));
+        assert!((rms(&right) / (0.8 * 0.125 / 2f32.sqrt()) - 1.0).abs() < 0.02, "right at {}", rms(&right));
+        // And its pitch
+        let crossings = |s: &[f32]| s.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+        assert!((crossings(&left) as i32 - 400).abs() <= 1, "left crosses {} times", crossings(&left));
+        assert!((crossings(&right) as i32 - 200).abs() <= 1, "right crosses {} times", crossings(&right));
+    }
+
+    #[test]
     fn test_audio_input_gate_plays_an_envelope() {
         // A tone burst on the input opens the gate, which plays the
         // oscillator through an envelope and a VCA

@@ -24,6 +24,9 @@ pub const FOLLOW_FLOOR_DB: f32 = -60.0;
 /// again, so a level hovering at the threshold doesn't chatter.
 pub const GATE_HYSTERESIS_DB: f32 = 6.0;
 
+/// The Channel choice: which of the device's inputs each side hears.
+pub const CHANNEL_LABELS: &[&str] = &["Stereo", "1", "2"];
+
 /// Converts a level in dBFS to Follow's scale: 0 at the floor, 1 at 0 dBFS.
 #[inline]
 pub fn follow_from_db(db: f32) -> f32 {
@@ -41,8 +44,9 @@ fn coefficient(ms: f32, sample_rate: f32) -> f32 {
 /// # Ports
 ///
 /// **Outputs:**
-/// - **L**, **R** (Audio): The input, after Gain. A mono input is heard on
-///   both.
+/// - **L**, **R** (Audio): The input, after Gain. In Stereo, input 1 on L
+///   and input 2 on R; on 1 or 2, that input on both. A mono device is
+///   heard on both either way.
 /// - **Follow** (Control): How loud the input is, on a dB scale: 0 at
 ///   -60 dB, 1 at full scale.
 /// - **Gate** (Gate): High while the input is above the Threshold.
@@ -53,6 +57,7 @@ fn coefficient(ms: f32, sample_rate: f32) -> f32 {
 /// - **Threshold** (-60 to 0 dB): Where the gate opens.
 /// - **Attack** (0.1-100 ms): How fast Follow rises.
 /// - **Release** (5-2000 ms): How fast Follow falls.
+/// - **Channel** (Stereo, 1, 2): Which input the module hears.
 pub struct AudioInput {
     /// The Gain knob as a linear gain, smoothed.
     gain: SmoothedValue,
@@ -77,9 +82,9 @@ impl AudioInput {
             sample_rate,
             ports: vec![
                 PortDefinition::output("left", "L", SignalType::Audio)
-                    .describe("The input's left side, or the whole of a mono input, after Gain"),
+                    .describe("Input 1, or the chosen Channel, after Gain"),
                 PortDefinition::output("right", "R", SignalType::Audio)
-                    .describe("The input's right side, or the whole of a mono input, after Gain"),
+                    .describe("Input 2, or the chosen Channel, after Gain"),
                 PortDefinition::output("follow", "Follow", SignalType::Control)
                     .describe("How loud the input is: 0 at -60 dB up to 1 at full scale"),
                 PortDefinition::output("gate", "Gate", SignalType::Gate)
@@ -94,6 +99,8 @@ impl AudioInput {
                     .describe("How fast Follow rises when the input gets louder"),
                 ParameterDefinition::new("release", "Release", 5.0, 2000.0, 150.0, ParameterDisplay::logarithmic("ms"))
                     .describe("How fast Follow falls when the input gets quieter"),
+                ParameterDefinition::choice("channel", "Channel", CHANNEL_LABELS, 0)
+                    .describe("Stereo hears inputs 1 and 2 on L and R; 1 or 2 hears that input alone, on both"),
             ],
         }
     }
@@ -102,6 +109,7 @@ impl AudioInput {
     const PARAM_THRESHOLD: usize = 1;
     const PARAM_ATTACK: usize = 2;
     const PARAM_RELEASE: usize = 3;
+    const PARAM_CHANNEL: usize = 4;
 
     /// Follow's reading of the envelope.
     #[inline]
@@ -156,16 +164,23 @@ impl DspModule for AudioInput {
         let close_at = open_at - GATE_HYSTERESIS_DB / -FOLLOW_FLOOR_DB;
         let attack = coefficient(params[Self::PARAM_ATTACK], self.sample_rate);
         let release = coefficient(params[Self::PARAM_RELEASE], self.sample_rate);
+        let channel = params[Self::PARAM_CHANNEL].round() as usize;
 
         for i in 0..context.block_size {
             let gain = self.gain.next();
-            let (left, right) = context.input.frame(i);
+            let (one, two) = context.input.frame(i);
+            let (left, right) = match channel {
+                1 => (one, one),
+                2 => (two, two),
+                _ => (one, two),
+            };
             let (left, right) = (left * gain, right * gain);
             left_out.samples[i] = left;
             right_out.samples[i] = right;
             self.peaks[0] = self.peaks[0].max(left.abs());
             self.peaks[1] = self.peaks[1].max(right.abs());
 
+            // The louder side; on 1 or 2 both sides are that input
             let level = left.abs().max(right.abs());
             let rate = if level > self.envelope { attack } else { release };
             self.envelope += rate * (level - self.envelope);
@@ -205,8 +220,16 @@ mod tests {
     const SR: f32 = 48000.0;
     const BLOCK: usize = 240; // 5 ms
 
-    /// Default parameters: 0 dB gain, -30 dB threshold, 5 ms attack, 150 ms release.
-    const DEFAULTS: [f32; 4] = [0.0, -30.0, 5.0, 150.0];
+    /// Default parameters: 0 dB gain, -30 dB threshold, 5 ms attack, 150 ms
+    /// release, Stereo.
+    const DEFAULTS: [f32; 5] = [0.0, -30.0, 5.0, 150.0, 0.0];
+
+    /// The defaults with Channel set to `index` (0 Stereo, 1, 2).
+    fn on_channel(index: f32) -> [f32; 5] {
+        let mut params = DEFAULTS;
+        params[4] = index;
+        params
+    }
 
     struct Run {
         left: Vec<f32>,
@@ -216,7 +239,7 @@ mod tests {
     }
 
     /// Plays stereo input through a fresh module, block by block.
-    fn run(left: &[f32], right: &[f32], params: [f32; 4]) -> Run {
+    fn run(left: &[f32], right: &[f32], params: [f32; 5]) -> Run {
         let mut module = AudioInput::new();
         module.prepare(SR, BLOCK);
         module.gain.set_immediate(10f32.powf(params[0] / 20.0));
@@ -265,7 +288,11 @@ mod tests {
         assert_eq!(ports[2].signal_type, SignalType::Control);
         assert_eq!(ports[3].signal_type, SignalType::Gate);
         let params: Vec<_> = module.parameters().iter().map(|p| p.name).collect();
-        assert_eq!(params, ["Gain", "Threshold", "Attack", "Release"]);
+        assert_eq!(params, ["Gain", "Threshold", "Attack", "Release", "Channel"]);
+        // Stereo by default, so patches saved before Channel sound the same
+        let channel = &module.parameters()[4];
+        assert_eq!(channel.default, 0.0);
+        assert!(matches!(channel.display, ParameterDisplay::Discrete { labels } if labels == CHANNEL_LABELS));
         assert!(!module.polyphonic());
     }
 
@@ -277,7 +304,7 @@ mod tests {
         assert_eq!(out.left, left);
         assert_eq!(out.right, right);
 
-        let louder = run(&left, &right, [6.0, -30.0, 5.0, 150.0]);
+        let louder = run(&left, &right, [6.0, -30.0, 5.0, 150.0, 0.0]);
         let ratio = louder.left[100] / left[100];
         assert!((ratio - 10f32.powf(6.0 / 20.0)).abs() < 1e-4, "ratio {ratio}");
     }
@@ -384,7 +411,7 @@ mod tests {
     #[test]
     fn test_gain_raises_the_input_over_the_threshold() {
         let signal = burst(-40.0);
-        let out = run(&signal, &signal, [18.0, -30.0, 5.0, 150.0]);
+        let out = run(&signal, &signal, [18.0, -30.0, 5.0, 150.0, 0.0]);
         assert!(out.gate.iter().any(|&g| g == 1.0), "+18 dB lifts -40 dB over -30 dB");
     }
 
@@ -395,6 +422,48 @@ mod tests {
         let left = run(&loud, &quiet, DEFAULTS);
         let right = run(&quiet, &loud, DEFAULTS);
         assert_eq!(left.follow, right.follow);
+    }
+
+    #[test]
+    fn test_channel_picks_which_input_both_sides_hear() {
+        // A guitar in input 1, nothing in input 2
+        let guitar = tone(-12.0, 0.3);
+        let empty = vec![0.0; guitar.len()];
+
+        let stereo = run(&guitar, &empty, on_channel(0.0));
+        assert_eq!(stereo.left, guitar);
+        assert_eq!(stereo.right, empty);
+
+        let one = run(&guitar, &empty, on_channel(1.0));
+        assert_eq!(one.left, guitar);
+        assert_eq!(one.right, guitar);
+
+        let two = run(&guitar, &empty, on_channel(2.0));
+        assert!(two.left.iter().chain(&two.right).all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn test_stereo_channel_matches_the_input_exactly() {
+        let left = tone(-6.0, 0.2);
+        let right: Vec<f32> = tone(-18.0, 0.2).iter().map(|s| -s).collect();
+        let out = run(&left, &right, on_channel(0.0));
+        assert_eq!((out.left, out.right), (left, right));
+    }
+
+    #[test]
+    fn test_follow_and_gate_hear_the_chosen_channel_only() {
+        // A loud burst in input 2 while input 1 stays quiet
+        let quiet = burst(-50.0);
+        let loud = burst(-6.0);
+
+        let one = run(&quiet, &loud, on_channel(1.0));
+        assert!(one.gate.iter().all(|&g| g == 0.0), "input 1 never crosses the threshold");
+        assert!(one.follow.iter().all(|&f| f < follow_from_db(-45.0)));
+
+        let two = run(&quiet, &loud, on_channel(2.0));
+        assert!(two.gate.iter().any(|&g| g == 1.0), "input 2 opens the gate");
+        // The same as hearing input 2 on both sides
+        assert_eq!(two.follow, run(&loud, &loud, DEFAULTS).follow);
     }
 
     #[test]

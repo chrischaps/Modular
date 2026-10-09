@@ -743,6 +743,33 @@ mod tests {
     }
 
     #[test]
+    fn test_audio_input_channel_defaults_to_stereo_and_round_trips() {
+        use crate::persistence::{NamedParameter, ParameterValue};
+
+        // Saved before Audio Input had a Channel
+        let mut patch = Patch::new("old input");
+        let mut input = NodeData::new(1, "source.audio_input", (0.0, 0.0));
+        input.parameters = vec![
+            NamedParameter::new("Gain", ParameterValue::Number(6.0)),
+            NamedParameter::new("Threshold", ParameterValue::Number(-24.0)),
+        ];
+        patch.nodes.push(input);
+        let (saved, warnings) = reload(&patch, 0);
+        assert!(warnings.is_empty(), "{:?}", warnings);
+        assert_eq!(param(&saved, "source.audio_input", "Channel"), 0.0, "Stereo, as before");
+        assert_eq!(param(&saved, "source.audio_input", "Gain"), 6.0);
+
+        // Set to input 1, then saved and loaded again
+        let mut changed = saved.clone();
+        let channel = changed.nodes[0].parameters.iter_mut().find(|p| p.name == "Channel").unwrap();
+        channel.value = ParameterValue::Select(1);
+        let json = serde_json::to_string(&reload(&changed, 0).0).unwrap();
+        let loaded = patch_from_json(&json).unwrap();
+        assert_eq!(param(&loaded, "source.audio_input", "Channel"), 1.0);
+        assert_eq!(param(&loaded, "source.audio_input", "Threshold"), -24.0);
+    }
+
+    #[test]
     fn test_parameters_restore_by_name_not_position() {
         let mut patch = Patch::new("reordered");
         let mut filter = NodeData::new(1, "filter.svf", (0.0, 0.0));
