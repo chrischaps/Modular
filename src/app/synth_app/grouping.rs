@@ -304,18 +304,15 @@ impl SynthApp {
             .reduce(|a, b| a.union(b))
     }
 
-    /// Whether every module on the current level has been drawn, so its size is known.
-    pub(super) fn level_measured(&self) -> bool {
-        groups::level_nodes(&self.graph_state.graph, self.user_state.level)
-            .iter()
-            .all(|n| self.node_sizes.contains_key(n))
-    }
-
     /// Zooms out until the current level fits the view (never in past 1:1),
     /// and frames it: for a patch opened on a small screen, where the
-    /// signal path would otherwise run off the edge.
+    /// signal path would otherwise run off the edge. Its frames and notes,
+    /// as last drawn, count too.
     pub(super) fn fit_level(&mut self, ui: &egui::Ui) {
-        let Some(bounds) = self.level_bounds().filter(|_| self.editor_rect.is_positive()) else { return };
+        let to_nodes = self.editor_rect.min.to_vec2() + self.graph_state.pan_zoom.pan;
+        let annotations = self.user_state.annotations.drawn.values().map(|r| r.translate(-to_nodes));
+        let bounds = self.level_bounds().into_iter().chain(annotations).reduce(|a, b| a.union(b));
+        let Some(bounds) = bounds.filter(|_| self.editor_rect.is_positive()) else { return };
         let view = self.editor_rect.size();
         let room = vec2(view.x - 2.0 * FRAME_MARGIN, view.y - TRAIL_HEIGHT - 2.0 * FRAME_MARGIN);
         let scale = (room.x / bounds.width()).min(room.y / bounds.height()).min(1.0);

@@ -257,8 +257,8 @@ pub struct SynthApp {
     /// Embedded in a page (`?patch=` in the address): just the canvas, with
     /// a Play button and a way to the full app.
     embedded: bool,
-    /// Frames left to wait for a just-opened patch's modules to be measured
-    /// before it's zoomed to fit the view; 0 when no fit is waiting. Patches
+    /// Frames left to keep zooming a just-opened patch to fit the view, as
+    /// its modules are drawn and measured; 0 when no fit is under way. Patches
     /// opened in the browser fit, where a phone shows only a corner of one.
     fit_pending: u8,
     /// A finger is dragging the canvas: on a touch screen that pans, where a
@@ -1640,12 +1640,11 @@ impl SynthApp {
 
                 // Draw the node graph editor
                 let (zoom_before, pan_before) = (self.graph_state.pan_zoom.zoom, self.graph_state.pan_zoom.pan);
+                // Fitted again each frame for a few: zoomed out, modules that
+                // were off screen are drawn and measured, and may need more room
                 if self.fit_pending > 0 {
                     self.fit_pending -= 1;
-                    if self.level_measured() || self.fit_pending == 0 {
-                        self.fit_pending = 0;
-                        self.fit_level(ui);
-                    }
+                    self.fit_level(ui);
                 }
                 self.follow_gestures(ui, editor_rect);
                 // A capture script moves the view like a camera
@@ -2681,7 +2680,7 @@ impl SynthApp {
     fn fit_on_web(&mut self) {
         if WEB {
             // A few frames for its modules to be drawn and measured
-            self.fit_pending = 4;
+            self.fit_pending = 6;
         }
     }
 
@@ -3306,9 +3305,14 @@ impl SynthApp {
                         .color(theme::text::DISABLED)
                         .small());
                 }
-                ui.label(RichText::new(concat!("Modular Synth v", env!("CARGO_PKG_VERSION")))
+                // The version gives way on a narrow screen (a phone), rather
+                // than running over the status message
+                let version = RichText::new(concat!("Modular Synth v", env!("CARGO_PKG_VERSION")))
                     .color(theme::text::DISABLED)
-                    .small());
+                    .small();
+                if ui.available_width() >= 140.0 {
+                    ui.label(version);
+                }
             });
         });
     }
