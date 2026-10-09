@@ -12,6 +12,7 @@ mod clock_display;
 mod data_types;
 pub mod hints;
 pub mod input_display;
+mod divider_display;
 mod logic_display;
 mod mixer_strips;
 mod module_ui;

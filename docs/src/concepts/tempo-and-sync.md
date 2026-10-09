@@ -14,7 +14,7 @@ A patch without a Clock has no transport. Synced modules then assume 120 BPM, an
 
 If a patch has more than one Clock, the transport is the first one in processing order, which is usually the one nothing else feeds. Other Clocks still pulse at their own settings; they just don't set the patch's tempo.
 
-For a pulse slower than the beat, such as once every four bars, divide the one Clock with [Logic](../modules/utilities/logic.md) rather than adding a second, slower Clock. A divider counts the Clock's pulses, so it stays on the beat at any tempo, and it can't become the transport by accident.
+For a pulse slower than the beat, such as once every four bars, divide the one Clock with a [Clock Divider](../modules/utilities/divider.md) rather than adding a second, slower Clock. A divider counts the Clock's pulses, so it stays on the beat at any tempo, and it can't become the transport by accident.
 
 ## Two kinds of sync
 

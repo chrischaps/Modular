@@ -1,25 +1,22 @@
-//! The Logic node's display: one picture for each of its three jobs.
+//! The Logic node's display: its inputs, its answers, and its comparator.
 //!
-//! - **The count** is a ring of beads, one per count, read clockwise from the
-//!   top like a clock face. The count that fires wears a ring. The counts the
-//!   Gate stays open for lie on a green arc, which lights while the gate is
-//!   open. A bead in the Count's orange travels round as the clock ticks.
-//! - **The logic** is four lamps, lit while AND, OR, XOR and NOT A are high.
+//! - **A** and **B** are two small lamps at the left, lit while each is
+//!   high. With nothing patched into B it reads Above, and its lamp says so.
+//! - **The answers** are four lamps, lit while AND, OR, XOR and NOT A are
+//!   high, so the truth table plays out in front of you.
 //! - **The comparator** is a column the CV rises in, with Threshold drawn
 //!   across it as a line you can drag. The CV turns green when it's above.
-
-use std::f32::consts::{FRAC_PI_2, TAU};
 
 use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Sense, Stroke, Vec2};
 use egui_node_graph2::NodeId;
 
 use crate::app::theme;
-use crate::modules::logic::{Logic, MAX_DIVIDE};
+use crate::modules::logic::Logic;
 
 use super::{SynthGraph, SynthGraphState, SynthValueType};
 
 /// Engine output ports of the four logic outputs, with their lamp labels.
-const LAMPS: [(usize, &str); 4] = [(3, "AND"), (4, "OR"), (5, "XOR"), (6, "NOT A")];
+const LAMPS: [(usize, &str); 4] = [(0, "AND"), (1, "OR"), (2, "XOR"), (3, "NOT A")];
 
 /// Draws the display and returns the Threshold to set while its line is
 /// being dragged: `("Threshold", value)`.
@@ -32,40 +29,31 @@ pub fn logic_display(
 ) -> Option<(String, f32)> {
     let z = zoom;
     let node = graph.nodes.get(node_id)?;
-    let value_of = |name: &str, default: f32| {
-        node.inputs
-            .iter()
-            .find(|(input, _)| input == name)
-            .and_then(|(_, id)| match graph.get_input(*id).value {
-                SynthValueType::Number { value, .. } => Some(value),
-                _ => None,
-            })
-            .unwrap_or(default)
-    };
-    let divide = (value_of("Divide", 4.0).round() as usize).clamp(1, MAX_DIVIDE);
-    let offset = (value_of("Offset", 0.0).round().max(0.0) as usize) % divide;
-    let length = (value_of("Length", 1.0).round() as usize).clamp(1, divide);
-    let threshold = value_of("Threshold", 0.5);
+    let input_of = |name: &str| node.inputs.iter().find(|(input, _)| input == name).map(|(_, id)| *id);
+    let threshold = input_of("Threshold")
+        .and_then(|id| match graph.get_input(id).value {
+            SynthValueType::Number { value, .. } => Some(value),
+            _ => None,
+        })
+        .unwrap_or(0.5);
+    let b_patched = input_of("B").is_some_and(|id| graph.iter_connections().any(|(input, _)| input == id));
 
     let engine_node_id = user_state.get_engine_node_id(node_id);
     let readout = engine_node_id.and_then(|id| user_state.readouts.get(&id)).copied().unwrap_or_default();
-    let count = readout.values[Logic::READOUT_COUNT];
-    let count = (count >= 0.0).then(|| (count.round() as usize) % divide);
-    let gate_open = readout.values[Logic::READOUT_GATE] > 0.5;
     let cv = readout.values[Logic::READOUT_CV];
     let above = readout.values[Logic::READOUT_ABOVE] > 0.5;
+    let a = readout.values[Logic::READOUT_A] > 0.5;
+    let b = readout.values[Logic::READOUT_B] > 0.5;
 
-    // As wide as the knob row below: four 44-pt columns
-    let gap = ui.spacing().item_spacing.x;
-    let width = 4.0 * 44.0 * z + 3.0 * gap - 8.0 * z;
-    let height = 62.0 * z;
+    let width = 136.0 * z;
+    let height = 52.0 * z;
 
     // Separator, as the other displays have
     ui.add_space(4.0 * z);
     let accent = crate::dsp::ModuleCategory::Utility.color();
-    let full = ui.available_rect_before_wrap();
+    let left = ui.cursor().left();
     ui.painter().hline(
-        (full.left() + 4.0 * z)..=(full.right() - 4.0 * z),
+        left..=(left + width),
         ui.cursor().top(),
         Stroke::new(1.0 * z, Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 64)),
     );
@@ -80,67 +68,43 @@ pub fn logic_display(
     let orange = theme::signal::CONTROL;
     let small = egui::FontId::proportional(8.0 * z);
 
-    // --- The count ring ---
-    let radius = height / 2.0 - 5.0 * z;
-    let center = Pos2::new(rect.left() + radius + 5.0 * z, rect.center().y);
-    let angle_of = |n: f32| -FRAC_PI_2 + TAU * n / divide as f32;
-    let at = |n: f32, r: f32| center + Vec2::angled(angle_of(n)) * r;
-    let bead = (radius * TAU / divide as f32 * 0.28).clamp(0.9 * z, 2.6 * z);
-
-    // The gate's arc: from the count that fires through the last one it's
-    // open for, drawn just inside the beads
-    let in_gate = |n: usize| (n + divide - offset) % divide < length;
-    let arc_radius = radius - bead - 2.5 * z;
-    let arc_ink = if gate_open { green } else { green.gamma_multiply(0.35) };
-    let arc_end = length as f32 - 0.5;
-    let segments = ((arc_end + 0.5) * 48.0 / divide as f32).ceil().max(2.0) as usize;
-    let arc: Vec<Pos2> = (0..=segments)
-        .map(|s| at(offset as f32 - 0.5 + (arc_end + 0.5) * s as f32 / segments as f32, arc_radius))
-        .collect();
-    painter.add(egui::Shape::line(arc, Stroke::new(if gate_open { 2.0 * z } else { 1.4 * z }, arc_ink)));
-
-    for n in 0..divide {
-        let pos = at(n as f32, radius);
-        let fill = if Some(n) == count {
-            orange
-        } else if in_gate(n) {
-            green.gamma_multiply(if gate_open { 0.7 } else { 0.4 })
+    // --- A and B, the inputs ---
+    let inputs_x = rect.left() + 6.0 * z;
+    for (row, (label, lit)) in [("A", a), ("B", b)].into_iter().enumerate() {
+        let y = rect.top() + height * (0.28 + 0.44 * row as f32);
+        let lamp = Pos2::new(inputs_x, y);
+        if lit {
+            painter.circle_filled(lamp, 5.5 * z, green.gamma_multiply(0.25));
+            painter.circle_filled(lamp, 3.5 * z, green);
         } else {
-            theme::background::GRID_MAJOR.gamma_multiply(1.8)
-        };
-        if Some(n) == count {
-            painter.circle_filled(pos, bead * 2.2, orange.gamma_multiply(0.25));
+            painter.circle(lamp, 3.5 * z, theme::background::MAIN, Stroke::new(1.0 * z, theme::background::GRID_MAJOR));
         }
-        painter.circle_filled(pos, bead, fill);
-        if n == offset {
-            painter.circle_stroke(pos, bead + 1.8 * z, Stroke::new(1.0 * z, green));
-        }
+        painter.text(lamp + Vec2::new(7.0 * z, 0.0), egui::Align2::LEFT_CENTER, label, small.clone(), theme::text::SECONDARY);
     }
-    painter.text(
-        center,
-        egui::Align2::CENTER_CENTER,
-        format!("÷{divide}"),
-        egui::FontId::new(11.0 * z, egui::FontFamily::Name(theme::TITLE_FAMILY.into())),
-        theme::text::SECONDARY,
-    );
-    let ring = Rect::from_center_size(center, Vec2::splat(radius * 2.0 + 4.0 * z));
-    let place = match count {
-        Some(n) => format!("Count {} of {divide}", n + 1),
-        None => "Waiting for the first clock".to_string(),
-    };
-    let open_for = if length >= divide { "always".to_string() } else { format!("for {length} clock{}", if length == 1 { "" } else { "s" }) };
-    ui.interact(ring, ui.id().with(("logic_ring", node_id)), Sense::hover())
-        .on_hover_text(format!("{place}\nFires on count {}, the ringed bead\nGate stays open {open_for}, along the green arc", offset + 1));
+    // An empty B reads Above, and says so under its lamp
+    let b_lamp = Pos2::new(inputs_x, rect.top() + height * 0.72);
+    let b_rect = Rect::from_center_size(b_lamp + Vec2::new(4.0 * z, 0.0), Vec2::new(18.0 * z, 12.0 * z));
+    let b_hover = ui.interact(b_rect, ui.id().with(("logic_b", node_id)), Sense::hover());
+    if !b_patched {
+        painter.text(
+            b_lamp + Vec2::new(0.0, 9.0 * z),
+            egui::Align2::LEFT_TOP,
+            "= Above",
+            egui::FontId::proportional(7.0 * z),
+            theme::text::DISABLED,
+        );
+        b_hover.on_hover_text("Nothing is patched into B, so B is Above: AND passes A only while CV is over the Threshold");
+    }
 
     // --- The column, at the right: CV against Threshold ---
-    let column = Rect::from_x_y_ranges(rect.right() - 12.0 * z..=rect.right() - 2.0 * z, rect.top() + 2.0 * z..=rect.bottom() - 11.0 * z);
+    let column = Rect::from_x_y_ranges(rect.right() - 12.0 * z..=rect.right() - 2.0 * z, rect.top() + 1.0 * z..=rect.bottom() - 10.0 * z);
     let y_at = |value: f32| column.bottom() - column.height() * ((value + 1.0) / 2.0).clamp(0.0, 1.0);
     painter.rect(column, 3.0 * z, theme::background::MAIN, Stroke::new(1.0 * z, theme::background::GRID_MAJOR));
     let level = Rect::from_x_y_ranges(column.shrink(2.0 * z).x_range(), y_at(cv)..=column.bottom() - 2.0 * z);
     if level.height() > 0.0 {
         painter.rect_filled(level, 2.0 * z, if above { green } else { orange.gamma_multiply(0.6) });
     }
-    painter.text(Pos2::new(column.center().x, rect.bottom()), egui::Align2::CENTER_BOTTOM, "CV", small.clone(), theme::text::DISABLED);
+    painter.text(Pos2::new(column.center().x, rect.bottom() + 1.0 * z), egui::Align2::CENTER_BOTTOM, "CV", small.clone(), theme::text::DISABLED);
 
     // The Threshold, a line across the column, draggable
     let line_y = y_at(threshold);
@@ -162,8 +126,8 @@ pub fn logic_display(
         if above { "high" } else { "low" }
     ));
 
-    // --- The lamps, between: AND, OR, XOR, NOT A ---
-    let lamps = Rect::from_x_y_ranges(ring.right() + 10.0 * z..=column.left() - 12.0 * z, rect.top() + 4.0 * z..=rect.bottom() - 4.0 * z);
+    // --- The answers, between: AND, OR, XOR, NOT A ---
+    let lamps = Rect::from_x_y_ranges(rect.left() + 34.0 * z..=column.left() - 10.0 * z, rect.top() + 2.0 * z..=rect.bottom() - 2.0 * z);
     let lamp_gap = 4.0 * z;
     let lamp_size = Vec2::new((lamps.width() - lamp_gap) / 2.0, (lamps.height() - lamp_gap) / 2.0);
     for (i, (port, label)) in LAMPS.into_iter().enumerate() {

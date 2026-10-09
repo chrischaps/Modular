@@ -776,6 +776,31 @@
           "value": 2741.0
         }
       ]
+    },
+    {
+      "id": 17,
+      "module_id": "util.divider",
+      "position": [
+        40.0,
+        440.0
+      ],
+      "parameters": [
+        {
+          "name": "Divide",
+          "type": "Number",
+          "value": 3.0
+        },
+        {
+          "name": "Offset",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Length",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
     }
   ],
   "connections": [
@@ -788,8 +813,8 @@
     {
       "from_node": 1,
       "from_port": "Gate",
-      "to_node": 12,
-      "to_port": "Trig"
+      "to_node": 17,
+      "to_port": "Clock"
     },
     {
       "from_node": 2,
@@ -898,6 +923,12 @@
       "from_port": "Out",
       "to_node": 4,
       "to_port": "V/Oct"
+    },
+    {
+      "from_node": 17,
+      "from_port": "Trig",
+      "to_node": 12,
+      "to_port": "Trig"
     }
   ],
   "midi_mappings": [],
@@ -910,7 +941,7 @@
       ],
       "size": [
         781.0,
-        626.0
+        754.0
       ],
       "color": "blue"
     },
@@ -979,13 +1010,13 @@
     {
       "text": "The Clock steps the sequencer once a beat through C D E G A G E D. The pentatonic scale has no half steps, so no two notes clash.",
       "position": [
-        16.0,
-        660.0
+        223.0,
+        494.0
       ],
-      "width": 520.0
+      "width": 330.0
     },
     {
-      "text": "The S&H catches the LFO on every beat, so each note gets its own brightness. The cycles don't line up, so no two passes sound alike.",
+      "text": "The S&H catches the LFO every third beat, on the Clock Divider, so the brightness moves in threes against the eight-note melody. The cycles don't line up, so no two passes sound alike.",
       "position": [
         16.0,
         1243.0

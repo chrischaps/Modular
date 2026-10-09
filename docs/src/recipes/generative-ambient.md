@@ -1,6 +1,6 @@
 # Generative Ambient
 
-A patch that plays itself. A slow pentatonic melody repeats every twelve seconds, but each note comes out with a different brightness, and a second voice wanders around it, never taking the same path twice. The tuning drifts, and long echoes and an eight-second reverb blur one phrase into the next. Press Play and leave it running.
+A patch that plays itself. A slow pentatonic melody repeats every twelve seconds, but its brightness shifts in threes against it, and a second voice wanders around it, never taking the same path twice. The tuning drifts, and long echoes and an eight-second reverb blur one phrase into the next. Press Play and leave it running.
 
 > **Load it:** choose **📚 Examples → Generative Ambient** in the toolbar and press **▶ Play**. It needs no keyboard.
 > The patch file is [`patches/generative-ambient.json`](https://github.com/chrischaps/Modular/blob/master/patches/generative-ambient.json).
@@ -9,12 +9,12 @@ A patch that plays itself. A slow pentatonic melody repeats every twelve seconds
 *Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Modular**.*
 
 ![The Generative Ambient patch](../images/recipe-generative-ambient.png)
-*Clock and sequencer play the melody, top left. Below, Noise and the Quantizer sing the second voice.*
+*Clock and sequencer play the melody, top left, with the Clock Divider under the Clock. Below, the LFO and Sample & Hold set the brightness, and Noise and the Quantizer sing the second voice.*
 
 ## What it teaches
 
 - **Clock and sequencer.** A clock sets the pace and a step sequencer turns each pulse into a note.
-- **Sample & hold.** Freezing a moving signal at each note gives every note its own setting, a step at a time.
+- **Sample & hold.** Freezing a moving signal at a pulse gives each group of notes its own setting, a step at a time.
 - **Cycles that don't line up.** When loops of different lengths run against each other, the combination takes a very long time to repeat. That's where the brightness gets its variety.
 - **Chance, in key.** A quantizer snaps a random voltage to the notes of a scale, so chance can write a melody without a wrong note.
 
@@ -33,6 +33,7 @@ A patch that plays itself. A slow pentatonic melody repeats every twelve seconds
 | [ADSR Envelope](../modules/modulation/adsr.md) | **Atk** 300 ms, **Dec** 500 ms, **Sus** 70%, **Rel** 2 s |
 | [VCA](../modules/utilities/vca.md) | Defaults |
 | [LFO](../modules/modulation/lfo.md) 1 | **Rate** 0.13 Hz, **Wave** Triangle, **Bipolar** on |
+| [Clock Divider](../modules/utilities/divider.md) | **Div** 3 |
 | [Sample & Hold](../modules/utilities/sample-hold.md) | **Slew** 300 ms |
 | [LFO](../modules/modulation/lfo.md) 2 | **Rate** 0.03 Hz, **Wave** Sine, **Bipolar** on |
 | [Stereo Delay](../modules/effects/delay.md) | **Time** 600 ms, **FB** 50%, **Mix** 40%, **HiCut** 4 kHz, **LoCut** 200 Hz, **P-P** on |
@@ -71,17 +72,18 @@ This voice keeps its own time. Its notes change when the random walk crosses fro
 
 The mini piano on the Quantizer lights the five notes of the scale and follows the note it's playing.
 
-### Brightness, one note at a time
+### Brightness in threes
 
 ```text
+[Clock Gate] ──> [Clock Divider Clock]
+[Clock Divider Trig] ──> [Sample & Hold Trig]
 [LFO 1 Out] ──> [Sample & Hold In]
-[Clock Gate] ──> [Sample & Hold Trig]
 [Sample & Hold Out] ──> [SVF Filter Cutoff]
 ```
 
-LFO 1 is a slow triangle, one cycle every 7.7 seconds. On every clock pulse, the Sample & Hold catches the LFO's current value and holds it until the next. The filter's **Cutoff** input works in octaves, so each note gets a cutoff somewhere between 750 Hz and 3 kHz. The 300 ms **Slew** glides between values instead of jumping.
+LFO 1 is a slow triangle, one cycle every 7.7 seconds. The Clock Divider passes on every third clock pulse, and on each one the Sample & Hold catches the LFO's current value and holds it. The filter's **Cutoff** input works in octaves, so each group of three notes gets a cutoff somewhere between 750 Hz and 3 kHz. The 300 ms **Slew** glides between values instead of jumping.
 
-The LFO's 7.7-second cycle doesn't divide evenly into the 1.5-second pulses or the twelve-second loop. So the melody repeats exactly, but the brightness of each note doesn't: every pass through the phrase comes out shaded differently.
+Three doesn't go into the melody's eight. The first pass is shaded 3 + 3 + 2, the next starts its groups one note later, and the groups only fall on the same notes again after three passes, 36 seconds. On top of that, the LFO's 7.7-second cycle divides evenly into none of them. So the melody repeats exactly, but its shading never does: every pass comes out lit differently, in phrases that cut across the melody's own.
 
 ### Slow drift
 
@@ -118,6 +120,8 @@ The envelope's 300 ms attack takes the edge off each note and its 2-second relea
 
 **An odd-length loop.** Set **Steps** to 5 or 7 so the phrase falls out of step with the bar.
 
+**Other groupings.** Set the Clock Divider's **Div** to 1 and every note gets its own brightness. Try 5 against the eight notes for a longer cycle, or 4 for shading that lines up with the melody's two halves.
+
 **Slower still.** Turn the Clock down to 20 BPM, and raise the Reverb's **Decay** to 15 s or more.
 
 **Tape echoes.** Turn on the delay's **Tape** for wobble and saturation in the repeats.
@@ -127,6 +131,7 @@ The envelope's 300 ms attack takes the edge off each note and its 2-second relea
 ## Related
 
 - [Sample & Hold](../modules/utilities/sample-hold.md) – stepped modulation
+- [Clock Divider](../modules/utilities/divider.md) – every third pulse, and longer phrases
 - [Quantizer](../modules/utilities/quantizer.md) – random pitches, in key
 - [Step Sequencer](../modules/utilities/sequencer.md) – editing steps
 - [Rhythmic Sequence](./rhythmic-sequence.md) – the same clock and sequencer, at dance tempo

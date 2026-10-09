@@ -53,7 +53,7 @@ Beside the lamps, a badge shows where the time comes from: **INT** for the Clock
 | **1/8** | Half beat | 250 ms |
 | **1/16** | Quarter beat | 125 ms |
 
-A Clock has one output. For a second rhythm, divide its pulses with [Logic](../utilities/logic.md): a sixteenth Clock divided by 3 plays dotted eighths against it, and divided by 64 pulses once every four bars, slower than the Clock's slowest setting. Logic counts the Clock's own pulses, so the two can never drift apart, and changing the BPM moves both.
+A Clock has one output. For a second rhythm, divide its pulses with a [Clock Divider](../utilities/divider.md): a sixteenth Clock divided by 3 plays dotted eighths against it, and divided by 64 pulses once every four bars, slower than the Clock's slowest setting. The divider counts the Clock's own pulses, so the two can never drift apart, and changing the BPM moves both.
 
 ## Gate length
 
@@ -144,7 +144,7 @@ The Delay needs no cable from the Clock to follow its tempo.
 ## Related modules
 
 - [Sequencer](../utilities/sequencer.md), the Clock's most common partner
-- [Logic](../utilities/logic.md) to divide the Clock's pulses into longer phrases and odd rhythms
+- [Clock Divider](../utilities/divider.md) to divide the Clock's pulses into longer phrases and odd rhythms
 - [ADSR Envelope](./adsr.md) to turn pulses into notes
 - [LFO](./lfo.md), which locks to the Clock's beat when synced
 - [Delay](../effects/delay.md), which follows the Clock's tempo when synced

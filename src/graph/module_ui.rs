@@ -237,11 +237,18 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "util.divider",
+        knobs: &[knob_as("Divide", "Div"), knob("Offset"), knob("Length")],
+        monitor: &["Trig", "Gate"],
+        display: NodeDisplay::DividerRing,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "util.logic",
-        knobs: &[knob_as("Divide", "Div"), knob("Offset"), knob("Length"), knob_as("Threshold", "Thresh")],
-        // The logic lamps read their outputs; the gate outputs light up
-        monitor: &["Trig", "Gate", "AND", "OR", "XOR", "NOT A", "Above"],
-        display: NodeDisplay::LogicRing,
+        knobs: &[knob_as("Threshold", "Thresh")],
+        // The lamps read the outputs, which light up too
+        monitor: &["AND", "OR", "XOR", "NOT A", "Above"],
+        display: NodeDisplay::LogicLamps,
         ..ModuleUi::DEFAULT
     },
     ModuleUi {

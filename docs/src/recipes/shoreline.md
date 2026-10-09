@@ -14,8 +14,8 @@ Surf rolls in and draws back, and a glass chime somewhere up the beach turns in 
 ## What it teaches
 
 - **Noise as sound.** Pink and brown noise through a moving lowpass filter make convincing surf.
-- **Noise as decision.** White noise, sampled on a clock, chooses notes. Noise's smooth **Random** output decides how fast the waves come and how hard the chime is struck.
-- **One source, many voices.** Every output of the Noise module is patched, and each does a different job. Because one random signal drives both the waves and the chime, the two move together: when the wind picks up, the waves come quicker and the chime rings louder.
+- **Noise as decision.** White noise, sampled on a clock, chooses notes. Noise's smooth **Random** output decides how fast the waves come, whether the chime rings at all, and how hard it's struck.
+- **One source, many voices.** Every output of the Noise module is patched, and each does a different job. Because one random signal drives both the waves and the chime, the two move together: when the wind picks up, the waves come quicker and the chime starts to ring. When it drops, the chime falls silent.
 
 ## Modules
 
@@ -23,6 +23,7 @@ Surf rolls in and draws back, and a glass chime somewhere up the beach turns in 
 |--------|----------|
 | [Noise](../modules/sources/noise.md) | **Level** 50%, **Rate** 0.07 Hz |
 | [Clock](../modules/modulation/clock.md) | **BPM** 80, **Div** 1/4, **Gate** 30% |
+| [Logic](../modules/utilities/logic.md) | **Thresh** -0.3, nothing in **B** |
 | [Sample & Hold](../modules/utilities/sample-hold.md) | Defaults (no slew) |
 | [Oscillator](../modules/sources/oscillator.md) | **Wave** Sine, **Oct** +1 |
 | [ADSR Envelope](../modules/modulation/adsr.md) | **Atk** 2 ms, **Dec** 1.2 s, **Sus** 0%, **Rel** 1.2 s, **Vel** 80% |
@@ -68,23 +69,27 @@ On its own the LFO would be a metronome. Noise's **Random** output wanders smoot
 ### The chime
 
 ```text
-[Clock Gate] ──> [Sample & Hold Trig]
+[Logic AND] ──> [Sample & Hold Trig]
 [Noise White] ──> [Sample & Hold In]
 [Sample & Hold Out] ──> [Oscillator V/Oct]
-[Clock Gate] ──> [ADSR Gate]
+[Logic AND] ──> [ADSR Gate]
 [Oscillator Out] ──> [VCA (chime) In]
 [ADSR Out] ──> [VCA (chime) CV]
 ```
 
-This is the classic random melody. On each clock pulse, every 0.75 seconds, the Sample & Hold catches the white noise and holds it as a pitch. With Noise **Level** at 50%, the pitches land anywhere within half an octave of C5. They're unquantized, falling between the keys of a piano, which suits a wind chime: real chimes are seldom tuned to a scale. The sine wave, a 2 ms strike and a 1.2-second ring make it sound like glass.
+This is the classic random melody. On each pulse that reaches it, at most every 0.75 seconds, the Sample & Hold catches the white noise and holds it as a pitch. With Noise **Level** at 50%, the pitches land anywhere within half an octave of C5. They're unquantized, falling between the keys of a piano, which suits a wind chime: real chimes are seldom tuned to a scale. The sine wave, a 2 ms strike and a 1.2-second ring make it sound like glass.
 
 ### The wind
 
 ```text
+[Clock Gate] ──> [Logic A]
+[Noise Random] ──> [Logic CV]
 [Noise Random] ──> [ADSR Velocity]
 ```
 
-The same **Random** that sets the wave speed also sets how hard each strike lands. With **Vel** at 80%, a strike while Random is high rings at full level. One while it's at or below zero rings at a fifth of that, a faint tick. So the chime comes and goes in gusts, and the gusts come with the faster waves.
+A real wind chime doesn't ring on a beat. It rings when the wind blows, and hangs still when it drops. The Clock's pulses pass through a [Logic](../modules/utilities/logic.md) module first. Noise's **Random**, the wind, goes into its **CV**, and nothing goes into **B**, so B is Logic's own **Above**: high while the wind is above the **Threshold** of -0.3. **AND** lets a clock pulse through only then. Through the calms, ten or twenty seconds at a time, the chime hangs silent and only the surf moves.
+
+The same **Random** also sets how hard each strike lands. With **Vel** at 80%, a strike while Random is high rings at full level. One just over the threshold rings at about a fifth of that. So a gust doesn't switch the chime on: it fades in with a few faint ticks, swells, and fades out again. The gusts come with the faster waves, because the same wind sets the waves' speed.
 
 ### Space
 
@@ -104,6 +109,8 @@ A large, six-second reverb spreads the chime across the stereo field and blurs e
 **A wider chime.** Turn Noise **Level** up to 100% and the chime ranges a full octave either way. The surf gets louder too, so lower the surf VCA's **Level** to match.
 
 **Gentler wind.** Lower the ADSR's **Vel** to 40% so calm and gusty strikes differ less.
+
+**Stiller or windier.** Raise Logic's **Thresh** to 0 and the chime rings only in the stronger half of the gusts, with long calms between. Lower it to -1 and it rings on nearly every beat, whatever the wind.
 
 **Glide.** Raise the Sample & Hold's **Slew** to 50 ms and the chime bends between notes, more like a singing bowl than a bell.
 

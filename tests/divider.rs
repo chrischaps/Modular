@@ -1,7 +1,7 @@
-//! The Logic module's divider can schedule a phrase on its own. Backbeat
-//! plays a tom fill every fourth bar with a second Clock at a quarter of the
-//! tempo and a bar counter to keep the two in step. The test patch
-//! `fixtures/backbeat-logic.json` replaces both with one Logic dividing the
+//! The Clock Divider schedules Backbeat's phrase. Backbeat used to play its
+//! tom fill every fourth bar with a second Clock at a quarter of the tempo
+//! and a bar counter to keep the two in step; `fixtures/backbeat-phrase-clock.json`
+//! keeps that version. The example now uses one Clock Divider dividing the
 //! sixteenths by 64. These tests render the two and check they play the
 //! same bars.
 
@@ -21,7 +21,7 @@ fn repo(path: &str) -> PathBuf {
 }
 
 fn scratch() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("modular-logic-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("modular-divider-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -55,33 +55,33 @@ fn fill_bars(steps: &[f32]) -> Vec<usize> {
     steps.chunks_exact(16).enumerate().filter(|(_, bar)| bar[6] < -90.0).map(|(n, _)| n + 1).collect()
 }
 
-/// The test patch with its Logic's Offset changed.
+/// Backbeat with its divider's Offset changed.
 fn with_offset(offset: f32, path: &Path) -> PathBuf {
-    let mut patch: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(repo("tests/fixtures/backbeat-logic.json")).unwrap()).unwrap();
-    let logic = patch["nodes"].as_array_mut().unwrap().iter_mut().find(|n| n["module_id"] == "util.logic").unwrap();
-    let param = logic["parameters"].as_array_mut().unwrap().iter_mut().find(|p| p["name"] == "Offset").unwrap();
+    let mut patch: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(repo("patches/backbeat.json")).unwrap()).unwrap();
+    let divider = patch["nodes"].as_array_mut().unwrap().iter_mut().find(|n| n["module_id"] == "util.divider").unwrap();
+    let param = divider["parameters"].as_array_mut().unwrap().iter_mut().find(|p| p["name"] == "Offset").unwrap();
     param["value"] = offset.into();
     std::fs::write(path, serde_json::to_string_pretty(&patch).unwrap()).unwrap();
     path.to_path_buf()
 }
 
 #[test]
-fn logic_fill_plays_the_same_bars_as_the_phrase_clock() {
+fn backbeat_divider_plays_the_same_bars_as_the_phrase_clock() {
     let dir = scratch();
-    let original = steps_db(&repo("patches/backbeat.json"), &dir.join("original.wav"));
-    let logic = steps_db(&repo("tests/fixtures/backbeat-logic.json"), &dir.join("logic.wav"));
+    let phrase_clock = steps_db(&repo("tests/fixtures/backbeat-phrase-clock.json"), &dir.join("phrase-clock.wav"));
+    let divider = steps_db(&repo("patches/backbeat.json"), &dir.join("divider.wav"));
 
-    assert_eq!(fill_bars(&original), vec![1, 5, 9]);
-    assert_eq!(fill_bars(&logic), vec![1, 5, 9]);
+    assert_eq!(fill_bars(&phrase_clock), vec![1, 5, 9]);
+    assert_eq!(fill_bars(&divider), vec![1, 5, 9]);
 
     // Step for step, the same levels. The one difference: the phrase clock
-    // closed its gate 100 ms into the bar after a fill, Logic at its second
-    // sixteenth, so the hats' fader comes back up a moment later, after the
-    // downbeat's closed hat has died away
-    assert_eq!(original.len(), logic.len());
-    for (step, (a, b)) in original.iter().zip(&logic).enumerate() {
+    // closed its gate 100 ms into the bar after a fill, the divider at its
+    // second sixteenth, so the hats' fader comes back up a moment later,
+    // after the downbeat's closed hat has died away
+    assert_eq!(phrase_clock.len(), divider.len());
+    for (step, (a, b)) in phrase_clock.iter().zip(&divider).enumerate() {
         if *a > -80.0 {
-            assert!((a - b).abs() < 0.1, "bar {} step {}: {a:.2} dB, Logic {b:.2} dB", step / 16 + 1, step % 16 + 1);
+            assert!((a - b).abs() < 0.1, "bar {} step {}: {a:.2} dB, divider {b:.2} dB", step / 16 + 1, step % 16 + 1);
         }
     }
 
@@ -89,7 +89,7 @@ fn logic_fill_plays_the_same_bars_as_the_phrase_clock() {
     // comparison above would have caught it
     let moved = steps_db(&with_offset(16.0, &dir.join("moved.json")), &dir.join("moved.wav"));
     assert_eq!(fill_bars(&moved), vec![2, 6, 10]);
-    let largest = original.iter().zip(&moved).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
+    let largest = phrase_clock.iter().zip(&moved).map(|(a, b)| (a - b).abs()).fold(0.0, f32::max);
     assert!(largest > 20.0, "moving the fill changed no step by more than {largest:.1} dB");
 
     std::fs::remove_dir_all(&dir).ok();

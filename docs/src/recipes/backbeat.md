@@ -9,14 +9,14 @@ A whole drum kit with no samples in it: a kick that drops in pitch, a snare with
 *Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Modular**.*
 
 ![The Backbeat patch](../images/recipe-backbeat.png)
-*One lane per drum, from the top: kick, snare, hi-hats, toms, crash. The clock is at the top left. The phrase clock and bar counter that schedule the fill sit lower down in the same column. Kick and snare mix to the centre at the top right. Everything else mixes through a small room to the right of the hi-hats.*
+*One lane per drum, from the top: kick, snare, hi-hats, toms, crash. The clock is at the top left. The Clock Divider that schedules the fill sits lower down in the same column. Kick and snare mix to the centre at the top right. Everything else mixes through a small room to the right of the hi-hats.*
 
 ## What it teaches
 
 - **Drums from oscillators and noise.** A kick is a sine that falls in pitch. A snare is a tone plus a burst of filtered noise. Hats and cymbals are noise with the low end removed.
 - **Accents and ghost notes.** Each sequencer step has a velocity, and the envelopes turn velocity into loudness. The same snare plays a backbeat and a whisper.
 - **A sequencer's pitch as a switch.** The hi-hat lane's pitch output is a flag that says whether the hat is open. That flag also chokes it.
-- **Phrases longer than a bar.** A 16-step sequencer loops every bar, so a fill every fourth bar needs a second, slower clock. A bar counter keeps the two in step.
+- **Phrases longer than a bar.** A 16-step sequencer loops every bar. For a fill every fourth bar, a Clock Divider counts the sixteenths and opens a gate once every 64.
 
 ## The pattern
 
@@ -50,8 +50,7 @@ crash    on the downbeat after each fill
 | [VCA](../modules/utilities/vca.md) (hat choke) | **Level** 85% |
 | [Oscillator](../modules/sources/oscillator.md) (toms) | **Wave** Sine, **Oct** -1, **Semi** +2, **Exp FM** 0.35 oct |
 | [ADSR Envelope](../modules/modulation/adsr.md) (toms) | **Dec** 320 ms, **Rel** 320 ms, **Vel** 60% |
-| [Clock](../modules/modulation/clock.md) (phrase) | **BPM** 24, **Div** 1, **Gate** 26% |
-| [Step Sequencer](../modules/utilities/sequencer.md) (bar counter) | **Steps** 4, **Gate of** 100 ms, only step 4 on |
+| [Clock Divider](../modules/utilities/divider.md) (phrase) | **Div** 64, **Offset** 0, **Length** 17 |
 | [Noise](../modules/sources/noise.md) + [SVF Filter](../modules/filters/svf-filter.md) (crash) | **Level** 0%; HighPass, **Cutoff** 4.2 kHz, **Res** 20% |
 | [ADSR Envelope](../modules/modulation/adsr.md) (crash) | **Dec** 1.6 s, **Rel** 1.6 s, **Vel** 0% |
 | [Attenuverter](../modules/utilities/attenuverter.md) (hat mute) | **Amount** -1.0 |
@@ -106,33 +105,17 @@ So on steps 7 and 15, set to C5, the hat opens. Steps 8 and 16 are also set to C
 ### The fill and the crash
 
 ```text
-[Kick Seq EOC] ──> [Bar Counter Clock]
-[Bar Counter Gate] ──> [Phrase Clock Sync]
-[Phrase Clock Gate] ──> [Tom Seq Run]  [Tom Seq Reset]  [Attenuverter In]
+[Clock Gate] ──> [Clock Divider Clock]
+[Clock Divider Gate] ──> [Tom Seq Run]  [Tom Seq Reset]  [Attenuverter In]
 [Attenuverter Out] ──> [Mixer Level 1]  [Mixer Level 2]
 [Tom Seq EOC] ──> [Crash Env Gate]
 ```
 
-A 16-step sequencer can't wait three bars before it plays. The toms get a second, slower clock instead. The phrase clock runs at 24 BPM, a quarter of the tempo, with **Div** 1. One cycle is four bars, and its gate stays open for the first 26% of that, just over one bar. While the gate is open, the tom sequencer runs. When it opens, the sequencer resets to step 1. The toms play their fill on steps 9 to 16, two hits on each drum from G down to E, then stop.
+A 16-step sequencer can't wait three bars before it plays. The Clock Divider does the waiting. It counts the Clock's sixteenths, and 64 of them are four bars. On count 0, the downbeat of bar 1, its **Gate** opens: the tom sequencer resets to step 1 and starts running. The toms play their fill on steps 9 to 16, two hits on each drum from G down to E.
 
-The gate stays open for a few milliseconds past the bar line. That lets the tom sequencer take one more step and wrap around, and its **EOC** pulse strikes the crash on the next downbeat. The same gate, inverted by the Attenuverter, pulls both hat faders to zero, so the hats stop for the fill and come back with the crash.
+The Gate stays open for 17 clocks, **Length** 17: the fill bar and the downbeat after it. That one extra clock lets the tom sequencer take one more step and wrap round, and its **EOC** pulse strikes the crash on the next downbeat. Then the Gate closes and the toms wait for count 0 again. The same Gate, inverted by the Attenuverter, pulls both hat faders to zero, so the hats stop for the fill and come back with the crash.
 
-Two clocks running freely would slowly drift apart. The bar counter is a 4-step sequencer that advances once a bar, clocked by the kick lane's **EOC**. It fires on step 4 to re-sync the phrase clock every four bars. Over a five-minute render, every crash lands within 1.3 ms of its downbeat.
-
-The fill also plays in the very first bar, so the patch opens with a count-in down the toms and lands on a crash.
-
-### A simpler phrase: Logic
-
-The phrase clock and the bar counter take two modules and a re-sync to do one job: open a gate once every four bars. A [Logic](../modules/utilities/logic.md) module does it alone. Delete the phrase clock and the bar counter, and patch:
-
-```text
-[Clock Gate] ──> [Logic Clock]                 (Div 64, Offset 0, Length 17)
-[Logic Gate] ──> [Tom Seq Run]  [Tom Seq Reset]  [Attenuverter In]
-```
-
-Logic counts the Clock's sixteenths, and 64 of them are four bars. Its **Gate** opens on count 0, the downbeat of bar 1, and stays open for 17 clocks: the fill bar and the downbeat after it. So the toms still take one extra step, wrap round and strike the crash. Rendered side by side, the two versions play the same bars, every sixteenth within a hundredth of a decibel of the other.
-
-A divider counts the Clock's pulses, so it can't drift and needs no re-sync, and it follows the Clock to any tempo. At 72 BPM the fill stays on every fourth bar, where a phrase clock would need 18 BPM, below its slowest setting. For a fill every eighth bar, set **Div** to 128.
+Because the divider counts the Clock's own pulses, it can't drift from the beat, however long the patch plays, and it follows the Clock to any tempo. The fill also plays in the very first bar, so the patch opens with a count-in down the toms and lands on a crash.
 
 ### Toms across the kit
 
@@ -158,7 +141,9 @@ Kick and snare go to the first Mixer's mono **Out**, through a compressor, and i
 
 **A different fill.** The toms play steps 9 to 16. Turn on steps 1 to 8 for a whole-bar fill, or change the pitches for a different run.
 
-**Faster.** Set the Clock to 120 BPM and the phrase clock to 30. The phrase clock must always run at a quarter of the Clock's tempo. Its lowest setting is 20 BPM, so below 80 BPM the fill can't stay every fourth bar. With [Logic](#a-simpler-phrase-logic) scheduling the fill instead, turn only the Clock, to any tempo.
+**Faster or slower.** Turn the Clock's **BPM**. The fill stays on every fourth bar at any tempo, because the divider counts the Clock's own sixteenths.
+
+**A longer phrase.** Set the Clock Divider's **Div** to 128 for a fill every eighth bar. Set **Offset** to 48, or 112 with **Div** 128, and the fill moves to the last bar of the phrase, with the crash on the first bar of the next one, the way drummers usually phrase it.
 
 ## Related
 
