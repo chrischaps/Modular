@@ -1,6 +1,6 @@
 # Afterglow
 
-A patch that plays itself and sounds finished: a soft, plucked arpeggio rolls through a four-chord progression over a warm pad. Its notes bounce between the speakers on dotted-eighth tape echoes. Nothing in the rack plays chords, so two sequencers share the work. One plays the arpeggio, and the other moves it from chord to chord.
+A patch that plays itself and sounds finished: a soft, plucked arpeggio rolls through a four-chord progression over a warm pad. Its notes bounce between the speakers on dotted-eighth tape echoes. A Step Sequencer plays the arpeggio. A Chord Sequencer moves it from chord to chord and plays the same chords on the pad: Fmaj9, Cadd9, G6, Am9.
 
 > **Load it:** choose **📚 Examples → Afterglow** in the toolbar and press **▶ Play**. It needs no keyboard.
 > The patch file is [`patches/afterglow.json`](https://github.com/chrischaps/Soba/blob/master/patches/afterglow.json).
@@ -9,13 +9,14 @@ A patch that plays itself and sounds finished: a soft, plucked arpeggio rolls th
 *Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Soba**.*
 
 ![The Afterglow patch](../images/recipe-afterglow.png)
-*The arpeggio voice and the effects run along the top, and the pad runs along the bottom. The cable between the two sequencers is what changes the chords.*
+*The arpeggio voice and the effects run along the top, and the pad runs along the bottom. The cable from the Chord Sequencer's **Root** up to the arpeggio's oscillator is what moves the arpeggio from chord to chord.*
 
 ## What it teaches
 
-- **Transposing with a second sequencer.** Pitch inputs add up, so one sequencer can shift another's notes. Here it plays the arpeggio over four chords.
+- **Transposing with a second sequencer.** Pitch inputs add up, so one sequencer can shift another's notes. Here the Chord Sequencer's **Root** moves the arpeggio over four chords.
 - **Clocking from end of cycle.** A sequencer's **EOC** output can clock a second sequencer, so the second one moves once per bar.
-- **Chords without a third.** Sus2 shapes are neither major nor minor, so the same shape works on any root.
+- **Chords on one cable.** The Chord Sequencer sends each chord down a polyphonic cable, voiced and voice-led, with the bass underneath. One pad voice plays the whole progression.
+- **Chords without a third.** Sus2 shapes are neither major nor minor, so the same arpeggio shape works on any root.
 - **Two voices, one space.** A bright lead and a dark pad share one chorus, delay and reverb, so they sound as if they're in the same room.
 
 ## Modules
@@ -23,8 +24,8 @@ A patch that plays itself and sounds finished: a soft, plucked arpeggio rolls th
 | Module | Settings |
 |--------|----------|
 | [Clock](../modules/modulation/clock.md) | **BPM** 92, **Div** 1/16 |
-| [Step Sequencer](../modules/utilities/sequencer.md) 1 (arpeggio) | **Steps** 16, **Gate** 60%, **Gate of** 100 ms. Notes C4 G4 D5 C5 G5 D5 G4 C5 C4 G4 D5 G5 C6 G5 D5 G4, step 10 off |
-| [Step Sequencer](../modules/utilities/sequencer.md) 2 (chords) | **Steps** 4, **Gate** 99%, **Gate of** 100 ms. Notes F3 C4 G3 A3 |
+| [Step Sequencer](../modules/utilities/sequencer.md) (arpeggio) | **Steps** 16, **Gate** 60%, **Gate of** 100 ms. Notes C4 G4 D5 C5 G5 D5 G4 C5 C4 G4 D5 G5 C6 G5 D5 G4, step 10 off |
+| [Chord Sequencer](../modules/utilities/chord-sequencer.md) | **Steps** 4, **Gate** 4%, **Voices** 4, **Range** 5, **Voicing** Close, **Voice lead** on, **Bass voice** on. Chords Fmaj9 (F3), Cadd9 (C4), G6 (G3), Am9 (A3) |
 | [Oscillator](../modules/sources/oscillator.md) 1 | **Wave** Saw, **Voices** 2, **Detune** 12%, **Exp FM** 1.0 oct |
 | [Ladder Filter](../modules/filters/ladder-filter.md) | **Cutoff** 900 Hz, **Res** 35%, **Drive** 2.2x |
 | [ADSR Envelope](../modules/modulation/adsr.md) 1 | **Atk** 2 ms, **Dec** 350 ms, **Sus** 0%, **Rel** 350 ms, **Vel** 60% |
@@ -46,25 +47,25 @@ A patch that plays itself and sounds finished: a soft, plucked arpeggio rolls th
 ### One shape, four chords
 
 ```text
-[Clock Gate] ──> [Step Sequencer 1 Clock]
-[Step Sequencer 1 Pitch] ──> [Oscillator 1 V/Oct]
-[Step Sequencer 1 EOC] ──> [Step Sequencer 2 Clock]
-[Step Sequencer 2 Pitch] ──> [Oscillator 1 Exp FM]
+[Clock Gate] ──> [Step Sequencer Clock]
+[Step Sequencer Pitch] ──> [Oscillator 1 V/Oct]
+[Step Sequencer EOC] ──> [Chord Sequencer Clock]
+[Chord Sequencer Root] ──> [Oscillator 1 Exp FM]
 ```
 
-Sequencer 1 plays a sixteen-step arpeggio at one note per sixteenth. It uses four notes: C, G, D and the octave C, which are a chord's root, fifth, ninth and octave. They're spread over two octaves.
+The Step Sequencer plays a sixteen-step arpeggio at one note per sixteenth. It uses four notes: C, G, D and the octave C, which are a chord's root, fifth, ninth and octave. They're spread over two octaves.
 
-Sequencer 2 holds the chord. It's clocked by Sequencer 1's **EOC** output, which pulses each time the arpeggio wraps around, so it steps once per bar: F, C, G, A. Its **Pitch** goes into Oscillator 1's **Exp FM** input, and with **Exp FM** at 1.0 octave per volt that input works exactly like a second **V/Oct**. The oscillator adds the two pitches together. C4 is zero volts, so a step on F3 moves the whole arpeggio down seven semitones, and C4 leaves it where it is.
+The Chord Sequencer holds the chord. It's clocked by the Step Sequencer's **EOC** output, which pulses each time the arpeggio wraps around, so it steps once per bar. Its **Root** output carries each chord's root as a single pitch: F3, C4, G3, A3. That goes into Oscillator 1's **Exp FM** input, and with **Exp FM** at 1.0 octave per volt that input works exactly like a second **V/Oct**. The oscillator adds the two pitches together. C4 is zero volts, so a chord on F3 moves the whole arpeggio down seven semitones, and C4 leaves it where it is.
 
-The shape has no third. Without one, a chord is neither major nor minor (it's a *sus2*). So moving the shape doesn't change its mood, and on these four roots every note it plays stays on the white keys, in C major. Played as full chords, the progression would be F, C, G and A minor. As sus2 shapes it sounds open and unresolved.
+The arpeggio's shape has no third. Without one, a chord is neither major nor minor (it's a *sus2*). So moving the shape doesn't change its mood, and on these four roots every note it plays stays on the white keys, in C major. The pad decides what the chords are (below). Fmaj9, Cadd9, G6 and Am9 each contain the root, fifth and ninth the arpeggio plays over them, so the two parts always agree.
 
 ### The pluck
 
 ```text
 [Oscillator 1 Out] ──> [Ladder Filter In]
 [Ladder Filter LP24] ──> [VCA 1 In]
-[Step Sequencer 1 Gate] ──> [ADSR 1 Gate]
-[Step Sequencer 1 Velocity] ──> [ADSR 1 Velocity]
+[Step Sequencer Gate] ──> [ADSR 1 Gate]
+[Step Sequencer Velocity] ──> [ADSR 1 Velocity]
 [ADSR 1 Out] ──> [VCA 1 CV]
              ──> [Mix In 1]
 [LFO Out] ──> [Mix In 2]
@@ -78,16 +79,18 @@ The Mix adds a very slow LFO to the envelope before both reach **Cutoff**. Over 
 ### The pad
 
 ```text
-[Step Sequencer 2 Pitch] ──> [Oscillator 2 V/Oct]
+[Chord Sequencer Pitch] ──> [Oscillator 2 V/Oct]     (poly, 4 channels)
 [Oscillator 2 Out] ──> [SVF Filter In]
 [SVF Filter LowPass] ──> [VCA 2 In]
-[Step Sequencer 2 Gate] ──> [ADSR 2 Gate]
+[Chord Sequencer Gate] ──> [ADSR 2 Gate]
 [ADSR 2 Out] ──> [VCA 2 CV]
 ```
 
-The chord sequencer also plays the bass. Oscillator 2 is five detuned saws an octave down, and they follow the chord roots. The SVF filter at 420 Hz keeps them dark and round.
+The Chord Sequencer plays the bass and the chords on one cable. With **Bass voice** on and **Voices** at 4, its **Pitch** carries the root on its first channel and three chord tones above it. The oscillator, filter, envelope and VCA are all polyphonic, so each channel gets its own five detuned saws, an octave down. The Mixer hears the four channels summed.
 
-VCA 2's **CV Amt** of 60% means the envelope controls only part of the level, and the other 40% is always there. So the pad never stops. On each chord change, the sequencer's short gate fires ADSR 2, and the pad swells, then settles back over two seconds. The very first bar plays over F before Sequencer 2 has had a clock, so the pad comes in quietly and blooms on the first change.
+The bass is the root: F2, C3, G2, A2. Because the bass already has it, each chord leaves out its own root and plays its colour tones instead. For Fmaj9 that's its 3rd, 7th and 9th (A, E, G), and for Am9 the same (C, G, B). With **Voice lead** on, each chord takes the inversion nearest the last, so from bar to bar each of the pad's voices holds its note or moves a third at most. The SVF filter at 420 Hz keeps it all dark and round: a glow under the arpeggio rather than a second part.
+
+VCA 2's **CV Amt** of 60% means the envelope controls only part of the level, and the other 40% is always there. So the pad never stops. On each chord change, the sequencer's short gate (4% of the bar, about 100 ms) fires ADSR 2, and the pad swells, then settles back over two seconds. The very first bar plays over Fmaj9 before the Chord Sequencer has had a clock. The sequencer already sends that first chord, with its gate low, so the pad comes in quietly and blooms on the first change.
 
 ### Echoes and space
 
@@ -104,11 +107,15 @@ The Mixer sets the arpeggio a little to the right and keeps the pad, which carri
 
 ## Variations
 
-**A new progression.** Right-click Sequencer 2's steps to change the roots. C, D, F, G and A keep every note in C major. E and B add an F♯ or a C♯, which can sound lovely, but the pad and the arpeggio won't share a key.
+**A new progression.** Right-click a Chord Sequencer step to change its root and type. Roots on C, D, F, G and A keep the arpeggio in C major, and types like Dm9 or G6 suit them. E and B roots add an F♯ or a C♯ to the arpeggio, which can sound lovely, but the arpeggio and the pad won't share a key.
 
-**A longer progression.** Set Sequencer 2's **Steps** to 8 and fill in four more roots, for example F C G A F C D G.
+**A longer progression.** Set the Chord Sequencer's **Steps** to 8 and fill in four more chords, for example Fmaj9 Cadd9 G6 Am9 Fmaj9 Cadd9 Dm9 G6.
 
-**A different arpeggio.** Set Sequencer 1's **Dir** to P-P to rock back and forth, or Rnd for a new order every bar. Any order of the four notes still fits the chord.
+**A bigger pad.** Turn **Voices** up to 5 or 6, for the 5ths and doubled notes, and set **Voicing** to Spread. Lower VCA 2's **Level** to keep the arpeggio on top.
+
+**The original sus2 pad.** Switch **Bass voice** off and set **Voices** to 1. The pad then plays only the roots, as Afterglow did before the Chord Sequencer.
+
+**A different arpeggio.** Set the Step Sequencer's **Dir** to P-P to rock back and forth, or Rnd for a new order every bar. Any order of the four notes still fits the chord.
 
 **Triplet shimmer.** Set the delay's **Sync** to 1/8T. The echoes now land in threes against the sixteenths.
 
@@ -118,6 +125,7 @@ The Mixer sets the arpeggio a little to the right and keeps the pad, which carri
 
 ## Related
 
+- [Chord Sequencer](../modules/utilities/chord-sequencer.md) – chord types, voicing and the bass voice
 - [Step Sequencer](../modules/utilities/sequencer.md) – editing steps and the EOC output
 - [Oscillator](../modules/sources/oscillator.md) – V/Oct and Exp FM
 - [Generative Ambient](./generative-ambient.md) – one sequencer, and a second voice that wanders in key

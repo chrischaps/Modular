@@ -203,6 +203,7 @@ The [Clock](../modulation/clock.md)'s **Run** and **Reset** outputs are made for
 
 - [Clock](../modulation/clock.md): drives the sequencer
 - [Arranger](./arranger.md): picks the pattern for each section of a song, through **Pattern**
+- [Chord Sequencer](./chord-sequencer.md): a chord per step instead of a note, on polyphonic cables
 - [Trigger Sequencer](./trigger-sequencer.md): eight lanes of drum hits from one module, with chained patterns for fills
 - [Clock Divider](./divider.md): divides the clock, so a sequencer can play once every few bars from its **Run** and **Reset**
 - [ADSR Envelope](../modulation/adsr.md): shapes each step's note from the Gate output

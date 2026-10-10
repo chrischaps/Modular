@@ -201,7 +201,7 @@ struct StepDrag {
 
 /// The note a drag lands on: `dy` points down the screen from where it
 /// began, so dragging up raises the note.
-fn dragged_pitch(from: u8, dy: f32, zoom: f32, octaves: bool) -> u8 {
+pub(super) fn dragged_pitch(from: u8, dy: f32, zoom: f32, octaves: bool) -> u8 {
     let semitones = if octaves {
         (-dy / (DRAG_PER_OCTAVE * zoom)).round() as i32 * 12
     } else {
@@ -421,7 +421,7 @@ fn slur(painter: &egui::Painter, from: egui::Rect, to: egui::Rect, wraps: bool, 
 
 /// The note a drag will land on, floated above its step where the node's
 /// edge can't clip it.
-fn drag_badge(ui: &egui::Ui, node_id: NodeId, step: egui::Rect, name: &str, zoom: f32) {
+pub(super) fn drag_badge(ui: &egui::Ui, node_id: NodeId, step: egui::Rect, name: &str, zoom: f32) {
     let painter = ui.ctx().layer_painter(LayerId::new(Order::Tooltip, Id::new(("step_drag_badge", node_id))));
     let font = egui::FontId::proportional((12.0 * zoom).max(11.0));
     let galley = painter.layout_no_wrap(name.to_string(), font, Color32::from_rgb(30, 22, 12));

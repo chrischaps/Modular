@@ -336,6 +336,16 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "seq.chord",
+        knobs: &[knob("Steps"), knob_as("Gate Length", "Gate"), knob("Voices"), knob("Range")],
+        labels: &[("Direction", "Dir"), ("Voicing", "Voicing"), ("Voice Leading", "Voice lead"), ("Bass Voice", "Bass voice")],
+        // The grid and its popover edit these
+        hidden: &["Step *"],
+        monitor: &["Gate", "EOC"],
+        display: NodeDisplay::ChordGrid,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "seq.trigger",
         knobs: &[knob("Steps"), knob_as("Gate Length", "Gate"), knob_as("Accent Amount", "Accent")],
         // The grid, the pattern tabs and the Chain edit these

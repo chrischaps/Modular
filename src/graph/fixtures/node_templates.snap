@@ -791,6 +791,127 @@ knob Glide              "Glide" KnobOnly
 monitor [1, 3, 4]
 display StepGrid
 
+== seq.chord "Chord Sequencer" finder="Chord Sequencer" Utility
+in   Clock              Gate     ConnectionOnly       inline=true  port
+in   Reset              Gate     ConnectionOnly       inline=true  port
+in   Run                Gate     ConnectionOnly       inline=true  port
+in   Steps              Control  ConstantOnly         inline=false num 4 [1..16]  stepped
+in   Direction          Control  ConstantOnly         inline=true  select 0 ["Fwd", "Bwd", "P-P", "Rnd"] "Dir"
+in   Gate Length        Control  ConstantOnly         inline=false num 100 [1..100] %
+in   Voicing            Control  ConstantOnly         inline=true  select 0 ["Close", "Open", "Spread"] "Voicing"
+in   Voice Leading      Control  ConstantOnly         inline=true  toggle true "Voice lead"
+in   Voices             Control  ConstantOnly         inline=false num 4 [1..8]  stepped
+in   Range              Control  ConstantOnly         inline=false num 3 [1..6]  stepped
+in   Bass Voice         Control  ConstantOnly         inline=true  toggle false "Bass voice"
+in   Step 1 Root        Control  ConstantOnly         inline=false num 36 [0..127]  stepped
+in   Step 1 Type        Control  ConstantOnly         inline=false select 3 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 1 Bass        Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 1 Gate        Control  ConstantOnly         inline=false toggle true ""
+in   Step 1 Velocity    Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 1 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 2 Root        Control  ConstantOnly         inline=false num 33 [0..127]  stepped
+in   Step 2 Type        Control  ConstantOnly         inline=false select 4 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 2 Bass        Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 2 Gate        Control  ConstantOnly         inline=false toggle true ""
+in   Step 2 Velocity    Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 2 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 3 Root        Control  ConstantOnly         inline=false num 29 [0..127]  stepped
+in   Step 3 Type        Control  ConstantOnly         inline=false select 3 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 3 Bass        Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 3 Gate        Control  ConstantOnly         inline=false toggle true ""
+in   Step 3 Velocity    Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 3 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 4 Root        Control  ConstantOnly         inline=false num 31 [0..127]  stepped
+in   Step 4 Type        Control  ConstantOnly         inline=false select 2 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 4 Bass        Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 4 Gate        Control  ConstantOnly         inline=false toggle true ""
+in   Step 4 Velocity    Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 4 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 5 Root        Control  ConstantOnly         inline=false num 36 [0..127]  stepped
+in   Step 5 Type        Control  ConstantOnly         inline=false select 0 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 5 Bass        Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 5 Gate        Control  ConstantOnly         inline=false toggle true ""
+in   Step 5 Velocity    Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 5 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 6 Root        Control  ConstantOnly         inline=false num 36 [0..127]  stepped
+in   Step 6 Type        Control  ConstantOnly         inline=false select 0 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 6 Bass        Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 6 Gate        Control  ConstantOnly         inline=false toggle true ""
+in   Step 6 Velocity    Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 6 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 7 Root        Control  ConstantOnly         inline=false num 36 [0..127]  stepped
+in   Step 7 Type        Control  ConstantOnly         inline=false select 0 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 7 Bass        Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 7 Gate        Control  ConstantOnly         inline=false toggle true ""
+in   Step 7 Velocity    Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 7 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 8 Root        Control  ConstantOnly         inline=false num 36 [0..127]  stepped
+in   Step 8 Type        Control  ConstantOnly         inline=false select 0 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 8 Bass        Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 8 Gate        Control  ConstantOnly         inline=false toggle true ""
+in   Step 8 Velocity    Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 8 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 9 Root        Control  ConstantOnly         inline=false num 36 [0..127]  stepped
+in   Step 9 Type        Control  ConstantOnly         inline=false select 0 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 9 Bass        Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 9 Gate        Control  ConstantOnly         inline=false toggle true ""
+in   Step 9 Velocity    Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 9 Tie         Control  ConstantOnly         inline=false toggle false ""
+in   Step 10 Root       Control  ConstantOnly         inline=false num 36 [0..127]  stepped
+in   Step 10 Type       Control  ConstantOnly         inline=false select 0 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 10 Bass       Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 10 Gate       Control  ConstantOnly         inline=false toggle true ""
+in   Step 10 Velocity   Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 10 Tie        Control  ConstantOnly         inline=false toggle false ""
+in   Step 11 Root       Control  ConstantOnly         inline=false num 36 [0..127]  stepped
+in   Step 11 Type       Control  ConstantOnly         inline=false select 0 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 11 Bass       Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 11 Gate       Control  ConstantOnly         inline=false toggle true ""
+in   Step 11 Velocity   Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 11 Tie        Control  ConstantOnly         inline=false toggle false ""
+in   Step 12 Root       Control  ConstantOnly         inline=false num 36 [0..127]  stepped
+in   Step 12 Type       Control  ConstantOnly         inline=false select 0 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 12 Bass       Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 12 Gate       Control  ConstantOnly         inline=false toggle true ""
+in   Step 12 Velocity   Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 12 Tie        Control  ConstantOnly         inline=false toggle false ""
+in   Step 13 Root       Control  ConstantOnly         inline=false num 36 [0..127]  stepped
+in   Step 13 Type       Control  ConstantOnly         inline=false select 0 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 13 Bass       Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 13 Gate       Control  ConstantOnly         inline=false toggle true ""
+in   Step 13 Velocity   Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 13 Tie        Control  ConstantOnly         inline=false toggle false ""
+in   Step 14 Root       Control  ConstantOnly         inline=false num 36 [0..127]  stepped
+in   Step 14 Type       Control  ConstantOnly         inline=false select 0 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 14 Bass       Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 14 Gate       Control  ConstantOnly         inline=false toggle true ""
+in   Step 14 Velocity   Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 14 Tie        Control  ConstantOnly         inline=false toggle false ""
+in   Step 15 Root       Control  ConstantOnly         inline=false num 36 [0..127]  stepped
+in   Step 15 Type       Control  ConstantOnly         inline=false select 0 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 15 Bass       Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 15 Gate       Control  ConstantOnly         inline=false toggle true ""
+in   Step 15 Velocity   Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 15 Tie        Control  ConstantOnly         inline=false toggle false ""
+in   Step 16 Root       Control  ConstantOnly         inline=false num 36 [0..127]  stepped
+in   Step 16 Type       Control  ConstantOnly         inline=false select 0 ["maj", "min", "7", "maj7", "m7", "m7b5", "dim", "aug", "sus2", "sus4", "6", "m6", "add9", "maj9", "m9", "9", "11", "13"] ""
+in   Step 16 Bass       Control  ConstantOnly         inline=false select 0 ["Root", "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"] ""
+in   Step 16 Gate       Control  ConstantOnly         inline=false toggle true ""
+in   Step 16 Velocity   Control  ConstantOnly         inline=false num 100 [0..127]  stepped
+in   Step 16 Tie        Control  ConstantOnly         inline=false toggle false ""
+out  Pitch              Control
+out  Gate               Gate
+out  Velocity           Control
+out  Root               Control
+out  Bass               Control
+out  EOC                Gate
+knob Steps              "Steps" KnobOnly
+knob Gate Length        "Gate" KnobOnly
+knob Voices             "Voices" KnobOnly
+knob Range              "Range" KnobOnly
+monitor [1, 5]
+display ChordGrid
+
 == seq.trigger "Trigger Sequencer" finder="Trigger Sequencer" Utility
 in   Clock              Gate     ConnectionOnly       inline=true  port
 in   Reset              Gate     ConnectionOnly       inline=true  port

@@ -111,7 +111,7 @@ pub const EXAMPLES: &[Example] = &[
     Example {
         name: "Afterglow",
         file_name: "afterglow.json",
-        description: "Plays itself: one sequencer transposes another's arpeggio through a chord progression, over a warm pad and dotted-eighth tape echoes",
+        description: "Plays itself: a Chord Sequencer moves an arpeggio through Fmaj9, Cadd9, G6 and Am9 and plays them on a warm pad, under dotted-eighth tape echoes",
         json: include_str!("../../patches/afterglow.json"),
     },
     Example {

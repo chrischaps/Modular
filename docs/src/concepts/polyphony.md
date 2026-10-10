@@ -6,7 +6,9 @@ This is the approach VCV Rack takes. You don't build eight copies of your voice.
 
 ## Where voices come from
 
-The [Poly MIDI](../modules/midi/poly-midi.md) module is where polyphony starts. Its **Voices** knob (1 to 8) sets how many channels its **Pitch**, **Gate**, **Velocity** and **Aftertouch** cables carry, and each note you play is given a channel of its own. When a Poly MIDI module is in the patch, your computer keyboard plays it too.
+The [Poly MIDI](../modules/midi/poly-midi.md) module is where polyphony starts when you play. Its **Voices** knob (1 to 8) sets how many channels its **Pitch**, **Gate**, **Velocity** and **Aftertouch** cables carry, and each note you play is given a channel of its own. When a Poly MIDI module is in the patch, your computer keyboard plays it too.
+
+In a patch that plays itself, the [Chord Sequencer](../modules/utilities/chord-sequencer.md) starts it instead. It sends a progression's chords down the same **Pitch**, **Gate** and **Velocity** cables, one channel per note, so a voice built for Poly MIDI plays it unchanged.
 
 ## Polyphonic modules
 

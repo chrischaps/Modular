@@ -6,6 +6,7 @@
 pub mod arranger;
 pub mod attenuverter;
 pub mod audio_input;
+pub mod chord_sequencer;
 pub mod chorus;
 pub mod clock;
 pub mod compressor;
@@ -43,6 +44,7 @@ pub mod vca;
 pub use arranger::Arranger;
 pub use attenuverter::Attenuverter;
 pub use audio_input::AudioInput;
+pub use chord_sequencer::ChordSequencer;
 pub use chorus::Chorus;
 pub use clock::Clock;
 pub use compressor::Compressor;

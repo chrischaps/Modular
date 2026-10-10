@@ -198,7 +198,7 @@ impl SequenceDirection {
 
     /// The step a pattern starts from: the last one when playing backward,
     /// otherwise the first.
-    fn start_step(self, num_steps: usize) -> usize {
+    pub(crate) fn start_step(self, num_steps: usize) -> usize {
         match self {
             SequenceDirection::Backward => num_steps - 1,
             _ => 0,

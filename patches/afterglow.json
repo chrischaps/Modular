@@ -504,7 +504,7 @@
     },
     {
       "id": 9,
-      "module_id": "seq.step",
+      "module_id": "seq.chord",
       "position": [
         246.0,
         1094.0
@@ -523,12 +523,47 @@
         {
           "name": "Gate Length",
           "type": "Number",
-          "value": 99.0
+          "value": 4.0
         },
         {
-          "name": "Step 1 Pitch",
+          "name": "Voicing",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Voice Leading",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Voices",
+          "type": "Number",
+          "value": 4.0
+        },
+        {
+          "name": "Range",
+          "type": "Number",
+          "value": 5.0
+        },
+        {
+          "name": "Bass Voice",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 1 Root",
           "type": "Number",
           "value": 53.0
+        },
+        {
+          "name": "Step 1 Type",
+          "type": "Select",
+          "value": 13
+        },
+        {
+          "name": "Step 1 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 1 Gate",
@@ -541,9 +576,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 2 Pitch",
+          "name": "Step 1 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 2 Root",
           "type": "Number",
           "value": 60.0
+        },
+        {
+          "name": "Step 2 Type",
+          "type": "Select",
+          "value": 12
+        },
+        {
+          "name": "Step 2 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 2 Gate",
@@ -556,9 +606,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 3 Pitch",
+          "name": "Step 2 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 3 Root",
           "type": "Number",
           "value": 55.0
+        },
+        {
+          "name": "Step 3 Type",
+          "type": "Select",
+          "value": 10
+        },
+        {
+          "name": "Step 3 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 3 Gate",
@@ -571,9 +636,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 4 Pitch",
+          "name": "Step 3 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 4 Root",
           "type": "Number",
           "value": 57.0
+        },
+        {
+          "name": "Step 4 Type",
+          "type": "Select",
+          "value": 14
+        },
+        {
+          "name": "Step 4 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 4 Gate",
@@ -586,9 +666,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 5 Pitch",
+          "name": "Step 4 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 5 Root",
           "type": "Number",
-          "value": 53.0
+          "value": 36.0
+        },
+        {
+          "name": "Step 5 Type",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 5 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 5 Gate",
@@ -601,9 +696,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 6 Pitch",
+          "name": "Step 5 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 6 Root",
           "type": "Number",
-          "value": 60.0
+          "value": 36.0
+        },
+        {
+          "name": "Step 6 Type",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 6 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 6 Gate",
@@ -616,9 +726,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 7 Pitch",
+          "name": "Step 6 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 7 Root",
           "type": "Number",
-          "value": 55.0
+          "value": 36.0
+        },
+        {
+          "name": "Step 7 Type",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 7 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 7 Gate",
@@ -631,9 +756,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 8 Pitch",
+          "name": "Step 7 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 8 Root",
           "type": "Number",
-          "value": 57.0
+          "value": 36.0
+        },
+        {
+          "name": "Step 8 Type",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 8 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 8 Gate",
@@ -646,9 +786,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 9 Pitch",
+          "name": "Step 8 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 9 Root",
           "type": "Number",
-          "value": 53.0
+          "value": 36.0
+        },
+        {
+          "name": "Step 9 Type",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 9 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 9 Gate",
@@ -661,9 +816,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 10 Pitch",
+          "name": "Step 9 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 10 Root",
           "type": "Number",
-          "value": 60.0
+          "value": 36.0
+        },
+        {
+          "name": "Step 10 Type",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 10 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 10 Gate",
@@ -676,9 +846,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 11 Pitch",
+          "name": "Step 10 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 11 Root",
           "type": "Number",
-          "value": 55.0
+          "value": 36.0
+        },
+        {
+          "name": "Step 11 Type",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 11 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 11 Gate",
@@ -691,9 +876,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 12 Pitch",
+          "name": "Step 11 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 12 Root",
           "type": "Number",
-          "value": 57.0
+          "value": 36.0
+        },
+        {
+          "name": "Step 12 Type",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 12 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 12 Gate",
@@ -706,9 +906,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 13 Pitch",
+          "name": "Step 12 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 13 Root",
           "type": "Number",
-          "value": 53.0
+          "value": 36.0
+        },
+        {
+          "name": "Step 13 Type",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 13 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 13 Gate",
@@ -721,9 +936,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 14 Pitch",
+          "name": "Step 13 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 14 Root",
           "type": "Number",
-          "value": 60.0
+          "value": 36.0
+        },
+        {
+          "name": "Step 14 Type",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 14 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 14 Gate",
@@ -736,9 +966,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 15 Pitch",
+          "name": "Step 14 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 15 Root",
           "type": "Number",
-          "value": 55.0
+          "value": 36.0
+        },
+        {
+          "name": "Step 15 Type",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 15 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 15 Gate",
@@ -751,9 +996,24 @@
           "value": 100.0
         },
         {
-          "name": "Step 16 Pitch",
+          "name": "Step 15 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 16 Root",
           "type": "Number",
-          "value": 57.0
+          "value": 36.0
+        },
+        {
+          "name": "Step 16 Type",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 16 Bass",
+          "type": "Select",
+          "value": 0
         },
         {
           "name": "Step 16 Gate",
@@ -764,6 +1024,11 @@
           "name": "Step 16 Velocity",
           "type": "Number",
           "value": 100.0
+        },
+        {
+          "name": "Step 16 Tie",
+          "type": "Toggle",
+          "value": false
         }
       ]
     },
@@ -771,7 +1036,7 @@
       "id": 10,
       "module_id": "osc.sine",
       "position": [
-        548.0,
+        620.0,
         1094.0
       ],
       "parameters": [
@@ -831,7 +1096,7 @@
       "id": 11,
       "module_id": "filter.svf",
       "position": [
-        770.0,
+        842.0,
         1094.0
       ],
       "parameters": [
@@ -856,7 +1121,7 @@
       "id": 12,
       "module_id": "util.vca",
       "position": [
-        1030.0,
+        1102.0,
         1134.0
       ],
       "parameters": [
@@ -876,7 +1141,7 @@
       "id": 13,
       "module_id": "mod.adsr",
       "position": [
-        1030.0,
+        1102.0,
         1394.0
       ],
       "parameters": [
@@ -1309,7 +1574,7 @@
     },
     {
       "from_node": 9,
-      "from_port": "Pitch",
+      "from_port": "Root",
       "to_node": 3,
       "to_port": "Exp FM"
     },
@@ -1413,7 +1678,7 @@
         1036.0
       ],
       "size": [
-        1062.0,
+        1134.0,
         718.0
       ],
       "color": "violet"
@@ -1433,9 +1698,9 @@
   ],
   "notes": [
     {
-      "text": "Sequencer 2 steps once a bar, on Sequencer 1's **EOC**. Its pitch moves the whole arpeggio: F, C, G, A. One shape, four chords.",
+      "text": "The Chord Sequencer steps once a bar, on the Step Sequencer's **EOC**. Its **Root** moves the whole arpeggio: F, C, G, A. Its chords, Fmaj9, Cadd9, G6 and Am9, play on the pad, with each root underneath as the bass.",
       "position": [
-        1320.0,
+        1392.0,
         1036.0
       ],
       "width": 300.0

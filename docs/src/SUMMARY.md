@@ -50,6 +50,7 @@
   - [Looper](./modules/utilities/looper.md)
   - [Oscilloscope](./modules/visualization/oscilloscope.md)
   - [Step Sequencer](./modules/utilities/sequencer.md)
+  - [Chord Sequencer](./modules/utilities/chord-sequencer.md)
   - [Trigger Sequencer](./modules/utilities/trigger-sequencer.md)
   - [Arranger](./modules/utilities/arranger.md)
   - [MIDI Monitor](./modules/midi/midi-monitor.md)

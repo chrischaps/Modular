@@ -259,6 +259,9 @@ pub enum NodeDisplay {
     Scope,
     /// Step Sequencer: step grid.
     StepGrid,
+    /// Chord Sequencer: the voicing on a keyboard, and a step per chord,
+    /// named.
+    ChordGrid,
     /// Audio Output: output stage level meter.
     OutputMeter,
     /// Mixer: a row per channel strip, with its jacks, its lane of the
@@ -1562,6 +1565,12 @@ impl NodeDataTrait for SynthNodeData {
             ui.add_space(4.0 * zoom);
 
             step_sequencer_display(ui, zoom, node_id, graph, user_state, &mut responses);
+        }
+
+        if self.display == NodeDisplay::ChordGrid {
+            ui.add_space(4.0 * zoom);
+            let edits = super::chord_grid::chord_grid(ui, node_id, graph, user_state, zoom);
+            responses.extend(edits.into_iter().map(NodeResponse::User));
         }
 
         // Special rendering for Oscillator module - waveform preview
