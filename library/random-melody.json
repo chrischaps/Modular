@@ -162,7 +162,8 @@
             }
           ],
           "pinned": {
-            "Transpose": 1
+            "Root": 1,
+            "Scale": 1
           }
         },
         {

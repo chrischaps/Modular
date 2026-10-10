@@ -1,5 +1,5 @@
 //! How a group's nodes look: the group's own node, with its name, a
-//! miniature of what's inside it and the knobs pinned to it, and the Inputs
+//! miniature of what's inside it and the controls pinned to it, and the Inputs
 //! and Outputs nodes inside it.
 //!
 //! A group wears rose, the one header colour no built-in module has, so a
@@ -13,9 +13,10 @@ use egui::{vec2, Align2, Color32, FontId, Pos2, Rect, RichText, Sense, Stroke};
 use egui_node_graph2::{NodeId, NodeResponse};
 
 use crate::app::theme;
-use super::groups::NodeKind;
+use super::groups::{Control, FaceControl, NodeKind};
+use super::hints;
 use super::node_data::KnobPlace;
-use super::{SynthGraph, SynthGraphState, SynthNodeData, SynthResponse};
+use super::{SynthGraph, SynthGraphState, SynthNodeData, SynthResponse, SynthValueType};
 
 type Responses = Vec<NodeResponse<SynthResponse, SynthNodeData>>;
 
@@ -120,7 +121,7 @@ fn draw_doorway(painter: &egui::Painter, center: Pos2, size: f32, ink: Color32, 
 }
 
 /// The body of a group's node: the name being typed, if it is, then the
-/// miniature, then the pinned knobs.
+/// miniature, then the pinned dropdowns and toggles, then the pinned knobs.
 pub fn body(
     data: &SynthNodeData,
     ui: &mut egui::Ui,
@@ -195,11 +196,23 @@ pub fn body(
         responses.push(NodeResponse::User(SynthResponse::EnterGroup(node_id)));
     }
 
-    // The knobs pinned to it, in their modules' colours
-    if !face.knobs.is_empty() {
+    // The dropdowns and toggles pinned to it, then the knobs, in their
+    // modules' colours
+    let outer = data.parent.is_some();
+    let (knobs, switches): (Vec<_>, Vec<_>) = face.controls.iter().partition(|c| c.kind == Control::Knob);
+    if !switches.is_empty() {
         ui.add_space(6.0 * zoom);
-        let outer = data.parent.is_some();
-        for row in face.knobs.chunks(KNOBS_PER_ROW) {
+        for (row, width) in switch_rows(ui, graph, &switches, PREVIEW_WIDTH * zoom) {
+            ui.horizontal(|ui| {
+                for control in row {
+                    switch_chip(ui, control, graph, user_state, width, outer, &mut responses);
+                }
+            });
+        }
+    }
+    if !knobs.is_empty() {
+        ui.add_space(6.0 * zoom);
+        for row in knobs.chunks(KNOBS_PER_ROW) {
             ui.horizontal(|ui| {
                 for knob in row {
                     let Some(module) = graph.nodes.get(knob.node) else { continue };
@@ -213,6 +226,146 @@ pub fn body(
         }
     }
     responses
+}
+
+/// The pinned dropdowns and toggles laid out in rows across the face, in
+/// order, with how wide each of a row's chips is. A row takes as many as fit
+/// at half the face or wider, as wide as their longest choice, and they
+/// share the row's width evenly, so every row lines up with the miniature.
+fn switch_rows<'a>(
+    ui: &egui::Ui,
+    graph: &SynthGraph,
+    switches: &[&'a FaceControl],
+    face_width: f32,
+) -> Vec<(Vec<&'a FaceControl>, f32)> {
+    let gap = ui.spacing().item_spacing.x;
+    let least = (face_width - gap) / 2.0;
+    let font = egui::TextStyle::Button.resolve(ui.style());
+    let chrome = ui.spacing().icon_width + ui.spacing().icon_spacing + 2.0 * ui.spacing().button_padding.x;
+    let wants = |control: &FaceControl| {
+        let options = graph.nodes.get(control.node).and_then(|module| {
+            let (_, input) = module.inputs.iter().find(|(name, _)| *name == control.param)?;
+            match &graph.get_input(*input).value {
+                SynthValueType::Select { options, .. } => Some(options.clone()),
+                _ => None,
+            }
+        });
+        let longest = options.unwrap_or_default().into_iter().map(|option| {
+            ui.fonts(|f| f.layout_no_wrap(option, font.clone(), Color32::WHITE).size().x)
+        });
+        (longest.fold(0.0, f32::max) + chrome).clamp(least, face_width)
+    };
+
+    let mut rows: Vec<(Vec<&FaceControl>, f32)> = Vec::new();
+    for &control in switches {
+        let width = wants(control);
+        match rows.last_mut() {
+            Some((row, used)) if *used + gap + width <= face_width + 0.5 => {
+                row.push(control);
+                *used += gap + width;
+            }
+            _ => rows.push((vec![control], width)),
+        }
+    }
+    rows.into_iter()
+        .map(|(row, _)| {
+            let n = row.len() as f32;
+            let width = (face_width - gap * (n - 1.0)) / n;
+            (row, width)
+        })
+        .collect()
+}
+
+/// A dropdown or toggle pinned to a group's face, `width` wide: its name in
+/// its module's colour over the control, which changes it inside as well.
+fn switch_chip(
+    ui: &mut egui::Ui,
+    control: &FaceControl,
+    graph: &SynthGraph,
+    user_state: &mut SynthGraphState,
+    width: f32,
+    outer: bool,
+    responses: &mut Responses,
+) {
+    let Some(module) = graph.nodes.get(control.node) else { return };
+    let Some(&(_, input_id)) = module.inputs.iter().find(|(name, _)| *name == control.param) else { return };
+    let input = graph.get_input(input_id);
+    let data = &module.user_data;
+    let accent = data.category.color();
+    // A dropdown with a jack is the cable's while one is plugged in
+    let patched = graph.iter_connections().any(|(to, _)| to == input_id);
+    let hint = || hints::Hint::input(data.module_id, &control.param);
+
+    ui.vertical(|ui| {
+        ui.set_width(width);
+        let label = match &input.value {
+            SynthValueType::Select { label, .. } | SynthValueType::Toggle { label, .. } if !label.is_empty() => label.as_str(),
+            _ => control.param.as_str(),
+        };
+        let name = ui.add(
+            egui::Label::new(RichText::new(label).small().color(accent.gamma_multiply(if patched { 0.5 } else { 0.9 })))
+                .sense(Sense::click())
+                .truncate(),
+        );
+        let name = hints::attach(name, hint());
+
+        let mut value = input.value.clone();
+        let response = ui
+            .scope(|ui| {
+                if patched {
+                    ui.disable();
+                }
+                let visuals = &mut ui.visuals_mut().widgets;
+                visuals.inactive.bg_stroke = Stroke::new(1.0, accent.gamma_multiply(0.45));
+                visuals.hovered.bg_stroke = Stroke::new(1.0, accent.gamma_multiply(0.8));
+                match &mut value {
+                    SynthValueType::Select { value, options, .. } => {
+                        egui::ComboBox::from_id_salt((control.node, control.param.as_str(), "face"))
+                            .width(width)
+                            // A long choice ("Pentatonic Minor") is cut short to
+                            // fit the face, and shown whole in the list
+                            .truncate()
+                            .selected_text(options.get(*value).map(|s| s.as_str()).unwrap_or(""))
+                            .show_ui(ui, |ui| {
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+                                for (i, option) in options.iter().enumerate() {
+                                    ui.selectable_value(value, i, option);
+                                }
+                            })
+                            .response
+                    }
+                    SynthValueType::Toggle { value, .. } => {
+                        // Lit in the module's colour when on
+                        let selection = &mut ui.visuals_mut().selection;
+                        selection.bg_fill = accent.gamma_multiply(0.4);
+                        selection.stroke = Stroke::new(1.0, accent.lerp_to_gamma(Color32::WHITE, 0.55));
+                        let text = if *value { "On" } else { "Off" };
+                        let button = ui.add(egui::Button::new(text).selected(*value).min_size(vec2(width, 0.0)));
+                        if button.clicked() {
+                            *value = !*value;
+                        }
+                        button
+                    }
+                    SynthValueType::Port | SynthValueType::Number { .. } => ui.label(""),
+                }
+            })
+            .inner;
+        let response = hints::attach(response, hint());
+        if value != input.value {
+            responses.push(NodeResponse::User(SynthResponse::ParameterChanged {
+                node_id: control.node,
+                param_name: control.param.clone(),
+                value: value.actual_value(),
+            }));
+        }
+
+        let place = KnobPlace::Face { depth: control.depth, outer };
+        for response in [name, response] {
+            if let Some(pin) = data.switch_menu(&response, control.node, &control.param, place, user_state) {
+                responses.push(NodeResponse::User(pin));
+            }
+        }
+    });
 }
 
 /// The field a group's name is typed into, while it's being named.

@@ -1,5 +1,5 @@
 //! Groups: modules collapsed into one node, with jacks of its own and
-//! whichever knobs are pinned to its face.
+//! whichever controls are pinned to its face.
 //!
 //! # How a group lives in the graph
 //!
@@ -567,18 +567,41 @@ impl Default for Preview {
 #[derive(Clone, Debug, Default)]
 pub struct Face {
     pub preview: Preview,
-    /// The knobs pinned to it.
-    pub knobs: Vec<FaceKnob>,
+    /// The controls pinned to it.
+    pub controls: Vec<FaceControl>,
 }
 
-/// A knob pinned to a group's face.
+/// A module's control pinned to a group's face.
 #[derive(Clone, Debug, PartialEq)]
-pub struct FaceKnob {
-    /// The module the knob belongs to.
+pub struct FaceControl {
+    /// The module the control belongs to.
     pub node: NodeId,
     pub param: String,
     /// How many groups down the module is from the face: 1 directly inside.
     pub depth: u8,
+    pub kind: Control,
+}
+
+/// The two kinds of control a module has, and a group's face shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Control {
+    /// One of the knobs in its knob row.
+    Knob,
+    /// A dropdown or toggle, drawn among its inputs.
+    Switch,
+}
+
+/// The controls a module can show on a group's face, each kind in
+/// parameter order: its knobs, then its dropdowns and toggles.
+pub fn controls(graph: &SynthGraph, node_id: NodeId) -> Vec<(&str, Control)> {
+    let node = &graph[node_id];
+    let knobs = node.user_data.knob_params.iter().map(|k| (k.param_name.as_str(), Control::Knob));
+    let switches = node.inputs.iter().filter_map(|(name, input)| {
+        let input = graph.get_input(*input);
+        let switch = input.shown_inline && matches!(input.value, SynthValueType::Toggle { .. } | SynthValueType::Select { .. });
+        switch.then_some((name.as_str(), Control::Switch))
+    });
+    knobs.chain(switches).collect()
 }
 
 /// A group's name being typed, in a field on its face.
@@ -642,15 +665,15 @@ pub fn preview(
     preview
 }
 
-/// The knobs a group shows on its face: each knob pinned to it, from
+/// The controls a group shows on its face: each one pinned to it, from
 /// modules directly inside it or deeper down, nearest first, then top to
-/// bottom by where the modules sit.
-pub fn face_knobs(
+/// bottom by where the modules sit, then in parameter order.
+pub fn face_controls(
     graph: &SynthGraph,
     position: impl Fn(NodeId) -> Option<Pos2>,
     index: &GroupIndex,
     id: GroupId,
-) -> Vec<FaceKnob> {
+) -> Vec<FaceControl> {
     let mut modules: Vec<(NodeId, u8)> = graph
         .nodes
         .iter()
@@ -662,16 +685,16 @@ pub fn face_knobs(
         (a.1, position(a.0).y, position(a.0).x).partial_cmp(&(b.1, position(b.0).y, position(b.0).x)).unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let mut knobs = Vec::new();
+    let mut shown = Vec::new();
     for (node_id, depth) in modules {
         let data = &graph[node_id].user_data;
-        for knob in &data.knob_params {
-            if data.pin_levels(&knob.param_name) >= depth {
-                knobs.push(FaceKnob { node: node_id, param: knob.param_name.clone(), depth });
+        for (param, kind) in controls(graph, node_id) {
+            if data.pin_levels(param) >= depth {
+                shown.push(FaceControl { node: node_id, param: param.to_string(), depth, kind });
             }
         }
     }
-    knobs
+    shown
 }
 
 #[cfg(test)]
@@ -852,20 +875,24 @@ mod tests {
     }
 
     #[test]
-    fn pinned_knobs_show_on_the_groups_they_reach() {
+    fn pinned_controls_show_on_the_groups_they_reach() {
         let mut rig = Rig::new();
         let [_, osc, filter, env, vca, _] = voice(&mut rig);
         rig.editor.graph[filter].user_data.pins.insert("Cutoff".into(), 1);
         rig.editor.graph[osc].user_data.pins.insert("Octave".into(), 2);
+        // A dropdown shows as well as a knob; a name that's neither doesn't
+        rig.editor.graph[osc].user_data.pins.insert("Waveform".into(), 1);
+        rig.editor.graph[osc].user_data.pins.insert("Wobble".into(), 1);
         rig.group(&[osc, filter], "Tone");
         let outer = rig.group(&[env, vca], "Amp");
         let graph = &rig.editor.graph;
         let index = GroupIndex::of(graph);
         let positions = &rig.editor.node_positions;
-        let knobs = |id| face_knobs(graph, |n| positions.get(n).copied(), &index, id);
+        let knobs = |id| face_controls(graph, |n| positions.get(n).copied(), &index, id);
         // Oscillator (left) before the filter, both directly inside Tone
-        let knob = |node, param: &str| FaceKnob { node, param: param.to_string(), depth: 1 };
-        assert_eq!(knobs(GroupId(1000)), [knob(osc, "Octave"), knob(filter, "Cutoff")]);
+        let knob = |node, param: &str| FaceControl { node, param: param.to_string(), depth: 1, kind: Control::Knob };
+        let switch = |node, param: &str| FaceControl { kind: Control::Switch, ..knob(node, param) };
+        assert_eq!(knobs(GroupId(1000)), [knob(osc, "Octave"), switch(osc, "Waveform"), knob(filter, "Cutoff")]);
         assert!(knobs(GroupId(1001)).is_empty());
         let _ = outer;
     }

@@ -119,7 +119,7 @@ pub const LIBRARY: &[LibraryGroup] = &[
         name: "Random Melody",
         file_name: "random-melody.json",
         section: Section::Generators,
-        description: "Plays itself: a wandering voltage, sampled on the beat and kept in A minor pentatonic. Amount is its range, Threshold how many beats rest",
+        description: "Plays itself: a wandering voltage, sampled on the beat and kept in a scale, A minor pentatonic until you change Root and Scale. Amount is its range, Threshold how many beats rest",
         json: include_str!("../../library/random-melody.json"),
     },
     LibraryGroup {
@@ -147,7 +147,7 @@ pub const LIBRARY: &[LibraryGroup] = &[
         name: "Auto-Pan",
         file_name: "auto-pan.json",
         section: Section::Effects,
-        description: "An LFO sweeps a mono sound from side to side. Amount is how wide; inside, Tempo Sync locks the sweep to the Clock",
+        description: "An LFO sweeps a mono sound from side to side. Amount is how wide, and Tempo locks the sweep to the Clock",
         json: include_str!("../../library/auto-pan.json"),
     },
 ];
@@ -157,8 +157,7 @@ mod tests {
     use super::*;
     use crate::dsp::analysis::{amp_to_db, peak, rms};
     use crate::engine::OfflineRenderer;
-    use crate::graph::{SynthGraphState, SynthNodeTemplate};
-    use egui_node_graph2::NodeTemplateTrait;
+    use crate::graph::groups::{self, GroupIndex};
     use crate::persistence::{capture_patch, compile_patch, stage_patch, ConnectionData, JackData, NodeData, ParameterValue};
 
     #[test]
@@ -187,7 +186,7 @@ mod tests {
             let compiled = compile_patch(&patch).unwrap();
             assert!(compiled.warnings.is_empty(), "{}: {:?}", entry.name, compiled.warnings);
 
-            // Every jack is wired inside, and every pinned knob is a real one
+            // Every jack is wired inside
             for jack in &group.inputs {
                 assert!(
                     group.connections.iter().any(|c| c.from_node == group.id && c.from_port == jack.name),
@@ -204,13 +203,19 @@ mod tests {
                     jack.name
                 );
             }
+            // Every pin shows on the face, knob, dropdown or toggle
             assert!(group.nodes.iter().any(|n| !n.pinned.is_empty()), "{}: nothing on its face", entry.name);
+            let staged = stage_patch(&patch).unwrap();
+            let graph = &staged.graph;
+            let id = graph.nodes.values().find_map(|n| n.user_data.kind.group()).unwrap();
+            let shown: Vec<_> = groups::face_controls(graph, |_| None, &GroupIndex::of(graph), id)
+                .into_iter()
+                .map(|control| (control.node, control.param))
+                .collect();
             for node in &group.nodes {
-                // Only knobs show on a face: not dropdowns or toggles
-                let template = SynthNodeTemplate::from_module_id(&node.module_id).unwrap();
-                let knobs = template.user_data(&mut SynthGraphState::new()).knob_params;
+                let graph_id = staged.nodes.iter().find(|n| n.patch_id == node.id).unwrap().graph_id;
                 for name in node.pinned.keys() {
-                    assert!(knobs.iter().any(|k| &k.param_name == name), "{}: {name} isn't a knob to pin", entry.name);
+                    assert!(shown.contains(&(graph_id, name.clone())), "{}: {name} is pinned but not on the face", entry.name);
                 }
             }
         }

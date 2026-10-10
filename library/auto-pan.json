@@ -71,7 +71,8 @@
             }
           ],
           "pinned": {
-            "Rate": 1
+            "Rate": 1,
+            "Tempo Sync": 1
           }
         },
         {

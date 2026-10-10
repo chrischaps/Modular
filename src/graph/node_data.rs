@@ -981,36 +981,10 @@ impl SynthNodeData {
                                 ui.close_menu();
                             }
                         }
-                        // Pinning: the knob shows on the face of the group around it
-                        let pinned = self.pin_levels(&knob_param.param_name);
-                        let mut pin = |ui: &mut egui::Ui, label: &str, hint: &str, levels: u8| {
-                            if ui.button(label).on_hover_text(hint).clicked() {
-                                responses.push(NodeResponse::User(SynthResponse::PinKnob {
-                                    node_id,
-                                    param_name: knob_param.param_name.clone(),
-                                    levels,
-                                }));
-                                ui.close_menu();
-                            }
-                        };
-                        match place {
-                            KnobPlace::Module if self.parent.is_some() => {
-                                ui.separator();
-                                if pinned == 0 {
-                                    pin(ui, "Show on group", "Put this knob on the face of the group it's in", 1);
-                                } else {
-                                    pin(ui, "Hide from group", "Take this knob off the group's face", 0);
-                                }
-                            }
-                            KnobPlace::Face { depth, outer } => {
-                                ui.separator();
-                                pin(ui, "Hide from group", "Take this knob off this group's face", depth - 1);
-                                if outer && pinned == depth {
-                                    pin(ui, "Show on outer group too", "Put this knob on the face of the group around this one too", depth + 1);
-                                }
-                            }
-                            KnobPlace::Module => {}
+                        if self.parent.is_some() || place.is_face() {
+                            ui.separator();
                         }
+                        responses.extend(self.pin_items(ui, node_id, &knob_param.param_name, place).map(NodeResponse::User));
                     });
                     // Set flag if context menu is open to prevent add-node menu
                     if menu_response.is_some() {
@@ -1019,6 +993,70 @@ impl SynthNodeData {
                 }
             }
         }
+    }
+
+    /// The right-click menu items that pin a control to the faces of the
+    /// groups around its module, or take it off: a knob's, a dropdown's or a
+    /// toggle's. Nothing for a module that isn't in a group.
+    pub(super) fn pin_items(
+        &self,
+        ui: &mut egui::Ui,
+        node_id: egui_node_graph2::NodeId,
+        param_name: &str,
+        place: KnobPlace,
+    ) -> Option<SynthResponse> {
+        let pinned = self.pin_levels(param_name);
+        let mut chosen = None;
+        let mut pin = |ui: &mut egui::Ui, label: &str, hint: &str, levels: u8| {
+            if ui.button(label).on_hover_text(hint).clicked() {
+                chosen = Some(SynthResponse::PinKnob { node_id, param_name: param_name.to_string(), levels });
+                ui.close_menu();
+            }
+        };
+        match place {
+            KnobPlace::Module if self.parent.is_some() => {
+                if pinned == 0 {
+                    pin(ui, "Show on group", "Put this control on the face of the group it's in", 1);
+                } else {
+                    pin(ui, "Hide from group", "Take this control off the group's face", 0);
+                }
+            }
+            KnobPlace::Face { depth, outer } => {
+                pin(ui, "Hide from group", "Take this control off this group's face", depth - 1);
+                if outer && pinned == depth {
+                    pin(ui, "Show on outer group too", "Put this control on the face of the group around this one too", depth + 1);
+                }
+            }
+            KnobPlace::Module => {}
+        }
+        chosen
+    }
+
+    /// A dropdown's or toggle's right-click menu, among the module's inputs
+    /// or on a group's face: pinning, and why there's no MIDI Learn.
+    pub(super) fn switch_menu(
+        &self,
+        response: &egui::Response,
+        node_id: egui_node_graph2::NodeId,
+        param_name: &str,
+        place: KnobPlace,
+        user_state: &mut super::SynthGraphState,
+    ) -> Option<SynthResponse> {
+        // Outside a group there's nothing to offer
+        if self.parent.is_none() && !place.is_face() {
+            return None;
+        }
+        let mut chosen = None;
+        let menu = response.context_menu(|ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+            chosen = self.pin_items(ui, node_id, param_name, place);
+            ui.separator();
+            ui.label(RichText::new("Only knobs can learn MIDI CCs").small().weak());
+        });
+        if menu.is_some() {
+            user_state.widget_context_menu_open = true;
+        }
+        chosen
     }
 
     /// A module's right-click menu. Each action applies to the whole

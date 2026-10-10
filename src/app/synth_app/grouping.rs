@@ -11,7 +11,7 @@ use eframe::egui::{self, vec2, FontId, RichText};
 use egui_node_graph2::NodeId;
 
 use crate::graph::groups::{self, Face, GroupIndex, Renaming};
-use crate::graph::{annotation_ui, GroupId};
+use crate::graph::{annotation_ui, GroupId, SynthValueType};
 use crate::persistence::{capture_level, Patch};
 use super::super::editing;
 use super::super::library::{self, SavedModule};
@@ -73,7 +73,7 @@ impl SynthApp {
                 let position = |n: NodeId| positions.get(n).map(|p| (p.to_vec2() / zoom * PREVIEW_ZOOM).to_pos2());
                 let face = Face {
                     preview: groups::preview(graph, position, |n| sizes.get(&n).copied(), id, PREVIEW_ZOOM),
-                    knobs: groups::face_knobs(graph, |n| positions.get(n).copied(), &index, id),
+                    controls: groups::face_controls(graph, |n| positions.get(n).copied(), &index, id),
                 };
                 (id, face)
             })
@@ -201,18 +201,26 @@ impl SynthApp {
         }
     }
 
-    /// Shows a module's knob on the faces of the groups around it, `levels`
-    /// groups up, or with 0, on none.
+    /// Shows a module's knob, dropdown or toggle on the faces of the groups
+    /// around it, `levels` groups up, or with 0, on none.
     pub(super) fn pin_knob(&mut self, node_id: NodeId, param_name: &str, levels: u8) {
-        let Some(node) = self.graph_state.graph.nodes.get_mut(node_id) else { return };
-        let data = &mut node.user_data;
+        let graph = &mut self.graph_state.graph;
+        let Some(node) = graph.nodes.get(node_id) else { return };
+        // A knob's label, or the one a dropdown or toggle wears beside it
+        let label = match node.user_data.knob_params.iter().find(|k| k.param_name == param_name) {
+            Some(knob) => knob.label.clone(),
+            None => match node.inputs.iter().find(|(name, _)| name == param_name).map(|(_, id)| &graph.get_input(*id).value) {
+                Some(SynthValueType::Select { label, .. } | SynthValueType::Toggle { label, .. }) if !label.is_empty() => label.clone(),
+                _ => param_name.to_string(),
+            },
+        };
+        let data = &mut graph[node_id].user_data;
         let before = data.pin_levels(param_name);
         if levels == 0 {
             data.pins.remove(param_name);
         } else {
             data.pins.insert(param_name.to_string(), levels);
         }
-        let label = data.knob_params.iter().find(|k| k.param_name == param_name).map_or(param_name, |k| k.label.as_str());
         let what = format!("{} {}", data.display_name, label);
         let (verb, done) = if levels > before { ("Pin", "on its group's face") } else { ("Unpin", "off the group's face") };
         self.history.name_next(format!("{verb} {what}"));

@@ -98,7 +98,10 @@
               "type": "Number",
               "value": 0.5
             }
-          ]
+          ],
+          "pinned": {
+            "Waveform": 1
+          }
         },
         {
           "id": 2,

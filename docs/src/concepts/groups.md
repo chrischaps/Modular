@@ -1,6 +1,6 @@
 # Groups
 
-A good voice (an oscillator, a filter, a VCA and an envelope) is the same few modules in patch after patch, and three voices side by side turn into a wall of cables. A **group** collapses modules into one node of your own. It has jacks where cables crossed into and out of the selection, and the knobs you choose to keep on its face. Open it to work on what's inside. Save it to **My Modules**, and it's in the add menu of every patch.
+A good voice (an oscillator, a filter, a VCA and an envelope) is the same few modules in patch after patch, and three voices side by side turn into a wall of cables. A **group** collapses modules into one node of your own. It has jacks where cables crossed into and out of the selection, and the controls you choose to keep on its face. Open it to work on what's inside. Save it to **My Modules**, and it's in the add menu of every patch.
 
 ![A group called Voice, playing, with four knobs on its face](../images/groups-outside.png)
 *Voice holds an envelope and a VCA. Its face shows them in miniature, with four of their knobs pinned.*
@@ -36,25 +36,27 @@ Everything else works as it does at the top of the patch. Modules you add, paste
 
 The group's face shows a miniature of what's inside: each module as a small card in its header color, wired as it is. Hover it to see **Open ▸**, and click to go inside.
 
-Below the miniature are any knobs you've **pinned** to the group. Inside the group, right-click a knob and choose **Show on group**. The knob appears on the group's face, in its module's color. It's the module's own knob, not a copy:
+Below the miniature are any controls you've **pinned** to the group. Inside the group, right-click a knob, a dropdown or a toggle and choose **Show on group**. It appears on the group's face, in its module's color: dropdowns and toggles in a row of their own, with the knobs under them. It's the module's own control, not a copy:
 
-- Turning either one turns both.
-- A [MIDI Learn](../getting-started/interface-overview.md#midi-learn) mapping works from either place.
-- If a cable inside the group moves the knob, the face shows it moving.
+- Turning or changing either one changes both, and undo takes back either.
+- A [MIDI Learn](../getting-started/interface-overview.md#midi-learn) mapping on a knob works from either place. Dropdowns and toggles can't learn a CC, inside or on the face.
+- If a cable inside the group moves a knob, the face shows it moving. A toggle with a jack, such as the Slope's **Cycle**, is greyed on the face while a cable sets it.
 
-Right-click a knob on the face and choose **Hide from group** to take it off. If the group is inside another group, **Show on outer group too** puts the knob on that group's face as well.
+Controls from modules nearer the face come first, then top to bottom by where the modules sit, then in each module's own order.
+
+Right-click a control on the face and choose **Hide from group** to take it off. If the group is inside another group, **Show on outer group too** puts it on that group's face as well.
 
 ## My Modules
 
 Right-click a group and choose **Save to My Modules**. The group is saved as a file named after it, in *Documents/Soba/My Modules*.
 
-Saved groups come first in the [quick-add palette](../getting-started/interface-overview.md#quick-add) (`Space`), under **My Modules**, and in the add menu's **My Modules** submenu. Each one is described by its jacks and size, such as *In, Gate, Velocity → Out · 2 modules*. Choosing one adds a copy of the whole group at the cursor, with its modules, cables, jacks and pinned knobs.
+Saved groups come first in the [quick-add palette](../getting-started/interface-overview.md#quick-add) (`Space`), under **My Modules**, and in the add menu's **My Modules** submenu. Each one is described by its jacks and size, such as *In, Gate, Velocity → Out · 2 modules*. Choosing one adds a copy of the whole group at the cursor, with its modules, cables, jacks and pinned controls.
 
 Saving a group under a name that's already there updates it. The folder holds ordinary patch files, so you can copy them to another computer or share them. To find the folder, choose **Open folder** at the bottom of the add menu's My Modules submenu.
 
 ## The Library
 
-The **Library** is a shelf of ready-made groups that ships with Soba. Each one is an ordinary group: add it, play it from the knobs on its face, then open it to see how it's made and change anything inside. Find them under **Library** at the bottom of the add menu, sorted into sections, or type a name or `lib` into the [quick-add palette](../getting-started/interface-overview.md#quick-add).
+The **Library** is a shelf of ready-made groups that ships with Soba. Each one is an ordinary group: add it, play it from the controls on its face, then open it to see how it's made and change anything inside. Find them under **Library** at the bottom of the add menu, sorted into sections, or type a name or `lib` into the [quick-add palette](../getting-started/interface-overview.md#quick-add).
 
 | Group | What it is | Jacks |
 |-------|------------|-------|
@@ -66,11 +68,11 @@ The **Library** is a shelf of ready-made groups that ships with Soba. Each one i
 | **Acid Bass** | A resonant, driven ladder snapped open on every note; velocity accents | Pitch, Gate, Velocity → Out |
 | **Reese Bass** | Three detuned saws beating against each other, with a slow LFO in the filter | Pitch, Gate, Velocity → Out |
 | **Drum Kit** | Kick, snare and hats on a stereo mixer, the closed hat choking the open one | Kick, Snare, Hat, Open Hat, Accent → Out L, Out R |
-| **Random Melody** | Plays itself: a wandering voltage sampled on the beat and kept in A minor pentatonic. **Amt** is its range, **Thresh** how many beats rest | → Pitch, Gate |
+| **Random Melody** | Plays itself: a wandering voltage sampled on the beat and kept in a scale, A minor pentatonic until you change **Root** and **Scale**. **Amt** is its range, **Thresh** how many beats rest | → Pitch, Gate |
 | **Wind** | Plays itself: pink noise through a wandering band-pass, whistling higher as each gust rises | → Out L, Out R |
 | **Stereo Space** | Chorus, ping-pong tape echo and a room, in pedalboard order | In L, In R → Out L, Out R |
 | **Pump** | Each trigger ducks the sound and lets it swell back, like a compressor keyed from the kick | In, Trig → Out |
-| **Auto-Pan** | An LFO sweeps a mono sound from side to side | In → Out L, Out R |
+| **Auto-Pan** | An LFO sweeps a mono sound from side to side. **Tempo** locks the sweep to the Clock | In → Out L, Out R |
 
 The voices share a shape: plug a [Keyboard](../modules/midi/keyboard.md) or [Poly MIDI](../modules/midi/poly-midi.md) into **Pitch**, **Gate** and **Velocity**, and **Out** into a mixer or the output. They're built only from [polyphonic](./polyphony.md) modules, so Poly MIDI plays chords through any of them. They're also levelled to match, so swapping one voice for another doesn't jump in volume.
 
@@ -88,4 +90,4 @@ Groups are saved in the patch file, each holding its own modules, cables and gro
 
 ## Limits
 
-A group's jacks are set when you make it. To add or remove a jack, ungroup the group, change the cables, and group it again. The new group is called *Group* until you rename it; its pinned knobs are kept.
+A group's jacks are set when you make it. To add or remove a jack, ungroup the group, change the cables, and group it again. The new group is called *Group* until you rename it; its pinned controls are kept.
