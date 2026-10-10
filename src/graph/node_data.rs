@@ -840,10 +840,11 @@ impl SynthNodeData {
                                 Color32::from_rgb(180, 100, 200) // Purple for MIDI
                             };
 
-                            // Centred over the knob, which sits at the column's left
+                            // In the corner beside the knob's top right, which the
+                            // dial never reaches, so a badge never moves the knob
                             let dot_size = 8.0 * zoom;
                             let badge_center = egui::pos2(
-                                ui.cursor().left() + knob_size / 2.0,
+                                ui.cursor().left() + knob_size + 2.0 * zoom,
                                 ui.cursor().top() + dot_size / 2.0,
                             );
 
@@ -860,8 +861,6 @@ impl SynthNodeData {
                                 Color32::WHITE,
                             );
 
-                            ui.add_space(dot_size + 2.0 * zoom);
-
                             // Request repaint for blinking effect
                             if midi_config.is_learn_target {
                                 ui.ctx().request_repaint();
@@ -873,17 +872,15 @@ impl SynthNodeData {
                             } else {
                                 Color32::from_rgb(100, 200, 100) // Green for connected but no signal yet
                             };
-                            // Draw a small colored dot centered above the knob
+                            // A small dot at the knob's top right, clear of the dial.
+                            // It takes no room, so knobs in a row stay level
+                            // whichever of them are patched
                             let dot_size = 6.0 * zoom;
-                            let dot_rect = egui::Rect::from_center_size(
-                                egui::pos2(
-                                    ui.cursor().left() + knob_size / 2.0,
-                                    ui.cursor().top() + dot_size / 2.0,
-                                ),
-                                egui::vec2(dot_size, dot_size),
+                            let dot_center = egui::pos2(
+                                ui.cursor().left() + knob_size - 1.0 * zoom,
+                                ui.cursor().top() + dot_size / 2.0,
                             );
-                            ui.painter().circle_filled(dot_rect.center(), dot_size / 2.0, indicator_color);
-                            ui.add_space(dot_size + 2.0 * zoom);
+                            ui.painter().circle_filled(dot_center, dot_size / 2.0, indicator_color);
                         }
 
                         // Render knob based on the value type
