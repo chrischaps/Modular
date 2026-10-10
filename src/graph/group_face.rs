@@ -13,7 +13,7 @@ use egui::{vec2, Align2, Color32, FontId, Pos2, Rect, RichText, Sense, Stroke};
 use egui_node_graph2::{NodeId, NodeResponse};
 
 use crate::app::theme;
-use super::groups::{Control, FaceControl, JackAction, NodeKind, Side};
+use super::groups::{Control, FaceControl, JackAction, JackEdit, NodeKind, Side};
 use super::hints;
 use super::node_data::KnobPlace;
 use super::{SynthGraph, SynthGraphState, SynthNodeData, SynthResponse, SynthValueType};
@@ -110,6 +110,10 @@ pub fn port_menu(
     if actions.is_empty() {
         return None;
     }
+    // Each time the menu opens, its name field starts from the jack's name
+    if response.secondary_clicked() {
+        response.ctx.data_mut(|d| d.remove::<(String, bool)>(name_field_id(node_id, side, port)));
+    }
     let mut chosen = None;
     let menu = response.context_menu(|ui| {
         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
@@ -121,24 +125,83 @@ pub fn port_menu(
     chosen
 }
 
-/// The menu items for what a port can do with groups' jacks.
+/// Where a jack's menu keeps the name being typed, and whether the field
+/// has been drawn yet.
+fn name_field_id(node_id: NodeId, side: Side, port: &str) -> egui::Id {
+    egui::Id::new((node_id, side, port, "jack name"))
+}
+
+/// The menu items for what a port can do with groups' jacks. A jack's own
+/// menu opens on a field with its name selected, so typing renames it.
 pub fn jack_items(ui: &mut egui::Ui, actions: &[JackAction], node_id: NodeId, side: Side, port: &str) -> Option<SynthResponse> {
     let mut chosen = None;
-    for &action in actions {
-        let (label, hint) = match action {
-            JackAction::Show => ("Show on group", "Give the group a jack for this port"),
-            JackAction::Taken => ("Show on group", "Something inside the group is plugged in here already"),
-            JackAction::Hide => ("Hide from group", "Unplug it from the group's jack. A jack left with nothing inside goes"),
-            JackAction::Remove => ("Remove jack", "Take this jack off the group, with its cables inside and out"),
-        };
-        let button = ui.add_enabled(action != JackAction::Taken, egui::Button::new(label));
-        let button = if action == JackAction::Taken { button.on_disabled_hover_text(hint) } else { button.on_hover_text(hint) };
-        if button.clicked() {
-            chosen = Some(SynthResponse::Jack { node_id, side, port: port.to_string(), action });
-            ui.close_menu();
+    let choose = |edit: JackEdit| Some(SynthResponse::Jack { node_id, side, port: port.to_string(), edit });
+    for (i, &action) in actions.iter().enumerate() {
+        if i > 0 {
+            ui.separator();
         }
+        let mut item = |ui: &mut egui::Ui, enabled: bool, label: &str, hint: &str, edit: JackEdit| {
+            let button = ui.add_enabled(enabled, egui::Button::new(label));
+            let button = if enabled { button.on_hover_text(hint) } else { button.on_disabled_hover_text(hint) };
+            if button.clicked() {
+                ui.close_menu();
+                return choose(edit);
+            }
+            None
+        };
+        let picked = match action {
+            JackAction::Show => item(ui, true, "Show on group", "Give the group a jack for this port", JackEdit::Show),
+            JackAction::Taken => {
+                item(ui, false, "Show on group", "Something inside the group is plugged in here already", JackEdit::Show)
+            }
+            JackAction::Hide => item(
+                ui,
+                true,
+                "Hide from group",
+                "Unplug it from the group's jack. A jack left with nothing inside goes",
+                JackEdit::Hide,
+            ),
+            JackAction::Jack { slot, count } => {
+                let renamed = name_field(ui, node_id, side, port).map(JackEdit::Rename).and_then(&choose);
+                ui.separator();
+                let up = item(ui, slot > 0, "Move up", "One place up the group's jacks", JackEdit::Move { up: true });
+                let down = item(ui, slot + 1 < count, "Move down", "One place down the group's jacks", JackEdit::Move { up: false });
+                ui.separator();
+                let remove = item(ui, true, "Remove jack", "Take this jack off the group, with its cables inside and out", JackEdit::Remove);
+                renamed.or(up).or(down).or(remove)
+            }
+        };
+        chosen = chosen.or(picked);
     }
     chosen
+}
+
+/// A jack's name, ready to type over. Enter renames it: returns the name
+/// typed, if it's new.
+fn name_field(ui: &mut egui::Ui, node_id: NodeId, side: Side, port: &str) -> Option<String> {
+    let id = name_field_id(node_id, side, port);
+    let (mut text, fresh) = ui.data_mut(|d| d.get_temp::<(String, bool)>(id)).unwrap_or_else(|| (port.to_string(), true));
+    let mut renamed = None;
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Name").small().color(theme::text::SECONDARY));
+        let edit_id = id.with("edit");
+        let mut output = egui::TextEdit::singleline(&mut text).id(edit_id).desired_width(120.0).show(ui);
+        if fresh {
+            output.response.request_focus();
+            let all = CCursorRange::two(CCursor::new(0), CCursor::new(text.chars().count()));
+            output.state.cursor.set_char_range(Some(all));
+            output.state.store(ui.ctx(), edit_id);
+        }
+        let response = output.response.on_hover_text("Type a new name and press Enter");
+        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            if text.trim() != port && !text.trim().is_empty() {
+                renamed = Some(text.clone());
+            }
+            ui.close_menu();
+        }
+    });
+    ui.data_mut(|d| d.insert_temp(id, (text, false)));
+    renamed
 }
 
 /// Two cards, one behind the other: a group of modules.

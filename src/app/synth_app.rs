@@ -327,7 +327,7 @@ enum NodeMenuAction {
     Rename(egui_node_graph2::NodeId, String),
     Pin(egui_node_graph2::NodeId, String, u8),
     /// A port's menu chose what to do with groups' jacks.
-    Jack(egui_node_graph2::NodeId, crate::graph::groups::Side, String, crate::graph::groups::JackAction),
+    Jack(egui_node_graph2::NodeId, crate::graph::groups::Side, String, crate::graph::groups::JackEdit),
     SaveToLibrary(egui_node_graph2::NodeId),
     OpenSample(egui_node_graph2::NodeId),
 }
@@ -1899,8 +1899,8 @@ impl SynthApp {
                         NodeResponse::User(crate::graph::SynthResponse::PinKnob { node_id, param_name, levels }) => {
                             node_menu_actions.push(NodeMenuAction::Pin(node_id, param_name, levels));
                         }
-                        NodeResponse::User(crate::graph::SynthResponse::Jack { node_id, side, port, action }) => {
-                            node_menu_actions.push(NodeMenuAction::Jack(node_id, side, port, action));
+                        NodeResponse::User(crate::graph::SynthResponse::Jack { node_id, side, port, edit }) => {
+                            node_menu_actions.push(NodeMenuAction::Jack(node_id, side, port, edit));
                         }
                         NodeResponse::User(crate::graph::SynthResponse::SaveGroup(node_id)) => {
                             node_menu_actions.push(NodeMenuAction::SaveToLibrary(node_id));
@@ -2403,7 +2403,7 @@ impl SynthApp {
             NodeMenuAction::StartRename(node_id) => self.start_rename(node_id),
             NodeMenuAction::Rename(node_id, name) => self.rename_group(node_id, &name),
             NodeMenuAction::Pin(node_id, param_name, levels) => self.pin_knob(node_id, &param_name, levels),
-            NodeMenuAction::Jack(node_id, side, port, action) => self.jack_action(node_id, side, &port, action),
+            NodeMenuAction::Jack(node_id, side, port, edit) => self.edit_jack(node_id, side, &port, edit),
             NodeMenuAction::SaveToLibrary(node_id) => self.save_to_library(node_id),
             NodeMenuAction::OpenSample(node_id) => self.open_sample_dialog(node_id),
         }

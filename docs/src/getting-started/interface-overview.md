@@ -166,7 +166,7 @@ A group collapses modules into one node of your own, with jacks where cables cro
 - **Group:** select modules and press `Ctrl + G`, then type a name and press `Enter`.
 - **Go inside:** double-click the group, select it and press `Tab`, or click the miniature on its face. A trail at the top of the canvas shows where you are; click it, or press `Escape`, to go back out.
 - **Pin a control:** inside the group, right-click a knob, dropdown or toggle and choose **Show on group**.
-- **Add a jack:** inside the group, right-click a port's name and choose **Show on group**. Right-click a jack and choose **Remove jack** to take it away.
+- **Add a jack:** inside the group, right-click a port's name and choose **Show on group**. Right-click a jack to rename it, move it up or down, or remove it.
 - **Rename:** select the group and press `F2`, or right-click it and choose **Rename**.
 - **Ungroup:** select the group and press `Ctrl + Alt + G`.
 - **Keep it:** right-click the group and choose **Save to My Modules**. It's then in the add menu and quick-add palette of every patch.
@@ -175,7 +175,7 @@ A group's right-click menu also has **Open**, **Duplicate**, **Copy** and **Dele
 
 ## Undo and redo
 
-**Undo** (`Ctrl + Z`) and **Redo** (`Ctrl + Shift + Z` or `Ctrl + Y`) cover adding, deleting, moving and bypassing modules, patching and unpatching cables, turning knobs, grouping and ungrouping, adding and removing a group's jacks, and every change to [frames and notes](#frames-and-notes). Hover the toolbar buttons to see which edit is next, such as *Move Oscillator*, *Set SVF Filter Cutoff* or *Move frame Voice*.
+**Undo** (`Ctrl + Z`) and **Redo** (`Ctrl + Shift + Z` or `Ctrl + Y`) cover adding, deleting, moving and bypassing modules, patching and unpatching cables, turning knobs, grouping and ungrouping, adding, renaming, moving and removing a group's jacks, and every change to [frames and notes](#frames-and-notes). Hover the toolbar buttons to see which edit is next, such as *Move Oscillator*, *Set SVF Filter Cutoff* or *Move frame Voice*.
 
 A whole drag is one step: turning a knob from 200 Hz to 2 kHz and back undoes in one go. A deleted module comes back with its settings, its cables and its MIDI mappings. Knobs moved by a MIDI controller aren't recorded, and opening a patch starts a fresh history.
 

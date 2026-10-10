@@ -676,22 +676,26 @@ mod tests {
     }
 
     #[test]
-    fn test_a_jack_added_to_a_group_survives_a_round_trip() {
+    fn test_a_jack_added_renamed_and_moved_survives_a_round_trip() {
         use crate::graph::groups::{self, Side};
         let patch = patch_from_json(include_str!("../../library/acid-bass.json")).unwrap();
         let mut staged = stage_patch(&patch).unwrap();
         let ladder = staged.nodes.iter().find(|n| n.template.module_id() == "filter.ladder").unwrap();
         let (ladder_graph, ladder_id) = (ladder.graph_id, ladder.patch_id);
         groups::show_port(&mut staged.graph, ladder_graph, Side::Input, "Resonance").unwrap();
+        // Renamed and moved up a place, it's saved that way
+        let group_node = staged.graph.nodes.iter().find(|(_, n)| n.user_data.kind.group().is_some()).unwrap().0;
+        groups::rename_jack(&mut staged.graph, group_node, Side::Input, "Resonance", "Res").unwrap();
+        groups::move_jack(&mut staged.graph, group_node, Side::Input, "Res", true).unwrap();
 
         let ids: HashMap<NodeId, u64> = staged.nodes.iter().map(|n| (n.graph_id, n.patch_id)).collect();
         let saved = capture_patch(&patch.name, &staged.graph, |g| ids.get(&g).copied(), |_| (0.0, 0.0), &[]);
         let json = serde_json::to_string(&saved).unwrap();
         let group = &patch_from_json(&json).unwrap().groups[0];
         let jacks: Vec<&str> = group.inputs.iter().map(|j| j.name.as_str()).collect();
-        assert_eq!(jacks, ["Pitch", "Gate", "Velocity", "Resonance"]);
+        assert_eq!(jacks, ["Pitch", "Gate", "Res", "Velocity"]);
         assert!(group.connections.iter().any(|c| c.from_node == group.id
-            && c.from_port == "Resonance"
+            && c.from_port == "Res"
             && c.to_node == ladder_id
             && c.to_port == "Resonance"));
     }

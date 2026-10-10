@@ -10,7 +10,7 @@
 use eframe::egui::{self, vec2, FontId, RichText};
 use egui_node_graph2::NodeId;
 
-use crate::graph::groups::{self, Face, GroupIndex, JackAction, Renaming, Side};
+use crate::graph::groups::{self, Face, GroupIndex, JackAction, JackEdit, Renaming, Side};
 use crate::graph::{annotation_ui, GroupId, SynthValueType};
 use crate::persistence::{capture_level, Patch};
 use super::super::editing;
@@ -250,19 +250,19 @@ impl SynthApp {
 
     /// Does what a port's menu chose with groups' jacks: shows the port on
     /// the group it's in as a new jack, unplugs it from the group's jack, or
-    /// takes away the jack it is.
-    pub(super) fn jack_action(&mut self, node_id: NodeId, side: Side, port: &str, action: JackAction) {
+    /// renames, moves or takes away the jack it is.
+    pub(super) fn edit_jack(&mut self, node_id: NodeId, side: Side, port: &str, edit: JackEdit) {
         let graph = &mut self.graph_state.graph;
         let group_name = |graph: &crate::graph::SynthGraph, id| {
             GroupIndex::of(graph).node(id).map_or_else(String::new, |n| groups::name(graph, n).to_string())
         };
-        let (undo, status) = match action {
-            JackAction::Show => {
+        let (undo, status) = match edit {
+            JackEdit::Show => {
                 let Some((id, jack)) = groups::show_port(graph, node_id, side, port) else { return };
                 let group = group_name(graph, id);
                 (format!("Add jack {jack} to {group}"), format!("{group} has a new jack, {jack}"))
             }
-            JackAction::Hide => {
+            JackEdit::Hide => {
                 let Some((id, jacks)) = groups::hide_port(graph, node_id, side, port) else { return };
                 let group = group_name(graph, id);
                 let module = graph.nodes.get(node_id).map_or("", |n| n.user_data.display_name.as_str());
@@ -275,12 +275,23 @@ impl SynthApp {
                     _ => (format!("Remove jacks from {group}"), format!("{module} {port} is no longer shown on {group}")),
                 }
             }
-            JackAction::Remove => {
+            JackEdit::Remove => {
                 let Some((id, jack)) = groups::remove_port_jack(graph, node_id, side, port) else { return };
                 let group = group_name(graph, id);
                 (format!("Remove jack {jack} from {group}"), format!("{group} no longer has a {jack} jack"))
             }
-            JackAction::Taken => return,
+            JackEdit::Rename(name) => {
+                let Some((id, old, new)) = groups::rename_jack(graph, node_id, side, port, &name) else { return };
+                let group = group_name(graph, id);
+                let numbered = if new != name.trim() { format!(" ({} is taken)", name.trim()) } else { String::new() };
+                (format!("Rename jack {old} to {new}"), format!("{group}'s {old} jack is now {new}{numbered}"))
+            }
+            JackEdit::Move { up } => {
+                let Some((id, jack)) = groups::move_jack(graph, node_id, side, port, up) else { return };
+                let group = group_name(graph, id);
+                let way = if up { "up" } else { "down" };
+                (format!("Move jack {jack} {way}"), format!("{group}'s {jack} jack moved {way}"))
+            }
         };
         self.history.name_next(undo);
         self.status_message = Some(status);

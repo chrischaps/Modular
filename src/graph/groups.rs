@@ -493,8 +493,20 @@ pub enum JackAction {
     /// carrying nothing.
     Hide,
     /// The port is one of a group's jacks, on its node or its Inputs or
-    /// Outputs: take the jack away.
+    /// Outputs: rename it, move it, or take it away. `slot` is its place
+    /// among the `count` jacks on its side.
+    Jack { slot: usize, count: usize },
+}
+
+/// What a port's right-click menu chose to do with a group's jacks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum JackEdit {
+    Show,
+    Hide,
     Remove,
+    Rename(String),
+    /// One place up the group's jacks, or down.
+    Move { up: bool },
 }
 
 /// The port called `name` on one side of a node, and its position there.
@@ -527,7 +539,13 @@ pub fn jack_actions(graph: &SynthGraph, index: &GroupIndex, node_id: NodeId, sid
     let Some((_, id)) = port(graph, node_id, side, name) else { return actions };
     let data = &node.user_data;
     if jacks_of(data.kind, side).is_some() {
-        actions.push(JackAction::Remove);
+        let ports = match side {
+            Side::Input => node.inputs.iter().map(|(n, _)| n).collect::<Vec<_>>(),
+            Side::Output => node.outputs.iter().map(|(n, _)| n).collect(),
+        };
+        if let Some(slot) = ports.iter().position(|n| *n == name) {
+            actions.push(JackAction::Jack { slot, count: ports.len() });
+        }
     }
     let Some(parent) = data.parent.filter(|_| !data.kind.is_proxy()) else { return actions };
     let parts = index.parts(parent);
@@ -629,6 +647,93 @@ pub fn hide_port(graph: &mut SynthGraph, node_id: NodeId, side: Side, name: &str
         }
     }
     (!jacks.is_empty()).then_some((id, jacks))
+}
+
+/// A change to the list of a group's jacks on one side, made to both
+/// lists that hold them, so the group's node and its Inputs or Outputs
+/// agree slot for slot.
+enum ListEdit {
+    Rename(usize, String),
+    Swap(usize, usize),
+}
+
+impl ListEdit {
+    fn apply<T>(&self, list: &mut [(String, T)]) {
+        match self {
+            Self::Rename(k, name) => {
+                if let Some(entry) = list.get_mut(*k) {
+                    entry.0 = name.clone();
+                }
+            }
+            Self::Swap(a, b) => {
+                if *a < list.len() && *b < list.len() {
+                    list.swap(*a, *b);
+                }
+            }
+        }
+    }
+}
+
+/// Makes the same edit to a group's jacks on one side, on its node and its
+/// Inputs or Outputs.
+fn edit_jacks(graph: &mut SynthGraph, index: &GroupIndex, id: GroupId, side: Side, edit: ListEdit) {
+    let parts = index.parts(id);
+    match side {
+        Side::Input => {
+            if let Some(node) = parts.node {
+                edit.apply(&mut graph[node].inputs);
+            }
+            if let Some(inputs) = parts.inputs {
+                edit.apply(&mut graph[inputs].outputs);
+            }
+        }
+        Side::Output => {
+            if let Some(node) = parts.node {
+                edit.apply(&mut graph[node].outputs);
+            }
+            if let Some(outputs) = parts.outputs {
+                edit.apply(&mut graph[outputs].inputs);
+            }
+        }
+    }
+}
+
+/// Renames the jack a port is, on a group's node or its Inputs or Outputs.
+/// A name another jack on that side has already is numbered. Returns the
+/// group and the jack's old and new names, or `None` if the name is blank
+/// or the same.
+pub fn rename_jack(graph: &mut SynthGraph, node_id: NodeId, side: Side, port_name: &str, name: &str) -> Option<(GroupId, String, String)> {
+    let index = GroupIndex::of(graph);
+    let (id, group_side) = jacks_of(graph.nodes.get(node_id)?.user_data.kind, side)?;
+    let (k, _) = port(graph, node_id, side, port_name)?;
+    let name = name.trim();
+    if name.is_empty() || name == port_name {
+        return None;
+    }
+    let group = index.node(id)?;
+    let others: Vec<String> = match group_side {
+        Side::Input => graph[group].inputs.iter().map(|(n, _)| n.clone()).collect(),
+        Side::Output => graph[group].outputs.iter().map(|(n, _)| n.clone()).collect(),
+    };
+    let others = others.into_iter().enumerate().filter(|(i, _)| *i != k).map(|(_, n)| n);
+    let name = unique_names(others.chain(std::iter::once(name.to_string()))).pop()?;
+    edit_jacks(graph, &index, id, group_side, ListEdit::Rename(k, name.clone()));
+    Some((id, port_name.to_string(), name))
+}
+
+/// Moves the jack a port is one place up or down the group's jacks, with
+/// its cables. Returns the group and the jack's name, or `None` at the end.
+pub fn move_jack(graph: &mut SynthGraph, node_id: NodeId, side: Side, port_name: &str, up: bool) -> Option<(GroupId, String)> {
+    let index = GroupIndex::of(graph);
+    let (id, group_side) = jacks_of(graph.nodes.get(node_id)?.user_data.kind, side)?;
+    let (k, _) = port(graph, node_id, side, port_name)?;
+    let count = match side {
+        Side::Input => graph[node_id].inputs.len(),
+        Side::Output => graph[node_id].outputs.len(),
+    };
+    let to = if up { k.checked_sub(1)? } else { Some(k + 1).filter(|&to| to < count)? };
+    edit_jacks(graph, &index, id, group_side, ListEdit::Swap(k, to));
+    Some((id, port_name.to_string()))
 }
 
 /// Takes away the jack a port is, on a group's node or its Inputs or
@@ -1136,7 +1241,7 @@ mod tests {
         assert_eq!(actions(&rig, filter, Side::Input, "In"), [JackAction::Taken]);
         // A knob with no jack has no port to show
         assert!(actions(&rig, filter, Side::Input, "Drive").is_empty());
-        assert_eq!(actions(&rig, new.inputs, Side::Output, "Gate"), [JackAction::Remove]);
+        assert_eq!(actions(&rig, new.inputs, Side::Output, "Gate"), [JackAction::Jack { slot: 1, count: 2 }]);
 
         let graph = &mut rig.editor.graph;
         assert_eq!(show_port(graph, filter, Side::Input, "Cutoff"), Some((GroupId(1000), "Cutoff".to_string())));
@@ -1193,7 +1298,7 @@ mod tests {
         let index = GroupIndex::of(&rig.editor.graph);
         let graph = &mut rig.editor.graph;
         let _ = show_port(graph, filter, Side::Input, "Cutoff").unwrap();
-        assert_eq!(jack_actions(graph, &index, inner.node, Side::Input, "Cutoff"), [JackAction::Remove, JackAction::Show]);
+        assert_eq!(jack_actions(graph, &index, inner.node, Side::Input, "Cutoff"), [JackAction::Jack { slot: 1, count: 2 }, JackAction::Show]);
         assert_eq!(show_port(graph, inner.node, Side::Input, "Cutoff"), Some((GroupId(1001), "Cutoff".to_string())));
         assert!(graph[outer.node].get_input("Cutoff").is_ok());
     }
@@ -1212,5 +1317,38 @@ mod tests {
         assert_eq!(graph[new.node].get_input("Gate").unwrap(), gate);
         set_jacks(graph, new.node, Side::Input, &jacks[..1]);
         assert_eq!(input_jacks(graph, new.node), jacks[..1]);
+    }
+
+    #[test]
+    fn jacks_rename_and_move_with_their_cables() {
+        let mut rig = Rig::new();
+        let [keys, osc, filter, env, vca, _] = voice(&mut rig);
+        let new = rig.group(&[osc, filter, env, vca], "Voice");
+        let before = rig.leaf();
+        let names = |rig: &Rig| input_jacks(&rig.editor.graph, new.node).into_iter().map(|j| j.name).collect::<Vec<_>>();
+        let inside = |rig: &Rig| output_jacks(&rig.editor.graph, new.inputs).into_iter().map(|j| j.name).collect::<Vec<_>>();
+
+        // Renamed from outside, Inputs inside follows
+        let graph = &mut rig.editor.graph;
+        assert_eq!(rename_jack(graph, new.node, Side::Input, "V/Oct", " Pitch "), Some((GroupId(1000), "V/Oct".into(), "Pitch".into())));
+        assert_eq!(names(&rig), ["Pitch", "Gate"]);
+        assert_eq!(inside(&rig), ["Pitch", "Gate"]);
+        // A name that's taken is numbered; a blank one changes nothing
+        let graph = &mut rig.editor.graph;
+        assert_eq!(rename_jack(graph, new.inputs, Side::Output, "Gate", "Pitch").map(|r| r.2), Some("Pitch 2".into()));
+        assert_eq!(rename_jack(graph, new.node, Side::Input, "Pitch 2", "  "), None);
+        assert_eq!(rename_jack(graph, new.node, Side::Input, "Pitch 2", "Gate").map(|r| r.2), Some("Gate".into()));
+
+        // Moved, both lists swap, and every module hears what it did
+        let graph = &mut rig.editor.graph;
+        assert_eq!(move_jack(graph, new.node, Side::Input, "Gate", true), Some((GroupId(1000), "Gate".into())));
+        assert_eq!(names(&rig), ["Gate", "Pitch"]);
+        assert_eq!(inside(&rig), ["Gate", "Pitch"]);
+        let graph = &mut rig.editor.graph;
+        assert_eq!(move_jack(graph, new.node, Side::Input, "Gate", true), None);
+        assert_eq!(move_jack(graph, new.inputs, Side::Output, "Pitch", false), None);
+        assert_eq!(rig.leaf(), before);
+        let graph = &rig.editor.graph;
+        assert_eq!(graph.connection(graph[new.node].get_input("Pitch").unwrap()), graph[keys].get_output("Pitch").ok());
     }
 }

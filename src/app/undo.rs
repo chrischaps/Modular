@@ -1661,6 +1661,39 @@ mod tests {
     }
 
     #[test]
+    fn test_renaming_and_moving_jacks_undo_with_their_cables() {
+        let mut rig = Rig::new();
+        let (osc, filter, out) = voice(&mut rig);
+        let new = group(&mut rig, &[osc, filter], "Tone");
+        groups::show_port(&mut rig.editor.graph, filter, Side::Output, "HighPass").unwrap();
+        rig.connect(new.node, "HighPass", out, "Right");
+        rig.record();
+        let outputs = |rig: &Rig| groups::output_jacks(&rig.editor.graph, new.node).into_iter().map(|j| j.name).collect::<Vec<_>>();
+        let cables = groups::leaf_cables(&rig.editor.graph);
+        assert_eq!(outputs(&rig), ["LowPass", "HighPass"]);
+
+        let (undone, _) = round_trip(&mut rig, |rig| {
+            groups::rename_jack(&mut rig.editor.graph, new.outputs, Side::Input, "HighPass", "Bright").unwrap();
+            rig.history.name_next("Rename jack HighPass to Bright");
+        });
+        assert_eq!(undone.label, "Rename jack HighPass to Bright");
+        assert!(undone.commands.is_empty(), "{:?}", undone.commands);
+        assert_eq!(outputs(&rig), ["LowPass", "Bright"]);
+
+        // Moving swaps the jacks, and every module still hears what it did
+        let (undone, redone) = round_trip(&mut rig, |rig| {
+            groups::move_jack(&mut rig.editor.graph, new.node, Side::Output, "Bright", true).unwrap();
+        });
+        assert_eq!(sound_changes(&undone.commands), 0, "{:?}", undone.commands);
+        assert_eq!(sound_changes(&redone.commands), 0, "{:?}", redone.commands);
+        assert_eq!(outputs(&rig), ["Bright", "LowPass"]);
+        assert_eq!(groups::leaf_cables(&rig.editor.graph), cables);
+        rig.undo();
+        assert_eq!(outputs(&rig), ["LowPass", "Bright"]);
+        assert_eq!(groups::leaf_cables(&rig.editor.graph), cables);
+    }
+
+    #[test]
     fn test_deleting_a_group_brings_everything_back() {
         let mut rig = Rig::new();
         let (osc, filter, out) = voice(&mut rig);
