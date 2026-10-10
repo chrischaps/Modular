@@ -512,24 +512,24 @@ mod tests {
 
     #[test]
     fn test_a_loaded_patch_starts_at_its_saved_knobs() {
-        // Noise at Level 0 (for an envelope to play) and a Mixer channel
-        // faded down: neither glides in from its default when the patch opens
+        // Noise at Level 0 (for an envelope to play) and a Mix input faded
+        // down: neither glides in from its default when the patch opens
         let mut patch = Patch::new("faded");
         let mut noise = NodeData::new(1, "source.noise", (0.0, 0.0));
         noise.parameters = vec![NamedParameter::new("Level", ParameterValue::LinearRange(0.0))];
-        let mut mixer = NodeData::new(3, "util.mixer", (100.0, 0.0));
+        let mut mixer = NodeData::new(3, "util.mix", (100.0, 0.0));
         mixer.parameters = vec![NamedParameter::new("Level 1", ParameterValue::LinearRange(0.0))];
         patch.nodes.extend([noise, NodeData::new(2, "osc.sine", (0.0, 100.0)), mixer]);
         patch.nodes.push(NodeData::new(4, "output.audio", (200.0, 0.0)));
         patch.connections.push(ConnectionData::new(1, "White", 4, "Left"));
-        patch.connections.push(ConnectionData::new(2, "Out", 3, "Ch 1"));
+        patch.connections.push(ConnectionData::new(2, "Out", 3, "In 1"));
         patch.connections.push(ConnectionData::new(3, "Out", 4, "Right"));
 
         let (mut r, compiled) = OfflineRenderer::from_patch(&patch, 48000.0, 256).unwrap();
         assert!(compiled.warnings.is_empty(), "{:?}", compiled.warnings);
         let out = r.render_seconds(0.05);
         assert_eq!(peak(&out.left), 0.0, "Noise at Level 0 hissed on load");
-        assert_eq!(peak(&out.right), 0.0, "a faded Mixer channel leaked on load");
+        assert_eq!(peak(&out.right), 0.0, "a faded Mix input leaked on load");
     }
 
     /// Rising edges through `threshold`, in seconds.

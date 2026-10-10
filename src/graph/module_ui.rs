@@ -240,6 +240,12 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "util.mix",
+        // One knob per input, in a row under their jacks
+        knobs: &[knob_as("Level 1", "1"), knob_as("Level 2", "2"), knob_as("Level 3", "3"), knob_as("Level 4", "4")],
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "util.mixer",
         // A column per channel strip, its level over its pan over its send,
         // and a fifth for the master section and the return. The display's

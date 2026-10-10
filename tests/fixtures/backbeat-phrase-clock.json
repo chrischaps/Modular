@@ -2249,7 +2249,7 @@
     },
     {
       "id": 32,
-      "module_id": "util.mixer",
+      "module_id": "util.mix",
       "position": [
         1820.0,
         74.0
@@ -2272,56 +2272,6 @@
         },
         {
           "name": "Level 4",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Pan 1",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Pan 2",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Pan 3",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Pan 4",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Mute 1",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 2",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 3",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 4",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Master",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Spread",
           "type": "Number",
           "value": 0.0
         }
@@ -2611,7 +2561,7 @@
       "from_node": 6,
       "from_port": "Out",
       "to_node": 32,
-      "to_port": "Ch 1"
+      "to_port": "In 1"
     },
     {
       "from_node": 7,
@@ -2677,13 +2627,13 @@
       "from_node": 12,
       "from_port": "HighPass",
       "to_node": 32,
-      "to_port": "Ch 3"
+      "to_port": "In 3"
     },
     {
       "from_node": 13,
       "from_port": "Out",
       "to_node": 32,
-      "to_port": "Ch 2"
+      "to_port": "In 2"
     },
     {
       "from_node": 14,

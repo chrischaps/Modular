@@ -48,6 +48,9 @@ pub mod signal {
 
     /// MIDI signal - purple
     pub const MIDI: Color32 = SignalType::Midi.color();
+
+    /// Mixer bus - pale steel
+    pub const BUS: Color32 = SignalType::Bus.color();
 }
 
 /// Module header colors by category. These are [`ModuleCategory::color`].

@@ -503,7 +503,7 @@ const CLIP_CEILING: f32 = 1.5;
 /// and slope and eases toward the ceiling, so a signal crossing full scale
 /// bends instead of jumping.
 #[inline]
-fn soft_clip(x: f32) -> f32 {
+pub(crate) fn soft_clip(x: f32) -> f32 {
     let over = x.abs() - CLIP_KNEE;
     if over <= 0.0 {
         x

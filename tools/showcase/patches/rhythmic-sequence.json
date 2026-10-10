@@ -574,7 +574,7 @@
     },
     {
       "id": 10,
-      "module_id": "util.mixer",
+      "module_id": "util.mix",
       "position": [
         750.0,
         360.0
@@ -803,13 +803,13 @@
       "from_node": 9,
       "from_port": "Out",
       "to_node": 10,
-      "to_port": "Ch 1"
+      "to_port": "In 1"
     },
     {
       "from_node": 9,
       "from_port": "Out",
       "to_node": 10,
-      "to_port": "Ch 2"
+      "to_port": "In 2"
     },
     {
       "from_node": 10,

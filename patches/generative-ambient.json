@@ -419,7 +419,7 @@
     },
     {
       "id": 5,
-      "module_id": "util.mixer",
+      "module_id": "util.mix",
       "position": [
         892.0,
         114.0
@@ -832,13 +832,13 @@
       "from_node": 3,
       "from_port": "Out",
       "to_node": 5,
-      "to_port": "Ch 1"
+      "to_port": "In 1"
     },
     {
       "from_node": 4,
       "from_port": "Out",
       "to_node": 5,
-      "to_port": "Ch 2"
+      "to_port": "In 2"
     },
     {
       "from_node": 5,

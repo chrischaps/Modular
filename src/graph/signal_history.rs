@@ -35,7 +35,8 @@ pub enum TraceShape {
 impl TraceShape {
     pub fn of(signal_type: SignalType) -> Self {
         match signal_type {
-            SignalType::Audio => TraceShape::Envelope,
+            // A bus is audio, a strand per side and send
+            SignalType::Audio | SignalType::Bus => TraceShape::Envelope,
             SignalType::Control => TraceShape::Waveform,
             SignalType::Gate | SignalType::Midi => TraceShape::Steps,
         }

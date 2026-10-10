@@ -258,6 +258,21 @@ out  Out                Control
 knob Amount             "Amt" KnobOnly
 knob Offset             "Offset" KnobOnly
 
+== util.mix "Mix" finder="Mix" Utility
+in   In 1               Audio    ConnectionOnly       inline=true  port
+in   In 2               Audio    ConnectionOnly       inline=true  port
+in   In 3               Audio    ConnectionOnly       inline=true  port
+in   In 4               Audio    ConnectionOnly       inline=true  port
+in   Level 1            Control  ConstantOnly         inline=false num 1 [0..1]
+in   Level 2            Control  ConstantOnly         inline=false num 1 [0..1]
+in   Level 3            Control  ConstantOnly         inline=false num 1 [0..1]
+in   Level 4            Control  ConstantOnly         inline=false num 1 [0..1]
+out  Out                Audio
+knob Level 1            "1" KnobOnly
+knob Level 2            "2" KnobOnly
+knob Level 3            "3" KnobOnly
+knob Level 4            "4" KnobOnly
+
 == util.mixer "Mixer" finder="Mixer" Utility
 in   Ch 1               Audio    ConnectionOnly       inline=true  port
 in   Ch 2               Audio    ConnectionOnly       inline=true  port

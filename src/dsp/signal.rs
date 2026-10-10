@@ -11,12 +11,15 @@ use egui::Color32;
 /// - **Control**: Modulation CV, 0.0 to 1.0 (unipolar) or -1.0 to 1.0 (bipolar)
 /// - **Gate**: On/off triggers, either 0.0 or 1.0
 /// - **Midi**: Structured note and control change events
+/// - **Bus**: A whole mix on one cable, from one Mixer to the next: its
+///   stereo pair and its send bus, a strand each
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SignalType {
     Audio,
     Control,
     Gate,
     Midi,
+    Bus,
 }
 
 impl SignalType {
@@ -28,12 +31,14 @@ impl SignalType {
     /// - Control: Orange
     /// - Gate: Green
     /// - Midi: Purple
+    /// - Bus: Pale steel, the colour of a console's multicore
     pub const fn color(&self) -> Color32 {
         match self {
             SignalType::Audio => Color32::from_rgb(66, 135, 245),   // Blue
             SignalType::Control => Color32::from_rgb(245, 158, 66), // Orange
             SignalType::Gate => Color32::from_rgb(66, 245, 135),    // Green
             SignalType::Midi => Color32::from_rgb(178, 102, 255),   // Purple
+            SignalType::Bus => Color32::from_rgb(200, 205, 215),    // Pale steel
         }
     }
 
@@ -44,6 +49,8 @@ impl SignalType {
     /// - Audio <-> Control: Allowed (audio-rate modulation)
     /// - Gate -> Control: Allowed (on/off modulation)
     /// - Midi -> Any other type: Not allowed (needs converter module)
+    /// - Bus -> Bus only: a mix goes from one Mixer into the next, and
+    ///   nowhere else would know which strand is which
     pub fn can_connect_to(&self, target: SignalType) -> bool {
         match (self, target) {
             // Same type always connects
@@ -72,6 +79,7 @@ impl SignalType {
             SignalType::Control => "Control",
             SignalType::Gate => "Gate",
             SignalType::Midi => "MIDI",
+            SignalType::Bus => "Bus",
         }
     }
 }
@@ -394,6 +402,15 @@ mod tests {
         assert!(SignalType::Control.can_connect_to(SignalType::Control));
         assert!(SignalType::Gate.can_connect_to(SignalType::Gate));
         assert!(SignalType::Midi.can_connect_to(SignalType::Midi));
+        assert!(SignalType::Bus.can_connect_to(SignalType::Bus));
+    }
+
+    #[test]
+    fn test_bus_only_meets_a_bus() {
+        for other in [SignalType::Audio, SignalType::Control, SignalType::Gate, SignalType::Midi] {
+            assert!(!SignalType::Bus.can_connect_to(other), "Bus into {other:?}");
+            assert!(!other.can_connect_to(SignalType::Bus), "{other:?} into Bus");
+        }
     }
 
     #[test]
@@ -435,6 +452,7 @@ mod tests {
             SignalType::Control.color(),
             SignalType::Gate.color(),
             SignalType::Midi.color(),
+            SignalType::Bus.color(),
         ];
         for i in 0..colors.len() {
             for j in (i + 1)..colors.len() {

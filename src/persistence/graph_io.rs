@@ -374,7 +374,7 @@ impl Builder<'_> {
 
 /// The signal type a jack names.
 fn signal_named(name: &str) -> Option<SignalType> {
-    [SignalType::Audio, SignalType::Control, SignalType::Gate, SignalType::Midi]
+    [SignalType::Audio, SignalType::Control, SignalType::Gate, SignalType::Midi, SignalType::Bus]
         .into_iter()
         .find(|signal| signal.name().eq_ignore_ascii_case(name))
 }

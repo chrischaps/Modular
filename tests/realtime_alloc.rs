@@ -85,7 +85,7 @@ fn ports(module_id: &str) -> (Vec<usize>, Vec<usize>) {
 }
 
 /// The patch size the guard plays.
-const PATCH_SIZE: usize = 32;
+const PATCH_SIZE: usize = 33;
 
 /// Adds `count` modules, cycling through every built-in module in
 /// registration order, chained output-to-input, with every port monitored.

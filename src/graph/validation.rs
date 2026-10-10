@@ -50,6 +50,7 @@ impl ConnectionError {
         match self {
             ConnectionError::IncompatibleTypes { from_type, to_type } => {
                 match (from_type, to_type) {
+                    (SignalType::Bus, _) | (_, SignalType::Bus) => "A Mixer's Chain Out only goes into another Mixer's Chain In",
                     (SignalType::Midi, _) => "MIDI requires a converter module",
                     (_, SignalType::Midi) => "MIDI requires a converter module",
                     (SignalType::Gate, SignalType::Audio) => "Gate cannot connect directly to Audio",
@@ -82,6 +83,8 @@ impl ConnectionError {
 /// | Gate → Audio   | ✗       | Gate needs envelope/converter |
 /// | Audio → Gate   | ✗       | Needs comparator module       |
 /// | Control → Gate | ✗       | Needs comparator module       |
+/// | Bus → Bus      | ✓       | One Mixer's mix into the next |
+/// | Bus ↔ Others   | ✗       | Only a Mixer knows the strands|
 ///
 pub fn validate_connection(
     from_type: SignalType,
@@ -171,6 +174,20 @@ mod tests {
         assert!(!validate_connection(SignalType::Audio, SignalType::Midi).is_valid());
         assert!(!validate_connection(SignalType::Control, SignalType::Midi).is_valid());
         assert!(!validate_connection(SignalType::Gate, SignalType::Midi).is_valid());
+    }
+
+    #[test]
+    fn test_a_bus_only_goes_into_a_bus() {
+        assert!(validate_connection(SignalType::Bus, SignalType::Bus).is_valid());
+        for other in [SignalType::Audio, SignalType::Control, SignalType::Gate, SignalType::Midi] {
+            let out = validate_connection(SignalType::Bus, other);
+            assert!(!out.is_valid());
+            assert!(!validate_connection(other, SignalType::Bus).is_valid());
+            // The editor tells you where it does go
+            if let ValidationResult::Invalid(error) = out {
+                assert!(error.message().contains("Chain In"), "{other:?}: {}", error.message());
+            }
+        }
     }
 
     #[test]

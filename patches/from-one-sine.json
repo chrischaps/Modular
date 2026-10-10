@@ -8589,7 +8589,7 @@
     },
     {
       "id": 36,
-      "module_id": "util.mixer",
+      "module_id": "util.mix",
       "position": [
         876.0,
         2889.0
@@ -8614,81 +8614,6 @@
           "name": "Level 4",
           "type": "Number",
           "value": 0.35
-        },
-        {
-          "name": "Pan 1",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Pan 2",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Pan 3",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Pan 4",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Mute 1",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 2",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 3",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 4",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Master",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Spread",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Send 1",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Send 2",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Send 3",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Send 4",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Return",
-          "type": "Number",
-          "value": 1.0
         }
       ]
     },
@@ -14045,7 +13970,7 @@
     },
     {
       "id": 77,
-      "module_id": "util.mixer",
+      "module_id": "util.mix",
       "position": [
         860.0,
         3924.0
@@ -14068,81 +13993,6 @@
         },
         {
           "name": "Level 4",
-          "type": "Number",
-          "value": 1.0
-        },
-        {
-          "name": "Pan 1",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Pan 2",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Pan 3",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Pan 4",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Mute 1",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 2",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 3",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 4",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Master",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Spread",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Send 1",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Send 2",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Send 3",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Send 4",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Return",
           "type": "Number",
           "value": 1.0
         }
@@ -15382,7 +15232,7 @@
       "from_node": 8,
       "from_port": "Vel 6",
       "to_node": 77,
-      "to_port": "Ch 1"
+      "to_port": "In 1"
     },
     {
       "from_node": 8,
@@ -15664,25 +15514,25 @@
       "from_node": 32,
       "from_port": "Out",
       "to_node": 36,
-      "to_port": "Ch 1"
+      "to_port": "In 1"
     },
     {
       "from_node": 33,
       "from_port": "Out",
       "to_node": 36,
-      "to_port": "Ch 2"
+      "to_port": "In 2"
     },
     {
       "from_node": 34,
       "from_port": "Out",
       "to_node": 36,
-      "to_port": "Ch 3"
+      "to_port": "In 3"
     },
     {
       "from_node": 35,
       "from_port": "Out",
       "to_node": 36,
-      "to_port": "Ch 4"
+      "to_port": "In 4"
     },
     {
       "from_node": 36,
@@ -16096,7 +15946,7 @@
       "from_node": 76,
       "from_port": "Out",
       "to_node": 77,
-      "to_port": "Ch 2"
+      "to_port": "In 2"
     },
     {
       "from_node": 77,
