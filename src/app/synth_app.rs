@@ -1823,6 +1823,18 @@ impl SynthApp {
                             }
                             self.history.name_next(label);
                         }
+                        NodeResponse::User(crate::graph::SynthResponse::SetLabels { node_id: response_node_id, label, labels }) => {
+                            if let Some(node) = self.graph_state.graph.nodes.get_mut(response_node_id) {
+                                for (key, text) in labels {
+                                    if text.is_empty() {
+                                        node.user_data.labels.remove(&key);
+                                    } else {
+                                        node.user_data.labels.insert(key, text);
+                                    }
+                                }
+                            }
+                            self.history.name_next(label);
+                        }
                         NodeResponse::User(crate::graph::SynthResponse::MidiLearnStart {
                             engine_node_id,
                             param_index,

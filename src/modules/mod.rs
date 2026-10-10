@@ -3,6 +3,7 @@
 //! Built-in synthesizer modules.
 //! Includes oscillators, filters, envelopes, LFOs, utilities, and output modules.
 
+pub mod arranger;
 pub mod attenuverter;
 pub mod audio_input;
 pub mod chorus;
@@ -39,6 +40,7 @@ pub mod trigger_sequencer;
 pub mod vca;
 
 // Re-export commonly used types
+pub use arranger::Arranger;
 pub use attenuverter::Attenuverter;
 pub use audio_input::AudioInput;
 pub use chorus::Chorus;

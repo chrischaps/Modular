@@ -312,7 +312,7 @@ def from_one_sine(s):
         (u(13) - 1.0, 3.0, (1150, 2283), 0.95, "Lift: the lead takes the motif"),
         (u(15), 6.0, whole, 0.2, "the whole rack"),
         (u(17) - 1.0, 4.0, (1640, 2117), 1.25, "Memory: the Looper plays the opening back"),
-        (u(18) + 4.0, 5.0, (897, 798), 0.95, "the score turning the faders"),
+        (u(18) + 4.0, 5.0, (920, 783), 1.1, "the Arrangers turning the faders"),
         (u(20) - 0.5, 9.0, whole, 0.2, "the build pulls back to the whole rack"),
         (u(22), 8.0, (2962, 2347), 0.21, "Everything: a breath closer, every module still in frame"),
         (u(23) + 3.0, 5.0, (3100, 1080), 0.95, "the bass, driven harder as the song brightens"),

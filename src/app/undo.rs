@@ -73,6 +73,8 @@ enum Body {
         pins: BTreeMap<String, u8>,
         /// The file it plays, by sample key.
         file: Option<String>,
+        /// Names given to its sections and lanes.
+        labels: BTreeMap<String, String>,
     },
     /// A group's own node.
     Group { name: String, inputs: Vec<Jack>, outputs: Vec<Jack> },
@@ -103,9 +105,9 @@ impl NodeState {
         self.parent == other.parent
             && match (&self.body, &other.body) {
                 (
-                    Body::Module { template: t1, bypassed: b1, pins: p1, file: f1, .. },
-                    Body::Module { template: t2, bypassed: b2, pins: p2, file: f2, .. },
-                ) => t1 == t2 && b1 == b2 && p1 == p2 && f1 == f2,
+                    Body::Module { template: t1, bypassed: b1, pins: p1, file: f1, labels: l1, .. },
+                    Body::Module { template: t2, bypassed: b2, pins: p2, file: f2, labels: l2, .. },
+                ) => t1 == t2 && b1 == b2 && p1 == p2 && f1 == f2 && l1 == l2,
                 (a, b) => a == b,
             }
     }
@@ -193,7 +195,14 @@ impl Snapshot {
                         .into_iter()
                         .map(|input| graph.get_input(input).value.actual_value())
                         .collect();
-                    Body::Module { template, params, bypassed: data.bypassed, pins: data.pins.clone(), file: data.file.clone() }
+                    Body::Module {
+                        template,
+                        params,
+                        bypassed: data.bypassed,
+                        pins: data.pins.clone(),
+                        file: data.file.clone(),
+                        labels: data.labels.clone(),
+                    }
                 }
                 NodeKind::Group(_) => Body::Group {
                     name: data.display_name.clone(),
@@ -432,11 +441,12 @@ impl Step {
             let Some(state) = &diff.after else { continue };
             let position = anchor.zoomed(state.position, zoom);
             let node_id = match (&state.body, diff.key) {
-                (Body::Module { template, bypassed, pins, file, .. }, NodeKey::Module(engine_id)) => {
+                (Body::Module { template, bypassed, pins, file, labels, .. }, NodeKey::Module(engine_id)) => {
                     let node_id = editing::place_node(editor, user_state, *template, position);
                     let data = &mut editor.graph[node_id].user_data;
                     data.bypassed = *bypassed;
                     data.pins = pins.clone();
+                    data.labels = labels.clone();
                     // Its recording follows from the file, as the app syncs samples
                     data.file = file.clone();
                     user_state.assign_engine_node_id(node_id, engine_id);
@@ -476,10 +486,11 @@ impl Step {
                 }
             }
             match &after.body {
-                Body::Module { pins, file, .. } => {
+                Body::Module { pins, file, labels, .. } => {
                     let data = &mut editor.graph[node_id].user_data;
                     data.pins = pins.clone();
                     data.file = file.clone();
+                    data.labels = labels.clone();
                 }
                 Body::Group { name, inputs, outputs } => {
                     groups::rename(&mut editor.graph, node_id, name);
@@ -614,6 +625,12 @@ fn describe(nodes: &[NodeDiff], cables: &[CableDiff], before: &Snapshot, after: 
     let only = |same: fn(&NodeState, &NodeState) -> bool| {
         pairs().all(|(_, a, b)| changed_params(a, b).next().is_none() && !moved(a.position, b.position) && same(a, b))
     };
+    if only(|a, b| a.parent == b.parent && pins(a) == pins(b) && a.bypassed() == b.bypassed() && file(a) == file(b) && labels(a) != labels(b)) {
+        return match changed.as_slice() {
+            [one] => format!("Rename in {}", one.name()),
+            many => format!("Rename in {}", modules(many.len())),
+        };
+    }
     if only(|a, b| a.parent == b.parent && pins(a) == pins(b) && a.bypassed() == b.bypassed() && file(a) != file(b)) {
         return match changed.as_slice() {
             [one] => format!("Load sample into {}", one.name()),
@@ -627,7 +644,7 @@ fn describe(nodes: &[NodeDiff], cables: &[CableDiff], before: &Snapshot, after: 
             _ => format!("Bypass {}", modules(changed.len())),
         };
     }
-    if only(|a, b| a.parent == b.parent && a.bypassed() == b.bypassed() && file(a) == file(b)) {
+    if only(|a, b| a.parent == b.parent && a.bypassed() == b.bypassed() && file(a) == file(b) && labels(a) == labels(b)) {
         return match pairs().next() {
             Some((one, a, b)) if changed.len() == 1 => {
                 let (was, is) = (pins(a).len(), pins(b).len());
@@ -659,6 +676,14 @@ fn pins(state: &NodeState) -> BTreeMap<String, u8> {
     match &state.body {
         Body::Module { pins, .. } => pins.clone(),
         _ => BTreeMap::new(),
+    }
+}
+
+/// The names given to a module's sections and lanes.
+fn labels(state: &NodeState) -> Option<&BTreeMap<String, String>> {
+    match &state.body {
+        Body::Module { labels, .. } => Some(labels),
+        _ => None,
     }
 }
 
@@ -1275,6 +1300,34 @@ mod tests {
         assert!(undone.commands.is_empty());
         rig.undo();
         assert_eq!(rig.editor.graph[sampler].user_data.file, None);
+    }
+
+    #[test]
+    fn test_naming_a_section_round_trips() {
+        let mut rig = Rig::new();
+        let arranger = rig.add("seq.arranger", pos2(0.0, 0.0));
+        rig.record();
+        let (undone, _) = round_trip(&mut rig, |rig| {
+            rig.editor.graph[arranger].user_data.labels.insert("Section 2".into(), "Chorus".into());
+        });
+        assert_eq!(undone.label, "Rename in Arranger");
+        assert!(undone.commands.is_empty(), "names don't reach the engine");
+        rig.undo();
+        assert!(rig.editor.graph[arranger].user_data.labels.is_empty());
+        rig.redo();
+        assert_eq!(rig.editor.graph[arranger].user_data.labels.get("Section 2").map(String::as_str), Some("Chorus"));
+    }
+
+    #[test]
+    fn test_a_deleted_arranger_comes_back_with_its_names() {
+        let mut rig = Rig::new();
+        let arranger = rig.add("seq.arranger", pos2(0.0, 0.0));
+        rig.editor.graph[arranger].user_data.labels.insert("Lane 1".into(), "Bass".into());
+        rig.record();
+        let key = rig.engine_id(arranger);
+        round_trip(&mut rig, |rig| rig.delete(arranger));
+        rig.undo();
+        assert_eq!(rig.editor.graph[rig.node(key)].user_data.labels.get("Lane 1").map(String::as_str), Some("Bass"));
     }
 
     #[test]

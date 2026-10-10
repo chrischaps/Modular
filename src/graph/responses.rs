@@ -24,6 +24,15 @@ pub enum SynthResponse {
         label: String,
         changes: Vec<(String, f32)>,
     },
+    /// Names given to things on a node that aren't parameters, such as an
+    /// Arranger's sections: key to text, with empty text taking the name
+    /// away. Undo takes them back as a step named `label`, together with
+    /// any parameters edited in the same frame.
+    SetLabels {
+        node_id: egui_node_graph2::NodeId,
+        label: String,
+        labels: Vec<(String, String)>,
+    },
     /// A parameter played rather than edited, like a Looper's footswitch
     /// pressed on the node: it reaches the engine at once, as a MIDI
     /// controller's would, and isn't an undo step.

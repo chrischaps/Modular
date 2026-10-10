@@ -289,6 +289,9 @@ pub enum NodeDisplay {
     LooperRing,
     /// Slope: the rise and fall to proportion, with a dot riding them.
     SlopeShape,
+    /// Arranger: the song's sections beside its own jacks, each lane's
+    /// level beside its CV and Gate, and a playhead through them all.
+    Timeline,
 }
 
 impl NodeDisplay {
@@ -340,6 +343,9 @@ pub struct SynthNodeData {
     /// The file the module plays (a Sampler's), by sample key: an absolute
     /// path, or an example's (see [`crate::persistence::sample_files`]).
     pub file: Option<String>,
+    /// Names given to things that aren't parameters (an Arranger's sections
+    /// and lanes), by key.
+    pub labels: BTreeMap<String, String>,
 }
 
 /// How much of the node body shows through while it's bypassed.
@@ -381,6 +387,7 @@ impl SynthNodeData {
             parent: None,
             pins: BTreeMap::new(),
             file: None,
+            labels: BTreeMap::new(),
         }
     }
 
@@ -1204,7 +1211,7 @@ impl NodeDataTrait for SynthNodeData {
         &self,
         ui: &mut egui::Ui,
         node_id: egui_node_graph2::NodeId,
-        _graph: &egui_node_graph2::Graph<Self, Self::DataType, Self::ValueType>,
+        graph: &egui_node_graph2::Graph<Self, Self::DataType, Self::ValueType>,
         user_state: &mut Self::UserState,
         zoom: f32,
     ) -> Vec<NodeResponse<Self::Response, Self>>
@@ -1264,6 +1271,20 @@ impl NodeDataTrait for SynthNodeData {
             icon_rect.center().y,
         );
         self.draw_category_icon(ui.painter(), icon_center, icon_size, self.titlebar_ink());
+
+        // The Arranger names the section playing, at the header's far end
+        if self.display == NodeDisplay::Timeline {
+            if let Some(note) = super::arranger_display::title_note(graph, user_state, node_id) {
+                // After the title, which the editor draws next
+                let title_font = self.titlebar_text_style().resolve(ui.style());
+                let title = ui.painter().layout_no_wrap(graph[node_id].label.clone(), title_font, Color32::WHITE).size().x;
+                let font = egui::FontId::proportional(11.0 * zoom);
+                let ink = self.titlebar_ink();
+                let galley = ui.painter().layout_no_wrap(format!("▸  {note}"), font, ink.gamma_multiply(0.85));
+                let at = egui::pos2(icon_rect.right() + title + 12.0 * zoom, icon_rect.center().y - galley.size().y / 2.0);
+                ui.painter().galley(at, galley, ink);
+            }
+        }
 
         responses
     }
@@ -2289,6 +2310,11 @@ impl NodeDataTrait for SynthNodeData {
             responses.extend(edits.into_iter().map(NodeResponse::User));
         }
 
+        if self.display == NodeDisplay::Timeline {
+            let edits = super::arranger_display::section_bar(ui, node_id, graph, user_state, zoom);
+            responses.extend(edits.into_iter().map(NodeResponse::User));
+        }
+
         if self.display == NodeDisplay::LogicLamps {
             if let Some((param_name, value)) = super::logic_display::logic_display(ui, node_id, graph, user_state, zoom) {
                 responses.push(NodeResponse::User(SynthResponse::ParameterChanged { node_id, param_name, value }));
@@ -2360,6 +2386,12 @@ impl NodeDataTrait for SynthNodeData {
         // The Trigger Sequencer draws each lane of its grid beside the lane's jacks
         if self.display == NodeDisplay::TriggerGrid {
             if let Some(edits) = super::trigger_display::output_row(ui, node_id, graph, user_state, param_name) {
+                return edits.into_iter().map(NodeResponse::User).collect();
+            }
+        }
+        // The Arranger draws its timeline the same way, a lane beside its jacks
+        if self.display == NodeDisplay::Timeline {
+            if let Some(edits) = super::arranger_display::output_row(ui, node_id, graph, user_state, param_name) {
                 return edits.into_iter().map(NodeResponse::User).collect();
             }
         }

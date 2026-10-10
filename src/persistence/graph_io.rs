@@ -273,6 +273,7 @@ impl Builder<'_> {
             user_data.parent = parent;
             user_data.pins = node_data.pinned.clone();
             user_data.file = node_data.file.clone();
+            user_data.labels = node_data.labels.clone();
 
             here.insert(node_data.id, graph_id);
             self.modules.insert(node_data.id, graph_id);
@@ -503,6 +504,7 @@ pub fn capture_level(
                 node_data.bypassed = data.bypassed;
                 node_data.pinned = data.pins.clone();
                 node_data.file = data.file.clone();
+                node_data.labels = data.labels.clone();
                 node_data.parameters = node
                     .inputs
                     .iter()
@@ -613,6 +615,25 @@ mod tests {
         assert_eq!(param(&saved, "input.midi_note", "Channel"), 3.0);
         assert_eq!(param(&saved, "input.midi_note", "Octave"), 1.0);
         assert!(node(&saved, "input.midi_note").parameters.iter().all(|p| p.name != "Note"));
+    }
+
+    #[test]
+    fn test_an_arrangers_names_survive_a_round_trip() {
+        let mut patch = Patch::new("arranged");
+        let mut arranger = NodeData::new(1, "seq.arranger", (0.0, 0.0));
+        arranger.labels.insert("Section 1".into(), "Intro".into());
+        arranger.labels.insert("Lane 3".into(), "Pad".into());
+        patch.nodes.extend([arranger, NodeData::new(2, "osc.sine", (0.0, 0.0))]);
+
+        let (saved, warnings) = reload(&patch, 0);
+        assert!(warnings.is_empty(), "{:?}", warnings);
+        let labels = &node(&saved, "seq.arranger").labels;
+        assert_eq!(labels.get("Section 1").map(String::as_str), Some("Intro"));
+        assert_eq!(labels.get("Lane 3").map(String::as_str), Some("Pad"));
+        // Only modules with names mention them
+        let json = serde_json::to_string(&saved).unwrap();
+        assert_eq!(json.matches("\"labels\"").count(), 1);
+        assert_eq!(patch_from_json(&json).unwrap(), saved);
     }
 
     #[test]

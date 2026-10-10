@@ -166,6 +166,12 @@ impl StepTimer {
         self.since_clock = None;
     }
 
+    /// Samples since the last clock edge, or `None` before the first (and
+    /// after a reset).
+    pub(crate) fn since_clock(&self) -> Option<usize> {
+        self.since_clock
+    }
+
     /// Forgets everything measured, as at another sample rate.
     pub(crate) fn forget(&mut self) {
         *self = Self::new();

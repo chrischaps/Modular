@@ -18,6 +18,7 @@ mod logic_display;
 mod looper_display;
 mod slope_display;
 mod trigger_display;
+mod arranger_display;
 mod step_grid;
 mod mixer_strips;
 mod module_ui;

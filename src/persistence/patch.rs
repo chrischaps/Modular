@@ -187,6 +187,11 @@ pub struct NodeData {
     /// otherwise. Only written when there is one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
+    /// Names the module's user gave things that aren't parameters (an
+    /// Arranger's sections and lanes), by key. Only written when there are
+    /// some.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub labels: BTreeMap<String, String>,
 }
 
 impl NodeData {
@@ -200,6 +205,7 @@ impl NodeData {
             bypassed: false,
             pinned: BTreeMap::new(),
             file: None,
+            labels: BTreeMap::new(),
         }
     }
 }
@@ -452,6 +458,7 @@ pub fn migrate_v2_to_v3(old: PatchV2) -> Patch {
                 bypassed: false,
                 pinned: BTreeMap::new(),
                 file: None,
+                labels: BTreeMap::new(),
             }
         })
         .collect();
@@ -706,6 +713,7 @@ mod tests {
             bypassed: false,
             pinned: BTreeMap::new(),
             file: None,
+            labels: BTreeMap::new(),
         });
         patch.connections.push(ConnectionData::new(1, "Out", 2, "In"));
 

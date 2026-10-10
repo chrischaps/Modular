@@ -2,7 +2,7 @@
 
 A whole song in one patch: four and a half minutes of D minor at 112 BPM, from a first note to a last one, with nobody at the keys. It opens the way every patch in this manual opens, on one sine wave playing a short tune, and part by part the rest of the rack joins in: a pad, an arpeggio, a bass, drums, bells, a supersaw lead. In the breakdown a [Looper](../modules/utilities/looper.md) plays the opening back to itself, reversed and an octave down. The song ends where it began, on the sine alone.
 
-Nothing outside the patch tells it what to do. Two [Trigger Sequencers](../modules/utilities/trigger-sequencer.md) take one step every four bars, and those 32 steps are the score: each lane rides one part's fader, picks the drum pattern, or presses a pedal. Ninety-five modules play their part, of 27 kinds: every module in the rack except the five that wait for a player. Left running, it plays the song again from the top.
+Nothing outside the patch tells it what to do. Two [Arrangers](../modules/utilities/arranger.md) are the score: they count the song in bars, through 24 named sections, and each of their lanes rides one part's fader, picks the drum pattern, strikes the crash or presses a pedal. Eighty modules play their part, of 28 kinds. Left running, it plays the song again from the top.
 
 > **Load it:** choose **📚 Examples → From One Sine** in the toolbar and press **▶ Play**. It needs no keyboard.
 > The patch file is [`patches/from-one-sine.json`](https://github.com/chrischaps/Soba/blob/master/patches/from-one-sine.json).
@@ -11,14 +11,14 @@ Nothing outside the patch tells it what to do. Two [Trigger Sequencers](../modul
 *Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Soba**.*
 
 ![The From One Sine patch](../images/recipe-from-one-sine.png)
-*The whole song at the widest zoom. The score and harmony are on the top left, the instruments are in strips with signal running left to right, the drums run along the bottom, and the mixing desk is on the right. Orange cables from the score reach every fader.*
+*The whole song at the widest zoom, at the drop. The score's two Arrangers and the harmony are on the top left, the instruments are in strips with signal running left to right, the drums run along the bottom, and the mixing desk is on the right. Orange cables from the score reach every fader.*
 
 ## The song
 
 <iframe class="patch-film" src="https://www.youtube-nocookie.com/embed/xvmurP7NABw?rel=0" title="From One Sine, filmed in Soba as it plays" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen loading="lazy"></iframe>
 *The whole song, filmed in the app as it plays. The camera follows the score: it opens close on the lone sine, visits each part as it enters, pulls back to the whole rack for the drop, and ends where it began. [Watch on YouTube](https://youtu.be/xvmurP7NABw).*
 
-Each section is four units of four bars, sixteen bars in all.
+Each section of the song is sixteen bars. On the Arrangers they're 24 sections: a new one wherever a part enters or leaves, and a one-bar **Fill** to close each phrase of the groove.
 
 | Bars | Section | What happens |
 |------|---------|--------------|
@@ -33,11 +33,11 @@ Each section is four units of four bars, sixteen bars in all.
 
 ## What it teaches
 
-- **A patch can hold its own arrangement.** Trigger Sequencer lanes are more than drum triggers: a lane's **Vel** holds its last hit's velocity, so a slow sequencer is a set of faders that move on cue.
-- **Smoothing a control voltage.** A [Sample & Hold](../modules/utilities/sample-hold.md) with **Slew** turns a jump into a glide. Triggered by the lane's own gate, it samples exactly when the level changes.
-- **Mix adds control voltages.** A [Mix](../modules/utilities/mix.md) adds its inputs into one **Out**, so it can add two CVs, here the score's drum pattern and a fill.
+- **A patch can hold its own arrangement.** An [Arranger](../modules/utilities/arranger.md) is a timeline of named sections, and its lanes are faders that move on cue. Each section jumps, ramps, holds or hits each lane as it starts.
+- **Smoothing a control voltage.** A lane's **Glide** turns a jump into a glide, so a fader can move under a ringing note without a click: a second for the sustained parts, 40 ms for the rhythmic ones.
+- **One lane, two jobs.** A lane's **Gate** is high while the lane is above zero, so the riser's lane sets its level and opens its envelope for exactly its section.
 - **Harmony from mono parts.** A sequencer for each pad voice, stepping once a bar, sings real chords with real voice-leading. A root sequencer transposes the arpeggio and bass through **Exp FM**.
-- **Gates make decisions.** A [Clock Divider](../modules/utilities/divider.md), [Logic](../modules/utilities/logic.md) and an [Attenuverter](../modules/utilities/attenuverter.md) put a fill in the last bar of a phrase only when the score asks for one.
+- **Hits press buttons.** A Hit is a trigger with a level on it: the crash and its accent, and the Looper's **Rec** and **Clear**.
 - **Sidechain ducking.** The [Compressor](../modules/effects/compressor.md) on the pad listens to the kick.
 - **Send and return.** Four [Mixers](../modules/utilities/mixer.md) chain their mixes and their sends along one cable each, so one delay and two reverbs serve the whole song.
 
@@ -46,9 +46,9 @@ Each section is four units of four bars, sixteen bars in all.
 | Module | Role |
 |--------|------|
 | [Clock](../modules/modulation/clock.md) | **BPM** 112, **Div** 1/16, **Swing** 54% |
-| [Clock Divider](../modules/utilities/divider.md) ×6 | Beats (÷4), eighths (÷2), bars (÷16), units (÷64), each unit's last bar (÷64, **Offset** 48, **Length** 16), and ÷3 for the sparkles |
-| [Trigger Sequencer](../modules/utilities/trigger-sequencer.md) ×2 | The score, clocked once per unit. **Chain** A B: 32 steps |
-| [Sample & Hold](../modules/utilities/sample-hold.md) ×11 | Ten fader glides: **Slew** 1 s for the pad, wind, sparkles, Looper and brightness, 0.8 s for the sine, 0.3 s for the lead, 40 ms for the arp, bass and bells. The eleventh samples the sparkles' random voltage |
+| [Clock Divider](../modules/utilities/divider.md) ×4 | Beats (÷4), eighths (÷2), bars (÷16), and ÷3 for the sparkles |
+| [Arranger](../modules/utilities/arranger.md) ×2 | The score: 24 sections, 128 bars. **Desk** rides eight faders. **Cues** picks the drum pattern, strikes the crash, holds the riser, sets the brightness and the Looper's level, and presses its pedals |
+| [Sample & Hold](../modules/utilities/sample-hold.md) | Samples the sparkles' random voltage |
 | [Step Sequencer](../modules/utilities/sequencer.md) ×8 | Roots and three pad voices (a step a bar), the motif (quarters), the arp and bass (sixteenths), the bells (eighths) |
 | [Oscillator](../modules/sources/oscillator.md) ×10 | The sine, the supersaw lead (**Voices** 7), four pad saws, the arp (Square), the bass (Saw), the sparkles (Tri), the riser |
 | [ADSR Envelope](../modules/modulation/adsr.md) ×7 | One per voice, two for the bass (filter and amp) |
@@ -56,19 +56,18 @@ Each section is four units of four bars, sixteen bars in all.
 | [Ladder Filter](../modules/filters/ladder-filter.md) ×2 | Pad and bass |
 | [VCA](../modules/utilities/vca.md) ×6 | Each voice's envelope |
 | [LFO](../modules/modulation/lfo.md) ×3 | The chorus depth and the wind's sweep (4 bars), the arp's pulse width (1 bar) |
-| [Attenuverter](../modules/utilities/attenuverter.md) ×4 | Scaling: the pad's brightness, the bass drive, the arp's PWM, the fill |
+| [Attenuverter](../modules/utilities/attenuverter.md) ×3 | Scaling: the pad's brightness, the bass drive, the arp's PWM |
 | [Noise](../modules/sources/noise.md) ×2 | Pink wind, and the Random voltage for the sparkles |
 | [Quantizer](../modules/utilities/quantizer.md) | D minor pentatonic for the sparkles |
 | [Sampler](../modules/sources/sampler.md) | The bell from [Sampled Keys](./sampled-keys.md) |
 | [Looper](../modules/utilities/looper.md) | **Bars** 4, **Speed** ½×, **Reverse** on, **Dry** 0 |
 | [Drum](../modules/sources/drum.md) ×8 | Kick (tuned to A1), Snare, Clap, Closed Hat, Open Hat (choked by the closed hat), Rim, Tom (A2), and a Cymbal for the crash |
 | [Trigger Sequencer](../modules/utilities/trigger-sequencer.md) | The drums: four patterns, picked by **Pattern** CV |
-| [Logic](../modules/utilities/logic.md) | Lets the fill gate through when the score asks for fills |
 | [Compressor](../modules/effects/compressor.md) | Pad, sidechained by the kick |
 | [Chorus](../modules/effects/chorus.md) | Pad, into stereo |
 | [Distortion](../modules/effects/distortion.md) | Bass, **Tube** |
 | [3-Band EQ](../modules/effects/eq.md) | Bass: lows up, boxiness out |
-| [Mix](../modules/utilities/mix.md) ×2 | The pad's four voices, and the fill adder |
+| [Mix](../modules/utilities/mix.md) | The pad's four voices |
 | [Mixer](../modules/utilities/mixer.md) ×5 | Two for the kit, and Echoes, Body and Sky |
 | [Stereo Delay](../modules/effects/delay.md) | **Sync** 1/8D, **P-P** and **Tape** on, on the Echoes send |
 | [Reverb](../modules/effects/reverb.md) ×2 | A hall on Echoes, a plate on the send everyone shares |
@@ -80,22 +79,19 @@ Each section is four units of four bars, sixteen bars in all.
 ### The score
 
 ```text
-[Clock Gate] ──> [Clock Divider ÷64 Clock]
-[Clock Divider ÷64 Trig] ──> [Score I Clock]
-                         ──> [Score II Clock]
-[Score I Vel 2] ──> [Sample & Hold In]        (the pad's level)
-[Score I Gate 2] ──> [Sample & Hold Trig]
-[Sample & Hold Out] ──> [Mixer Body Level 2]
-                    ──> [Mixer Body Level 3]
+[Clock Gate] ──> [Desk Clock]
+             ──> [Cues Clock]
+[Desk Lane 6] ──> [Mixer Body Level 2]        (the pad, both sides)
+              ──> [Mixer Body Level 3]
+[Cues Lane 3] ──> [Mixer Sky Level 4]         (the riser's level)
+[Cues Gate 3] ──> [Riser ADSR Gate]           (and its envelope)
 ```
 
-The divider passes one sixteenth in 64, so each score steps once every four bars, a *unit*. Each has two patterns of sixteen steps, chained A then B: 32 units, 128 bars, the whole song.
+Both Arrangers count the Clock's sixteenths, sixteen to a bar, through the same 24 sections: First Sound, Echo, Sparkles, Arp, Pulse, Bass, Bells, Riser, Groove, Fill, Lift, Fill, Memory, Answer, Build, Everything, Fill, Second Wave, Lead Returns, Fill, Return, Sine Returns, Thinning and One Sine. They change section on the same clock edge as the sequencers step on, so the score and the music can't drift apart. **Loop to** is 1, so the song goes round again.
 
-Score I's lanes are the sine, pad, wind, arp, bass, drums, bells and lead. Score II's are the sparkles, the Looper's **Rec** and **Clear**, the Looper's level, the riser, the crash and a *brightness* lane. A level lane has a hit in every unit, and the hit's velocity is the part's fader for the next four bars: 70% is a fader at 70%, and 0% is silence. On the Echoes, Body and Sky mixers each channel's **Level** knob is at zero, and its **Level** input adds the score's level on top.
+**Desk**, the Arranger on the right, has a lane for each fader: the sine, arpeggio, bells, sparkles, bass, pad, wind and lead. On the Echoes, Body and Sky mixers each channel's **Level** knob is at zero, and its **Level** input adds the lane on top. Most sections jump a fader to a new level on their downbeat, and the rest hold it. The mixer adds a control voltage without smoothing it, so each lane has a **Glide**: a second for the pad, wind and sparkles, 0.8 s for the sine, 0.3 s for the lead, and 40 ms for the arp, bass and bells, which still land on the downbeat but never cut a tail short.
 
-The mixer adds a control voltage without smoothing it, so a jump at a section change would click if a note were still ringing. Each level therefore passes through a Sample & Hold. The lane's own gate fires as the level changes, so it samples the new value then, and **Slew** glides to it. The sustained parts glide for a second, so they fade. The rhythmic ones glide for 40 ms, so they still land on the downbeat but never cut a tail short.
-
-The event lanes use the gates. Score II's **Gate Length** is 95%, so a hit holds its gate for nearly four bars. That's what lets the riser's envelope climb for the whole unit and let go just before the downbeat.
+**Cues**, on the left, has the rest. **Drums** picks the drum pattern (see [Drums and fills](#drums-and-fills)). **Crash** hits on the downbeat of each big section, and its level is the cymbal's accent. **Riser** jumps to 30% for the Riser section and 32% for the Build. Its CV is the riser's level, and its gate holds the riser's envelope open for exactly those four bars. **Heat** ramps up through the opening, 8% to 48% over seven sections, and keeps climbing to its peak at Everything. Through two Attenuverters it opens the pad's Ladder and drives the bass harder. **Memory** is the Looper's level, and **Rec** and **Clear** hit its pedals.
 
 ### Harmony, a chord a bar
 
@@ -118,29 +114,26 @@ The arpeggio and the bass are written over C, and **Roots** moves them to each c
 [Motif Pitch] ──> [Sine V/Oct], [Supersaw V/Oct]
 [Sine VCA Out] ──> [Mixer Echoes Ch 1]
                ──> [Looper In L]
-[Score II Gate 2] ──> [Looper Rec]
+[Cues Gate 6] ──> [Looper Rec]
 [Clock Divider ÷16 Trig] ──> [Looper Clock]
 [Looper Loop L/R] ──> [Mixer Sky Ch 2/3]
 ```
 
 The motif is four bars of quarter notes, A, D E | F, D | C, A C | G, with ties for the long notes. It leans on notes that both halves of the progression share. A over Dm is the fifth and over Gm the ninth. C over F is the fifth and over Dm the seventh. So it fits whichever chords it lands on.
 
-The Looper listens to the sine. At bar 5, Score II presses **Rec**. With bar pulses on its **Clock** and **Bars** at 4, the take starts on the downbeat and closes itself after four bars. The Looper is set to **½×** and **Rev** from the start. Neither changes what it records, only how it plays it back, so the loop plays reversed, an octave down, at half speed: eight bars, landing on the progression's own eight-bar grid. Its level stays at zero until the breakdown. Score II presses **Clear** at bar 1, so each time the song comes round the Looper records the opening afresh.
+The Looper listens to the sine. At bar 5, the Echo section hits **Rec**. With bar pulses on its **Clock** and **Bars** at 4, the take starts on the downbeat and closes itself after four bars. The Looper is set to **½×** and **Rev** from the start. Neither changes what it records, only how it plays it back, so the loop plays reversed, an octave down, at half speed: eight bars, landing on the progression's own eight-bar grid. Its level stays at zero until the breakdown. First Sound hits **Clear** at bar 1, so each time the song comes round the Looper records the opening afresh.
 
 ### Drums and fills
 
 ```text
-[Score I Vel 6] ──> [Mix Pattern In 1]
-                ──> [Logic CV]                 (Threshold 0.55)
-[Clock Divider "last bar" Gate] ──> [Logic A]
-[Logic AND] ──> [Attenuverter In]              (Amount 0.25)
-[Attenuverter Out] ──> [Mix Pattern In 2]
-[Mix Pattern Out] ──> [Drum Trigger Sequencer Pattern]
+[Cues Lane 1] ──> [Drum Trigger Sequencer Pattern]
+[Cues Gate 2] ──> [Cymbal Trig]
+[Cues Lane 2] ──> [Cymbal Accent]
 ```
 
 The drum sequencer's **Pattern** input picks a pattern for each new bar in quarters: 0 to 0.25 is A, then B, C and D. A is silence, B is a pulse of kick, rim and offbeat hats, C is the groove, and D is a build: four-on-the-floor kicks, toms, and a snare roll whose ratchets climb to four hits a step.
 
-The score's drum lane sets the pattern for a whole unit: 0.10 for A, 0.35 for B, 0.52 for C and 0.85 for D. For a fill, one Clock Divider opens a gate for the last bar of every unit. Logic passes it through only while the score's CV is above 0.55, the Attenuverter scales it to 0.25, and the pattern Mix adds it to the score's CV. So a unit marked 0.60 plays C for three bars and D for one. The divider's gate is a **Gate**, and the Mix's inputs are audio, which a gate can't drive. The Attenuverter takes the gate as a control voltage, and scales it.
+The **Drums** lane jumps to 0.10 for A, 0.35 for B, 0.52 for C and 0.85 for D. Each phrase of the groove ends on a one-bar **Fill** section, which jumps it to D for that bar, and the section after jumps it back. The sequencer reads its **Pattern** on the same sample the lane jumps, so the lane has no Glide.
 
 The closed hat's gate chokes the open hat. The kick is tuned to A1, the fifth of D, and the tom to A2, so the drums sit in the key.
 
@@ -160,9 +153,9 @@ The sine, arpeggio, bells and sparkles share the Echoes mixer, whose send feeds 
 
 ## Variations
 
-**Rearrange it.** Every number in the two score sequencers is a fader. Open Score I and change a step's velocity to bring a part in early, or take it out. Set a drum-lane step to 52% for a unit of groove without a fill.
+**Rearrange it.** Drag a lane on the Desk up or down in any section to move that fader, or right-click it to ramp instead of jump. Delete a **Fill** section on both Arrangers for a phrase of groove without a fill. Keep the two Arrangers' sections the same: they play one song.
 
-**A shorter song.** Set both scores' **Chain** to A alone. The song becomes its first sixty-four bars, from the lone sine to the end of the lift, and starts again.
+**A shorter song.** Set both Arrangers' **Loop to** to 9, the Groove. The opening plays once, and then the song goes round from the groove to the end.
 
 **Remember something else.** Patch the Arp's VCA into the Looper's **In L** instead of the sine. The breakdown then hears the arpeggio, slowed and backwards.
 
@@ -172,6 +165,7 @@ The sine, arpeggio, bells and sparkles share the Echoes mixer, whose send feeds 
 
 ## Related
 
+- [Arranger](../modules/utilities/arranger.md): sections, lanes, and the cues that move them
 - [Afterglow](./afterglow.md): transposing an arpeggio with a second sequencer
 - [Roll Call](./roll-call.md): one Trigger Sequencer, eight drums
 - [Live Looper](./live-looper.md): the Looper with your own instrument

@@ -345,6 +345,21 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "seq.arranger",
+        knobs: &[knob("Steps")],
+        labels: &[("Loop", "Loop to")],
+        // The timeline, its section bar and its menus edit these
+        hidden: &["Sections", "Glide *", "Length *", "Section *"],
+        // The timeline lights each lane and trigger as it plays
+        monitor: &[
+            "Section Trig", "Bar", "Last Bar", "End",
+            "Lane 1", "Gate 1", "Lane 2", "Gate 2", "Lane 3", "Gate 3", "Lane 4", "Gate 4",
+            "Lane 5", "Gate 5", "Lane 6", "Gate 6", "Lane 7", "Gate 7", "Lane 8", "Gate 8",
+        ],
+        display: NodeDisplay::Timeline,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "fx.delay",
         knobs: &[
             // CV swings Time by ±50% and adds to Feedback, around the knobs

@@ -51,6 +51,7 @@
   - [Oscilloscope](./modules/visualization/oscilloscope.md)
   - [Step Sequencer](./modules/utilities/sequencer.md)
   - [Trigger Sequencer](./modules/utilities/trigger-sequencer.md)
+  - [Arranger](./modules/utilities/arranger.md)
   - [MIDI Monitor](./modules/midi/midi-monitor.md)
   - [Audio Output](./modules/output/audio-output.md)
 
