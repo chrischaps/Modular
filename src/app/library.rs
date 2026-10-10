@@ -1,4 +1,5 @@
 //! My Modules: groups saved to a folder of your own, to add to any patch.
+//! And the Library: groups that ship with the app, added the same way.
 //!
 //! Each saved group is a small patch file holding just that group, named
 //! after it, in `Documents/Modular/My Modules`. Adding one is a paste of
@@ -8,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::persistence::{load_from_file, save_to_file, GroupData, Patch, PatchError};
+use crate::persistence::{load_from_file, save_to_file, GroupData, LibraryGroup, Patch, PatchError, LIBRARY};
 
 /// Where saved groups live.
 pub fn folder() -> PathBuf {
@@ -19,12 +20,22 @@ pub fn folder() -> PathBuf {
         .join("My Modules")
 }
 
-/// A group saved to My Modules.
+/// Where a group to add comes from.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Source {
+    /// A file in My Modules.
+    File(PathBuf),
+    /// The Library, built into the app.
+    Library(&'static LibraryGroup),
+}
+
+/// A group saved to My Modules, or one from the Library.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SavedModule {
     pub name: String,
-    pub path: PathBuf,
-    /// What it is, in a line: its jacks and how many modules are inside.
+    pub source: Source,
+    /// What it is, in a line: its jacks and how many modules are inside,
+    /// after what a Library group is for.
     pub summary: String,
 }
 
@@ -34,13 +45,49 @@ impl SavedModule {
         if !patch.nodes.is_empty() {
             return None;
         }
-        Some(Self { name: group.name.clone(), path: path.to_path_buf(), summary: summary(group) })
+        Some(Self { name: group.name.clone(), source: Source::File(path.to_path_buf()), summary: summary(group) })
     }
 
-    /// The saved group, as a patch to paste.
+    /// The group, as a patch to paste.
     pub fn load(&self) -> Result<Patch, PatchError> {
-        load_from_file(&self.path)
+        match &self.source {
+            Source::File(path) => load_from_file(path),
+            Source::Library(group) => group.patch(),
+        }
     }
+
+    /// Whether it's one of the Library's.
+    pub fn in_library(&self) -> bool {
+        matches!(self.source, Source::Library(_))
+    }
+
+    /// The Library group it is, if it's one.
+    pub fn library_group(&self) -> Option<&'static LibraryGroup> {
+        match self.source {
+            Source::Library(group) => Some(group),
+            Source::File(_) => None,
+        }
+    }
+
+    /// Where it's added from, for the status bar: "My Modules" or "the Library".
+    pub fn from_where(&self) -> &'static str {
+        if self.in_library() { "the Library" } else { "My Modules" }
+    }
+}
+
+/// Every group in the Library, in menu order.
+pub fn library() -> Vec<SavedModule> {
+    LIBRARY
+        .iter()
+        .map(|group| {
+            let jacks = group.patch().ok().and_then(|patch| patch.groups.first().map(summary)).unwrap_or_default();
+            SavedModule {
+                name: group.name.to_string(),
+                source: Source::Library(group),
+                summary: format!("{}. {jacks}", group.description),
+            }
+        })
+        .collect()
 }
 
 /// "In, Gate → Out · 4 modules"
@@ -154,6 +201,17 @@ mod tests {
         assert!(replaced);
         assert_eq!(list_in(&folder).len(), 1);
         std::fs::remove_dir_all(&folder).ok();
+    }
+
+    #[test]
+    fn the_library_lists_every_group_with_its_jacks() {
+        let library = library();
+        assert_eq!(library.len(), LIBRARY.len());
+        let voice = library.iter().find(|m| m.name == "Subtractive Voice").unwrap();
+        assert!(voice.in_library());
+        assert_eq!(voice.from_where(), "the Library");
+        assert!(voice.summary.ends_with(". Pitch, Gate, Velocity → Out · 6 modules"), "{}", voice.summary);
+        assert_eq!(voice.load().unwrap().groups[0].name, "Subtractive Voice");
     }
 
     #[test]

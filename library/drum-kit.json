@@ -1,0 +1,464 @@
+{
+  "name": "Drum Kit",
+  "version": 6,
+  "nodes": [],
+  "connections": [],
+  "groups": [
+    {
+      "id": 800,
+      "name": "Drum Kit",
+      "position": [
+        0.0,
+        0.0
+      ],
+      "inputs": [
+        {
+          "name": "Kick",
+          "type": "Gate"
+        },
+        {
+          "name": "Snare",
+          "type": "Gate"
+        },
+        {
+          "name": "Hat",
+          "type": "Gate"
+        },
+        {
+          "name": "Open Hat",
+          "type": "Gate"
+        },
+        {
+          "name": "Accent",
+          "type": "Control"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Out L",
+          "type": "Audio"
+        },
+        {
+          "name": "Out R",
+          "type": "Audio"
+        }
+      ],
+      "inputs_position": [
+        -320.0,
+        0.0
+      ],
+      "outputs_position": [
+        780.0,
+        0.0
+      ],
+      "nodes": [
+        {
+          "id": 1,
+          "module_id": "source.drum",
+          "position": [
+            0.0,
+            0.0
+          ],
+          "parameters": [
+            {
+              "name": "Type",
+              "type": "Select",
+              "value": 0
+            },
+            {
+              "name": "Tune",
+              "type": "Number",
+              "value": -2.0
+            },
+            {
+              "name": "Decay",
+              "type": "Number",
+              "value": 0.55
+            },
+            {
+              "name": "Tone",
+              "type": "Number",
+              "value": 0.5
+            },
+            {
+              "name": "Snap",
+              "type": "Number",
+              "value": 0.5
+            },
+            {
+              "name": "Level",
+              "type": "Number",
+              "value": 0.8
+            }
+          ],
+          "pinned": {
+            "Tune": 1,
+            "Decay": 1
+          }
+        },
+        {
+          "id": 2,
+          "module_id": "source.drum",
+          "position": [
+            0.0,
+            330.0
+          ],
+          "parameters": [
+            {
+              "name": "Type",
+              "type": "Select",
+              "value": 1
+            },
+            {
+              "name": "Tune",
+              "type": "Number",
+              "value": 0.0
+            },
+            {
+              "name": "Decay",
+              "type": "Number",
+              "value": 0.5
+            },
+            {
+              "name": "Tone",
+              "type": "Number",
+              "value": 0.55
+            },
+            {
+              "name": "Snap",
+              "type": "Number",
+              "value": 0.6
+            },
+            {
+              "name": "Level",
+              "type": "Number",
+              "value": 0.7
+            }
+          ],
+          "pinned": {
+            "Tone": 1,
+            "Snap": 1
+          }
+        },
+        {
+          "id": 3,
+          "module_id": "source.drum",
+          "position": [
+            0.0,
+            660.0
+          ],
+          "parameters": [
+            {
+              "name": "Type",
+              "type": "Select",
+              "value": 4
+            },
+            {
+              "name": "Tune",
+              "type": "Number",
+              "value": 0.0
+            },
+            {
+              "name": "Decay",
+              "type": "Number",
+              "value": 0.35
+            },
+            {
+              "name": "Tone",
+              "type": "Number",
+              "value": 0.5
+            },
+            {
+              "name": "Snap",
+              "type": "Number",
+              "value": 0.5
+            },
+            {
+              "name": "Level",
+              "type": "Number",
+              "value": 0.5
+            }
+          ],
+          "pinned": {
+            "Decay": 1
+          }
+        },
+        {
+          "id": 4,
+          "module_id": "source.drum",
+          "position": [
+            0.0,
+            990.0
+          ],
+          "parameters": [
+            {
+              "name": "Type",
+              "type": "Select",
+              "value": 5
+            },
+            {
+              "name": "Tune",
+              "type": "Number",
+              "value": 0.0
+            },
+            {
+              "name": "Decay",
+              "type": "Number",
+              "value": 0.5
+            },
+            {
+              "name": "Tone",
+              "type": "Number",
+              "value": 0.5
+            },
+            {
+              "name": "Snap",
+              "type": "Number",
+              "value": 0.5
+            },
+            {
+              "name": "Level",
+              "type": "Number",
+              "value": 0.45
+            }
+          ],
+          "pinned": {
+            "Decay": 1
+          }
+        },
+        {
+          "id": 5,
+          "module_id": "util.mixer",
+          "position": [
+            360.0,
+            0.0
+          ],
+          "parameters": [
+            {
+              "name": "Level 1",
+              "type": "Number",
+              "value": 1.0
+            },
+            {
+              "name": "Level 2",
+              "type": "Number",
+              "value": 1.0
+            },
+            {
+              "name": "Level 3",
+              "type": "Number",
+              "value": 1.0
+            },
+            {
+              "name": "Level 4",
+              "type": "Number",
+              "value": 1.0
+            },
+            {
+              "name": "Pan 1",
+              "type": "Number",
+              "value": 0.0
+            },
+            {
+              "name": "Pan 2",
+              "type": "Number",
+              "value": -0.08
+            },
+            {
+              "name": "Pan 3",
+              "type": "Number",
+              "value": 0.25
+            },
+            {
+              "name": "Pan 4",
+              "type": "Number",
+              "value": 0.3
+            },
+            {
+              "name": "Width 1",
+              "type": "Number",
+              "value": 0.0
+            },
+            {
+              "name": "Width 2",
+              "type": "Number",
+              "value": 0.0
+            },
+            {
+              "name": "Width 3",
+              "type": "Number",
+              "value": 0.0
+            },
+            {
+              "name": "Width 4",
+              "type": "Number",
+              "value": 0.0
+            },
+            {
+              "name": "Send 1",
+              "type": "Number",
+              "value": 0.0
+            },
+            {
+              "name": "Send 2",
+              "type": "Number",
+              "value": 0.0
+            },
+            {
+              "name": "Send 3",
+              "type": "Number",
+              "value": 0.0
+            },
+            {
+              "name": "Send 4",
+              "type": "Number",
+              "value": 0.0
+            },
+            {
+              "name": "Mute 1",
+              "type": "Toggle",
+              "value": false
+            },
+            {
+              "name": "Mute 2",
+              "type": "Toggle",
+              "value": false
+            },
+            {
+              "name": "Mute 3",
+              "type": "Toggle",
+              "value": false
+            },
+            {
+              "name": "Mute 4",
+              "type": "Toggle",
+              "value": false
+            },
+            {
+              "name": "Solo 1",
+              "type": "Toggle",
+              "value": false
+            },
+            {
+              "name": "Solo 2",
+              "type": "Toggle",
+              "value": false
+            },
+            {
+              "name": "Solo 3",
+              "type": "Toggle",
+              "value": false
+            },
+            {
+              "name": "Solo 4",
+              "type": "Toggle",
+              "value": false
+            },
+            {
+              "name": "Return",
+              "type": "Number",
+              "value": 1.0
+            },
+            {
+              "name": "Master",
+              "type": "Number",
+              "value": 0.0
+            }
+          ]
+        }
+      ],
+      "connections": [
+        {
+          "from_node": 800,
+          "from_port": "Kick",
+          "to_node": 1,
+          "to_port": "Trig"
+        },
+        {
+          "from_node": 800,
+          "from_port": "Snare",
+          "to_node": 2,
+          "to_port": "Trig"
+        },
+        {
+          "from_node": 800,
+          "from_port": "Hat",
+          "to_node": 3,
+          "to_port": "Trig"
+        },
+        {
+          "from_node": 800,
+          "from_port": "Hat",
+          "to_node": 4,
+          "to_port": "Choke"
+        },
+        {
+          "from_node": 800,
+          "from_port": "Open Hat",
+          "to_node": 4,
+          "to_port": "Trig"
+        },
+        {
+          "from_node": 800,
+          "from_port": "Accent",
+          "to_node": 1,
+          "to_port": "Accent"
+        },
+        {
+          "from_node": 800,
+          "from_port": "Accent",
+          "to_node": 2,
+          "to_port": "Accent"
+        },
+        {
+          "from_node": 800,
+          "from_port": "Accent",
+          "to_node": 3,
+          "to_port": "Accent"
+        },
+        {
+          "from_node": 800,
+          "from_port": "Accent",
+          "to_node": 4,
+          "to_port": "Accent"
+        },
+        {
+          "from_node": 1,
+          "from_port": "Out",
+          "to_node": 5,
+          "to_port": "Ch 1"
+        },
+        {
+          "from_node": 2,
+          "from_port": "Out",
+          "to_node": 5,
+          "to_port": "Ch 2"
+        },
+        {
+          "from_node": 3,
+          "from_port": "Out",
+          "to_node": 5,
+          "to_port": "Ch 3"
+        },
+        {
+          "from_node": 4,
+          "from_port": "Out",
+          "to_node": 5,
+          "to_port": "Ch 4"
+        },
+        {
+          "from_node": 5,
+          "from_port": "Out L",
+          "to_node": 800,
+          "to_port": "Out L"
+        },
+        {
+          "from_node": 5,
+          "from_port": "Out R",
+          "to_node": 800,
+          "to_port": "Out R"
+        }
+      ]
+    }
+  ]
+}

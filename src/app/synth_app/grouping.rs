@@ -421,7 +421,8 @@ impl SynthApp {
         self.my_modules = library::list();
     }
 
-    /// Adds a group from My Modules, its corner at a point on screen.
+    /// Adds a group from My Modules or the Library, its corner at a point
+    /// on screen.
     pub(super) fn add_saved_module(&mut self, saved: &SavedModule, screen: egui::Pos2) {
         let patch = match saved.load() {
             Ok(patch) => patch,
@@ -437,7 +438,7 @@ impl SynthApp {
                     self.load_warnings = pasted.warnings.clone();
                 }
                 self.finish_paste(pasted, &format!("Add {}", saved.name));
-                self.status_message = Some(format!("Added {} from My Modules", saved.name));
+                self.status_message = Some(format!("Added {} from {}", saved.name, saved.from_where()));
             }
             Err(e) => self.status_message = Some(format!("Couldn't add {}: {e}", saved.name)),
         }

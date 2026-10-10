@@ -24,7 +24,7 @@ use crate::graph::{
 use crate::modules::keyboard::{key_to_note, relative_to_midi, KeyPriority, KeyboardInput};
 use crate::persistence::{
     capture_patch, examples, load_from_file, renumber_groups, save_to_file, stage_patch, Example, MidiMapping, Patch, PatchError,
-    EXAMPLES,
+    Section, EXAMPLES,
 };
 #[cfg(target_arch = "wasm32")]
 use crate::persistence::{patch_from_json, patch_to_json};
@@ -250,6 +250,8 @@ pub struct SynthApp {
     release_tab_focus: bool,
     /// The groups saved to My Modules, as of the last look.
     my_modules: Vec<SavedModule>,
+    /// The Library's groups, which ship with the app.
+    library_modules: Vec<SavedModule>,
     /// How big each node was last drawn, unzoomed.
     node_sizes: HashMap<egui_node_graph2::NodeId, egui::Vec2>,
     /// The level was framed before some of its nodes had been drawn.
@@ -422,6 +424,7 @@ impl SynthApp {
             naming_group: None,
             release_tab_focus: false,
             my_modules: Vec::new(),
+            library_modules: library::library(),
             node_sizes: HashMap::new(),
             reframe_level: false,
             embedded: false,
@@ -1895,11 +1898,13 @@ impl SynthApp {
                     egui::Frame::menu(ui.style()).show(ui, |ui| {
                         ui.set_min_width(120.0);
 
-                        // The categories, then My Modules if anything's saved there
+                        // The categories, then My Modules if anything's saved
+                        // there, then the Library
                         let rows: Vec<(&str, egui::Color32)> = categories
                             .iter()
                             .map(|(category, _)| (category.name(), category.color()))
                             .chain((!self.my_modules.is_empty()).then_some(("My Modules", theme::module::GROUP)))
+                            .chain(std::iter::once(("Library", theme::module::GROUP)))
                             .collect();
                         for (cat_index, (name, color)) in rows.into_iter().enumerate() {
                             // Create category button with arrow indicator
@@ -2025,6 +2030,35 @@ impl SynthApp {
                                 if ui.button(RichText::new("Open folder").color(theme::text::SECONDARY)).clicked() {
                                     open_library = true;
                                     close_menu = true;
+                                }
+                            });
+                        });
+                    submenu_rect = Some(submenu_response.response.rect);
+                    if submenu_response.response.rect.contains(ctx.input(|i| i.pointer.hover_pos().unwrap_or_default())) {
+                        self.user_state.context_menu_hover_intent = None;
+                    }
+                } else if open_cat_index == categories.len() + usize::from(!self.my_modules.is_empty()) {
+                    // The Library: ready-made groups, under their sections
+                    let submenu_pos = menu_response.response.rect.right_top() + egui::vec2(4.0, open_cat_index as f32 * 22.0);
+                    let submenu_response = egui::Area::new(egui::Id::new("add_node_submenu"))
+                        .fixed_pos(submenu_pos)
+                        .order(egui::Order::Foreground)
+                        .constrain(true)
+                        .show(ctx, |ui| {
+                            egui::Frame::menu(ui.style()).show(ui, |ui| {
+                                ui.set_min_width(140.0);
+                                for (n, section) in Section::ALL.into_iter().enumerate() {
+                                    if n > 0 {
+                                        ui.add_space(4.0);
+                                    }
+                                    ui.label(RichText::new(section.name().to_uppercase()).small().color(theme::text::DISABLED));
+                                    for saved in self.library_modules.iter().filter(|m| m.library_group().is_some_and(|g| g.section == section)) {
+                                        let text = RichText::new(&saved.name).color(theme::module::GROUP);
+                                        if ui.button(text).on_hover_text(&saved.summary).clicked() {
+                                            saved_to_add = Some(saved.clone());
+                                            close_menu = true;
+                                        }
+                                    }
                                 }
                             });
                         });
@@ -2211,7 +2245,8 @@ impl SynthApp {
         let anchor = self.cursor_or_center(ctx);
         self.user_state.context_menu_pos = None;
         self.my_modules = library::list();
-        self.quick_add = Some(QuickAdd::new(anchor, self.my_modules.clone()));
+        let groups = self.my_modules.iter().chain(&self.library_modules).cloned().collect();
+        self.quick_add = Some(QuickAdd::new(anchor, groups));
     }
 
     /// The patch position of a point on screen.

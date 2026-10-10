@@ -52,7 +52,7 @@ Right-click empty canvas to open the add menu. It lists the six categories in th
 
 ### Quick add
 
-Press `Space` or `Tab` with the mouse over the canvas. A search box opens at the cursor, listing every module by category, with your saved groups first under **My Modules**. Type a few letters to narrow the list, then press `Enter`, and the module appears where the box opened. (With a group selected, `Tab` opens the group instead.)
+Press `Space` or `Tab` with the mouse over the canvas. A search box opens at the cursor, listing every module by category, with your saved groups first under **My Modules** and the ready-made groups of the [Library](../concepts/groups.md#the-library) last. Type a few letters to narrow the list, then press `Enter`, and the module appears where the box opened. (With a group selected, `Tab` opens the group instead.)
 
 ![The quick-add palette](../images/interface-quick-add.png)
 *Type a few letters of a module's name or category, then press Enter.*

@@ -22,6 +22,7 @@ These modules run one voice per channel of their widest input:
 | [ADSR Envelope](../modules/modulation/adsr.md) | Stage and level |
 | [VCA](../modules/utilities/vca.md) | Gain |
 | [Attenuverter](../modules/utilities/attenuverter.md) | Scaling |
+| [Mix](../modules/utilities/mix.md) | Sum |
 | [Sample & Hold](../modules/utilities/sample-hold.md) | Held value |
 | [Quantizer](../modules/utilities/quantizer.md) | Note, and its Trig, so a chord comes out as a chord in the scale |
 

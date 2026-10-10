@@ -1,7 +1,7 @@
 //! The quick-add palette: press Space or Tab over the graph, type a few
 //! letters of a module's name or category, press Enter, and the module
 //! appears where the cursor was. Groups saved to My Modules are there too,
-//! first, in their rose.
+//! first, in their rose, and the Library's ready-made groups, last.
 //!
 //! Matching is fuzzy: the letters typed have to appear in order, not
 //! together, so "lfo", "svf" and "dly" all find what they should. Letters at
@@ -78,6 +78,8 @@ fn subsequence(query: &str, text: &str) -> Option<(i32, Vec<usize>)> {
 
 /// The heading saved groups go under.
 const MY_MODULES: &str = "My Modules";
+/// The heading the Library's groups go under.
+const LIBRARY: &str = "Library";
 
 /// Something the palette can add: a module, or a group from My Modules.
 #[derive(Clone, Debug, PartialEq)]
@@ -97,6 +99,7 @@ impl Entry {
     fn category(&self) -> &str {
         match self {
             Self::Module(template) => template.category().name(),
+            Self::Saved(saved) if saved.in_library() => LIBRARY,
             Self::Saved(_) => MY_MODULES,
         }
     }
@@ -147,13 +150,15 @@ fn match_word(word: &str, entry: &Entry) -> Option<(i32, Vec<usize>)> {
 }
 
 /// Everything matching all the words of `query`, best first. An empty
-/// query finds everything in menu order: My Modules, then every module.
+/// query finds everything in menu order: My Modules, every module, then
+/// the Library.
 fn search(query: &str, saved: &[SavedModule]) -> Vec<Found> {
-    let menu_order: Vec<Entry> = saved
-        .iter()
-        .cloned()
+    let (library, mine): (Vec<_>, Vec<_>) = saved.iter().cloned().partition(SavedModule::in_library);
+    let menu_order: Vec<Entry> = mine
+        .into_iter()
         .map(Entry::Saved)
         .chain(AllNodeTemplates::by_category().into_iter().flat_map(|(_, templates)| templates).map(Entry::Module))
+        .chain(library.into_iter().map(Entry::Saved))
         .collect();
     let words: Vec<&str> = query.split_whitespace().collect();
 
@@ -185,7 +190,7 @@ pub enum PaletteAction {
     Close,
     /// Chose a module to add.
     Add(SynthNodeTemplate),
-    /// Chose a group from My Modules.
+    /// Chose a group from My Modules or the Library.
     AddSaved(SavedModule),
 }
 
@@ -208,7 +213,7 @@ pub struct QuickAdd {
     /// The highlight moved by keyboard this frame, so the list should
     /// scroll to it.
     scroll_to_highlight: bool,
-    /// The groups in My Modules.
+    /// The groups in My Modules and the Library.
     saved: Vec<SavedModule>,
 }
 
@@ -423,6 +428,7 @@ fn footer(ui: &mut egui::Ui, entry: &Entry) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::library::{self, Source};
     use egui_node_graph2::NodeTemplateIter;
 
     fn top(query: &str) -> &'static str {
@@ -496,7 +502,7 @@ mod tests {
     fn saved_groups_come_first_and_match_by_name_or_heading() {
         let saved = vec![SavedModule {
             name: "Acid Voice".into(),
-            path: "Acid Voice.json".into(),
+            source: Source::File("Acid Voice.json".into()),
             summary: "Gate, Pitch → Out · 4 modules".into(),
         }];
         let all = search("", &saved);
@@ -505,5 +511,21 @@ mod tests {
         assert!(matches!(&search("acid", &saved)[0].entry, Entry::Saved(s) if s.name == "Acid Voice"));
         assert!(search("my", &saved).iter().any(|f| matches!(f.entry, Entry::Saved(_))));
         assert!(matches!(PaletteAction::add(&all[0].entry), PaletteAction::AddSaved(_)));
+    }
+
+    #[test]
+    fn the_library_comes_last_and_matches_by_name_or_heading() {
+        let mut saved = library::library();
+        saved.insert(0, SavedModule { name: "Mine".into(), source: Source::File("Mine.json".into()), summary: String::new() });
+        let all = search("", &saved);
+        assert_eq!(all.len(), AllNodeTemplates.all_kinds().len() + saved.len());
+        assert!(matches!(&all[0].entry, Entry::Saved(s) if s.name == "Mine"));
+        assert!(all.iter().rev().take(saved.len() - 1).all(|f| f.entry.category() == "Library"));
+        assert!(matches!(&search("supersaw", &saved)[0].entry, Entry::Saved(s) if s.name == "Supersaw Pad"));
+        assert!(matches!(&search("fm bell", &saved)[0].entry, Entry::Saved(s) if s.name == "FM Bell"));
+        let headed = search("lib", &saved);
+        assert!(headed.iter().take(saved.len() - 1).all(|f| f.entry.category() == "Library"));
+        // A module still wins its own name
+        assert_eq!(top("ladder"), "filter.ladder");
     }
 }

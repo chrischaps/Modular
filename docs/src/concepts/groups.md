@@ -52,6 +52,30 @@ Saved groups come first in the [quick-add palette](../getting-started/interface-
 
 Saving a group under a name that's already there updates it. The folder holds ordinary patch files, so you can copy them to another computer or share them. To find the folder, choose **Open folder** at the bottom of the add menu's My Modules submenu.
 
+## The Library
+
+The **Library** is a shelf of ready-made groups that ships with Modular Synth. Each one is an ordinary group: add it, play it from the knobs on its face, then open it to see how it's made and change anything inside. Find them under **Library** at the bottom of the add menu, sorted into sections, or type a name or `lib` into the [quick-add palette](../getting-started/interface-overview.md#quick-add).
+
+| Group | What it is | Jacks |
+|-------|------------|-------|
+| **Subtractive Voice** | A saw through a ladder filter, one envelope opening the filter and one shaping the level | Pitch, Gate, Velocity → Out |
+| **FM Voice** | Two-operator FM at 1:1, an electric-piano bark that mellows as it rings. **Oct** and **Semi** set the ratio | Pitch, Gate, Velocity → Out |
+| **FM Bell** | Two-operator FM at 1:3.5: clangorous partials that fade to a pure tone | Pitch, Gate, Velocity → Out |
+| **Supersaw Pad** | Seven detuned saws, a slow swell and a filter that breathes | Pitch, Gate, Velocity → Out |
+| **Mallet** | A short strike rings a resonant filter tuned to the note, like a marimba bar | Pitch, Gate, Velocity → Out |
+| **Acid Bass** | A resonant, driven ladder snapped open on every note; velocity accents | Pitch, Gate, Velocity → Out |
+| **Reese Bass** | Three detuned saws beating against each other, with a slow LFO in the filter | Pitch, Gate, Velocity → Out |
+| **Drum Kit** | Kick, snare and hats on a stereo mixer, the closed hat choking the open one | Kick, Snare, Hat, Open Hat, Accent → Out L, Out R |
+| **Random Melody** | Plays itself: a wandering voltage sampled on the beat and kept in A minor pentatonic. **Amt** is its range, **Thresh** how many beats rest | → Pitch, Gate |
+| **Wind** | Plays itself: pink noise through a wandering band-pass, whistling higher as each gust rises | → Out L, Out R |
+| **Stereo Space** | Chorus, ping-pong tape echo and a room, in pedalboard order | In L, In R → Out L, Out R |
+| **Pump** | Each trigger ducks the sound and lets it swell back, like a compressor keyed from the kick | In, Trig → Out |
+| **Auto-Pan** | An LFO sweeps a mono sound from side to side | In → Out L, Out R |
+
+The voices share a shape: plug a [Keyboard](../modules/midi/keyboard.md) or [Poly MIDI](../modules/midi/poly-midi.md) into **Pitch**, **Gate** and **Velocity**, and **Out** into a mixer or the output. They're built only from [polyphonic](./polyphony.md) modules, so Poly MIDI plays chords through any of them. They're also levelled to match, so swapping one voice for another doesn't jump in volume.
+
+A Library group you've changed can be saved to My Modules under its own name, like any other group.
+
 ## Editing and undo
 
 Copy, paste, duplicate and delete treat a group as a whole: deleting one deletes everything inside it. Undo covers grouping, ungrouping, renaming, pinning and every edit you make inside a group. Undoing an edit that was made inside a group shows you that group as it happens.

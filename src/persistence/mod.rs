@@ -5,11 +5,13 @@
 pub mod compile;
 pub mod examples;
 pub mod graph_io;
+pub mod library;
 pub mod patch;
 pub mod sample_files;
 
 pub use compile::{compile_patch, CompiledPatch};
 pub use examples::{Example, EXAMPLES};
+pub use library::{LibraryGroup, Section, LIBRARY};
 pub use graph_io::{
     capture_level, capture_patch, merge_patch, renumber_groups, stage_patch, CapturedLevel, Merged, StagedNode, StagedPart,
     StagedPatch,
