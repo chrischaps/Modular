@@ -9,6 +9,8 @@ use egui_node_graph2::WidgetValueTrait;
 use crate::dsp::{ParameterDefinition, ParameterDisplay};
 use crate::widgets::ParamFormat;
 use super::hints::{self, Hint};
+use super::groups::Side;
+use super::group_face;
 use super::node_data::KnobPlace;
 use super::{SynthGraphState, SynthNodeData, SynthResponse};
 
@@ -215,8 +217,9 @@ impl WidgetValueTrait for SynthValueType {
         };
         let (name, control) = match self {
             Self::Port | Self::Number { .. } => {
-                hints::attach(ui.label(param_name), hint());
-                return Vec::new();
+                // A jack's name opens its menu: shown on the group around it, or not
+                let name = hints::attach(ui.add(egui::Label::new(param_name).sense(egui::Sense::click())), hint());
+                return group_face::port_menu(&name, node_id, Side::Input, param_name, user_state).into_iter().collect();
             }
             Self::Toggle { value, label } => {
                 // Toggle gets an inline checkbox - not suitable for knob
@@ -255,13 +258,14 @@ impl WidgetValueTrait for SynthValueType {
     fn value_widget_connected(
         &mut self,
         param_name: &str,
-        _node_id: egui_node_graph2::NodeId,
+        node_id: egui_node_graph2::NodeId,
         ui: &mut egui::Ui,
-        _user_state: &mut Self::UserState,
+        user_state: &mut Self::UserState,
         node_data: &Self::NodeData,
     ) -> Vec<Self::Response> {
-        hints::attach(ui.label(param_name), Hint::input(node_data.module_id, param_name));
-        Vec::new()
+        let label = egui::Label::new(param_name).sense(egui::Sense::click());
+        let name = hints::attach(ui.add(label), Hint::input(node_data.module_id, param_name));
+        group_face::port_menu(&name, node_id, Side::Input, param_name, user_state).into_iter().collect()
     }
 }
 

@@ -1,6 +1,6 @@
 # Groups
 
-A good voice (an oscillator, a filter, a VCA and an envelope) is the same few modules in patch after patch, and three voices side by side turn into a wall of cables. A **group** collapses modules into one node of your own. It has jacks where cables crossed into and out of the selection, and the controls you choose to keep on its face. Open it to work on what's inside. Save it to **My Modules**, and it's in the add menu of every patch.
+A good voice (an oscillator, a filter, a VCA and an envelope) is the same few modules in patch after patch, and three voices side by side turn into a wall of cables. A **group** collapses modules into one node of your own. It has jacks where cables crossed into and out of the selection, plus any you add, and the controls you choose to keep on its face. Open it to work on what's inside. Save it to **My Modules**, and it's in the add menu of every patch.
 
 ![A group called Voice, playing, with a Wave dropdown and four knobs on its face](../images/groups-outside.png)
 *Voice holds an oscillator, an envelope and a VCA. Its face shows them in miniature, with the oscillator's **Wave** and four knobs pinned.*
@@ -86,8 +86,19 @@ Copy, paste, duplicate and delete treat a group as a whole: deleting one deletes
 
 The audio engine never sees a group. It only hears the modules and the cables between them, followed through any number of jacks. Groups use no CPU, and grouping or ungrouping never interrupts the sound. A grouped patch plays sample for sample what the ungrouped patch plays, and the test suite checks this for every example.
 
+## Adding and removing jacks
+
+A group starts with the jacks its cables gave it, and you can change them whenever you like. Inside the group, right-click a port's name:
+
+- **Show on group**, on an output or an unplugged input, gives the group a new jack named after the port, wired to it through Inputs or Outputs. A filter's **Cutoff** shown this way can be modulated from outside, and a second output can be brought out beside the first. An input that's already plugged in inside the group can't take a jack too, so the item is greyed.
+- **Hide from group**, on a port wired to one of the group's jacks, unplugs it. If that leaves the jack carrying nothing inside, the jack goes, and so does any cable into it outside. If the jack still feeds another module, as a shared **Gate** might, it stays.
+
+To take a jack away from anywhere, right-click it on the group's node, or on Inputs or Outputs inside, and choose **Remove jack**. Its cables go with it, inside and out.
+
+New jacks go at the bottom of the group's jacks. Inside a group within a group, an inner group's jacks are ports like any other, so you can show them on the group around it. Undo covers adding and removing jacks, and a saved patch keeps them.
+
 Groups are saved in the patch file, each holding its own modules, cables and groups. A patch with groups needs this version of Soba or later to open. A patch without groups is saved just as before, so older versions still open it.
 
 ## Limits
 
-A group's jacks are set when you make it. To add or remove a jack, ungroup the group, change the cables, and group it again. The new group is called *Group* until you rename it; its pinned controls are kept.
+A jack keeps the name it was given, and stays in its place among the group's jacks. To rename or reorder jacks, ungroup the group and group it again. The new group is called *Group* until you rename it, and its pinned controls are kept.

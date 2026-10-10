@@ -21,7 +21,7 @@
 use std::collections::{HashMap, HashSet};
 
 use egui::{Color32, Pos2, Rect, Vec2};
-use egui_node_graph2::{InputId, InputParamKind, NodeId, OutputId};
+use egui_node_graph2::{AnyParameterId, InputId, InputParamKind, NodeId, OutputId};
 
 use crate::app::theme;
 use crate::dsp::{ModuleCategory, SignalType};
@@ -475,6 +475,231 @@ pub fn group(
     Some(NewGroup { node, inputs, outputs })
 }
 
+/// Which side of a node a port is on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Side {
+    Input,
+    Output,
+}
+
+/// What a port's right-click menu can do with a group's jacks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JackAction {
+    /// Give the group the port sits in a jack for it.
+    Show,
+    /// An input fed by something else in the group can't take a jack too.
+    Taken,
+    /// Unplug it from the group's jack, and drop the jack if that leaves it
+    /// carrying nothing.
+    Hide,
+    /// The port is one of a group's jacks, on its node or its Inputs or
+    /// Outputs: take the jack away.
+    Remove,
+}
+
+/// The port called `name` on one side of a node, and its position there.
+fn port(graph: &SynthGraph, node_id: NodeId, side: Side, name: &str) -> Option<(usize, AnyParameterId)> {
+    let node = graph.nodes.get(node_id)?;
+    match side {
+        Side::Input => node.inputs.iter().position(|(n, _)| n == name).map(|k| (k, AnyParameterId::Input(node.inputs[k].1))),
+        Side::Output => node.outputs.iter().position(|(n, _)| n == name).map(|k| (k, AnyParameterId::Output(node.outputs[k].1))),
+    }
+}
+
+/// The group whose jacks a node's ports on one side are, and on which side
+/// of the group's own node they sit: a group's node has its jacks both
+/// sides, Inputs carries the input jacks and Outputs the output jacks.
+fn jacks_of(kind: NodeKind, side: Side) -> Option<(GroupId, Side)> {
+    match (kind, side) {
+        (NodeKind::Group(id), side) => Some((id, side)),
+        (NodeKind::Inputs(id), Side::Output) => Some((id, Side::Input)),
+        (NodeKind::Outputs(id), Side::Input) => Some((id, Side::Output)),
+        _ => None,
+    }
+}
+
+/// What can be done with groups' jacks from a port, in menu order. A
+/// group's node inside another group has both: its own jack can go, and it
+/// can be shown on the group around it.
+pub fn jack_actions(graph: &SynthGraph, index: &GroupIndex, node_id: NodeId, side: Side, name: &str) -> Vec<JackAction> {
+    let mut actions = Vec::new();
+    let Some(node) = graph.nodes.get(node_id) else { return actions };
+    let Some((_, id)) = port(graph, node_id, side, name) else { return actions };
+    let data = &node.user_data;
+    if jacks_of(data.kind, side).is_some() {
+        actions.push(JackAction::Remove);
+    }
+    let Some(parent) = data.parent.filter(|_| !data.kind.is_proxy()) else { return actions };
+    let parts = index.parts(parent);
+    match id {
+        AnyParameterId::Input(input) => {
+            if matches!(graph.get_input(input).kind, InputParamKind::ConstantOnly) {
+                return actions;
+            }
+            actions.push(match graph.connection(input) {
+                None => JackAction::Show,
+                Some(source) if Some(graph.get_output(source).node) == parts.inputs => JackAction::Hide,
+                Some(_) => JackAction::Taken,
+            });
+        }
+        AnyParameterId::Output(output) => {
+            let shown = parts.outputs.and_then(|o| graph.nodes.get(o)).is_some_and(|outputs| {
+                outputs.inputs.iter().any(|(_, jack)| graph.connection(*jack) == Some(output))
+            });
+            actions.push(if shown { JackAction::Hide } else { JackAction::Show });
+        }
+    }
+    actions
+}
+
+/// Gives the group a port sits in a new jack for it, at the bottom of the
+/// group's jacks, named after the port and wired to it inside. Returns the
+/// group and the jack's name, or `None` if the port can't have one.
+pub fn show_port(graph: &mut SynthGraph, node_id: NodeId, side: Side, name: &str) -> Option<(GroupId, String)> {
+    let index = GroupIndex::of(graph);
+    if !jack_actions(graph, &index, node_id, side, name).contains(&JackAction::Show) {
+        return None;
+    }
+    let id = graph.nodes.get(node_id)?.user_data.parent?;
+    let parts = index.parts(id);
+    let (group, (_, port)) = (parts.node?, port(graph, node_id, side, name)?);
+    let signal = match port {
+        AnyParameterId::Input(input) => graph.get_input(input).typ.signal_type(),
+        AnyParameterId::Output(output) => graph.get_output(output).typ.signal_type(),
+    };
+    let taken: Vec<String> = match side {
+        Side::Input => graph[group].inputs.iter().map(|(n, _)| n.clone()).collect(),
+        Side::Output => graph[group].outputs.iter().map(|(n, _)| n.clone()).collect(),
+    };
+    let names = unique_names(taken.into_iter().chain(std::iter::once(name.to_string())));
+    let jack = Jack { name: names.last()?.clone(), signal };
+    match port {
+        AnyParameterId::Input(input) => {
+            let inputs = parts.inputs?;
+            add_jack_inputs(graph, group, std::slice::from_ref(&jack));
+            add_jack_outputs(graph, inputs, std::slice::from_ref(&jack));
+            let carried = graph[inputs].outputs.last()?.1;
+            graph.add_connection(carried, input, 0);
+        }
+        AnyParameterId::Output(output) => {
+            let outputs = parts.outputs?;
+            add_jack_outputs(graph, group, std::slice::from_ref(&jack));
+            add_jack_inputs(graph, outputs, std::slice::from_ref(&jack));
+            let carries = graph[outputs].inputs.last()?.1;
+            graph.add_connection(output, carries, 0);
+        }
+    }
+    Some((id, jack.name))
+}
+
+/// Unplugs a port from the jacks of the group it sits in. A jack left
+/// carrying nothing inside goes, with its cables outside. Returns the group
+/// and each jack it was plugged into, with whether the jack went.
+pub fn hide_port(graph: &mut SynthGraph, node_id: NodeId, side: Side, name: &str) -> Option<(GroupId, Vec<(String, bool)>)> {
+    let index = GroupIndex::of(graph);
+    let id = graph.nodes.get(node_id)?.user_data.parent?;
+    let parts = index.parts(id);
+    let (_, port) = port(graph, node_id, side, name)?;
+    let mut jacks = Vec::new();
+    match port {
+        AnyParameterId::Input(input) => {
+            let source = graph.connection(input)?;
+            if Some(graph.get_output(source).node) != parts.inputs {
+                return None;
+            }
+            graph.remove_connection(input, source);
+            let k = graph.get_output_index(source)?;
+            let empty = !graph.iter_connections().any(|(_, o)| o == source);
+            jacks.push((graph[parts.inputs?].outputs[k].0.clone(), empty));
+            if empty {
+                remove_jack(graph, &index, id, Side::Input, k);
+            }
+        }
+        AnyParameterId::Output(output) => {
+            let outputs = parts.outputs?;
+            // Last first, so the positions of the ones still to go hold
+            let fed: Vec<usize> = (0..graph[outputs].inputs.len())
+                .filter(|&k| graph.connection(graph[outputs].inputs[k].1) == Some(output))
+                .collect();
+            for &k in fed.iter().rev() {
+                jacks.push((graph[outputs].inputs[k].0.clone(), true));
+                remove_jack(graph, &index, id, Side::Output, k);
+            }
+            jacks.reverse();
+        }
+    }
+    (!jacks.is_empty()).then_some((id, jacks))
+}
+
+/// Takes away the jack a port is, on a group's node or its Inputs or
+/// Outputs, with its cables inside and out. Returns the group and the
+/// jack's name.
+pub fn remove_port_jack(graph: &mut SynthGraph, node_id: NodeId, side: Side, name: &str) -> Option<(GroupId, String)> {
+    let index = GroupIndex::of(graph);
+    let (id, group_side) = jacks_of(graph.nodes.get(node_id)?.user_data.kind, side)?;
+    let (k, _) = port(graph, node_id, side, name)?;
+    remove_jack(graph, &index, id, group_side, k);
+    Some((id, name.to_string()))
+}
+
+/// Takes away a group's `k`th jack on one side: from its node, and the
+/// matching port on its Inputs or Outputs.
+fn remove_jack(graph: &mut SynthGraph, index: &GroupIndex, id: GroupId, side: Side, k: usize) {
+    let parts = index.parts(id);
+    let input_at = |graph: &SynthGraph, node: Option<NodeId>| node.and_then(|n| graph[n].inputs.get(k)).map(|(_, id)| *id);
+    let output_at = |graph: &SynthGraph, node: Option<NodeId>| node.and_then(|n| graph[n].outputs.get(k)).map(|(_, id)| *id);
+    let (input, output) = match side {
+        Side::Input => (input_at(graph, parts.node), output_at(graph, parts.inputs)),
+        Side::Output => (input_at(graph, parts.outputs), output_at(graph, parts.node)),
+    };
+    if let Some(input) = input {
+        graph.remove_input_param(input);
+    }
+    if let Some(output) = output {
+        graph.remove_output_param(output);
+    }
+}
+
+/// Makes a node's ports on one side the jacks given, slot by slot: a port
+/// that stays keeps its cables, renamed or retyped if need be, and ports
+/// past the end go. Undo keeps cables by port position, so this puts back
+/// exactly the jacks and cables a step remembers.
+pub fn set_jacks(graph: &mut SynthGraph, node_id: NodeId, side: Side, jacks: &[Jack]) {
+    let Some(node) = graph.nodes.get(node_id) else { return };
+    match side {
+        Side::Input => {
+            let ports: Vec<InputId> = node.inputs.iter().map(|(_, id)| *id).collect();
+            for (k, jack) in jacks.iter().enumerate() {
+                match ports.get(k) {
+                    Some(&input) => {
+                        graph[node_id].inputs[k].0 = jack.name.clone();
+                        graph.inputs[input].typ = SynthDataType::new(jack.signal);
+                    }
+                    None => add_jack_inputs(graph, node_id, std::slice::from_ref(jack)),
+                }
+            }
+            for &input in ports.iter().skip(jacks.len()) {
+                graph.remove_input_param(input);
+            }
+        }
+        Side::Output => {
+            let ports: Vec<OutputId> = node.outputs.iter().map(|(_, id)| *id).collect();
+            for (k, jack) in jacks.iter().enumerate() {
+                match ports.get(k) {
+                    Some(&output) => {
+                        graph[node_id].outputs[k].0 = jack.name.clone();
+                        graph.outputs[output].typ = SynthDataType::new(jack.signal);
+                    }
+                    None => add_jack_outputs(graph, node_id, std::slice::from_ref(jack)),
+                }
+            }
+            for &output in ports.iter().skip(jacks.len()) {
+                graph.remove_output_param(output);
+            }
+        }
+    }
+}
+
 /// Opens a group back out onto the level it sits on: its modules (and the
 /// groups inside it) come out where the group's node is, and every cable
 /// through its jacks becomes a cable straight from source to destination.
@@ -895,5 +1120,97 @@ mod tests {
         assert_eq!(knobs(GroupId(1000)), [knob(osc, "Octave"), switch(osc, "Waveform"), knob(filter, "Cutoff")]);
         assert!(knobs(GroupId(1001)).is_empty());
         let _ = outer;
+    }
+
+    #[test]
+    fn a_port_shown_on_its_group_gets_a_jack_that_carries_both_ways() {
+        let mut rig = Rig::new();
+        let [_, osc, filter, env, vca, _] = voice(&mut rig);
+        let lfo = rig.add("mod.lfo", pos2(0.0, 400.0));
+        let scope = rig.add("util.oscilloscope", pos2(900.0, 400.0));
+        let new = rig.group(&[osc, filter, env, vca], "Voice");
+        let index = GroupIndex::of(&rig.editor.graph);
+        let actions = |rig: &Rig, node, side, name| jack_actions(&rig.editor.graph, &index, node, side, name);
+        assert_eq!(actions(&rig, filter, Side::Input, "Cutoff"), [JackAction::Show]);
+        // Fed by the oscillator inside, so it can't take a jack too
+        assert_eq!(actions(&rig, filter, Side::Input, "In"), [JackAction::Taken]);
+        // A knob with no jack has no port to show
+        assert!(actions(&rig, filter, Side::Input, "Drive").is_empty());
+        assert_eq!(actions(&rig, new.inputs, Side::Output, "Gate"), [JackAction::Remove]);
+
+        let graph = &mut rig.editor.graph;
+        assert_eq!(show_port(graph, filter, Side::Input, "Cutoff"), Some((GroupId(1000), "Cutoff".to_string())));
+        assert_eq!(show_port(graph, env, Side::Output, "Out"), Some((GroupId(1000), "Out 2".to_string())));
+        let names = |jacks: Vec<Jack>| jacks.into_iter().map(|j| j.name).collect::<Vec<_>>();
+        assert_eq!(names(input_jacks(graph, new.node)), ["V/Oct", "Gate", "Cutoff"]);
+        assert_eq!(names(output_jacks(graph, new.node)), ["Out", "Out 2"]);
+        assert_eq!(names(output_jacks(graph, new.inputs)), ["V/Oct", "Gate", "Cutoff"]);
+        assert_eq!(names(input_jacks(graph, new.outputs)), ["Out", "Out 2"]);
+
+        // Plugged in outside, they reach the modules inside
+        rig.connect(lfo, "Out", new.node, "Cutoff");
+        rig.connect(new.node, "Out 2", scope, "In 1");
+        let leaf = rig.leaf();
+        assert!(leaf.contains(&("LFO".into(), "Out".into(), "SVF Filter".into(), "Cutoff".into())), "{leaf:?}");
+        assert!(leaf.contains(&("ADSR Envelope".into(), "Out".into(), "Oscilloscope".into(), "In 1".into())), "{leaf:?}");
+        let index = GroupIndex::of(&rig.editor.graph);
+        assert_eq!(actions(&rig, filter, Side::Input, "Cutoff"), [JackAction::Hide]);
+        assert_eq!(actions(&rig, env, Side::Output, "Out"), [JackAction::Hide]);
+
+        // Hidden again, the jacks go with their cables outside
+        let graph = &mut rig.editor.graph;
+        assert_eq!(hide_port(graph, filter, Side::Input, "Cutoff"), Some((GroupId(1000), vec![("Cutoff".to_string(), true)])));
+        assert_eq!(remove_port_jack(graph, new.outputs, Side::Input, "Out 2"), Some((GroupId(1000), "Out 2".to_string())));
+        assert_eq!(names(input_jacks(graph, new.node)), ["V/Oct", "Gate"]);
+        assert_eq!(names(output_jacks(graph, new.node)), ["Out"]);
+        assert_eq!(graph[new.inputs].outputs.len(), 2);
+        assert_eq!(graph[new.outputs].inputs.len(), 1);
+        assert!(!rig.leaf().iter().any(|c| c.0 == "LFO" || c.2 == "Oscilloscope"));
+    }
+
+    #[test]
+    fn hiding_one_port_of_a_shared_jack_keeps_the_jack() {
+        let mut rig = Rig::new();
+        let [keys, osc, _, env, vca, _] = voice(&mut rig);
+        let env2 = rig.add("mod.adsr", pos2(400.0, 400.0));
+        rig.connect(keys, "Gate", env2, "Gate");
+        rig.connect(env2, "Out", vca, "CV");
+        let new = rig.group(&[osc, env, env2, vca], "Voice");
+        // The keyboard's Gate feeds both envelopes through one jack
+        let graph = &mut rig.editor.graph;
+        assert_eq!(hide_port(graph, env2, Side::Input, "Gate"), Some((GroupId(1000), vec![("Gate".to_string(), false)])));
+        assert!(graph[new.node].get_input("Gate").is_ok());
+        assert!(rig.leaf().contains(&("Keyboard".into(), "Gate".into(), "ADSR Envelope".into(), "Gate".into())));
+    }
+
+    #[test]
+    fn a_group_inside_a_group_can_show_its_jacks_on_the_outer_one() {
+        let mut rig = Rig::new();
+        let [_, osc, filter, env, vca, _] = voice(&mut rig);
+        let inner = rig.group(&[osc, filter], "Tone");
+        let outer = rig.group(&[inner.node, env, vca], "Voice");
+        // Tone's own jack can go, or be shown on Voice
+        let index = GroupIndex::of(&rig.editor.graph);
+        let graph = &mut rig.editor.graph;
+        let _ = show_port(graph, filter, Side::Input, "Cutoff").unwrap();
+        assert_eq!(jack_actions(graph, &index, inner.node, Side::Input, "Cutoff"), [JackAction::Remove, JackAction::Show]);
+        assert_eq!(show_port(graph, inner.node, Side::Input, "Cutoff"), Some((GroupId(1001), "Cutoff".to_string())));
+        assert!(graph[outer.node].get_input("Cutoff").is_ok());
+    }
+
+    #[test]
+    fn set_jacks_keeps_the_ports_that_stay() {
+        let mut rig = Rig::new();
+        let [_, osc, filter, env, vca, _] = voice(&mut rig);
+        let new = rig.group(&[osc, filter, env, vca], "Voice");
+        let graph = &mut rig.editor.graph;
+        let gate = graph[new.node].get_input("Gate").unwrap();
+        let jack = |name: &str, signal| Jack { name: name.into(), signal };
+        let jacks = [jack("V/Oct", SignalType::Control), jack("Gate", SignalType::Gate), jack("Cutoff", SignalType::Control)];
+        set_jacks(graph, new.node, Side::Input, &jacks);
+        assert_eq!(input_jacks(graph, new.node), jacks);
+        assert_eq!(graph[new.node].get_input("Gate").unwrap(), gate);
+        set_jacks(graph, new.node, Side::Input, &jacks[..1]);
+        assert_eq!(input_jacks(graph, new.node), jacks[..1]);
     }
 }

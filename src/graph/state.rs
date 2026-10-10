@@ -13,7 +13,7 @@ use crate::engine::midi_engine::MidiEvent;
 use crate::widgets::{LevelMeter, ModuleMeters};
 use super::annotation_ui::{self, View};
 use super::annotations::{self, Annotations};
-use super::groups::{Face, GroupId, Renaming};
+use super::groups::{Face, GroupId, JackAction, Renaming, Side};
 use super::signal_history::{OutputHistory, TraceShape};
 use super::{SynthDataType, SynthGraph, SynthNodeData, SynthValueType};
 use super::templates::SynthNodeTemplate;
@@ -207,6 +207,10 @@ pub struct SynthGraphState {
     /// before drawing.
     pub group_faces: HashMap<GroupId, Face>,
 
+    /// What each port on the shown level can do with groups' jacks, by node
+    /// and side, then port name. Set by the app before drawing.
+    pub jack_actions: HashMap<(NodeId, Side), Vec<(String, Vec<JackAction>)>>,
+
     /// A group being named, in a field on its face.
     pub renaming: Option<Renaming>,
 
@@ -257,6 +261,7 @@ impl Default for SynthGraphState {
             hidden: HashSet::new(),
             output_aliases: HashMap::new(),
             group_faces: HashMap::new(),
+            jack_actions: HashMap::new(),
             renaming: None,
             engine_cables: Default::default(),
         }
@@ -267,6 +272,14 @@ impl SynthGraphState {
     /// Create a new graph state.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// What a port's right-click menu can do with groups' jacks.
+    pub fn jack_actions(&self, node_id: NodeId, side: Side, port: &str) -> &[JackAction] {
+        self.jack_actions
+            .get(&(node_id, side))
+            .and_then(|ports| ports.iter().find(|(name, _)| name == port))
+            .map_or(&[], |(_, actions)| actions.as_slice())
     }
 
     /// Allocate a new engine node ID and map it to a graph node.
@@ -350,6 +363,7 @@ impl SynthGraphState {
         self.hidden.clear();
         self.output_aliases.clear();
         self.group_faces.clear();
+        self.jack_actions.clear();
         self.renaming = None;
         self.engine_cables.clear();
     }

@@ -19,7 +19,7 @@ use crate::dsp::ModuleCategory;
 use crate::engine::midi_engine::MidiEvent;
 use crate::modules::{LadderFilter, SvfFilter};
 use crate::widgets::{knob, led, KnobStyle, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, FrequencyPoint, SpectrumConfig, SpectrumStyle, piano, piano_keys, PianoConfig, PianoData, noise_display, NoiseDisplayConfig};
-use super::groups::{GroupId, NodeKind};
+use super::groups::{GroupId, NodeKind, Side};
 use super::hints::{self, Hint};
 use super::step_grid::{step_grid, StepPattern};
 use super::{SynthResponse, SynthValueType};
@@ -1033,7 +1033,8 @@ impl SynthNodeData {
     }
 
     /// A dropdown's or toggle's right-click menu, among the module's inputs
-    /// or on a group's face: pinning, and why there's no MIDI Learn.
+    /// or on a group's face: its jack on the group, if it has a jack,
+    /// pinning, and why there's no MIDI Learn.
     pub(super) fn switch_menu(
         &self,
         response: &egui::Response,
@@ -1046,10 +1047,19 @@ impl SynthNodeData {
         if self.parent.is_none() && !place.is_face() {
             return None;
         }
+        let jack_actions = match place {
+            KnobPlace::Module => user_state.jack_actions(node_id, Side::Input, param_name).to_vec(),
+            KnobPlace::Face { .. } => Vec::new(),
+        };
         let mut chosen = None;
         let menu = response.context_menu(|ui| {
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-            chosen = self.pin_items(ui, node_id, param_name, place);
+            if !jack_actions.is_empty() {
+                chosen = super::group_face::jack_items(ui, &jack_actions, node_id, Side::Input, param_name);
+                ui.separator();
+            }
+            let pinned = self.pin_items(ui, node_id, param_name, place);
+            chosen = chosen.take().or(pinned);
             ui.separator();
             ui.label(RichText::new("Only knobs can learn MIDI CCs").small().weak());
         });
@@ -1132,6 +1142,25 @@ pub(super) fn defer_output_label(
         data.get_temp_mut_or_default::<Vec<DeferredOutputLabel>>(deferred_labels_id(node_id))
             .push(label);
     });
+}
+
+/// An output's right-click menu, over its label at `rect`: shown on the
+/// group around it, or not, or the jack it is taken away.
+fn output_menu(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    node_id: egui_node_graph2::NodeId,
+    param_name: &str,
+    user_state: &mut super::SynthGraphState,
+) -> Vec<NodeResponse<SynthResponse, SynthNodeData>> {
+    if user_state.jack_actions(node_id, Side::Output, param_name).is_empty() {
+        return Vec::new();
+    }
+    let response = ui.interact(rect, egui::Id::new((node_id, param_name, "output menu")), egui::Sense::click());
+    super::group_face::port_menu(&response, node_id, Side::Output, param_name, user_state)
+        .map(NodeResponse::User)
+        .into_iter()
+        .collect()
 }
 
 /// Slides each deferred output label flush with the node's right edge,
@@ -2353,7 +2382,7 @@ impl NodeDataTrait for SynthNodeData {
             let (_, rect) = ui.allocate_space(text_size);
             let shapes = vec![egui::Shape::galley(rect.min, galley, text_color)];
             defer_output_label(ui, node_id, param_name, rect, shapes);
-            return Vec::new();
+            return output_menu(ui, rect, node_id, param_name, user_state);
         };
 
         // The count sits in a pill of the cable's color, between the label
@@ -2378,8 +2407,7 @@ impl NodeDataTrait for SynthNodeData {
             egui::Shape::galley(badge.min + pad, badge_galley, badge_text),
         ];
         defer_output_label(ui, node_id, param_name, rect, shapes);
-
-        Vec::new()
+        output_menu(ui, rect, node_id, param_name, user_state)
     }
 
     fn titlebar_color(

@@ -69,6 +69,14 @@ pub enum SynthResponse {
         param_name: String,
         levels: u8,
     },
+    /// Show a port on the group it's in as a new jack, unplug it from the
+    /// group's jack, or take away the jack it is.
+    Jack {
+        node_id: egui_node_graph2::NodeId,
+        side: super::groups::Side,
+        port: String,
+        action: super::groups::JackAction,
+    },
     /// Group the selection the node is part of (or just the node).
     GroupNode(egui_node_graph2::NodeId),
     /// Take a group apart onto the level it sits on.

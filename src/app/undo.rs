@@ -25,7 +25,7 @@ use egui_node_graph2::{NodeId, PanZoom};
 
 use crate::engine::{EngineCommand, NodeId as EngineNodeId};
 use crate::graph::annotations::{self, Annotation, AnnotationId};
-use crate::graph::groups::{self, GroupId, Jack, NodeKind};
+use crate::graph::groups::{self, GroupId, Jack, NodeKind, Side};
 use crate::graph::{port_mapping, SynthGraph, SynthGraphEditorState, SynthGraphState, SynthNodeTemplate};
 use super::{editing, engine_sync};
 
@@ -481,8 +481,17 @@ impl Step {
                     data.pins = pins.clone();
                     data.file = file.clone();
                 }
-                Body::Group { name, .. } => groups::rename(&mut editor.graph, node_id, name),
-                Body::Jacks(_) => {}
+                Body::Group { name, inputs, outputs } => {
+                    groups::rename(&mut editor.graph, node_id, name);
+                    groups::set_jacks(&mut editor.graph, node_id, Side::Input, inputs);
+                    groups::set_jacks(&mut editor.graph, node_id, Side::Output, outputs);
+                }
+                // Inputs carries the input jacks as outputs, Outputs the reverse
+                Body::Jacks(jacks) => match diff.key {
+                    NodeKey::Inputs(_) => groups::set_jacks(&mut editor.graph, node_id, Side::Output, jacks),
+                    NodeKey::Outputs(_) => groups::set_jacks(&mut editor.graph, node_id, Side::Input, jacks),
+                    _ => {}
+                },
             }
             editor.graph[node_id].user_data.parent = after.parent;
             if moved(before.position, after.position) {
@@ -1534,6 +1543,68 @@ mod tests {
         assert!(undone.commands.is_empty());
         rig.undo();
         assert!(rig.editor.graph[filter].user_data.pins.is_empty());
+    }
+
+    #[test]
+    fn test_jacks_shown_and_removed_undo_with_their_cables() {
+        let mut rig = Rig::new();
+        let (osc, filter, out) = voice(&mut rig);
+        let lfo = rig.add("mod.lfo", pos2(100.0, 400.0));
+        let new = group(&mut rig, &[osc, filter], "Tone");
+        rig.record();
+        let jacks = |rig: &Rig| groups::input_jacks(&rig.editor.graph, new.node).into_iter().map(|j| j.name).collect::<Vec<_>>();
+        let leaf = |rig: &Rig| groups::leaf_cables(&rig.editor.graph).len();
+        assert!(jacks(&rig).is_empty());
+
+        // A new jack for the filter's Cutoff, with the LFO plugged into it
+        let (undone, _) = round_trip(&mut rig, |rig| {
+            groups::show_port(&mut rig.editor.graph, filter, Side::Input, "Cutoff").unwrap();
+            rig.history.name_next("Add jack Cutoff to Tone");
+        });
+        assert_eq!(undone.label, "Add jack Cutoff to Tone");
+        assert_eq!(jacks(&rig), ["Cutoff"]);
+        rig.connect(lfo, "Out", new.node, "Cutoff");
+        rig.record();
+        let cables = leaf(&rig);
+
+        // Taking it away undoes with the LFO still plugged in outside
+        round_trip(&mut rig, |rig| {
+            groups::remove_port_jack(&mut rig.editor.graph, new.inputs, Side::Output, "Cutoff").unwrap();
+        });
+        assert!(jacks(&rig).is_empty());
+        assert_eq!(leaf(&rig), cables - 1);
+        rig.undo();
+        assert_eq!(jacks(&rig), ["Cutoff"]);
+        assert_eq!(leaf(&rig), cables);
+
+        // An output jack beside the one grouping made, hidden from inside
+        let outputs = |rig: &Rig| groups::output_jacks(&rig.editor.graph, new.node).into_iter().map(|j| j.name).collect::<Vec<_>>();
+        round_trip(&mut rig, |rig| {
+            groups::show_port(&mut rig.editor.graph, filter, Side::Output, "HighPass").unwrap();
+        });
+        assert_eq!(outputs(&rig), ["LowPass", "HighPass"]);
+        rig.connect(new.node, "HighPass", out, "Right");
+        rig.record();
+        let cables = leaf(&rig);
+        round_trip(&mut rig, |rig| {
+            groups::hide_port(&mut rig.editor.graph, filter, Side::Output, "HighPass").unwrap();
+        });
+        assert_eq!(outputs(&rig), ["LowPass"]);
+        rig.undo();
+        assert_eq!(outputs(&rig), ["LowPass", "HighPass"]);
+        assert_eq!(leaf(&rig), cables);
+
+        // Removing the first output jack moves the second up a slot, and
+        // undo puts both back where they were, cables and all
+        round_trip(&mut rig, |rig| {
+            groups::remove_port_jack(&mut rig.editor.graph, new.node, Side::Output, "LowPass").unwrap();
+        });
+        assert_eq!(outputs(&rig), ["HighPass"]);
+        assert_eq!(leaf(&rig), cables - 1);
+        let undone = rig.undo();
+        assert_eq!(sound_changes(&undone.commands), 1, "{:?}", undone.commands);
+        assert_eq!(outputs(&rig), ["LowPass", "HighPass"]);
+        assert_eq!(leaf(&rig), cables);
     }
 
     #[test]

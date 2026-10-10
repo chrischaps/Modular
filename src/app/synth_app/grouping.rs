@@ -10,7 +10,7 @@
 use eframe::egui::{self, vec2, FontId, RichText};
 use egui_node_graph2::NodeId;
 
-use crate::graph::groups::{self, Face, GroupIndex, Renaming};
+use crate::graph::groups::{self, Face, GroupIndex, JackAction, Renaming, Side};
 use crate::graph::{annotation_ui, GroupId, SynthValueType};
 use crate::persistence::{capture_level, Patch};
 use super::super::editing;
@@ -59,6 +59,27 @@ impl SynthApp {
                 }
             }
         }
+
+        // What each port on show can do with groups' jacks, for its menu
+        let shown = graph.nodes.iter().filter(|(id, _)| !hidden.contains(id));
+        self.user_state.jack_actions = shown
+            .filter(|(_, node)| level.is_some() || !node.user_data.is_module())
+            .flat_map(|(node_id, node)| {
+                let ports = |side: Side, names: Vec<&String>| {
+                    let actions: Vec<(String, Vec<JackAction>)> = names
+                        .into_iter()
+                        .map(|name| (name.clone(), groups::jack_actions(graph, &index, node_id, side, name)))
+                        .filter(|(_, actions)| !actions.is_empty())
+                        .collect();
+                    ((node_id, side), actions)
+                };
+                [
+                    ports(Side::Input, node.inputs.iter().map(|(name, _)| name).collect()),
+                    ports(Side::Output, node.outputs.iter().map(|(name, _)| name).collect()),
+                ]
+            })
+            .filter(|(_, actions)| !actions.is_empty())
+            .collect();
 
         // The faces of the groups on show
         let positions = &self.graph_state.node_positions;
@@ -225,6 +246,44 @@ impl SynthApp {
         let (verb, done) = if levels > before { ("Pin", "on its group's face") } else { ("Unpin", "off the group's face") };
         self.history.name_next(format!("{verb} {what}"));
         self.status_message = Some(format!("{what} {done}"));
+    }
+
+    /// Does what a port's menu chose with groups' jacks: shows the port on
+    /// the group it's in as a new jack, unplugs it from the group's jack, or
+    /// takes away the jack it is.
+    pub(super) fn jack_action(&mut self, node_id: NodeId, side: Side, port: &str, action: JackAction) {
+        let graph = &mut self.graph_state.graph;
+        let group_name = |graph: &crate::graph::SynthGraph, id| {
+            GroupIndex::of(graph).node(id).map_or_else(String::new, |n| groups::name(graph, n).to_string())
+        };
+        let (undo, status) = match action {
+            JackAction::Show => {
+                let Some((id, jack)) = groups::show_port(graph, node_id, side, port) else { return };
+                let group = group_name(graph, id);
+                (format!("Add jack {jack} to {group}"), format!("{group} has a new jack, {jack}"))
+            }
+            JackAction::Hide => {
+                let Some((id, jacks)) = groups::hide_port(graph, node_id, side, port) else { return };
+                let group = group_name(graph, id);
+                let module = graph.nodes.get(node_id).map_or("", |n| n.user_data.display_name.as_str());
+                match jacks.as_slice() {
+                    [(jack, true)] => (format!("Remove jack {jack} from {group}"), format!("{group} no longer has a {jack} jack")),
+                    [(jack, false)] => (
+                        format!("Unplug {module} {port} from {group}"),
+                        format!("{module} {port} is unplugged from {group}'s {jack} jack, which still feeds the rest"),
+                    ),
+                    _ => (format!("Remove jacks from {group}"), format!("{module} {port} is no longer shown on {group}")),
+                }
+            }
+            JackAction::Remove => {
+                let Some((id, jack)) = groups::remove_port_jack(graph, node_id, side, port) else { return };
+                let group = group_name(graph, id);
+                (format!("Remove jack {jack} from {group}"), format!("{group} no longer has a {jack} jack"))
+            }
+            JackAction::Taken => return,
+        };
+        self.history.name_next(undo);
+        self.status_message = Some(status);
     }
 
     /// Shows the inside of a group.

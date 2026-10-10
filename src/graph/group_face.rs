@@ -13,7 +13,7 @@ use egui::{vec2, Align2, Color32, FontId, Pos2, Rect, RichText, Sense, Stroke};
 use egui_node_graph2::{NodeId, NodeResponse};
 
 use crate::app::theme;
-use super::groups::{Control, FaceControl, NodeKind};
+use super::groups::{Control, FaceControl, JackAction, NodeKind, Side};
 use super::hints;
 use super::node_data::KnobPlace;
 use super::{SynthGraph, SynthGraphState, SynthNodeData, SynthResponse, SynthValueType};
@@ -94,6 +94,51 @@ fn group_menu(ui: &mut egui::Ui, node_id: NodeId, responses: &mut Responses) {
     item(ui, "Ungroup", "Ctrl+Alt+G", SynthResponse::UngroupNode(node_id));
     ui.separator();
     item(ui, "Delete", "Del", SynthResponse::DeleteNode(node_id));
+}
+
+/// A port's right-click menu, when it has anything to do with groups'
+/// jacks: on a module inside a group, on a group's node, or on its Inputs
+/// or Outputs. `response` is the port's label.
+pub fn port_menu(
+    response: &egui::Response,
+    node_id: NodeId,
+    side: Side,
+    port: &str,
+    user_state: &mut SynthGraphState,
+) -> Option<SynthResponse> {
+    let actions = user_state.jack_actions(node_id, side, port).to_vec();
+    if actions.is_empty() {
+        return None;
+    }
+    let mut chosen = None;
+    let menu = response.context_menu(|ui| {
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
+        chosen = jack_items(ui, &actions, node_id, side, port);
+    });
+    if menu.is_some() {
+        user_state.widget_context_menu_open = true;
+    }
+    chosen
+}
+
+/// The menu items for what a port can do with groups' jacks.
+pub fn jack_items(ui: &mut egui::Ui, actions: &[JackAction], node_id: NodeId, side: Side, port: &str) -> Option<SynthResponse> {
+    let mut chosen = None;
+    for &action in actions {
+        let (label, hint) = match action {
+            JackAction::Show => ("Show on group", "Give the group a jack for this port"),
+            JackAction::Taken => ("Show on group", "Something inside the group is plugged in here already"),
+            JackAction::Hide => ("Hide from group", "Unplug it from the group's jack. A jack left with nothing inside goes"),
+            JackAction::Remove => ("Remove jack", "Take this jack off the group, with its cables inside and out"),
+        };
+        let button = ui.add_enabled(action != JackAction::Taken, egui::Button::new(label));
+        let button = if action == JackAction::Taken { button.on_disabled_hover_text(hint) } else { button.on_hover_text(hint) };
+        if button.clicked() {
+            chosen = Some(SynthResponse::Jack { node_id, side, port: port.to_string(), action });
+            ui.close_menu();
+        }
+    }
+    chosen
 }
 
 /// Two cards, one behind the other: a group of modules.
