@@ -124,6 +124,7 @@ An off step keeps its settings, so turning it off and on again changes nothing e
 ## Related
 
 - [Roll Call](../../recipes/roll-call.md) – a full kit on one Trigger Sequencer, with a fill and crash every four bars
+- [From One Sine](../../recipes/from-one-sine.md) – two Trigger Sequencers, a step every four bars, as a whole song's score: each lane's Vel rides a fader
 - [Drum](../sources/drum.md) – the voice each lane plays
 - [Step Sequencer](./sequencer.md) – notes rather than hits
 - [Clock](../modulation/clock.md) – tempo and swing

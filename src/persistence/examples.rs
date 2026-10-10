@@ -120,6 +120,12 @@ pub const EXAMPLES: &[Example] = &[
         description: "Plays itself: Logic splits a three-against-four rhythm between two gamelan-style parts that interlock into one fast melody, while a slow tide brings the second part in and out",
         json: include_str!("../../patches/interlock.json"),
     },
+    Example {
+        name: "From One Sine",
+        file_name: "from-one-sine.json",
+        description: "Plays itself, start to finish: a four-and-a-half-minute song in 95 modules, scored by two Trigger Sequencers that ride the faders. A lone sine's motif grows into the whole rack, and a Looper brings it back reversed",
+        json: include_str!("../../patches/from-one-sine.json"),
+    },
 ];
 
 /// The example opened when the app starts with nothing else to open.

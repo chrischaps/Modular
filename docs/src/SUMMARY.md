@@ -67,3 +67,4 @@
 - [Roll Call](./recipes/roll-call.md)
 - [Afterglow](./recipes/afterglow.md)
 - [Interlock](./recipes/interlock.md)
+- [From One Sine](./recipes/from-one-sine.md)
