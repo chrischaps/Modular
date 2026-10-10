@@ -2,8 +2,8 @@
 
 A good voice (an oscillator, a filter, a VCA and an envelope) is the same few modules in patch after patch, and three voices side by side turn into a wall of cables. A **group** collapses modules into one node of your own. It has jacks where cables crossed into and out of the selection, and the controls you choose to keep on its face. Open it to work on what's inside. Save it to **My Modules**, and it's in the add menu of every patch.
 
-![A group called Voice, playing, with four knobs on its face](../images/groups-outside.png)
-*Voice holds an envelope and a VCA. Its face shows them in miniature, with four of their knobs pinned.*
+![A group called Voice, playing, with a Wave dropdown and four knobs on its face](../images/groups-outside.png)
+*Voice holds an oscillator, an envelope and a VCA. Its face shows them in miniature, with the oscillator's **Wave** and four knobs pinned.*
 
 ## Making a group
 
