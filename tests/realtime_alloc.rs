@@ -9,7 +9,8 @@
 //! midway), the output is recorded (one take stopped and a new one
 //! started midway), its Sampler is given new recordings while it plays
 //! them, and its Looper is taken round its whole cycle again and again:
-//! record, overdub, undo, redo, stop, restart, clear. Edits are compiled on the "UI" side (outside the counted
+//! record, overdub, undo, redo, stop, restart, clear, while its loop is
+//! copied out to be saved and a saved loop is loaded back into it. Edits are compiled on the "UI" side (outside the counted
 //! region); installing them happens inside it. The input device's callback
 //! is counted too.
 
@@ -18,7 +19,7 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use soba::dsp::SampleData;
+use soba::dsp::{SampleData, Snapshot, SnapshotOutcome};
 
 use soba::engine::{
     create_module_registry, input_channel, input_channel_same_clock, AudioProcessor, EngineChannels, EngineCommand, EngineEvent, MidiEvent,
@@ -183,6 +184,14 @@ fn audio_callback_never_allocates() {
     // (round within each 120, footswitch): Rec, Stop, Undo, Clear
     let presses = [(5, 0), (30, 0), (45, 0), (70, 0), (78, 2), (84, 2), (90, 1), (96, 1), (102, 0), (106, 2), (112, 3)];
     let mut looper_states = std::collections::HashSet::new();
+    // Its loop copied out to save, into room set aside here, and a saved
+    // loop loaded back into it while it runs
+    let saved_loop = |hz: f32| {
+        let samples: Vec<f32> = (0..30000).map(|n| (n as f32 * hz / 48000.0 * std::f32::consts::TAU).sin() * 0.3).collect();
+        Some(Arc::new(SampleData::stereo(samples.clone(), samples, 48000.0)))
+    };
+    let mut snapshots_done = 0;
+    let mut loops_loaded = 0;
 
     // Record the whole run: the tap copies every callback into its ring
     let takes = std::env::temp_dir().join("soba-realtime-alloc");
@@ -261,6 +270,13 @@ fn audio_callback_never_allocates() {
             ui.send_command(EngineCommand::LoadSample { node_id: sampler, sample: tone(220.0 + round as f32) });
             loads += 1;
         }
+        if round % 40 == 35 {
+            ui.request_snapshot(looper, Box::new(Snapshot::with_capacity(48000 * 4)));
+        }
+        if round % 240 == 115 {
+            ui.send_command(EngineCommand::LoadSample { node_id: looper, sample: saved_loop(110.0 + round as f32) });
+            loops_loaded += 1;
+        }
         if round % 50 == 25 {
             let (node_id, module_id) = nodes[round / 50 % nodes.len()];
             ui.send_command(EngineCommand::RemoveModule { node_id });
@@ -279,6 +295,12 @@ fn audio_callback_never_allocates() {
             midi.push(TimestampedMidiEvent::now(event)).unwrap();
         }
         ui.flush();
+        // Snapshots coming back are dropped here, off the audio thread
+        while let Some((_, snapshot)) = ui.take_snapshot() {
+            if snapshot.outcome() == SnapshotOutcome::Done {
+                snapshots_done += 1;
+            }
+        }
         for event in ui.drain_events() {
             if let EngineEvent::Readout { node_id, readout } = event {
                 if node_id == looper {
@@ -313,6 +335,8 @@ fn audio_callback_never_allocates() {
     assert!(monitor.device_latency().is_some(), "the input's timestamps were taken in");
     assert!(output.iter().all(|s| s.is_finite()));
     assert!(loads > 25);
+    assert!(snapshots_done > 5, "{snapshots_done} snapshots of a loop came back");
+    assert!(loops_loaded >= 4);
     for state in ["Recording", "Playing", "Overdubbing", "Stopped", "Empty"] {
         assert!(looper_states.contains(state), "the Looper never reached {state}: {looper_states:?}");
     }

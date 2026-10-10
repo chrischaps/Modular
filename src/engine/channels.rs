@@ -11,6 +11,8 @@
 //! - **retired inputs** (audio -> UI): audio input feeds, likewise
 //! - **retired samples** (audio -> UI): recordings modules have let go of,
 //!   so a long file is never freed in the audio callback
+//! - **snapshots** (audio -> UI): copies of Loopers' loops, made into room
+//!   the UI set aside, coming back to be saved
 //! - **events** (audio -> UI): metering, monitor values, status
 //! - **scope frames** (audio -> UI): oscilloscope captures, by value
 //!
@@ -25,8 +27,8 @@ use rtrb::{Consumer, Producer, PushError, RingBuffer};
 
 use super::audio_graph::AudioGraph;
 use super::audio_processor::create_module_registry;
-use super::commands::{AudioMessage, EngineCommand, EngineEvent, ScopeFrame};
-use crate::dsp::SampleData;
+use super::commands::{AudioMessage, EngineCommand, EngineEvent, NodeId, ScopeFrame};
+use crate::dsp::{SampleData, Snapshot};
 use super::graph_plan::GraphPlan;
 use super::audio_input::InputFeed;
 use super::recorder::RecordTap;
@@ -53,6 +55,11 @@ const RETIRED_INPUT_BUFFER_SIZE: usize = 4;
 /// Recordings that can be on their way back at once. Each load sends at
 /// most one back, and a Sampler fading out of an old recording one more.
 const RETIRED_SAMPLE_BUFFER_SIZE: usize = 64;
+
+/// Loop snapshots that can be on their way to the audio thread, or back,
+/// at once: more than a patch has Loopers. The audio thread holds as many
+/// while it copies them.
+pub const MAX_SNAPSHOTS: usize = 64;
 
 /// Oscilloscope captures that can wait for the UI.
 const SCOPE_FRAME_BUFFER_SIZE: usize = 8;
@@ -142,6 +149,7 @@ impl EngineChannels {
         let (retired_tap_tx, retired_tap_rx) = RingBuffer::new(RETIRED_TAP_BUFFER_SIZE);
         let (retired_input_tx, retired_input_rx) = RingBuffer::new(RETIRED_INPUT_BUFFER_SIZE);
         let (retired_sample_tx, retired_sample_rx) = RingBuffer::new(RETIRED_SAMPLE_BUFFER_SIZE);
+        let (snapshot_tx, snapshot_rx) = RingBuffer::new(MAX_SNAPSHOTS);
 
         // Placeholder settings until an AudioProcessor reports the real ones
         let graph = AudioGraph::with_registry(44100.0, 256, create_module_registry());
@@ -156,6 +164,8 @@ impl EngineChannels {
                 retired_tap_rx,
                 retired_input_rx,
                 retired_sample_rx,
+                snapshot_rx,
+                snapshots_out: 0,
                 event_rx,
                 scope_rx,
                 config: Arc::clone(&config),
@@ -173,6 +183,7 @@ impl EngineChannels {
                 retired_tap_tx,
                 retired_input_tx,
                 retired_sample_tx,
+                snapshot_tx,
                 event_tx,
                 scope_tx,
                 config,
@@ -205,6 +216,9 @@ pub struct UiHandle {
     retired_tap_rx: Consumer<RecordTap>,
     retired_input_rx: Consumer<InputFeed>,
     retired_sample_rx: Consumer<Arc<SampleData>>,
+    snapshot_rx: Consumer<(NodeId, Box<Snapshot>)>,
+    /// Snapshots asked for and not yet back.
+    snapshots_out: usize,
     event_rx: Consumer<EngineEvent>,
     scope_rx: Consumer<ScopeFrame>,
     config: Arc<AudioConfig>,
@@ -216,8 +230,9 @@ pub struct UiHandle {
     /// Recording starts and stops, and audio inputs connected and
     /// disconnected, that didn't fit in the queue yet, in order.
     unsent_handoffs: Vec<AudioMessage>,
-    /// Recordings for running modules, waiting until the plans holding
-    /// those modules are sent, and then for room in the queue, in order.
+    /// Recordings for running modules, and snapshots of them, waiting
+    /// until the plans holding those modules are sent, and then for room in
+    /// the queue, in order.
     unsent_samples: Vec<AudioMessage>,
     /// Plans sent (or held by the audio thread) and not yet returned.
     plans_in_flight: usize,
@@ -383,6 +398,32 @@ impl UiHandle {
         !self.graph.is_dirty()
     }
 
+    /// Asks the audio thread for a copy of a module's recording (a Looper's
+    /// loop), into `snapshot`, made with room enough off the audio thread.
+    /// It comes back through [`take_snapshot`](Self::take_snapshot), filled
+    /// or saying why not, after the next [`flush`](Self::flush)es deliver
+    /// it. Returns false, and keeps nothing, if too many are already out.
+    pub fn request_snapshot(&mut self, node_id: NodeId, snapshot: Box<Snapshot>) -> bool {
+        if self.snapshots_out >= MAX_SNAPSHOTS {
+            return false;
+        }
+        self.snapshots_out += 1;
+        self.unsent_samples.push(AudioMessage::SnapshotLoop { node_id, snapshot });
+        true
+    }
+
+    /// A snapshot the audio thread has finished, if one is back.
+    pub fn take_snapshot(&mut self) -> Option<(NodeId, Box<Snapshot>)> {
+        let back = self.snapshot_rx.pop().ok()?;
+        self.snapshots_out = self.snapshots_out.saturating_sub(1);
+        Some(back)
+    }
+
+    /// Snapshots asked for and not yet taken back.
+    pub fn snapshots_out(&self) -> usize {
+        self.snapshots_out
+    }
+
     /// Sends any recordings waiting for room in the queue. Returns true if
     /// none are left waiting.
     fn send_samples(&mut self) -> bool {
@@ -399,6 +440,13 @@ impl UiHandle {
     /// The UI-side graph: the patch as the engine will play it.
     pub fn graph(&self) -> &AudioGraph {
         &self.graph
+    }
+
+    /// Notes that a module already holds `sample`, without sending it: a
+    /// Looper whose loop was just saved as that file. See
+    /// [`AudioGraph::note_sample`].
+    pub fn note_sample(&mut self, node_id: NodeId, sample: Option<Arc<SampleData>>) {
+        self.graph.note_sample(node_id, sample);
     }
 
     /// Receive an event from the audio engine.
@@ -438,6 +486,7 @@ pub struct EngineHandle {
     retired_tap_tx: Producer<RecordTap>,
     retired_input_tx: Producer<InputFeed>,
     retired_sample_tx: Producer<Arc<SampleData>>,
+    snapshot_tx: Producer<(NodeId, Box<Snapshot>)>,
     event_tx: Producer<EngineEvent>,
     scope_tx: Producer<ScopeFrame>,
     config: Arc<AudioConfig>,
@@ -497,6 +546,18 @@ impl EngineHandle {
         if let Err(PushError::Full(sample)) = self.retired_sample_tx.push(sample) {
             debug_assert!(false, "retired sample queue full");
             drop(sample);
+        }
+    }
+
+    /// Hands a finished snapshot back to the UI.
+    ///
+    /// REAL-TIME SAFE: the UI has at most [`MAX_SNAPSHOTS`] out, so there
+    /// is always room. Should that ever fail, it's dropped here rather
+    /// than lost.
+    pub fn return_snapshot(&mut self, node_id: NodeId, snapshot: Box<Snapshot>) {
+        if let Err(PushError::Full(back)) = self.snapshot_tx.push((node_id, snapshot)) {
+            debug_assert!(false, "snapshot queue full");
+            drop(back);
         }
     }
 
@@ -594,6 +655,12 @@ mod tests {
                         engine.retire_sample(old);
                     }
                     seen.push("sample");
+                }
+                AudioMessage::SnapshotLoop { node_id, mut snapshot } => {
+                    let mut budget = usize::MAX;
+                    current.fill_snapshot(node_id, &mut snapshot, &mut budget);
+                    engine.return_snapshot(node_id, snapshot);
+                    seen.push("snapshot");
                 }
             }
         }

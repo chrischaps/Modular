@@ -6,7 +6,7 @@
 use super::context::{ProcessContext, TransportState};
 use super::parameter::ParameterDefinition;
 use super::port::PortDefinition;
-use super::sample::SampleData;
+use super::sample::{SampleData, Snapshot, SnapshotOutcome};
 use super::SignalBuffer;
 use egui::Color32;
 use egui_node_graph2::CategoryTrait;
@@ -44,7 +44,7 @@ pub struct MeterLevels {
 }
 
 /// How many values a [`Readout`] carries.
-pub const MAX_READOUT: usize = 8;
+pub const MAX_READOUT: usize = 9;
 
 /// Live values a module shows on its node that aren't signals or meters: a
 /// Clock's received tempo and where it is in the bar, say. Fixed-size, so
@@ -385,6 +385,22 @@ pub trait DspModule: Send + 'static {
     /// dropped off the audio thread. Asked after every callback.
     fn take_retired_sample(&mut self) -> Option<Arc<SampleData>> {
         None
+    }
+
+    /// Work a module does a piece at a time between blocks, whether or not
+    /// the transport runs: a Looper copying in a loop it was given. Uses up
+    /// to `budget` frames of copying, taking off what it used. Called on
+    /// the audio thread after every callback's messages, or on the UI side
+    /// with no limit, for a module not yet handed to it.
+    fn background(&mut self, _budget: &mut usize) {}
+
+    /// Copies the recording the module holds (a Looper's loop, as heard)
+    /// into `snapshot`, up to `budget` frames at a time, taking off what it
+    /// used. Returns true once the snapshot is finished, whatever its
+    /// outcome. Called after every callback's messages until then.
+    fn fill_snapshot(&mut self, snapshot: &mut Snapshot, _budget: &mut usize) -> bool {
+        snapshot.finish(SnapshotOutcome::Unsupported, 0);
+        true
     }
 }
 

@@ -57,6 +57,10 @@ Once the loop is playing, tap **Rec** to overdub (the ring turns amber), play yo
 
 Turn **FB** down before an overdub to let the older layers fade as the new one goes on, so a loop can change gradually rather than only pile up.
 
+### Keeping your layers
+
+Your layers are part of the patch. Save it (an example has no file of its own, so **Save** asks where), and the loop goes into a `<patch name> loops` folder beside it. Open the patch tomorrow and the loop is there, stopped at the top: tap **Rec** to hear it and go on overdubbing from where you left off. What's kept is the loop as you hear it, so a layer you've undone stays out. See [Keeping the loop](../modules/utilities/looper.md#keeping-the-loop).
+
 ### Latency
 
 The status bar's **In** figure is the round trip from the input jack to your speakers, typically 20 to 50 ms. You play along with the loop you hear, and what you play arrives that long after the moment you were playing to. **Auto latency** writes each overdub that much earlier, so a strum on beat one lands on beat one. If layers still feel a hair late (your converters add delay no timestamp reports), trim with **Offset**.
@@ -94,3 +98,5 @@ The `render` tool can play a recording into the Audio Input and press the footsw
 ```text
 cargo run --release --bin render -- patches/live-looper.json out.wav --seconds 30 --input take.wav --cue cues.txt
 ```
+
+A copy saved with its loop renders that loop too: it opens stopped, so press **Rec** (or **Stop**) in the cues to start it.

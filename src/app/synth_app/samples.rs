@@ -1,4 +1,4 @@
-//! Samples in the editor: the files Samplers play.
+//! Samples in the editor: the files Samplers play, and Loopers' loops.
 //!
 //! A Sampler node names its file by key (see
 //! [`crate::persistence::sample_files`]), and that's all the editor edits:
@@ -8,6 +8,11 @@
 //! decoded and resampled to the engine's rate on this thread, whenever
 //! that isn't what it already has. A device that changes rate gets every
 //! recording again, resampled from the file's own.
+//!
+//! A Looper's file is its loop as last saved (see [`super::loops`]). The
+//! loop it holds is the player's, so it's only given the file when it's
+//! new to the patch (opened, pasted, brought back by undo), or when a
+//! change of rate has emptied it.
 //!
 //! Patch files keep paths relative to themselves where they can, so Save As
 //! copies samples from elsewhere into a folder beside the patch.
@@ -24,6 +29,7 @@ use egui_node_graph2::NodeId;
 use crate::engine::EngineCommand;
 use crate::graph::sample_shelf::DROPPED_PREFIX;
 use crate::graph::SynthNodeTemplate;
+use crate::modules::looper::LOOPER_ID;
 use crate::modules::sampler::SAMPLER_ID;
 use crate::persistence::sample_files::{self, SampleBase};
 use crate::persistence::{Patch, StagedNode};
@@ -107,8 +113,9 @@ impl SynthApp {
     }
 
     /// Gives every Sampler the recording its file names, at the engine's
-    /// rate, wherever that isn't what it has, and lets go of recordings no
-    /// node plays any more. Call once a frame, after the frame's edits.
+    /// rate, wherever that isn't what it has, and every new Looper the loop
+    /// its file holds; and lets go of recordings no node plays any more.
+    /// Call once a frame, after the frame's edits.
     pub(super) fn sync_samples(&mut self) {
         let samplers: Vec<(NodeId, Option<String>)> = self
             .graph_state
@@ -118,11 +125,31 @@ impl SynthApp {
             .filter(|(_, node)| node.user_data.module_id == SAMPLER_ID)
             .map(|(node_id, node)| (node_id, node.user_data.file.clone()))
             .collect();
+        let loopers: Vec<(NodeId, String)> = self
+            .graph_state
+            .graph
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.user_data.module_id == LOOPER_ID)
+            .filter_map(|(node_id, node)| Some((node_id, node.user_data.file.clone()?)))
+            .collect();
 
         let mut loads = Vec::new();
         if let Some(handle) = self.ui_handle.as_ref() {
             let graph = handle.graph();
             let rate = graph.sample_rate();
+            for (node_id, key) in &loopers {
+                let Some(engine_id) = self.user_state.get_engine_node_id(*node_id) else { continue };
+                let wanted = match graph.sample(engine_id) {
+                    // Not yet on the audio thread: it's given the loop at once
+                    None => graph.is_fresh(engine_id),
+                    // A change of rate emptied it: the loop as last saved comes back
+                    Some(has) => has.sample_rate() != rate,
+                };
+                if let Some(sample) = wanted.then(|| self.user_state.samples.playing(key, rate)).flatten() {
+                    loads.push(EngineCommand::LoadSample { node_id: engine_id, sample: Some(sample) });
+                }
+            }
             for (node_id, key) in &samplers {
                 let Some(engine_id) = self.user_state.get_engine_node_id(*node_id) else { continue };
                 if !graph.contains_module(engine_id) {
@@ -148,7 +175,8 @@ impl SynthApp {
             self.send_command(command);
         }
 
-        let in_use: HashSet<String> = samplers.into_iter().filter_map(|(_, key)| key).collect();
+        let in_use: HashSet<String> =
+            samplers.into_iter().filter_map(|(_, key)| key).chain(loopers.into_iter().map(|(_, key)| key)).collect();
         self.user_state.samples.retain(|key| in_use.contains(key));
     }
 
@@ -162,20 +190,46 @@ impl SynthApp {
         for node in nodes {
             let Some(data) = self.graph_state.graph.nodes.get_mut(node.graph_id).map(|n| &mut n.user_data) else { continue };
             let Some(saved) = data.file.clone() else { continue };
+            let looper = data.module_id == LOOPER_ID;
             let key = sample_files::resolve(&saved, base);
             data.file = Some(key.clone());
             if !checked.insert(key.clone()) {
                 continue;
             }
             match self.user_state.samples.load(&key) {
-                Ok(shelved) if shelved.truncated => {
+                Ok(shelved) if shelved.truncated && !looper => {
                     warnings.push(format!("Sample {saved} is longer than the 5 minutes a Sampler keeps, and was cut"));
                 }
                 Ok(_) => {}
+                Err(e) if looper => warnings.push(format!("Couldn't load loop {saved}: {e}. The Looper opens empty")),
                 Err(e) => warnings.push(format!("Couldn't load sample {saved}: {e}")),
             }
         }
         warnings
+    }
+
+    /// Saves the Loopers' loops beside `path` (see [`SynthApp::save_loops`])
+    /// and returns the patch to save there, with whatever went wrong. The
+    /// browser keeps no loops.
+    pub(super) fn patch_with_loops(&mut self, name: &str, path: &Path) -> (Patch, Vec<String>) {
+        #[cfg(not(target_arch = "wasm32"))]
+        let loops = self.save_loops(path);
+        #[cfg(target_arch = "wasm32")]
+        let loops = super::loops::LoopsSaved::default();
+        let mut patch = self.patch_for_file(name, path);
+        if !loops.left_out.is_empty() {
+            // Declined: saved without them
+            fn leave_out(nodes: &mut [crate::persistence::NodeData], groups: &mut [crate::persistence::GroupData], ids: &[u64]) {
+                for node in nodes.iter_mut().filter(|node| ids.contains(&node.id)) {
+                    node.file = None;
+                }
+                for group in groups {
+                    leave_out(&mut group.nodes, &mut group.groups, ids);
+                }
+            }
+            leave_out(&mut patch.nodes, &mut patch.groups, &loops.left_out);
+        }
+        (patch, loops.problems)
     }
 
     /// The patch as it will be saved at `path`: sample paths beside or

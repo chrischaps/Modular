@@ -225,6 +225,13 @@ impl Snapshot {
         snapshot
     }
 
+    /// Records a file a save gave a module, so it isn't mistaken for an edit.
+    fn set_file(&mut self, key: EngineNodeId, to: Option<String>) {
+        if let Some(NodeState { body: Body::Module { file, .. }, .. }) = self.nodes.get_mut(&NodeKey::Module(key)) {
+            *file = to;
+        }
+    }
+
     /// Records a value MIDI CC set, so it isn't mistaken for an edit.
     fn set_param(&mut self, key: EngineNodeId, param_index: usize, value: f32) {
         if let Some(NodeState { body: Body::Module { params, .. }, .. }) = self.nodes.get_mut(&NodeKey::Module(key)) {
@@ -307,6 +314,17 @@ impl NodeDiff {
 }
 
 impl Step {
+    /// Gives a module `file` on both sides of the step.
+    fn set_file(&mut self, key: EngineNodeId, to: &Option<String>) {
+        for diff in self.nodes.iter_mut().filter(|diff| diff.key == NodeKey::Module(key)) {
+            for state in [&mut diff.before, &mut diff.after].into_iter().flatten() {
+                if let Body::Module { file, .. } = &mut state.body {
+                    file.clone_from(to);
+                }
+            }
+        }
+    }
+
     /// What changed from `before` to `after`, or `None` if nothing did.
     pub fn between(before: &Snapshot, after: &Snapshot) -> Option<Self> {
         let keys: BTreeSet<NodeKey> = before.nodes.keys().chain(after.nodes.keys()).copied().collect();
@@ -824,6 +842,17 @@ impl History {
     /// Notes a value set by MIDI CC: playing a controller isn't an edit.
     pub fn absorb_param(&mut self, key: EngineNodeId, param_index: usize, value: f32) {
         self.baseline.set_param(key, param_index, value);
+    }
+
+    /// Notes a file a save gave a module (a Looper's loop, written beside
+    /// the patch). Keeping the loop isn't an edit to undo, so every step
+    /// takes the module as having it: undoing one never puts back a file
+    /// the loop is no longer in.
+    pub fn absorb_file(&mut self, key: EngineNodeId, file: Option<String>) {
+        self.baseline.set_file(key, file.clone());
+        for step in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            step.set_file(key, &file);
+        }
     }
 
     /// Undoes the last step, if there is one.
@@ -1550,5 +1579,30 @@ mod tests {
         assert_eq!(undone.level, id);
         let redone = rig.redo();
         assert_eq!(redone.level, id);
+    }
+
+    #[test]
+    fn test_a_saved_loop_file_is_not_an_edit_and_undo_keeps_it() {
+        let mut rig = Rig::new();
+        let looper = rig.add("util.looper", pos2(0.0, 0.0));
+        rig.record();
+        let key = rig.engine_id(looper);
+        rig.set(looper, "Feedback", 0.5);
+        rig.record();
+        let steps = rig.history.undo.len();
+
+        // A save points the Looper at its loop's file
+        rig.editor.graph[looper].user_data.file = Some("C:/song loops/Looper 1.wav".into());
+        rig.history.absorb_file(key, Some("C:/song loops/Looper 1.wav".into()));
+        rig.record();
+        assert_eq!(rig.history.undo.len(), steps, "no step");
+
+        // Undoing the knob, or the Looper's arrival and back, keeps the file
+        rig.undo();
+        assert_eq!(rig.param(looper, "Feedback"), 1.0);
+        assert_eq!(rig.editor.graph[looper].user_data.file.as_deref(), Some("C:/song loops/Looper 1.wav"));
+        rig.undo();
+        rig.redo();
+        assert_eq!(rig.editor.graph[rig.node(key)].user_data.file.as_deref(), Some("C:/song loops/Looper 1.wav"));
     }
 }

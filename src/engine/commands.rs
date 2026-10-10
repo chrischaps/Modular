@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::dsp::{MeterLevels, OutputLevels, Readout, SampleData, SignalBuffer, MAX_CHANNELS};
+use crate::dsp::{MeterLevels, OutputLevels, Readout, SampleData, SignalBuffer, Snapshot, MAX_CHANNELS};
 use crate::modules::oscilloscope::SCOPE_BUFFER_SIZE;
 
 use super::audio_input::InputFeed;
@@ -161,6 +161,9 @@ pub enum AudioMessage {
     /// Give a running module a recording to play, or take its away. The
     /// recording it had goes back to the UI to be dropped.
     LoadSample { node_id: NodeId, sample: Option<Arc<SampleData>> },
+    /// Copy a module's recording (a Looper's loop) into room the UI set
+    /// aside, a piece each callback, and hand it back when it's done.
+    SnapshotLoop { node_id: NodeId, snapshot: Box<Snapshot> },
 }
 
 /// One oscilloscope capture, sent from the audio thread by value so that

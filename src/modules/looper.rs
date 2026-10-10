@@ -32,6 +32,20 @@
 //! goes on into what was really played next. Every overdub punches in and
 //! out over the same few milliseconds, and stopping, clearing and undoing
 //! fade rather than cut.
+//!
+//! # Keeping the loop
+//!
+//! A patch saves each Looper's loop as a WAV beside it. Saving copies the
+//! loop as heard off the audio thread a piece per callback, into room the
+//! UI set aside ([`DspModule::fill_snapshot`]), and opening the patch hands
+//! the file back through [`DspModule::load_sample`], copied into the tape
+//! a piece per callback too ([`DspModule::background`]), or all at once
+//! before the module reaches the audio thread. A loaded loop waits,
+//! Stopped at the top. The Looper counts every change to what it holds
+//! (the [`READOUT_EDITS`](Looper::READOUT_EDITS) readout), so the UI can
+//! tell a loop that needs saving again from one that doesn't.
+
+use std::sync::Arc;
 
 use crate::dsp::{
     connected_input,
@@ -42,7 +56,7 @@ use crate::dsp::{
     primitives::hermite,
     signal::SignalBuffer,
     smoothed_value::SmoothedValue,
-    ParameterDisplay, SignalType,
+    ParameterDisplay, SampleData, SignalType, Snapshot, SnapshotOutcome,
 };
 
 /// The Looper's module ID.
@@ -75,6 +89,14 @@ const SCAN_BUDGET: usize = 16384;
 /// How long a free take's ring takes to go round before it closes, at first:
 /// it doubles each time the take outgrows it.
 const FREE_SCALE_SECONDS: f32 = 4.0;
+
+/// How far a loaded loop may be from a whole number of bars of the clock
+/// and still be trimmed or padded to it, in seconds: resampling a file
+/// saved at another rate leaves it a frame or two off.
+const SNAP_SECONDS: f32 = 0.005;
+
+/// The change count wraps below this, so a readout's `f32` holds it exactly.
+const EDITS_WRAP: u32 = (1 << 24) - 1;
 
 /// The Speed menu, in saved order.
 pub const SPEEDS: &[&str] = &["½×", "1×", "2×"];
@@ -384,6 +406,19 @@ pub struct Looper {
     overview_due: i64,
     overview_ready: bool,
 
+    // Keeping the loop
+    /// Changes to the loop as heard since it was created or last loaded
+    /// (0): a take, a close, an overdub begun or ended, an undo, a clear.
+    edits: u32,
+    /// A loop being copied in, a piece at a time.
+    loading: Option<Arc<SampleData>>,
+    /// Frames of it copied so far.
+    loaded: usize,
+    /// A loop finished loading, to go back and be dropped off the audio thread.
+    retired: Option<Arc<SampleData>>,
+    /// A loaded loop not yet trimmed to whole bars of the clock.
+    snap_pending: bool,
+
     loop_level: SmoothedValue,
     dry_level: SmoothedValue,
     ports: Vec<PortDefinition>,
@@ -433,6 +468,11 @@ impl Looper {
             overview: [[0.0; OVERVIEW_SEGMENTS]; 2],
             overview_due: 0,
             overview_ready: false,
+            edits: 0,
+            loading: None,
+            loaded: 0,
+            retired: None,
+            snap_pending: false,
             loop_level: SmoothedValue::with_default_smoothing(1.0, sample_rate),
             dry_level: SmoothedValue::with_default_smoothing(1.0, sample_rate),
             ports: vec![
@@ -525,6 +565,9 @@ impl Looper {
     pub const READOUT_SCALE: usize = 6;
     /// How far writes land back, in milliseconds.
     pub const READOUT_OFFSET_MS: usize = 7;
+    /// Changes to the loop since the module was made or last given a loop
+    /// to load: 0 means it holds just what it was given.
+    pub const READOUT_EDITS: usize = 8;
 
     const GATE_THRESHOLD: f32 = 0.5;
 
@@ -541,6 +584,21 @@ impl Looper {
     /// Frame `i` of the loop as it's heard.
     pub fn loop_frame(&self, i: usize) -> [f32; 2] {
         self.tape.read(i, self.tape.layer_visible)
+    }
+
+    /// Changes to the loop since the module was made or last loaded.
+    pub fn edits(&self) -> u32 {
+        self.edits
+    }
+
+    /// Whether a loop it was given is still being copied in.
+    pub fn is_loading(&self) -> bool {
+        self.loading.is_some()
+    }
+
+    /// Notes a change to the loop as heard.
+    fn bump(&mut self) {
+        self.edits = self.edits % EDITS_WRAP + 1;
     }
 
     fn sample_frames(&self, seconds: f32) -> usize {
@@ -572,6 +630,8 @@ impl Looper {
     /// Starts a take now.
     fn start_take(&mut self, params: &[f32], context: &ProcessContext, clocked: bool) {
         self.finish_clear();
+        self.cancel_load();
+        self.bump();
         self.state = LoopState::Recording;
         self.speculating = false;
         self.elapsed = 0;
@@ -620,7 +680,10 @@ impl Looper {
             LoopState::Recording => self.request_close(context, clocked),
             LoopState::Playing if self.finishing => self.pending_rec = true,
             LoopState::Playing => self.begin_overdub(params, context),
-            LoopState::Overdubbing => self.state = LoopState::Playing,
+            LoopState::Overdubbing => {
+                self.state = LoopState::Playing;
+                self.bump();
+            }
             LoopState::Stopped => self.restart(),
         }
     }
@@ -665,6 +728,7 @@ impl Looper {
         if self.head == 0 && self.state == LoopState::Playing {
             self.start_pulse = self.sample_frames(START_PULSE_SECONDS);
         }
+        self.bump();
         self.mark_all_dirty();
     }
 
@@ -675,6 +739,7 @@ impl Looper {
         self.last_frame = None;
         self.last_segment = None;
         self.state = LoopState::Overdubbing;
+        self.bump();
     }
 
     /// Folds the last layer's passes into the display's rings, once it can
@@ -706,7 +771,11 @@ impl Looper {
                 self.stop_on_close = true;
                 self.request_close(context, clocked);
             }
-            LoopState::Playing | LoopState::Overdubbing => self.state = LoopState::Stopped,
+            LoopState::Playing => self.state = LoopState::Stopped,
+            LoopState::Overdubbing => {
+                self.state = LoopState::Stopped;
+                self.bump();
+            }
             LoopState::Stopped => self.restart(),
         }
     }
@@ -718,10 +787,12 @@ impl Looper {
             self.dub_gain = 0.0;
             self.last_frame = None;
             self.last_segment = None;
+            self.bump();
         }
         if self.len == 0 || !self.tape.has_layer {
             return;
         }
+        self.bump();
         self.tape.layer_visible = !self.tape.layer_visible;
         self.undo_fade = 1.0;
         for s in 0..OVERVIEW_SEGMENTS {
@@ -732,11 +803,13 @@ impl Looper {
     }
 
     fn tap_clear(&mut self) {
+        self.cancel_load();
         match self.state {
             LoopState::Empty => {}
             LoopState::Armed | LoopState::Recording => self.clear_now(),
             _ => {
                 // Fade the loop out, then forget it
+                self.bump();
                 self.state = LoopState::Empty;
                 self.clear_pending = true;
                 self.dub_gain = 0.0;
@@ -752,6 +825,9 @@ impl Looper {
     }
 
     fn clear_now(&mut self) {
+        if (self.len > 0 && !self.clear_pending) || self.state == LoopState::Recording {
+            self.bump();
+        }
         self.tape.clear();
         self.state = LoopState::Empty;
         self.len = 0;
@@ -774,6 +850,53 @@ impl Looper {
         self.rings_layer = [0; OVERVIEW_SEGMENTS];
         self.layers = 0;
         self.dirty = [0; OVERVIEW_SEGMENTS / 64];
+        self.snap_pending = false;
+    }
+
+    // ------------------------------------------------------------------
+    // Loading
+    // ------------------------------------------------------------------
+
+    /// Drops a loop still being copied in: something was recorded instead.
+    fn cancel_load(&mut self) {
+        if let Some(sample) = self.loading.take() {
+            self.retired = Some(sample);
+            self.loaded = 0;
+        }
+    }
+
+    /// The loop being loaded is all copied in: it waits, Stopped at the top,
+    /// as it was given.
+    fn finish_load(&mut self) {
+        self.retired = self.loading.take();
+        self.len = self.loaded.max(1);
+        self.tape.used = self.len;
+        self.loaded = 0;
+        self.state = LoopState::Stopped;
+        self.head = 0;
+        self.edits = 0;
+        self.snap_pending = true;
+        self.mark_all_dirty();
+    }
+
+    /// Trims or pads a loaded loop to the nearest whole number of bars of
+    /// `bar` frames, if it's within a few milliseconds of it: a file saved
+    /// at another rate comes back a frame or two off when resampled.
+    fn snap_to_bar(&mut self, bar: f64) {
+        let len = self.len;
+        let bars = (len as f64 / bar).round().max(1.0);
+        let target = ((bars * bar).round() as usize).clamp(1, self.max_frames);
+        if target == len || target.abs_diff(len) > self.sample_frames(SNAP_SECONDS) {
+            return;
+        }
+        // Frames added hold the last one, which a wrap would play next anyway
+        let last = self.tape.read(len - 1, false);
+        for i in len..target {
+            self.tape.record(i, last);
+        }
+        self.len = target;
+        self.tape.used = self.tape.used.max(target);
+        self.mark_all_dirty();
     }
 
     // ------------------------------------------------------------------
@@ -925,6 +1048,8 @@ impl DspModule for Looper {
             self.fade_frames = self.sample_frames(FADE_SECONDS);
             // Room past the longest loop for the pre-roll the seam fades into
             self.tape = Tape::with_capacity(self.max_frames + self.fade_frames + 1);
+            // A loop on its way in is at the old rate: it's sent again at the new one
+            self.cancel_load();
             self.clear_now();
             self.since_pulse = None;
             self.pulse_period = None;
@@ -955,6 +1080,14 @@ impl DspModule for Looper {
         };
         let clocked = connected_input(inputs, Self::PORT_CLOCK).is_some();
         self.bar = if clocked { self.bar_frames(context) } else { None };
+        if self.snap_pending {
+            if self.state != LoopState::Stopped {
+                self.snap_pending = false;
+            } else if let Some(bar) = self.bar.filter(|&bar| bar >= 1.0) {
+                self.snap_to_bar(bar);
+                self.snap_pending = false;
+            }
+        }
 
         let step = SPEED_STEPS[(params[Self::PARAM_SPEED].round().max(0.0) as usize).min(SPEED_STEPS.len() - 1)];
         let forward = params[Self::PARAM_REVERSE] < 0.5;
@@ -1003,7 +1136,7 @@ impl DspModule for Looper {
             if pulse && clocked {
                 match self.state {
                     LoopState::Armed => self.start_take(params, context, clocked),
-                    LoopState::Empty if !self.clear_pending => {
+                    LoopState::Empty if !self.clear_pending && self.loading.is_none() => {
                         // Capture from this pulse, in case a late tap wants it
                         self.speculating = true;
                         self.elapsed = 0;
@@ -1055,6 +1188,8 @@ impl DspModule for Looper {
                         self.mark_dirty(k);
                     } else {
                         self.finishing = false;
+                        // The seam is written: the loop has changed since it closed
+                        self.bump();
                         if self.pending_rec {
                             self.pending_rec = false;
                             self.tap_rec(params, context, clocked);
@@ -1219,6 +1354,7 @@ impl DspModule for Looper {
         v[Self::READOUT_SCALE] = self.ring_frames() as f32 / rate;
         let offset = if self.state == LoopState::Overdubbing { self.dub_offset } else { self.take_offset };
         v[Self::READOUT_OFFSET_MS] = offset as f32 / rate * 1000.0;
+        v[Self::READOUT_EDITS] = self.edits as f32;
         if let Some(bar) = self.bar.filter(|&bar| bar >= 1.0) {
             let frames = if self.state == LoopState::Recording { self.elapsed } else { self.len as u64 };
             v[Self::READOUT_BARS] = (frames as f64 / bar) as f32;
@@ -1233,6 +1369,69 @@ impl DspModule for Looper {
         self.overview_ready = false;
         let [peaks, rings] = &self.overview;
         Some((peaks, rings, false))
+    }
+
+    /// Takes a loop to hold, at the engine's rate: it's copied into the
+    /// tape a piece at a time (see [`background`](DspModule::background)),
+    /// and then waits, Stopped. Whatever was held is gone. `None` leaves
+    /// the loop alone: it's the player's, not the file's.
+    fn load_sample(&mut self, sample: Option<Arc<SampleData>>) -> Option<Arc<SampleData>> {
+        let sample = sample?;
+        if sample.is_empty() || sample.sample_rate() != self.sample_rate || self.tape.capacity() == 0 {
+            return Some(sample);
+        }
+        // Stop at once: what was playing isn't the loop any more
+        self.clear_now();
+        self.loaded = 0;
+        self.loading.replace(sample)
+    }
+
+    fn take_retired_sample(&mut self) -> Option<Arc<SampleData>> {
+        self.retired.take()
+    }
+
+    /// Copies the next piece of a loop being loaded.
+    fn background(&mut self, budget: &mut usize) {
+        let Some(sample) = self.loading.as_ref() else { return };
+        let frames = sample.frames().min(self.max_frames);
+        let end = frames.min(self.loaded + *budget);
+        let (left, right) = (sample.left(), sample.right());
+        for i in self.loaded..end {
+            self.tape.record(i, [left[i], right[i]]);
+        }
+        *budget -= end - self.loaded;
+        self.loaded = end;
+        if self.loaded == frames {
+            self.finish_load();
+        }
+    }
+
+    /// Copies the loop as heard, the last layer with it unless it's undone.
+    /// A take still recording isn't a loop yet, so there's nothing to keep.
+    /// The loop is copied as it stands when each piece is read, so one
+    /// snapshotted mid-overdub has the overdub as far as it had got.
+    fn fill_snapshot(&mut self, snapshot: &mut Snapshot, budget: &mut usize) -> bool {
+        if self.loading.is_some() {
+            snapshot.finish(SnapshotOutcome::Busy, self.edits);
+            return true;
+        }
+        if !snapshot.has_begun() {
+            let len = if self.state == LoopState::Empty { 0 } else { self.len };
+            if !snapshot.begin(len, self.sample_rate, self.edits) || len == 0 {
+                return true;
+            }
+        }
+        if self.len != snapshot.frames() || self.state == LoopState::Empty {
+            snapshot.finish(SnapshotOutcome::Changed, self.edits);
+            return true;
+        }
+        let start = snapshot.copied();
+        let count = (snapshot.frames() - start).min(*budget);
+        for i in start..start + count {
+            snapshot.push(self.loop_frame(i));
+        }
+        *budget -= count;
+        snapshot.is_finished()
     }
 }
 
@@ -1765,5 +1964,251 @@ mod tests {
         let (peaks, rings, _) = rig.looper.take_scope_data().unwrap();
         assert!((peaks[10] - 0.8).abs() < 1e-5 && (peaks[200] - 0.1).abs() < 1e-5, "{} {}", peaks[10], peaks[200]);
         assert!(rings[10..250].iter().all(|&r| r == 1.0), "one pass over the whole loop");
+    }
+
+    /// Copies the loop through a snapshot, `piece` frames per call as the
+    /// audio thread would, counting the calls.
+    fn snapshot_of(looper: &mut Looper, piece: usize) -> (Snapshot, usize) {
+        let mut snapshot = Snapshot::with_capacity(looper.loop_frames() + 10);
+        let mut calls = 1;
+        loop {
+            let mut budget = piece;
+            if looper.fill_snapshot(&mut snapshot, &mut budget) {
+                return (snapshot, calls);
+            }
+            assert_eq!(budget, 0, "a call stops short only when its budget runs out");
+            calls += 1;
+        }
+    }
+
+    #[test]
+    fn test_a_snapshot_is_the_loop_as_heard_without_an_undone_layer() {
+        let len = 12000;
+        let mut rig = Rig::new();
+        rig.rec(0);
+        rig.rec(len);
+        rig.run(2 * len, |t| [(t as f32 * 0.01).sin() * 0.4, (t as f32 * 0.013).cos() * 0.3]);
+        let base: Vec<[f32; 2]> = (0..len).map(|i| rig.looper.loop_frame(i)).collect();
+        rig.rec(2 * len + 100);
+        rig.rec(3 * len + 3000);
+        rig.run(2 * len, sine(330.0, 0.3));
+        let layered: Vec<[f32; 2]> = (0..len).map(|i| rig.looper.loop_frame(i)).collect();
+        assert_ne!(layered, base);
+
+        // A piece at a time, and the same as the loop, bit for bit
+        let (snapshot, calls) = snapshot_of(&mut rig.looper, 5000);
+        assert_eq!(calls, 3);
+        assert_eq!(snapshot.outcome(), SnapshotOutcome::Done);
+        assert_eq!(snapshot.edits(), rig.looper.edits());
+        let sample = snapshot.into_sample().unwrap();
+        assert!(sample.is_stereo());
+        assert_eq!(sample.sample_rate(), SR);
+        let saved: Vec<[f32; 2]> = (0..len).map(|i| [sample.left()[i], sample.right()[i]]).collect();
+        assert_eq!(saved, layered);
+
+        // Undone, the layer is left out
+        rig.tap(rig.now + 10, Gates { undo: true, ..Default::default() });
+        rig.run(1000, silence);
+        let sample = snapshot_of(&mut rig.looper, usize::MAX).0.into_sample().unwrap();
+        let saved: Vec<[f32; 2]> = (0..len).map(|i| [sample.left()[i], sample.right()[i]]).collect();
+        assert_eq!(saved, base);
+    }
+
+    #[test]
+    fn test_nothing_to_snapshot_until_a_loop_closes() {
+        let mut rig = Rig::new();
+        assert_eq!(snapshot_of(&mut rig.looper, 100).0.outcome(), SnapshotOutcome::Empty);
+        rig.rec(0);
+        rig.run(1000, sine(220.0, 0.5));
+        assert_eq!(rig.looper.state(), LoopState::Recording);
+        assert_eq!(snapshot_of(&mut rig.looper, 100).0.outcome(), SnapshotOutcome::Empty, "a take is not a loop yet");
+
+        // Too little room says how much it needed
+        rig.rec(rig.now);
+        rig.run(1000, silence);
+        let mut small = Snapshot::with_capacity(10);
+        assert!(rig.looper.fill_snapshot(&mut small, &mut 100));
+        assert_eq!(small.outcome(), SnapshotOutcome::NoRoom(1000));
+    }
+
+    #[test]
+    fn test_edits_count_changes_to_the_loop_and_nothing_else() {
+        let len = 4800;
+        let mut rig = Rig::new();
+        let edits = |rig: &Rig| rig.looper.readout(&rig.params).unwrap().values[Looper::READOUT_EDITS];
+        assert_eq!(edits(&rig), 0.0);
+
+        rig.rec(0);
+        rig.run(100, sine(220.0, 0.5));
+        let recording = edits(&rig);
+        assert!(recording > 0.0, "a take is a change");
+        rig.rec(len);
+        // Past the close, and the seam written after it
+        rig.run(len + 1000, sine(220.0, 0.5));
+        let closed = edits(&rig);
+        assert!(closed > recording);
+
+        // Playing, stopping, restarting and the transport stopping change nothing
+        rig.run(3 * len, silence);
+        let stop = Gates { stop: true, ..Default::default() };
+        rig.tap(rig.now + 10, stop);
+        rig.tap(rig.now + 500, stop);
+        rig.run(2 * len, silence);
+        rig.looper.reset();
+        rig.run(len, silence);
+        assert_eq!(edits(&rig), closed);
+        rig.looper.reset();
+        assert_eq!(rig.looper.edits() as f32, closed, "nor does stopping a stopped Looper");
+
+        // Rec plays a stopped loop, which changes nothing; then an overdub
+        // is a change, its end is, an undo is, and a clear is
+        rig.rec(rig.now + 10);
+        rig.run(100, silence);
+        assert_eq!(rig.looper.state(), LoopState::Playing);
+        assert_eq!(edits(&rig), closed);
+        rig.rec(rig.now + 10);
+        rig.run(100, silence);
+        let dubbing = edits(&rig);
+        assert!(dubbing > closed);
+        rig.rec(rig.now + 10);
+        rig.run(100, silence);
+        let dubbed = edits(&rig);
+        assert!(dubbed > dubbing);
+        rig.tap(rig.now + 10, Gates { undo: true, ..Default::default() });
+        rig.run(100, silence);
+        let undone = edits(&rig);
+        assert!(undone > dubbed);
+        rig.tap(rig.now + 10, Gates { clear: true, ..Default::default() });
+        rig.run(1000, silence);
+        assert!(edits(&rig) > undone);
+        assert_eq!(rig.looper.state(), LoopState::Empty);
+    }
+
+    /// A stereo recording at the test rate, each frame distinct.
+    fn recording(frames: usize) -> Arc<SampleData> {
+        let left: Vec<f32> = (0..frames).map(|i| (i as f32 * 0.003).sin() * 0.5).collect();
+        let right: Vec<f32> = (0..frames).map(|i| (i as f32 * 0.002).cos() * 0.25).collect();
+        Arc::new(SampleData::stereo(left, right, SR))
+    }
+
+    #[test]
+    fn test_a_loaded_loop_waits_stopped_and_plays_from_the_top() {
+        let frames = 30000;
+        let loop_in = recording(frames);
+        let mut rig = Rig::new();
+        rig.rec(0);
+        rig.rec(5000);
+        rig.run(10000, sine(440.0, 0.5));
+        assert!(rig.looper.edits() > 0);
+
+        // A piece per call, as on the audio thread
+        assert!(rig.looper.load_sample(Some(Arc::clone(&loop_in))).is_none());
+        assert!(rig.looper.is_loading());
+        assert_eq!(snapshot_of(&mut rig.looper, 100).0.outcome(), SnapshotOutcome::Busy);
+        let mut calls = 0;
+        while rig.looper.is_loading() {
+            rig.looper.background(&mut 4096);
+            calls += 1;
+        }
+        assert_eq!(calls, frames.div_ceil(4096));
+        let back = rig.looper.take_retired_sample().expect("the loop goes back to be dropped");
+        assert!(Arc::ptr_eq(&back, &loop_in));
+
+        assert_eq!(rig.looper.state(), LoopState::Stopped);
+        assert_eq!(rig.looper.loop_frames(), frames);
+        assert_eq!(rig.looper.edits(), 0, "it holds just what it was given");
+        let readout = rig.looper.readout(&rig.params).unwrap();
+        assert_eq!(readout.values[Looper::READOUT_UNDO], 0.0, "no layer to undo");
+        assert_eq!(readout.values[Looper::READOUT_LAYERS], 0.0);
+        let saved = snapshot_of(&mut rig.looper, usize::MAX).0.into_sample().unwrap();
+        assert_eq!(&saved, loop_in.as_ref(), "and saves it again bit for bit");
+
+        // Silent until Rec, then the loop from its top, after the fade in
+        let quiet = rig.run(2000, silence);
+        assert!(quiet.looped[0].iter().all(|&s| s == 0.0));
+        rig.rec(rig.now + 10);
+        let heard = rig.run(frames + 1000, silence);
+        assert_eq!(rig.looper.state(), LoopState::Playing);
+        let fade = (FADE_SECONDS * SR) as usize;
+        for i in fade + 1..frames {
+            assert_eq!(heard.looped[0][10 + i], loop_in.left()[i], "frame {i}");
+            assert_eq!(heard.looped[1][10 + i], loop_in.right()[i], "frame {i}");
+        }
+        assert_eq!(rig.looper.edits(), 0, "playing it is not a change");
+    }
+
+    #[test]
+    fn test_rec_while_loading_drops_the_load() {
+        let mut rig = Rig::new();
+        rig.looper.load_sample(Some(recording(48000)));
+        rig.looper.background(&mut 1000);
+        rig.rec(5);
+        rig.run(100, |_| [0.5, 0.5]);
+        assert!(!rig.looper.is_loading());
+        assert!(rig.looper.take_retired_sample().is_some());
+        assert_eq!(rig.looper.state(), LoopState::Recording);
+        assert_eq!(rig.looper.loop_frame(50), [0.5, 0.5]);
+    }
+
+    #[test]
+    fn test_a_loop_at_another_rate_is_handed_back() {
+        let mut rig = Rig::new();
+        let other = Arc::new(SampleData::mono(vec![0.5; 1000], 44100.0));
+        assert!(rig.looper.load_sample(Some(other)).is_some());
+        assert!(!rig.looper.is_loading());
+        // And taking the file away leaves the loop alone
+        assert!(rig.looper.load_sample(None).is_none());
+    }
+
+    #[test]
+    fn test_a_loaded_loop_snaps_to_whole_bars_when_clocked() {
+        // 120 BPM, 4/4: a bar is 96 000 frames. A file saved at 44.1 kHz and
+        // resampled comes back a frame short of two bars
+        let mut rig = clocked_rig(120.0);
+        rig.looper.load_sample(Some(recording(2 * 96000 - 1)));
+        rig.looper.background(&mut { usize::MAX });
+        rig.run(BLOCK, silence);
+        assert_eq!(rig.looper.loop_frames(), 2 * 96000);
+        assert_eq!(rig.looper.edits(), 0);
+        let last = rig.looper.loop_frame(2 * 96000 - 2);
+        assert_eq!(rig.looper.loop_frame(2 * 96000 - 1), last, "the frame added holds the last");
+
+        // One well off a bar is a free loop, and keeps its length
+        let mut rig = clocked_rig(120.0);
+        rig.looper.load_sample(Some(recording(100000)));
+        rig.looper.background(&mut { usize::MAX });
+        rig.run(BLOCK, silence);
+        assert_eq!(rig.looper.loop_frames(), 100000);
+
+        // Unclocked, a loop is left as it is
+        let mut rig = Rig::new();
+        rig.looper.load_sample(Some(recording(2 * 96000 - 1)));
+        rig.looper.background(&mut { usize::MAX });
+        rig.run(BLOCK, silence);
+        assert_eq!(rig.looper.loop_frames(), 2 * 96000 - 1);
+    }
+
+    #[test]
+    fn test_a_loop_saved_at_another_rate_comes_back_in_tune_and_on_the_bar() {
+        // Two bars at 97 BPM, saved at 44.1 kHz, opened at 48 kHz: resampling
+        // leaves it a frame off, and the clock puts it back on the bar
+        let bpm = 97.0;
+        let bar_at = |rate: f64| rate * 60.0 / bpm as f64 * 4.0;
+        let frames = (2.0 * bar_at(44100.0)).round() as usize;
+        let hz = 441.0;
+        let tone: Vec<f32> = (0..frames).map(|n| (n as f32 * hz / 44100.0 * std::f32::consts::TAU).sin() * 0.5).collect();
+        let resampled = SampleData::mono(tone, 44100.0).resampled(SR);
+        let whole = (2.0 * bar_at(SR as f64)).round() as usize;
+        assert_ne!(resampled.frames(), whole, "the test needs a loop that comes back off the bar");
+
+        let mut rig = clocked_rig(bpm);
+        rig.looper.load_sample(Some(Arc::new(resampled)));
+        rig.looper.background(&mut { usize::MAX });
+        rig.run(BLOCK, silence);
+        assert_eq!(rig.looper.loop_frames(), whole);
+        // Still 441 Hz: count rising zero crossings over a second
+        let stored = rig.stored();
+        let crossings = stored[..48000].windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+        assert!((440..=442).contains(&crossings), "{crossings}");
     }
 }

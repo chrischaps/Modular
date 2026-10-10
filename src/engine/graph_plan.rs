@@ -30,7 +30,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::dsp::{DspModule, MeterLevels, OutputLevels, ProcessContext, Readout, SampleData, SignalBuffer, TransportState};
+use crate::dsp::{DspModule, MeterLevels, OutputLevels, ProcessContext, Readout, SampleData, SignalBuffer, Snapshot, SnapshotOutcome, TransportState};
 use crate::engine::commands::{ChannelPeaks, NodeId, PortIndex};
 
 pub use crate::dsp::module_trait::MAX_INPUTS;
@@ -255,6 +255,35 @@ impl GraphPlan {
         for module in self.nodes.iter_mut().filter_map(|node| node.module.as_mut()) {
             if let Some(sample) = module.take_retired_sample() {
                 f(sample);
+            }
+        }
+    }
+
+    /// Lets every module do its piece of background work (a Looper copying
+    /// in a loop), sharing `budget` frames of copying between them.
+    ///
+    /// REAL-TIME SAFE.
+    pub fn background(&mut self, budget: &mut usize) {
+        for module in self.nodes.iter_mut().filter_map(|node| node.module.as_mut()) {
+            if *budget == 0 {
+                break;
+            }
+            module.background(budget);
+        }
+    }
+
+    /// Copies up to `budget` frames of a module's recording into
+    /// `snapshot`. Returns true once the snapshot is finished, as
+    /// [`Unsupported`](SnapshotOutcome::Unsupported) if the node isn't in
+    /// this plan.
+    ///
+    /// REAL-TIME SAFE.
+    pub fn fill_snapshot(&mut self, node_id: NodeId, snapshot: &mut Snapshot, budget: &mut usize) -> bool {
+        match self.nodes.iter_mut().find(|node| node.node_id == node_id).and_then(|node| node.module.as_mut()) {
+            Some(module) => module.fill_snapshot(snapshot, budget),
+            None => {
+                snapshot.finish(SnapshotOutcome::Unsupported, 0);
+                true
             }
         }
     }

@@ -47,6 +47,7 @@ use super::WEB;
 use super::web;
 
 mod grouping;
+mod loops;
 mod samples;
 #[cfg(not(target_arch = "wasm32"))]
 mod updates;
@@ -233,6 +234,14 @@ pub struct SynthApp {
     recordings_folder: Option<PathBuf>,
     /// The note about the last finished take.
     record_toast: Option<Toast>,
+
+    // --- Loops ---
+    /// Each Looper's loop as the patch last saved it, by engine node.
+    /// Loopers not here hold what they were opened with.
+    kept_loops: HashMap<crate::engine::NodeId, loops::KeptLoop>,
+    /// Loop files the patch opened or wrote, which a save may remove once
+    /// no Looper names them.
+    loop_files: std::collections::HashSet<String>,
 
     // --- Updates ---
     /// The check for new versions, and installing them.
@@ -432,6 +441,8 @@ impl SynthApp {
             recording: None,
             recordings_folder: None,
             record_toast: None,
+            kept_loops: HashMap::new(),
+            loop_files: std::collections::HashSet::new(),
             #[cfg(not(target_arch = "wasm32"))]
             updater: Updater::new(),
             resuming: false,
@@ -2675,9 +2686,11 @@ impl SynthApp {
             self.send_command(EngineCommand::SetPlaying(true));
         }
 
-        // A loaded patch starts its own history, with nothing unsaved
+        // A loaded patch starts its own history, with nothing unsaved, and
+        // its Loopers hold the loops it was saved with
         self.history.reset(&self.graph_state, &self.user_state);
         self.mark_saved();
+        self.opened_loops();
 
         Ok(staged.warnings)
     }
@@ -2708,6 +2721,7 @@ impl SynthApp {
         self.clear_graph();
         self.history.reset(&self.graph_state, &self.user_state);
         self.mark_saved();
+        self.opened_loops();
         self.load_warnings.clear();
         self.current_patch_path = None;
         self.current_example = None;
@@ -2746,13 +2760,15 @@ impl SynthApp {
                 .and_then(|s| s.to_str())
                 .unwrap_or("Untitled");
 
-            // Samples from elsewhere go beside the patch, so its folder holds everything
+            // Samples from elsewhere go beside the patch, so its folder
+            // holds everything, and the loops go there too
             let copy_problem = self.gather_samples(&path);
-            let patch = self.patch_for_file(name, &path);
+            let (patch, loop_problems) = self.patch_with_loops(name, &path);
             match save_to_file(&patch, &path) {
                 Ok(()) => {
-                    if let Some(problem) = copy_problem {
-                        self.load_warnings = vec![problem];
+                    let problems: Vec<String> = copy_problem.into_iter().chain(loop_problems).collect();
+                    if !problems.is_empty() {
+                        self.load_warnings = problems;
                     }
                     self.current_patch_path = Some(path.clone());
                     self.current_example = None;
@@ -3014,9 +3030,12 @@ impl SynthApp {
                 .and_then(|s| s.to_str())
                 .unwrap_or("Untitled");
 
-            let patch = self.patch_for_file(name, &path);
+            let (patch, loop_problems) = self.patch_with_loops(name, &path);
             match save_to_file(&patch, &path) {
                 Ok(()) => {
+                    if !loop_problems.is_empty() {
+                        self.load_warnings = loop_problems;
+                    }
                     self.status_message = Some(format!("Saved: {}", path.display()));
                     self.saved_as(&path);
                     true
@@ -3050,9 +3069,10 @@ impl SynthApp {
         self.history.record(&self.graph_state, &self.user_state, false, Instant::now());
     }
 
-    /// Whether the patch has changes that aren't saved anywhere.
+    /// Whether the patch has changes that aren't saved anywhere, a loop
+    /// recorded among them.
     fn has_unsaved_changes(&self) -> bool {
-        self.history.has_unsaved_changes() || self.midi_mappings != self.saved_midi_mappings
+        self.history.has_unsaved_changes() || self.midi_mappings != self.saved_midi_mappings || self.loops_unsaved()
     }
 
     /// The patch's name: its file's, its example's, or "Untitled".

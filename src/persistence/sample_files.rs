@@ -147,7 +147,15 @@ pub fn samples_folder(patch: &Path) -> PathBuf {
     patch.with_file_name(format!("{stem} samples"))
 }
 
-/// Writes 32-bit float WAV bytes for a recording, for tests and tools.
+/// The folder a patch saved as `patch` keeps its Loopers' loops in:
+/// `<patch name> loops`, beside it.
+pub fn loops_folder(patch: &Path) -> PathBuf {
+    let stem = patch.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "patch".to_string());
+    patch.with_file_name(format!("{stem} loops"))
+}
+
+/// Writes 32-bit float WAV bytes for a recording, so nothing is lost: a
+/// Looper's loop, saved, and tests and tools.
 pub fn encode_wav(sample: &SampleData) -> Vec<u8> {
     let channels = if sample.is_stereo() { 2 } else { 1 };
     let spec = hound::WavSpec {
@@ -250,5 +258,7 @@ mod tests {
     fn copied_samples_go_beside_the_patch() {
         let folder = samples_folder(Path::new("songs").join("Night Drive.json").as_path());
         assert_eq!(folder, Path::new("songs").join("Night Drive samples"));
+        let loops = loops_folder(Path::new("songs").join("Night Drive.json").as_path());
+        assert_eq!(loops, Path::new("songs").join("Night Drive loops"));
     }
 }

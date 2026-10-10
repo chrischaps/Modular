@@ -123,6 +123,9 @@ impl OfflineRenderer {
         for (node_id, sample) in self.graph.take_sample_loads() {
             drop(self.plan.load_sample(node_id, sample));
         }
+        // Nothing here is real time, so loops loaded are copied in at once
+        self.plan.background(&mut { usize::MAX });
+        self.plan.take_retired_samples(drop);
     }
 
     /// Queues a MIDI message to arrive at `frame` on the renderer's sample
@@ -940,5 +943,37 @@ mod tests {
         let b4 = 440.0 * 2f64.powf(2.0 / 12.0);
         let cents = 1200.0 * (f / b4).log2();
         assert!(cents.abs() < 1.0, "expected B4, measured {:.2} Hz ({:+.2} cents)", f, cents);
+    }
+
+    #[test]
+    fn test_a_saved_loop_waits_and_plays_on_rec() {
+        use crate::dsp::SampleData;
+        use crate::modules::looper::Looper;
+        let folder = std::env::temp_dir().join(format!("soba-loop-{}", std::process::id()));
+        std::fs::create_dir_all(folder.join("song loops")).unwrap();
+        // Half a second of 330 Hz, saved as a Looper saves it
+        let tone: Vec<f32> = (0..24000).map(|n| (std::f32::consts::TAU * 330.0 * n as f32 / 48000.0).sin() * 0.5).collect();
+        let wav = crate::persistence::sample_files::encode_wav(&SampleData::mono(tone, 48000.0));
+        std::fs::write(folder.join("song loops").join("Looper 2.wav"), wav).unwrap();
+
+        let mut patch = Patch::new("song");
+        let mut looper = NodeData::new(2, "util.looper", (0.0, 0.0));
+        looper.file = Some("song loops/Looper 2.wav".to_string());
+        patch.nodes.push(looper);
+        patch.nodes.push(NodeData::new(3, "output.audio", (200.0, 0.0)));
+        patch.connections.push(ConnectionData::new(2, "Loop L", 3, "Left"));
+        patch.connections.push(ConnectionData::new(2, "Loop R", 3, "Right"));
+        let (mut r, compiled) = OfflineRenderer::from_patch(&patch, 48000.0, 256).unwrap();
+        assert!(r.load_samples(&compiled, SampleBase::Folder(&folder)).is_empty());
+
+        // Silent, Stopped, until the Rec footswitch, then the loop
+        let node_id = compiled.node_ids[&2];
+        let pedal = |down: bool| EngineCommand::SetParameter { node_id, param_index: Looper::PARAM_PEDALS, value: down as u8 as f32 };
+        let out = r.render_with_commands(1.0, vec![(12800, pedal(true)), (16384, pedal(false))]);
+        assert_eq!(peak(&out.left[..12800]), 0.0, "it waits");
+        assert!(rms(&out.left[16000..]) > 0.2, "rms {}", rms(&out.left[16000..]));
+        let hz = Spectrum::of(&out.left[16000..], 48000.0).dominant_frequency();
+        assert!((hz - 330.0).abs() < 3.0, "{hz}");
+        std::fs::remove_dir_all(&folder).ok();
     }
 }

@@ -445,11 +445,31 @@ impl AudioGraph {
         };
         spec.sample = sample.clone();
         match spec.fresh.as_mut() {
-            // Whatever it hands back is dropped here, off the audio thread
-            Some(module) => drop(module.load_sample(sample)),
+            Some(module) => {
+                // Whatever it hands back is dropped here, off the audio
+                // thread, and anything it would copy in a piece at a time
+                // (a Looper's loop) is copied at once
+                drop(module.load_sample(sample));
+                module.background(&mut { usize::MAX });
+                drop(module.take_retired_sample());
+            }
             None => self.sample_loads.push((node_id, sample)),
         }
         true
+    }
+
+    /// Notes that a module already holds `sample`, without sending it: a
+    /// Looper whose loop was just saved holds what the file does.
+    pub fn note_sample(&mut self, node_id: NodeId, sample: Option<Arc<SampleData>>) {
+        if let Some(spec) = self.nodes.get_mut(&node_id) {
+            spec.sample = sample;
+        }
+    }
+
+    /// Whether a module is still here on the UI side, not yet handed to a
+    /// plan: what it's given now it has at once.
+    pub fn is_fresh(&self, node_id: NodeId) -> bool {
+        self.nodes.get(&node_id).is_some_and(|spec| spec.fresh.is_some())
     }
 
     /// The recording a module was last given, if any.

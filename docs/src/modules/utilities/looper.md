@@ -100,7 +100,22 @@ Soba measures that round trip (the **In** figure in the status bar, see [Audio I
 
 ## Memory
 
-A Looper holds up to **two minutes** of stereo, plus room for one undo layer: about 92 MB at 48 kHz, set aside when the module is added and never on the audio thread. Recording past two minutes closes the loop there. Changing the device's sample rate empties the loop.
+A Looper holds up to **two minutes** of stereo, plus room for one undo layer: about 92 MB at 48 kHz, set aside when the module is added and never on the audio thread. Recording past two minutes closes the loop there. Changing the device's sample rate empties the loop, and brings back the one last saved with the patch, if there is one.
+
+## Keeping the loop
+
+A loop is part of the patch. Saving the patch saves each Looper's loop as a WAV file in a `<patch name> loops` folder beside it, and opening the patch brings the loop back, **Stopped** at the top, with its waveform on the ring. Tap **Rec** or **Stop** to play it.
+
+- **What's saved is the loop as you hear it.** The last overdub layer is in it, unless you've undone it. The undo layer itself isn't kept, so after the patch is opened again there's nothing for Undo to take back.
+- **A loop is a change.** Recording, overdubbing, undoing or clearing one marks the patch unsaved (the dot in the window title), and **New**, **Open** and quitting ask before letting it go.
+- **Only what changed is written.** A loop that hasn't changed since it was saved or opened isn't written again, so saving a patch with a long loop is instant the second time.
+- **Nothing is lost.** The files are 32-bit float WAVs at the device's rate, about 23 MB a minute in stereo, and half that for a mono loop (one input patched makes one). If the loops to write come to more than 50 MB, saving asks first. **No** saves the patch without them, and its Loopers will open empty.
+- **The folder stays tidy.** A Looper with nothing in it saves no file. A loop file the patch wrote that no Looper uses any more (its loop cleared, or the Looper deleted) is removed on the next save, and so is the folder once it's empty. Files you put there yourself are left alone.
+- **Another sample rate.** Opened on a device at a different rate, a loop is resampled so it stays in tune. With a **Clock** patched, a loop that resampling left a frame or two off a whole number of bars is trimmed back onto the bar.
+- **Saving takes a moment.** The loop is copied off the audio thread a piece at a time, so the sound never stutters: about half a second for a two-minute loop. Saving during an overdub keeps the overdub as far as it had got, and the patch shows unsaved again once the overdub ends. A first take still recording isn't a loop yet, so it isn't saved.
+- **Autosave doesn't keep loops.** After a crash, a [recovered](../../getting-started/interface-overview.md#autosave-and-recovery) patch's Loopers come back with the loops last saved, if any.
+- **The browser can't keep loops**, as there's no folder beside the patch to put them in.
+- **Offline too.** The `render` tool loads a patch's saved loops, so a cue that presses **Rec** plays them.
 
 ## Clean loop points
 

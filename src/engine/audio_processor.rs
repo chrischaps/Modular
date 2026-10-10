@@ -9,12 +9,12 @@ use cpal::{FromSample, Sample};
 use rtrb::Consumer;
 
 use crate::dsp::denormal::DenormalGuard;
-use crate::dsp::{InputAudio, MidiEvent, ModuleRegistry, Poly, ProcessContext};
+use crate::dsp::{InputAudio, MidiEvent, ModuleRegistry, Poly, ProcessContext, Snapshot, SnapshotOutcome};
 use crate::modules::{AdsrEnvelope, Attenuverter, AudioInput, AudioOutput, Chorus, Clock, ClockDivider, Compressor, Distortion, Drum, KeyboardInput, LadderFilter, Lfo, Logic, Looper, MidiMonitor, MidiNote, Mix, Mixer, Noise, Oscilloscope, PolyMidi, ParametricEq, Quantizer, Reverb, SampleHold, Sampler, Oscillator, Slope, StepSequencer, StereoDelay, TriggerSequencer, SvfFilter, Vca};
 
 use super::audio_input::InputFeed;
-use super::channels::EngineHandle;
-use super::commands::{AudioMessage, EngineEvent, ScopeFrame};
+use super::channels::{EngineHandle, MAX_SNAPSHOTS};
+use super::commands::{AudioMessage, EngineEvent, NodeId, ScopeFrame};
 use super::graph_plan::GraphPlan;
 use super::midi_engine::TimestampedMidiEvent;
 use super::midi_scheduler::{take_chunk, MidiScheduler};
@@ -137,7 +137,15 @@ pub struct AudioProcessor {
     recorder: Option<RecordTap>,
     /// Audio from the input device, for Audio Input modules.
     input: LiveInput,
+    /// Loop snapshots being copied, a piece each callback. Room for
+    /// [`MAX_SNAPSHOTS`] is set aside up front.
+    snapshots: Vec<(NodeId, Box<Snapshot>)>,
 }
+
+/// Frames of background copying (loops loaded or snapshotted) per frame a
+/// callback plays: about 2% of the callback's time, which copies a
+/// two-minute loop in about half a second.
+const BACKGROUND_FRAMES_PER_FRAME: usize = 256;
 
 impl AudioProcessor {
     /// Creates a new audio processor.
@@ -161,6 +169,7 @@ impl AudioProcessor {
             cpu_load_avg: 0.0,
             recorder: None,
             input: LiveInput::new(block_size),
+            snapshots: Vec::with_capacity(MAX_SNAPSHOTS),
         }
     }
 
@@ -223,7 +232,7 @@ impl AudioProcessor {
         let start_time = Instant::now();
 
         // Process pending messages from UI
-        self.process_messages();
+        self.process_messages(output.len() / channels.max(1));
 
         // Clear output buffer
         output.fill(0.0);
@@ -281,7 +290,7 @@ impl AudioProcessor {
     /// from the start of the buffer.
     pub fn process_offline(&mut self, output: &mut [f32], channels: usize, midi: &mut [MidiEvent], input: InputAudio<'_>) {
         let _denormals = DenormalGuard::new();
-        self.process_messages();
+        self.process_messages(output.len() / channels.max(1));
         self.midi.skip(Instant::now());
         self.input.discard();
         output.fill(0.0);
@@ -382,8 +391,9 @@ impl AudioProcessor {
         });
     }
 
-    /// Applies all pending messages from the UI thread.
-    fn process_messages(&mut self) {
+    /// Applies all pending messages from the UI thread, then does a
+    /// callback of `frames` frames' share of background copying.
+    fn process_messages(&mut self, frames: usize) {
         while let Some(message) = self.engine_handle.recv_message() {
             match message {
                 AudioMessage::InstallPlan(mut plan) => {
@@ -437,12 +447,52 @@ impl AudioProcessor {
                         self.engine_handle.retire_sample(old);
                     }
                 }
+                AudioMessage::SnapshotLoop { node_id, mut snapshot } => {
+                    if self.snapshots.len() < self.snapshots.capacity() {
+                        self.snapshots.push((node_id, snapshot));
+                    } else {
+                        snapshot.finish(SnapshotOutcome::Busy, 0);
+                        self.engine_handle.return_snapshot(node_id, snapshot);
+                    }
+                }
             }
         }
         // Recordings Samplers have finished fading out of, or let go of
-        // when stopped, go back to be freed
+        // when stopped, go back to be freed: before the background work,
+        // which may let go of another (a Looper finishing a load), and after
+        self.retire_samples();
+        self.background_work(frames);
+        self.retire_samples();
+    }
+
+    /// Hands recordings modules have let go of back to the UI.
+    fn retire_samples(&mut self) {
         let Self { plan, engine_handle, .. } = self;
         plan.take_retired_samples(|sample| engine_handle.retire_sample(sample));
+    }
+
+    /// Copies the next pieces of loops being loaded and snapshotted, within
+    /// the budget of a callback `frames` long, and hands back finished
+    /// snapshots. Runs whether or not the transport does.
+    ///
+    /// REAL-TIME SAFE: copies into room set aside beforehand.
+    fn background_work(&mut self, frames: usize) {
+        let mut budget = frames * BACKGROUND_FRAMES_PER_FRAME;
+        self.plan.background(&mut budget);
+        let mut i = 0;
+        while i < self.snapshots.len() {
+            let (node_id, snapshot) = &mut self.snapshots[i];
+            if self.plan.fill_snapshot(*node_id, snapshot, &mut budget) {
+                // Order doesn't matter, and this never reallocates
+                let (node_id, snapshot) = self.snapshots.swap_remove(i);
+                self.engine_handle.return_snapshot(node_id, snapshot);
+            } else {
+                i += 1;
+            }
+            if budget == 0 {
+                break;
+            }
+        }
     }
 
     /// Writes the output module's audio for one block into `output`
@@ -492,7 +542,7 @@ impl AudioProcessor {
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         // Install anything already compiled for the old rate first, so it
         // gets re-prepared below along with everything else
-        self.process_messages();
+        self.process_messages(0);
 
         self.sample_rate = sample_rate;
         self.plan.set_sample_rate(sample_rate);
@@ -666,5 +716,75 @@ mod tests {
         let left: Vec<f32> = output.iter().step_by(2).copied().collect();
         assert!(left.windows(2).all(|w| (w[1] - w[0]).abs() < 1e-3), "oscillator is gone");
         assert!(ui.flush());
+    }
+
+    /// A distinct stereo loop at 48 kHz.
+    fn a_loop(frames: usize, hz: f32) -> std::sync::Arc<crate::dsp::SampleData> {
+        let left: Vec<f32> = (0..frames).map(|n| (n as f32 * hz / 48000.0 * std::f32::consts::TAU).sin() * 0.5).collect();
+        let right: Vec<f32> = left.iter().map(|s| s * -0.5).collect();
+        std::sync::Arc::new(crate::dsp::SampleData::stereo(left, right, 48000.0))
+    }
+
+    /// Runs callbacks until a snapshot comes back, returning it and how
+    /// many callbacks it took.
+    fn wait_for_snapshot(ui: &mut UiHandle, processor: &mut AudioProcessor) -> ((NodeId, Box<Snapshot>), usize) {
+        let mut output = vec![0.0; 512];
+        for callbacks in 1..200 {
+            processor.process(&mut output, 2);
+            ui.flush();
+            if let Some(back) = ui.take_snapshot() {
+                return (back, callbacks);
+            }
+        }
+        panic!("the snapshot never came back");
+    }
+
+    #[test]
+    fn test_a_loop_goes_in_and_comes_back_out_whole_while_stopped() {
+        let (mut ui, engine) = EngineChannels::with_defaults().split();
+        let mut processor = AudioProcessor::new(48000.0, 256, engine);
+        let mut output = vec![0.0; 512];
+        // The graph learns the engine's rate
+        ui.flush();
+        ui.send_command(EngineCommand::AddModule { node_id: 1, module_id: "util.looper" });
+
+        // Given before the Looper reaches the audio thread, it's in at once
+        let first = a_loop(100_000, 220.0);
+        ui.send_command(EngineCommand::LoadSample { node_id: 1, sample: Some(first.clone()) });
+        ui.flush();
+        processor.process(&mut output, 2);
+        assert!(!processor.is_playing());
+
+        // Out a piece a callback (65 536 frames each here), stopped or not
+        assert!(ui.request_snapshot(1, Box::new(Snapshot::with_capacity(100_064))));
+        ui.flush();
+        let ((node_id, snapshot), callbacks) = wait_for_snapshot(&mut ui, &mut processor);
+        assert_eq!(node_id, 1);
+        assert_eq!(callbacks, 2);
+        assert_eq!(snapshot.edits(), 0);
+        assert_eq!(&snapshot.into_sample().unwrap(), first.as_ref(), "bit for bit");
+        assert_eq!(ui.snapshots_out(), 0);
+
+        // Given to the running Looper, a loop goes in a piece a callback too,
+        // and comes back to be dropped here
+        let second = a_loop(150_000, 330.0);
+        ui.send_command(EngineCommand::LoadSample { node_id: 1, sample: Some(second.clone()) });
+        ui.flush();
+        for _ in 0..4 {
+            processor.process(&mut output, 2);
+        }
+        ui.flush();
+        assert_eq!(std::sync::Arc::strong_count(&first), 1, "the first loop is let go of");
+        assert_eq!(std::sync::Arc::strong_count(&second), 2, "only the graph's record and ours are left");
+        ui.request_snapshot(1, Box::new(Snapshot::with_capacity(150_064)));
+        ui.flush();
+        let ((_, snapshot), _) = wait_for_snapshot(&mut ui, &mut processor);
+        assert_eq!(&snapshot.into_sample().unwrap(), second.as_ref());
+
+        // A node that isn't there says so
+        ui.request_snapshot(9, Box::new(Snapshot::with_capacity(10)));
+        ui.flush();
+        let ((_, snapshot), _) = wait_for_snapshot(&mut ui, &mut processor);
+        assert_eq!(snapshot.outcome(), SnapshotOutcome::Unsupported);
     }
 }

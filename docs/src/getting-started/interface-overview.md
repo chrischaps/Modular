@@ -247,13 +247,15 @@ The **📚 Examples** menu holds fourteen ready-made patches: **First Sound**, w
 
 A [Sampler](../modules/sources/sampler.md) keeps the path to its WAV file in the patch. A file beside or below the patch is saved by a path relative to it, so the patch's folder can be moved or shared whole. **Save As** copies samples from anywhere else into a `<patch name> samples` folder beside the patch, asking first if they come to more than 50 MB. A patch whose sample has gone missing still opens, with the missing file among the load warnings.
 
+A [Looper](../modules/utilities/looper.md)'s loop is kept the same way. Saving the patch writes each loop that changed as a WAV into a `<patch name> loops` folder beside it, asking first if they come to more than 50 MB, and opening the patch brings each loop back, stopped and ready to play. A loop whose file has gone missing is a load warning, and its Looper opens empty. See [Keeping the loop](../modules/utilities/looper.md#keeping-the-loop).
+
 ### Recent patches
 
 **🕘 Recent** lists the last eight patches you opened or saved, newest first. Hover one to see where it lives. A file that has since been moved or deleted is grayed out. **Clear Recent** empties the list.
 
 ### Unsaved changes
 
-While a patch has unsaved changes, the window title starts with a dot (`● Lush Pad · Soba`), and so does its name in the status bar. Undoing back to the saved state clears the dot.
+While a patch has unsaved changes, the window title starts with a dot (`● Lush Pad · Soba`), and so does its name in the status bar. Undoing back to the saved state clears the dot. Recording into a [Looper](../modules/utilities/looper.md#keeping-the-loop) counts as a change too.
 
 **New**, **Open**, opening an example or a recent file, and closing the window all ask first when there are unsaved changes:
 
@@ -267,7 +269,7 @@ Closing the window while a [recording](#recording) is running asks too, even wit
 
 Every 30 seconds, a patch with unsaved changes is autosaved alongside the app's settings. Saving the patch, or choosing **Quit Without Saving**, clears the autosave, so one only survives if Soba closes without asking: after a crash or a forced quit.
 
-The next time the app starts, it offers the patch back. **Recover** reopens it exactly as it was at the last autosave, still marked unsaved; **Discard** lets it go. At most, you lose the last 30 seconds of work.
+The next time the app starts, it offers the patch back. **Recover** reopens it exactly as it was at the last autosave, still marked unsaved; **Discard** lets it go. At most, you lose the last 30 seconds of work. An autosave doesn't keep Loopers' loops, though: they come back as last saved with the patch, and the prompt says so.
 
 Recent files, the autosave, your cable style and the window's size and position are kept in the settings file:
 

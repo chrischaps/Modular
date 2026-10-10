@@ -10,6 +10,7 @@ use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke, Vec2};
 use egui_node_graph2::NodeId;
 
 use crate::app::theme;
+use crate::dsp::MAX_READOUT;
 use crate::modules::slope::{Curve, Slope, MAX_TIME, MIN_TIME};
 
 use super::drum_display::{duration, fill_under};
@@ -42,7 +43,7 @@ pub fn slope_display(ui: &mut egui::Ui, node_id: NodeId, graph: &SynthGraph, use
             value_of("Fall").unwrap_or(0.3).clamp(MIN_TIME, MAX_TIME),
         ),
     };
-    let values = live.map_or([0.0; 8], |r| r.values);
+    let values = live.map_or([0.0; MAX_READOUT], |r| r.values);
     let charge = values[Slope::READOUT_CHARGE];
     let motion = values[Slope::READOUT_MOTION];
     let eor = values[Slope::READOUT_EOR] > 0.5;

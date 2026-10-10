@@ -170,6 +170,153 @@ impl SampleData {
     }
 }
 
+/// How a [`Snapshot`] came out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapshotOutcome {
+    /// Not finished yet.
+    Copying,
+    /// Every frame is copied.
+    Done,
+    /// The module holds nothing to keep (a Looper with no loop).
+    Empty,
+    /// The recording is longer than the room set aside for it: this many frames.
+    NoRoom(usize),
+    /// The recording changed length while it was being copied.
+    Changed,
+    /// The module is still loading a recording, so what it holds isn't settled.
+    Busy,
+    /// The module keeps no recording, or it isn't in the patch any more.
+    Unsupported,
+}
+
+/// A copy of a recording a module holds (a Looper's loop), made on the
+/// audio thread a piece at a time into room the UI set aside beforehand,
+/// so copying never allocates there and a long loop doesn't stall one
+/// callback.
+///
+/// The module copies as many frames as it's allowed each callback (see
+/// [`DspModule::fill_snapshot`](super::DspModule::fill_snapshot)), and the
+/// snapshot goes back to the UI once [`is_finished`](Self::is_finished).
+#[derive(Debug)]
+pub struct Snapshot {
+    left: Vec<f32>,
+    right: Vec<f32>,
+    /// Frames the recording has, once copying has begun.
+    frames: usize,
+    sample_rate: f32,
+    /// The module's count of changes to what it holds, as copying began.
+    edits: u32,
+    outcome: SnapshotOutcome,
+}
+
+impl Snapshot {
+    /// Room for a stereo recording `frames` long. Off the audio thread:
+    /// this allocates.
+    pub fn with_capacity(frames: usize) -> Self {
+        Self {
+            left: Vec::with_capacity(frames),
+            right: Vec::with_capacity(frames),
+            frames: 0,
+            sample_rate: 0.0,
+            edits: 0,
+            outcome: SnapshotOutcome::Copying,
+        }
+    }
+
+    /// How many frames there's room for.
+    pub fn capacity(&self) -> usize {
+        self.left.capacity().min(self.right.capacity())
+    }
+
+    /// Whether copying has begun.
+    pub fn has_begun(&self) -> bool {
+        self.frames > 0
+    }
+
+    /// Starts copying a recording `frames` long at `sample_rate`, as of the
+    /// module's `edits`th change. Returns false, and finishes as
+    /// [`NoRoom`](SnapshotOutcome::NoRoom), if it doesn't fit.
+    ///
+    /// REAL-TIME SAFE.
+    pub fn begin(&mut self, frames: usize, sample_rate: f32, edits: u32) -> bool {
+        self.left.clear();
+        self.right.clear();
+        if frames > self.capacity() {
+            self.outcome = SnapshotOutcome::NoRoom(frames);
+            return false;
+        }
+        self.frames = frames;
+        self.sample_rate = sample_rate;
+        self.edits = edits;
+        self.outcome = if frames == 0 { SnapshotOutcome::Empty } else { SnapshotOutcome::Copying };
+        true
+    }
+
+    /// Frames the recording has, once copying has begun.
+    pub fn frames(&self) -> usize {
+        self.frames
+    }
+
+    /// Frames copied so far.
+    pub fn copied(&self) -> usize {
+        self.left.len()
+    }
+
+    /// Adds the next frame. Past the end it's ignored; the last one
+    /// finishes the snapshot.
+    ///
+    /// REAL-TIME SAFE: within the room set aside.
+    #[inline]
+    pub fn push(&mut self, [left, right]: [f32; 2]) {
+        if self.left.len() < self.frames {
+            self.left.push(left);
+            self.right.push(right);
+            if self.left.len() == self.frames {
+                self.outcome = SnapshotOutcome::Done;
+            }
+        }
+    }
+
+    /// Finishes without a recording, saying why.
+    ///
+    /// REAL-TIME SAFE.
+    pub fn finish(&mut self, outcome: SnapshotOutcome, edits: u32) {
+        self.left.clear();
+        self.right.clear();
+        self.edits = edits;
+        self.outcome = outcome;
+    }
+
+    /// Whether there's nothing more to copy.
+    pub fn is_finished(&self) -> bool {
+        self.outcome != SnapshotOutcome::Copying
+    }
+
+    /// How it came out.
+    pub fn outcome(&self) -> SnapshotOutcome {
+        self.outcome
+    }
+
+    /// The module's count of changes to what it holds, as copying began:
+    /// a snapshot with the same count holds the same recording.
+    pub fn edits(&self) -> u32 {
+        self.edits
+    }
+
+    /// The recording, once [`Done`](SnapshotOutcome::Done): mono if both
+    /// sides are the same throughout, which a mono source makes.
+    pub fn into_sample(self) -> Option<SampleData> {
+        if self.outcome != SnapshotOutcome::Done {
+            return None;
+        }
+        Some(if self.left == self.right {
+            SampleData::mono(self.left, self.sample_rate)
+        } else {
+            SampleData::stereo(self.left, self.right, self.sample_rate)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,5 +376,37 @@ mod tests {
         assert_eq!(overview[0], (0.0, 0.9));
         assert_eq!(overview[2], (-0.5, 0.0));
         assert_eq!(overview[3], (0.0, 0.0));
+    }
+
+    #[test]
+    fn a_snapshot_fills_within_its_room() {
+        let mut snapshot = Snapshot::with_capacity(4);
+        assert!(!snapshot.is_finished());
+        assert!(snapshot.begin(3, 48000.0, 7));
+        snapshot.push([0.1, 0.2]);
+        snapshot.push([0.3, 0.4]);
+        assert!(!snapshot.is_finished());
+        snapshot.push([0.5, 0.6]);
+        snapshot.push([9.0, 9.0]);
+        assert_eq!(snapshot.outcome(), SnapshotOutcome::Done);
+        assert_eq!(snapshot.edits(), 7);
+        let sample = snapshot.into_sample().unwrap();
+        assert_eq!(sample.left(), &[0.1, 0.3, 0.5]);
+        assert_eq!(sample.right(), &[0.2, 0.4, 0.6]);
+        assert_eq!(sample.sample_rate(), 48000.0);
+    }
+
+    #[test]
+    fn a_snapshot_says_when_it_has_no_room_and_keeps_mono_mono() {
+        let mut small = Snapshot::with_capacity(2);
+        assert!(!small.begin(3, 48000.0, 1));
+        assert_eq!(small.outcome(), SnapshotOutcome::NoRoom(3));
+        assert!(small.into_sample().is_none());
+
+        let mut mono = Snapshot::with_capacity(2);
+        mono.begin(2, 44100.0, 0);
+        mono.push([0.5, 0.5]);
+        mono.push([-0.5, -0.5]);
+        assert!(!mono.into_sample().unwrap().is_stereo());
     }
 }

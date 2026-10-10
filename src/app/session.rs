@@ -14,6 +14,7 @@ use web_time::{SystemTime, UNIX_EPOCH};
 use eframe::egui::{self, Align, Layout, RichText};
 use serde::{Deserialize, Serialize};
 
+use crate::modules::looper::LOOPER_ID;
 use crate::persistence::{patch_from_json, Example, Patch, PatchError};
 use super::theme;
 
@@ -158,6 +159,11 @@ impl Autosave {
         patch_from_json(&self.patch)
     }
 
+    /// Whether the patch has a Looper, whose loop an autosave doesn't keep.
+    pub fn has_looper(&self) -> bool {
+        self.patch.contains(&format!("\"{LOOPER_ID}\""))
+    }
+
     /// The autosave a crash left behind, if there is one.
     pub fn load(storage: Option<&dyn eframe::Storage>) -> Option<Self> {
         // A clean exit stores `None`
@@ -263,6 +269,13 @@ pub fn recovery_prompt(ctx: &egui::Context, autosave: &Autosave) -> Option<bool>
             ))
             .color(theme::text::SECONDARY),
         );
+        if autosave.has_looper() {
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new("An autosave doesn’t keep loops: Loopers come back with the loops last saved with the patch, if any.")
+                    .color(theme::text::SECONDARY),
+            );
+        }
         ui.add_space(14.0);
 
         let mut answer = None;
