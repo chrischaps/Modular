@@ -6,6 +6,9 @@
 //! from them: the first audio output passes the first audio input, the
 //! second passes the second, and outputs beyond the last input repeat it (a
 //! filter's LowPass, HighPass, BandPass and Notch all pass the one input).
+//! Key inputs (a sidechain, a vocoder's modulator) are skipped: they shape
+//! the sound but aren't it, so a bypassed vocoder plays its carrier on both
+//! sides.
 
 use super::{ModuleCategory, PortDefinition, SignalType};
 
@@ -18,13 +21,13 @@ pub fn can_bypass(category: ModuleCategory, ports: &[PortDefinition]) -> bool {
 
 /// For each output port, in output order, the input (in input order) that
 /// passes straight through it while the module is bypassed. Outputs that
-/// aren't audio pass nothing.
-pub fn bypass_routes(ports: &[PortDefinition]) -> Vec<Option<usize>> {
+/// aren't audio pass nothing, and `keys` (input indices) pass nowhere.
+pub fn bypass_routes(ports: &[PortDefinition], keys: &[usize]) -> Vec<Option<usize>> {
     let audio_inputs: Vec<usize> = ports
         .iter()
         .filter(|p| p.is_input())
         .enumerate()
-        .filter(|(_, p)| p.signal_type == SignalType::Audio)
+        .filter(|(index, p)| p.signal_type == SignalType::Audio && !keys.contains(index))
         .map(|(index, _)| index)
         .collect();
     let mut audio_outputs_seen = 0;
@@ -63,7 +66,7 @@ mod tests {
             audio_out("out_l"),
             audio_out("out_r"),
         ];
-        assert_eq!(bypass_routes(&ports), vec![Some(0), Some(1)]);
+        assert_eq!(bypass_routes(&ports, &[]), vec![Some(0), Some(1)]);
     }
 
     #[test]
@@ -75,13 +78,28 @@ mod tests {
             audio_out("hp"),
             audio_out("bp"),
         ];
-        assert_eq!(bypass_routes(&ports), vec![Some(0); 3]);
+        assert_eq!(bypass_routes(&ports, &[]), vec![Some(0); 3]);
     }
 
     #[test]
     fn sidechain_never_reaches_the_output() {
         let ports = [audio_in("in"), audio_in("sidechain"), audio_out("out")];
-        assert_eq!(bypass_routes(&ports), vec![Some(0)]);
+        assert_eq!(bypass_routes(&ports, &[]), vec![Some(0)]);
+        assert_eq!(bypass_routes(&ports, &[1]), vec![Some(0)]);
+    }
+
+    #[test]
+    fn a_key_input_passes_nowhere() {
+        // A vocoder: its carrier reaches both sides, its modulator neither
+        let ports = [
+            audio_in("carrier"),
+            audio_in("modulator"),
+            PortDefinition::input("formant", "Formant", SignalType::Control),
+            audio_out("out_l"),
+            audio_out("out_r"),
+        ];
+        assert_eq!(bypass_routes(&ports, &[]), vec![Some(0), Some(1)]);
+        assert_eq!(bypass_routes(&ports, &[1]), vec![Some(0), Some(0)]);
     }
 
     #[test]
@@ -91,7 +109,7 @@ mod tests {
             audio_out("out"),
             PortDefinition::output("env", "Env", SignalType::Control),
         ];
-        assert_eq!(bypass_routes(&ports), vec![Some(0), None]);
+        assert_eq!(bypass_routes(&ports, &[]), vec![Some(0), None]);
     }
 
     #[test]

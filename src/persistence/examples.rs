@@ -32,6 +32,9 @@ impl Example {
 pub const EXAMPLE_SAMPLES: &[(&str, &[u8])] = &[
     // One strike of the FM Synthesis bell at C4, rendered by Soba
     ("samples/fm-bell-c4.wav", include_bytes!("../../patches/samples/fm-bell-c4.wav")),
+    // "Hello. I am Soba. I sing in sines.", from tools/voice/speak.py's
+    // formant synthesizer
+    ("samples/soba-speaks.wav", include_bytes!("../../patches/samples/soba-speaks.wav")),
 ];
 
 /// Every example, in menu order: from a first note to self-playing patches.
@@ -113,6 +116,12 @@ pub const EXAMPLES: &[Example] = &[
         file_name: "afterglow.json",
         description: "Plays itself: a Chord Sequencer moves an arpeggio through Fmaj9, Cadd9, G6 and Am9 and plays them on a warm pad, under dotted-eighth tape echoes",
         json: include_str!("../../patches/afterglow.json"),
+    },
+    Example {
+        name: "Soba Speaks",
+        file_name: "soba-speaks.json",
+        description: "Plays itself: a Vocoder puts a spoken line on a pad of four falling chords. Move one cable and it wears your own voice from a mic",
+        json: include_str!("../../patches/soba-speaks.json"),
     },
     Example {
         name: "Interlock",

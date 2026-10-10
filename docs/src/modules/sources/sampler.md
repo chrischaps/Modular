@@ -158,3 +158,4 @@ Patch a slow [LFO](../modulation/lfo.md) into **Start**, and a Clock into **Gate
 - [Trigger Sequencer](../utilities/trigger-sequencer.md) and [Step Sequencer](../utilities/sequencer.md): one-shots in time
 - [Audio Input](./audio-input.md): outside sound live, as it happens, where the Sampler plays it back from a file
 - [Drum](./drum.md): synthesized drums to sit beside recorded ones
+- [Vocoder](../effects/vocoder.md): a recorded voice that makes a chord speak, as in the [Soba Speaks](../../recipes/soba-speaks.md) example

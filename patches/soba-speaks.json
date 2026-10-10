@@ -1,0 +1,1334 @@
+{
+  "name": "Soba Speaks",
+  "version": 5,
+  "nodes": [
+    {
+      "id": 1,
+      "module_id": "util.clock",
+      "position": [
+        40.0,
+        94.0
+      ],
+      "parameters": [
+        {
+          "name": "Tempo",
+          "type": "Number",
+          "value": 76.0
+        },
+        {
+          "name": "Gate Length",
+          "type": "Number",
+          "value": 50.0
+        },
+        {
+          "name": "Division",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Run",
+          "type": "Toggle",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "module_id": "util.divider",
+      "position": [
+        40.0,
+        470.0
+      ],
+      "parameters": [
+        {
+          "name": "Divide",
+          "type": "Number",
+          "value": 2.0
+        },
+        {
+          "name": "Offset",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Length",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "module_id": "source.sampler",
+      "position": [
+        270.0,
+        74.0
+      ],
+      "parameters": [
+        {
+          "name": "Start",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "End",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Loop",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Loop Start",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Loop End",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Mode",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Tune",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Fine",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Root",
+          "type": "Number",
+          "value": 60.0
+        },
+        {
+          "name": "Speed",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Attack",
+          "type": "Number",
+          "value": 0.002
+        },
+        {
+          "name": "Release",
+          "type": "Number",
+          "value": 0.05
+        },
+        {
+          "name": "Level",
+          "type": "Number",
+          "value": 1.0
+        }
+      ],
+      "file": "samples/soba-speaks.wav"
+    },
+    {
+      "id": 4,
+      "module_id": "source.audio_input",
+      "position": [
+        270.0,
+        720.0
+      ],
+      "parameters": []
+    },
+    {
+      "id": 5,
+      "module_id": "seq.chord",
+      "position": [
+        40.0,
+        1280.0
+      ],
+      "parameters": [
+        {
+          "name": "Steps",
+          "type": "Number",
+          "value": 4.0
+        },
+        {
+          "name": "Direction",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Gate Length",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Voicing",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Voice Leading",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Voices",
+          "type": "Number",
+          "value": 5.0
+        },
+        {
+          "name": "Range",
+          "type": "Number",
+          "value": 4.0
+        },
+        {
+          "name": "Bass Voice",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 1 Root",
+          "type": "Number",
+          "value": 53.0
+        },
+        {
+          "name": "Step 1 Type",
+          "type": "Select",
+          "value": 13
+        },
+        {
+          "name": "Step 1 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 1 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 1 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 1 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 2 Root",
+          "type": "Number",
+          "value": 52.0
+        },
+        {
+          "name": "Step 2 Type",
+          "type": "Select",
+          "value": 4
+        },
+        {
+          "name": "Step 2 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 2 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 2 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 2 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 3 Root",
+          "type": "Number",
+          "value": 50.0
+        },
+        {
+          "name": "Step 3 Type",
+          "type": "Select",
+          "value": 14
+        },
+        {
+          "name": "Step 3 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 3 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 3 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 3 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 4 Root",
+          "type": "Number",
+          "value": 48.0
+        },
+        {
+          "name": "Step 4 Type",
+          "type": "Select",
+          "value": 3
+        },
+        {
+          "name": "Step 4 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 4 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 4 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 4 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 5 Root",
+          "type": "Number",
+          "value": 53.0
+        },
+        {
+          "name": "Step 5 Type",
+          "type": "Select",
+          "value": 13
+        },
+        {
+          "name": "Step 5 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 5 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 5 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 5 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 6 Root",
+          "type": "Number",
+          "value": 52.0
+        },
+        {
+          "name": "Step 6 Type",
+          "type": "Select",
+          "value": 4
+        },
+        {
+          "name": "Step 6 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 6 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 6 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 6 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 7 Root",
+          "type": "Number",
+          "value": 50.0
+        },
+        {
+          "name": "Step 7 Type",
+          "type": "Select",
+          "value": 14
+        },
+        {
+          "name": "Step 7 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 7 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 7 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 7 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 8 Root",
+          "type": "Number",
+          "value": 48.0
+        },
+        {
+          "name": "Step 8 Type",
+          "type": "Select",
+          "value": 3
+        },
+        {
+          "name": "Step 8 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 8 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 8 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 8 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 9 Root",
+          "type": "Number",
+          "value": 53.0
+        },
+        {
+          "name": "Step 9 Type",
+          "type": "Select",
+          "value": 13
+        },
+        {
+          "name": "Step 9 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 9 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 9 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 9 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 10 Root",
+          "type": "Number",
+          "value": 52.0
+        },
+        {
+          "name": "Step 10 Type",
+          "type": "Select",
+          "value": 4
+        },
+        {
+          "name": "Step 10 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 10 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 10 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 10 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 11 Root",
+          "type": "Number",
+          "value": 50.0
+        },
+        {
+          "name": "Step 11 Type",
+          "type": "Select",
+          "value": 14
+        },
+        {
+          "name": "Step 11 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 11 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 11 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 11 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 12 Root",
+          "type": "Number",
+          "value": 48.0
+        },
+        {
+          "name": "Step 12 Type",
+          "type": "Select",
+          "value": 3
+        },
+        {
+          "name": "Step 12 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 12 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 12 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 12 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 13 Root",
+          "type": "Number",
+          "value": 53.0
+        },
+        {
+          "name": "Step 13 Type",
+          "type": "Select",
+          "value": 13
+        },
+        {
+          "name": "Step 13 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 13 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 13 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 13 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 14 Root",
+          "type": "Number",
+          "value": 52.0
+        },
+        {
+          "name": "Step 14 Type",
+          "type": "Select",
+          "value": 4
+        },
+        {
+          "name": "Step 14 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 14 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 14 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 14 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 15 Root",
+          "type": "Number",
+          "value": 50.0
+        },
+        {
+          "name": "Step 15 Type",
+          "type": "Select",
+          "value": 14
+        },
+        {
+          "name": "Step 15 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 15 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 15 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 15 Tie",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Step 16 Root",
+          "type": "Number",
+          "value": 48.0
+        },
+        {
+          "name": "Step 16 Type",
+          "type": "Select",
+          "value": 3
+        },
+        {
+          "name": "Step 16 Bass",
+          "type": "Select",
+          "value": 0
+        },
+        {
+          "name": "Step 16 Gate",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Step 16 Velocity",
+          "type": "Number",
+          "value": 100.0
+        },
+        {
+          "name": "Step 16 Tie",
+          "type": "Toggle",
+          "value": false
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "module_id": "osc.sine",
+      "position": [
+        420.0,
+        1280.0
+      ],
+      "parameters": [
+        {
+          "name": "Octave",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Semitone",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Fine",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "FM Depth",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Exp FM Depth",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Waveform",
+          "type": "Select",
+          "value": 1
+        },
+        {
+          "name": "Pulse Width",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "Voices",
+          "type": "Number",
+          "value": 2.0
+        },
+        {
+          "name": "Detune",
+          "type": "Number",
+          "value": 0.1
+        },
+        {
+          "name": "Spread",
+          "type": "Number",
+          "value": 0.5
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "module_id": "filter.svf",
+      "position": [
+        680.0,
+        1520.0
+      ],
+      "parameters": [
+        {
+          "name": "Cutoff",
+          "type": "Number",
+          "value": 700.0
+        },
+        {
+          "name": "Resonance",
+          "type": "Number",
+          "value": 0.1
+        },
+        {
+          "name": "Drive",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "module_id": "util.vca",
+      "position": [
+        960.0,
+        1520.0
+      ],
+      "parameters": [
+        {
+          "name": "Level",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "CV Amount",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "module_id": "mod.adsr",
+      "position": [
+        960.0,
+        1740.0
+      ],
+      "parameters": [
+        {
+          "name": "Attack",
+          "type": "Number",
+          "value": 0.4
+        },
+        {
+          "name": "Decay",
+          "type": "Number",
+          "value": 0.2
+        },
+        {
+          "name": "Sustain",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Release",
+          "type": "Number",
+          "value": 1.5
+        },
+        {
+          "name": "Attack Curve",
+          "type": "Number",
+          "value": 0.2
+        },
+        {
+          "name": "Decay Curve",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "Release Curve",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "Velocity Amount",
+          "type": "Number",
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "module_id": "fx.vocoder",
+      "position": [
+        640.0,
+        74.0
+      ],
+      "parameters": [
+        {
+          "name": "Formant",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Bands",
+          "type": "Select",
+          "value": 1
+        },
+        {
+          "name": "Attack",
+          "type": "Number",
+          "value": 3.0
+        },
+        {
+          "name": "Release",
+          "type": "Number",
+          "value": 35.0
+        },
+        {
+          "name": "Sibilance",
+          "type": "Number",
+          "value": 0.35
+        },
+        {
+          "name": "Unvoiced",
+          "type": "Number",
+          "value": 0.4
+        },
+        {
+          "name": "Width",
+          "type": "Number",
+          "value": 0.6
+        },
+        {
+          "name": "Mix",
+          "type": "Number",
+          "value": 1.0
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "module_id": "util.mixer",
+      "position": [
+        950.0,
+        74.0
+      ],
+      "parameters": [
+        {
+          "name": "Level 1",
+          "type": "Number",
+          "value": 0.11
+        },
+        {
+          "name": "Level 2",
+          "type": "Number",
+          "value": 0.11
+        },
+        {
+          "name": "Level 3",
+          "type": "Number",
+          "value": 0.4
+        },
+        {
+          "name": "Level 4",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Pan 1",
+          "type": "Number",
+          "value": -0.8
+        },
+        {
+          "name": "Pan 2",
+          "type": "Number",
+          "value": 0.8
+        },
+        {
+          "name": "Pan 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Pan 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 1",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.6
+        },
+        {
+          "name": "Width 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 1",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Return",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "module_id": "fx.delay",
+      "position": [
+        1400.0,
+        74.0
+      ],
+      "parameters": [
+        {
+          "name": "Time",
+          "type": "Number",
+          "value": 395.0
+        },
+        {
+          "name": "Feedback",
+          "type": "Number",
+          "value": 0.35
+        },
+        {
+          "name": "Mix",
+          "type": "Number",
+          "value": 0.22
+        },
+        {
+          "name": "High Cut",
+          "type": "Number",
+          "value": 4000.0
+        },
+        {
+          "name": "Low Cut",
+          "type": "Number",
+          "value": 300.0
+        },
+        {
+          "name": "Ping-Pong",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Sync",
+          "type": "Select",
+          "value": 8
+        },
+        {
+          "name": "Tape",
+          "type": "Toggle",
+          "value": true
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "module_id": "fx.reverb",
+      "position": [
+        1730.0,
+        74.0
+      ],
+      "parameters": [
+        {
+          "name": "Size",
+          "type": "Number",
+          "value": 0.75
+        },
+        {
+          "name": "Decay",
+          "type": "Number",
+          "value": 4.0
+        },
+        {
+          "name": "Damping",
+          "type": "Number",
+          "value": 0.5
+        },
+        {
+          "name": "Pre-Delay",
+          "type": "Number",
+          "value": 25.0
+        },
+        {
+          "name": "Mix",
+          "type": "Number",
+          "value": 0.3
+        },
+        {
+          "name": "Width",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Mod",
+          "type": "Number",
+          "value": 0.3
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "module_id": "output.audio",
+      "position": [
+        2010.0,
+        114.0
+      ],
+      "parameters": [
+        {
+          "name": "Volume",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Limiter",
+          "type": "Toggle",
+          "value": true
+        },
+        {
+          "name": "Character",
+          "type": "Toggle",
+          "value": false
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from_node": 1,
+      "from_port": "Gate",
+      "to_node": 5,
+      "to_port": "Clock"
+    },
+    {
+      "from_node": 1,
+      "from_port": "Gate",
+      "to_node": 2,
+      "to_port": "Clock"
+    },
+    {
+      "from_node": 1,
+      "from_port": "Reset",
+      "to_node": 5,
+      "to_port": "Reset"
+    },
+    {
+      "from_node": 1,
+      "from_port": "Reset",
+      "to_node": 2,
+      "to_port": "Reset"
+    },
+    {
+      "from_node": 2,
+      "from_port": "Trig",
+      "to_node": 3,
+      "to_port": "Gate"
+    },
+    {
+      "from_node": 5,
+      "from_port": "Pitch",
+      "to_node": 6,
+      "to_port": "V/Oct"
+    },
+    {
+      "from_node": 5,
+      "from_port": "Gate",
+      "to_node": 9,
+      "to_port": "Gate"
+    },
+    {
+      "from_node": 6,
+      "from_port": "Out",
+      "to_node": 10,
+      "to_port": "Carrier"
+    },
+    {
+      "from_node": 3,
+      "from_port": "L",
+      "to_node": 10,
+      "to_port": "Modulator"
+    },
+    {
+      "from_node": 6,
+      "from_port": "Out",
+      "to_node": 7,
+      "to_port": "In"
+    },
+    {
+      "from_node": 7,
+      "from_port": "LowPass",
+      "to_node": 8,
+      "to_port": "In"
+    },
+    {
+      "from_node": 9,
+      "from_port": "Out",
+      "to_node": 8,
+      "to_port": "CV"
+    },
+    {
+      "from_node": 10,
+      "from_port": "Out L",
+      "to_node": 11,
+      "to_port": "Ch 1"
+    },
+    {
+      "from_node": 10,
+      "from_port": "Out R",
+      "to_node": 11,
+      "to_port": "Ch 2"
+    },
+    {
+      "from_node": 8,
+      "from_port": "Out",
+      "to_node": 11,
+      "to_port": "Ch 3"
+    },
+    {
+      "from_node": 11,
+      "from_port": "Out L",
+      "to_node": 12,
+      "to_port": "In L"
+    },
+    {
+      "from_node": 11,
+      "from_port": "Out R",
+      "to_node": 12,
+      "to_port": "In R"
+    },
+    {
+      "from_node": 12,
+      "from_port": "Out L",
+      "to_node": 13,
+      "to_port": "In L"
+    },
+    {
+      "from_node": 12,
+      "from_port": "Out R",
+      "to_node": 13,
+      "to_port": "In R"
+    },
+    {
+      "from_node": 13,
+      "from_port": "Out L",
+      "to_node": 14,
+      "to_port": "Left"
+    },
+    {
+      "from_node": 13,
+      "from_port": "Out R",
+      "to_node": 14,
+      "to_port": "Right"
+    }
+  ],
+  "midi_mappings": [],
+  "frames": [
+    {
+      "title": "The voice",
+      "position": [
+        16.0,
+        16.0
+      ],
+      "size": [
+        560.0,
+        1180.0
+      ],
+      "color": "blue"
+    },
+    {
+      "title": "The chords",
+      "position": [
+        16.0,
+        1222.0
+      ],
+      "size": [
+        1200.0,
+        900.0
+      ],
+      "color": "violet"
+    },
+    {
+      "title": "Vocoder and room",
+      "position": [
+        606.0,
+        16.0
+      ],
+      "size": [
+        1640.0,
+        700.0
+      ],
+      "color": "cyan"
+    }
+  ],
+  "notes": [
+    {
+      "text": "The Sampler says one line every two bars: \"Hello. I am Soba. I sing in sines.\" The voice was made by a formant synthesizer, from pulses and noise, so it is no one's recording.",
+      "position": [
+        680.0,
+        500.0
+      ],
+      "width": 240.0
+    },
+    {
+      "text": "**Your own voice:** move the Vocoder's **Modulator** cable from the Sampler's **L** to this Audio Input's **L**, and speak or sing into a mic. Use headphones, so the mic doesn't hear the speakers.",
+      "position": [
+        270.0,
+        1040.0
+      ],
+      "width": 290.0
+    },
+    {
+      "text": "The same pad plays twice: bright and raw into the Vocoder's **Carrier**, and filtered dark underneath, so the chords carry on between the words.",
+      "position": [
+        40.0,
+        1830.0
+      ],
+      "width": 380.0
+    }
+  ]
+}

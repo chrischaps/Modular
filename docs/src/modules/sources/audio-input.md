@@ -175,4 +175,5 @@ The louder the input, the quieter the pad: it dips under each word and swells ba
 - [Ladder Filter](../filters/ladder-filter.md) and [SVF Filter](../filters/svf-filter.md): shape it, with Follow on the cutoff
 - [ADSR Envelope](../modulation/adsr.md): triggered by Gate
 - [Compressor](../effects/compressor.md): evens out a voice or a guitar
+- [Vocoder](../effects/vocoder.md): speak or sing into it, and a synth chord speaks with your voice
 - [Audio Output](../output/audio-output.md): its limiter catches feedback

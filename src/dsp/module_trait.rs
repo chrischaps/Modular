@@ -44,7 +44,7 @@ pub struct MeterLevels {
 }
 
 /// How many values a [`Readout`] carries.
-pub const MAX_READOUT: usize = 9;
+pub const MAX_READOUT: usize = 28;
 
 /// Live values a module shows on its node that aren't signals or meters: a
 /// Clock's received tempo and where it is in the bar, say. Fixed-size, so
@@ -359,6 +359,13 @@ pub trait DspModule: Send + 'static {
     /// summed. The default is `false`.
     fn polyphonic(&self) -> bool {
         false
+    }
+
+    /// Inputs heard only for what they say about another signal, by input
+    /// index: a compressor's sidechain, a vocoder's modulator. Bypassed,
+    /// the module passes them nowhere.
+    fn key_inputs(&self) -> &'static [usize] {
+        &[]
     }
 
     /// Whether this module brings live input into the patch (Audio Input).

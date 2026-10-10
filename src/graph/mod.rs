@@ -18,6 +18,7 @@ mod logic_display;
 mod looper_display;
 mod slope_display;
 mod tape_display;
+mod vocoder_display;
 mod trigger_display;
 mod arranger_display;
 mod chord_grid;

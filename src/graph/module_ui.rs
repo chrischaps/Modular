@@ -448,6 +448,22 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "fx.vocoder",
+        // How the voice is heard, then what passes besides, then the output
+        knobs: &[
+            knob("Attack"),
+            knob("Release"),
+            modulatable("Formant", "Formant"),
+            knob_as("Sibilance", "Sibil"),
+            knob_as("Unvoiced", "Unvoic"),
+            knob("Width"),
+            knob("Mix"),
+        ],
+        display: NodeDisplay::VocoderBands,
+        knobs_per_row: 4,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "fx.compressor",
         knobs: &[
             knob_as("Threshold", "Thresh"),

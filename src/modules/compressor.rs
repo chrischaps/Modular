@@ -417,6 +417,10 @@ impl DspModule for Compressor {
         }
     }
 
+    fn key_inputs(&self) -> &'static [usize] {
+        &[Self::PORT_SIDECHAIN]
+    }
+
     fn reset(&mut self) {
         self.mean_square = 0.0;
         self.gr_held = 0.0;

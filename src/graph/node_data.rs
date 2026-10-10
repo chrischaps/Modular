@@ -294,6 +294,9 @@ pub enum NodeDisplay {
     SlopeShape,
     /// Tape: two reels turning, and the tape trembling across a glowing head.
     TapeReels,
+    /// Vocoder: a bar per band, the voice's level there, on a frequency
+    /// axis with the carrier's bands shifted by Formant.
+    VocoderBands,
     /// Arranger: the song's sections beside its own jacks, each lane's
     /// level beside its CV and Gate, and a playhead through them all.
     Timeline,
@@ -2264,6 +2267,10 @@ impl NodeDataTrait for SynthNodeData {
 
         if self.display == NodeDisplay::TapeReels {
             super::tape_display::tape_display(ui, node_id, graph, user_state, zoom);
+        }
+
+        if self.display == NodeDisplay::VocoderBands {
+            super::vocoder_display::vocoder_display(ui, node_id, graph, user_state, zoom);
         }
 
         if self.display == NodeDisplay::DrumHit {

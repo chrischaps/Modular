@@ -186,3 +186,4 @@ Patch **Root** into an oscillator's **Exp FM** (at 1.0 octave per volt) while a 
 - [Poly MIDI](../midi/poly-midi.md): chords played live, on the same kind of cable
 - [Polyphony](../../concepts/polyphony.md): how one cable carries several voices
 - [Arranger](./arranger.md): a song's sections, which can clock or reset the progression
+- [Vocoder](../effects/vocoder.md): a whole chord on one cable makes a carrier that speaks in harmony, as in [Soba Speaks](../../recipes/soba-speaks.md)

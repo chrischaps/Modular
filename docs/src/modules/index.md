@@ -1,6 +1,6 @@
 # Module Overview
 
-Soba has 37 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
+Soba has 38 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
 
 The **ID** is the name a patch file uses to refer to the module.
 
@@ -53,6 +53,7 @@ The **ID** is the name a patch file uses to refer to the module.
 | [Chorus](./effects/chorus.md) | `fx.chorus` | Stereo chorus and flanger |
 | [Tape](./effects/tape.md) | `fx.tape` | A tape machine for a bus: wow, flutter, saturation, age and hiss |
 | [Compressor](./effects/compressor.md) | `fx.compressor` | Dynamics compressor with sidechain and a gain-reduction output |
+| [Vocoder](./effects/vocoder.md) | `fx.vocoder` | Puts a voice's spectrum on a synth: 8 to 24 bands, formant shift, sibilance and unvoiced noise |
 
 ### Utility
 
@@ -145,6 +146,7 @@ Drive a voice from a sequence instead of a keyboard:
 | Place sounds left and right | [Mixer](./utilities/mixer.md) |
 | Add space and depth | [Stereo Delay](./effects/delay.md), [Reverb](./effects/reverb.md), [Chorus](./effects/chorus.md) |
 | Add grit or warmth | [Distortion](./effects/distortion.md), [Tape](./effects/tape.md) |
+| Make a synth talk or sing | [Vocoder](./effects/vocoder.md), with a voice from a [Sampler](./sources/sampler.md) or [Audio Input](./sources/audio-input.md) |
 | Balance tone and dynamics | [3-Band EQ](./effects/eq.md), [Compressor](./effects/compressor.md) |
 | See a signal | [Oscilloscope](./visualization/oscilloscope.md), [MIDI Monitor](./midi/midi-monitor.md) |
 | Hear the result | [Audio Output](./output/audio-output.md) |

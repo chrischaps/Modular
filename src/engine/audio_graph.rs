@@ -75,7 +75,7 @@ impl NodeSpec {
         module.prepare(sample_rate, block_size);
         let ports = module.ports().to_vec();
         let bypass_routes = if can_bypass(module.info().category, &ports) {
-            bypass_routes(&ports)
+            bypass_routes(&ports, module.key_inputs())
         } else {
             Vec::new()
         };
@@ -1681,6 +1681,30 @@ mod tests {
         let returning = out(&plan);
         assert!(returning[0] > 0.5 && returning[0] < 0.51, "starts dry: {}", returning[0]);
         assert!(returning[fade..].iter().all(|&s| s == 1.0));
+    }
+
+    #[test]
+    fn test_bypassed_vocoder_plays_its_carrier_on_both_sides() {
+        use crate::engine::graph_plan::BYPASS_FADE_SECONDS;
+        use crate::modules::Vocoder;
+
+        const BLOCK: usize = 1024;
+        let mut graph = AudioGraph::new(44100.0, BLOCK);
+        graph.add_module_instance(1, Box::new(TestOscillator::new(0.5)));
+        graph.add_module_instance(2, Box::new(TestOscillator::new(0.25)));
+        graph.add_module_instance(3, Box::new(Vocoder::new()));
+        graph.connect(1, 0, 3, Vocoder::PORT_CARRIER);
+        graph.connect(2, 0, 3, Vocoder::PORT_MODULATOR);
+        assert!(graph.set_bypass(3, true));
+        let mut plan = run_block(&mut graph, BLOCK);
+        for _ in 0..(BYPASS_FADE_SECONDS * 44100.0) as usize / BLOCK + 1 {
+            plan.process(&ProcessContext::new(44100.0, BLOCK));
+        }
+        let node = plan.nodes.iter().find(|n| n.node_id == 3).unwrap();
+        let outputs = node.outputs.clone();
+        for side in outputs {
+            assert!(plan.outputs[side].samples.iter().all(|&s| s == 0.5), "the voice isn't heard");
+        }
     }
 
     #[test]

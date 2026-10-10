@@ -40,6 +40,7 @@ pub mod slope;
 pub mod tape;
 pub mod trigger_sequencer;
 pub mod vca;
+pub mod vocoder;
 
 // Re-export commonly used types
 pub use arranger::Arranger;
@@ -79,3 +80,4 @@ pub use slope::Slope;
 pub use tape::Tape;
 pub use trigger_sequencer::TriggerSequencer;
 pub use vca::Vca;
+pub use vocoder::Vocoder;
