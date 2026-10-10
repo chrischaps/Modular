@@ -9,11 +9,16 @@
 //! sequencer has always had ("Step 3 Pitch"); B to D's come after all of
 //! them ("Step B3 Pitch"), so patches saved before there were patterns load
 //! with only A and play as they did.
+//!
+//! Any step can be a slide: Pitch glides into it from the note before and
+//! the gate stays high across the join, as on a 303. The Glide time and the
+//! slides of all four patterns come after everything else.
 
 use std::sync::LazyLock;
 
 use crate::dsp::{
     context::ProcessContext,
+    primitives::Glide,
     module_trait::{DspModule, ModuleCategory, ModuleInfo},
     parameter::ParameterDefinition,
     port::PortDefinition,
@@ -84,35 +89,66 @@ static STEP_TIE_NAMES: [&str; MAX_STEPS] = [
     "Step 13 Tie", "Step 14 Tie", "Step 15 Tie", "Step 16 Tie",
 ];
 
-/// The four things each step holds.
+static STEP_SLIDE_IDS: [&str; MAX_STEPS] = [
+    "step_1_slide", "step_2_slide", "step_3_slide", "step_4_slide",
+    "step_5_slide", "step_6_slide", "step_7_slide", "step_8_slide",
+    "step_9_slide", "step_10_slide", "step_11_slide", "step_12_slide",
+    "step_13_slide", "step_14_slide", "step_15_slide", "step_16_slide",
+];
+
+static STEP_SLIDE_NAMES: [&str; MAX_STEPS] = [
+    "Step 1 Slide", "Step 2 Slide", "Step 3 Slide", "Step 4 Slide",
+    "Step 5 Slide", "Step 6 Slide", "Step 7 Slide", "Step 8 Slide",
+    "Step 9 Slide", "Step 10 Slide", "Step 11 Slide", "Step 12 Slide",
+    "Step 13 Slide", "Step 14 Slide", "Step 15 Slide", "Step 16 Slide",
+];
+
+/// The things each step holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StepField {
     Pitch = 0,
     Gate = 1,
     Velocity = 2,
     Tie = 3,
+    /// Came after patterns, so its parameters are in a block of their own.
+    Slide = 4,
 }
 
+impl StepField {
+    /// Every field, as copying a pattern copies them.
+    pub const ALL: [StepField; 5] = [StepField::Pitch, StepField::Gate, StepField::Velocity, StepField::Tie, StepField::Slide];
+}
+
+/// The four fields patterns B to D keep side by side, a step at a time.
 const FIELDS: [StepField; 4] = [StepField::Pitch, StepField::Gate, StepField::Velocity, StepField::Tie];
 const FIELD_NAMES: [&str; 4] = ["Pitch", "Gate", "Velocity", "Tie"];
 
 /// Patterns B to D's parameter ids and names, made once and kept: they must
-/// be `'static`, and there are 192 of them. In the order the parameters
-/// are: pattern, then step, then field.
+/// be `'static`, and there are 240 of them. In the order the parameters
+/// are: pattern, then step, then field; and then the slides, pattern by
+/// pattern.
 struct PatternNames {
     ids: Vec<&'static str>,
     names: Vec<&'static str>,
+    slide_ids: Vec<&'static str>,
+    slide_names: Vec<&'static str>,
 }
 
 static PATTERN_PARAM_NAMES: LazyLock<PatternNames> = LazyLock::new(|| {
     let keep = |text: String| -> &'static str { Box::leak(text.into_boxed_str()) };
-    let mut names = PatternNames { ids: Vec::new(), names: Vec::new() };
+    let mut names = PatternNames { ids: Vec::new(), names: Vec::new(), slide_ids: Vec::new(), slide_names: Vec::new() };
     for letter in &PATTERN_NAMES[1..] {
         for step in 1..=MAX_STEPS {
             for field in FIELD_NAMES {
                 names.ids.push(keep(format!("step_{}{step}_{}", letter.to_lowercase(), field.to_lowercase())));
                 names.names.push(keep(format!("Step {letter}{step} {field}")));
             }
+        }
+    }
+    for letter in &PATTERN_NAMES[1..] {
+        for step in 1..=MAX_STEPS {
+            names.slide_ids.push(keep(format!("step_{}{step}_slide", letter.to_lowercase())));
+            names.slide_names.push(keep(format!("Step {letter}{step} Slide")));
         }
     }
     names
@@ -237,10 +273,10 @@ impl StepTimer {
     }
 }
 
-/// Convert a MIDI note number (0-127) to V/Oct control signal.
-/// C4 (note 60) = 0V, each semitone = 1/12 V
-fn note_to_voct(note: u8) -> f32 {
-    (note as f32 - 60.0) / 12.0
+/// Convert a MIDI note number (0-127), or a pitch between notes, to V/Oct
+/// control signal. C4 (note 60) = 0V, each semitone = 1/12 V
+fn note_to_voct(note: f32) -> f32 {
+    (note - 60.0) / 12.0
 }
 
 /// Convert a note number to a note name for display.
@@ -286,6 +322,10 @@ pub fn note_to_name(note: u8) -> String {
 ///   which then continues the note instead of starting a new one.
 /// - **Chain 1-8** (– / A-D): The patterns played, a pass each, in order.
 /// - **Step B1-D16 Pitch, Gate, Velocity, Tie**: Patterns B to D's steps.
+/// - **Glide** (0-1 s): How long a slide takes to reach its note.
+/// - **Step 1-16 Slide**, **Step B1-D16 Slide** (0/1): The step is slurred
+///   into from the note before: Pitch glides there over the Glide time, and
+///   the gate stays high across the join, as on a 303.
 ///
 /// # Patterns
 ///
@@ -297,7 +337,16 @@ pub fn note_to_name(note: u8) -> String {
 ///
 /// In the Step gate mode a note always starts with a rising edge: when a new
 /// note begins while the gate is still high, the gate drops for one sample
-/// first so envelopes retrigger. Only a tie carries the gate across unbroken.
+/// first so envelopes retrigger. Only a tie or a slide carries the gate
+/// across unbroken.
+///
+/// # Slides
+///
+/// A slide needs a note to come from: after a rest or a reset, a slide step
+/// is struck and starts on its own pitch. The note before a slide holds its
+/// gate until the slide begins, whatever the Gate Length, so the two join;
+/// it looks ahead to the step the next clock will play, in the pattern that
+/// step will be in. A tie carries a slide's glide on into the next step.
 pub struct StepSequencer {
     /// Current step index (0-based).
     current_step: usize,
@@ -316,12 +365,23 @@ pub struct StepSequencer {
     tied: bool,
     /// The gate output was high on the last sample.
     gate_high: bool,
+    /// The last step played was a note, not a rest, so a slide has
+    /// somewhere to come from.
+    playing_note: bool,
+    /// Pitch, in semitones, as it glides.
+    glide: Glide,
+    /// The note playing slides to its pitch; otherwise Pitch lands on it.
+    sliding: bool,
     /// How long the clock's steps are.
     timer: StepTimer,
     /// EOC timer (samples remaining in EOC pulse).
     eoc_timer: usize,
     /// Simple PRNG state for random mode.
     random_state: u32,
+    /// The random number for the next step, once drawn to see whether it
+    /// slides. Taken by the next advance, so the steps play in the same
+    /// order as when nothing looked ahead.
+    next_random: Option<u32>,
     /// The pattern playing.
     pattern: usize,
     /// Which Chain entry is playing.
@@ -448,7 +508,20 @@ impl StepSequencer {
                     .describe("Velocity for this step, 0 to 127"),
                 StepField::Tie => ParameterDefinition::toggle(id, name, false)
                     .describe("Holds this step's note into the next step, which continues it without a new attack"),
+                StepField::Slide => unreachable!("slides have their own block"),
             });
+        }
+
+        // Glide and every pattern's slides, after the patterns
+        parameters.push(
+            ParameterDefinition::new("glide", "Glide", 0.0, 1.0, 0.06, ParameterDisplay::logarithmic("s"))
+                .describe("How long a slide step takes to glide to its note"),
+        );
+        let slides = STEP_SLIDE_IDS.iter().zip(STEP_SLIDE_NAMES).chain(names.slide_ids.iter().zip(names.slide_names.iter().copied()));
+        for (id, name) in slides {
+            parameters.push(ParameterDefinition::toggle(id, name, false).describe(
+                "Slurs into this step: Pitch glides from the note before and the gate stays high, so the envelope isn't struck again",
+            ));
         }
         debug_assert_eq!(parameters.len(), Self::PARAM_COUNT);
 
@@ -461,9 +534,13 @@ impl StepSequencer {
             gate_timer: 0,
             tied: false,
             gate_high: false,
+            playing_note: false,
+            glide: Glide::NEW,
+            sliding: false,
             timer: StepTimer::new(),
             eoc_timer: 0,
             random_state: 12345, // Seed for PRNG
+            next_random: None,
             pattern: 0,
             chain_slot: 0,
             pass_clocks: 0,
@@ -518,16 +595,23 @@ impl StepSequencer {
     pub const PARAM_CHAIN: usize = Self::step_tie_param(MAX_STEPS);
     /// Patterns B to D's steps, four parameters a step, after the Chain.
     const PARAM_PATTERNS: usize = Self::PARAM_CHAIN + CHAIN_SLOTS;
-    pub const PARAM_COUNT: usize = Self::PARAM_PATTERNS + (PATTERNS - 1) * MAX_STEPS * 4;
+    /// Glide, after the patterns.
+    const PARAM_GLIDE: usize = Self::PARAM_PATTERNS + (PATTERNS - 1) * MAX_STEPS * 4;
+    /// Every pattern's slides, A's first, after Glide.
+    const PARAM_SLIDES: usize = Self::PARAM_GLIDE + 1;
+    pub const PARAM_COUNT: usize = Self::PARAM_SLIDES + PATTERNS * MAX_STEPS;
 
     /// The parameter holding one of a step's fields (all 0-based).
     pub const fn step_param(pattern: usize, step: usize, field: StepField) -> usize {
-        if pattern == 0 {
+        if let StepField::Slide = field {
+            Self::PARAM_SLIDES + pattern * MAX_STEPS + step
+        } else if pattern == 0 {
             match field {
                 StepField::Pitch => Self::step_pitch_param(step),
                 StepField::Gate => Self::step_gate_param(step),
                 StepField::Velocity => Self::step_velocity_param(step),
                 StepField::Tie => Self::step_tie_param(step),
+                StepField::Slide => unreachable!(),
             }
         } else {
             Self::PARAM_PATTERNS + ((pattern - 1) * MAX_STEPS + step) * 4 + field as usize
@@ -543,7 +627,10 @@ impl StepSequencer {
                 StepField::Gate => STEP_GATE_NAMES[step],
                 StepField::Velocity => STEP_VELOCITY_NAMES[step],
                 StepField::Tie => STEP_TIE_NAMES[step],
+                StepField::Slide => STEP_SLIDE_NAMES[step],
             }
+        } else if field == StepField::Slide {
+            PATTERN_PARAM_NAMES.slide_names[(pattern - 1) * MAX_STEPS + step]
         } else {
             PATTERN_PARAM_NAMES.names[((pattern - 1) * MAX_STEPS + step) * 4 + field as usize]
         }
@@ -621,48 +708,70 @@ impl StepSequencer {
         x
     }
 
-    /// Advance to the next step based on direction mode.
-    fn advance_step(&mut self, num_steps: usize, direction: SequenceDirection) -> bool {
-        let was_at_end;
-
-        match direction {
-            SequenceDirection::Forward => {
-                was_at_end = self.current_step >= num_steps - 1;
-                self.current_step = (self.current_step + 1) % num_steps;
-            }
-            SequenceDirection::Backward => {
-                was_at_end = self.current_step == 0;
-                if self.current_step == 0 {
-                    self.current_step = num_steps - 1;
-                } else {
-                    self.current_step -= 1;
-                }
-            }
-            SequenceDirection::PingPong => {
-                let next = self.current_step as i32 + self.ping_pong_direction;
-
-                if next >= num_steps as i32 {
-                    // Hit end, reverse direction
-                    self.ping_pong_direction = -1;
-                    self.current_step = if num_steps > 1 { num_steps - 2 } else { 0 };
-                    was_at_end = true;
-                } else if next < 0 {
-                    // Hit start, reverse direction
-                    self.ping_pong_direction = 1;
-                    self.current_step = if num_steps > 1 { 1 } else { 0 };
-                    was_at_end = true;
-                } else {
-                    self.current_step = next as usize;
-                    was_at_end = false;
-                }
-            }
-            SequenceDirection::Random => {
-                was_at_end = false; // No EOC in random mode
-                self.current_step = (self.next_random() as usize) % num_steps;
+    /// The random number the next step will be chosen by, drawn only once.
+    fn coming_random(&mut self) -> u32 {
+        match self.next_random {
+            Some(r) => r,
+            None => {
+                let r = self.next_random();
+                self.next_random = Some(r);
+                r
             }
         }
+    }
 
+    /// Where the next clock takes the sequence, without moving it there: the
+    /// step, the ping-pong direction after it, and whether it passes the end.
+    fn following_step(&mut self, num_steps: usize, direction: SequenceDirection) -> (usize, i32, bool) {
+        let current = self.current_step;
+        let ping_pong = self.ping_pong_direction;
+        match direction {
+            SequenceDirection::Forward => ((current + 1) % num_steps, ping_pong, current >= num_steps - 1),
+            SequenceDirection::Backward => {
+                let step = if current == 0 { num_steps - 1 } else { current - 1 };
+                (step, ping_pong, current == 0)
+            }
+            SequenceDirection::PingPong => {
+                let next = current as i32 + ping_pong;
+                if next >= num_steps as i32 {
+                    // Hit end, reverse direction
+                    (if num_steps > 1 { num_steps - 2 } else { 0 }, -1, true)
+                } else if next < 0 {
+                    // Hit start, reverse direction
+                    (if num_steps > 1 { 1 } else { 0 }, 1, true)
+                } else {
+                    (next as usize, ping_pong, false)
+                }
+            }
+            // No EOC in random mode
+            SequenceDirection::Random => ((self.coming_random() as usize) % num_steps, ping_pong, false),
+        }
+    }
+
+    /// Advance to the next step based on direction mode.
+    fn advance_step(&mut self, num_steps: usize, direction: SequenceDirection) -> bool {
+        let (step, ping_pong, was_at_end) = self.following_step(num_steps, direction);
+        self.current_step = step;
+        self.ping_pong_direction = ping_pong;
+        if direction == SequenceDirection::Random {
+            self.next_random = None;
+        }
         was_at_end
+    }
+
+    /// Whether the next clock plays a note that slides in from this one: its
+    /// step, in the pattern it will be in. The Pattern CV is read as it is
+    /// now, so one that moves before then can still change it.
+    fn slide_follows(&mut self, params: &[f32], num_steps: usize, direction: SequenceDirection, cv: Option<f32>) -> bool {
+        let (step, _, hit_end) = self.following_step(num_steps, direction);
+        let pass_over = match direction {
+            SequenceDirection::Random => self.pass_clocks + 1 >= num_steps,
+            _ => hit_end,
+        };
+        let pattern = if pass_over { self.coming_pattern(params, cv) } else { self.pattern };
+        step < MAX_STEPS
+            && params[Self::step_param(pattern, step, StepField::Gate)] > 0.5
+            && params[Self::step_param(pattern, step, StepField::Slide)] > 0.5
     }
 
     /// Get the current step's data.
@@ -714,6 +823,7 @@ impl DspModule for StepSequencer {
         let direction = SequenceDirection::from_param(params[Self::PARAM_DIRECTION]);
         let gate_length_percent = params[Self::PARAM_GATE_LENGTH] / 100.0;
         let gate_mode = GateMode::from_param(params[Self::PARAM_GATE_MODE]);
+        let glide = Glide::coefficient(params[Self::PARAM_GLIDE], self.sample_rate);
 
         // Get input buffers
         let clock_in = inputs.get(Self::PORT_CLOCK);
@@ -754,6 +864,9 @@ impl DspModule for StepSequencer {
                 self.reset_pending = true;
                 self.gate_timer = 0;
                 self.tied = false;
+                // The step after a reset has no note to slide from
+                self.playing_note = false;
+                self.sliding = false;
                 self.timer.forget_gap();
             }
 
@@ -800,18 +913,29 @@ impl DspModule for StepSequencer {
                 let pattern = self.pattern;
 
                 // A step that plays starts a note, or continues the last one
-                // if that was tied. A rest ends the note
+                // if that was tied, or slides on from it. A rest ends the note
                 let step_gate = params[Self::step_param(pattern, self.current_step, StepField::Gate)] > 0.5;
                 if step_gate {
                     let tie = params[Self::step_param(pattern, self.current_step, StepField::Tie)] > 0.5;
+                    let slide = params[Self::step_param(pattern, self.current_step, StepField::Slide)] > 0.5;
                     // Fixed gates never dipped, so old patches whose notes
                     // overlap still run them together
-                    retrigger = gate_mode == GateMode::Step && self.gate_high && !self.tied;
-                    self.gate_timer = self.gate_samples(gate_mode, gate_length_percent, tie);
+                    retrigger = gate_mode == GateMode::Step && self.gate_high && !self.tied && !slide;
+                    // A slide glides from the note before. A note held on by
+                    // a tie keeps gliding if it was
+                    self.sliding = (slide && self.playing_note) || (self.tied && self.sliding);
+                    let note = params[Self::step_param(pattern, self.current_step, StepField::Pitch)] as u8;
+                    self.glide.start(note as f32, self.sliding);
+                    // A note held into a slide joins it with no gap, like a tie
+                    let held = tie || self.slide_follows(params, num_steps, direction, cv);
+                    self.gate_timer = self.gate_samples(gate_mode, gate_length_percent, held);
                     self.tied = tie;
+                    self.playing_note = true;
                 } else {
                     self.gate_timer = 0;
                     self.tied = false;
+                    self.playing_note = false;
+                    self.sliding = false;
                 }
 
                 // Fire EOC pulse once the chain has played through (never in
@@ -831,8 +955,10 @@ impl DspModule for StepSequencer {
             let step_gate_enabled = params[Self::step_param(self.pattern, self.current_step, StepField::Gate)] > 0.5;
             let step_velocity = params[Self::step_param(self.pattern, self.current_step, StepField::Velocity)] / 127.0;
 
-            // Generate outputs (access directly by index to avoid multiple mutable borrows)
-            outputs[Self::PORT_PITCH].samples[i] = note_to_voct(step_pitch);
+            // Generate outputs (access directly by index to avoid multiple mutable borrows).
+            // Pitch lands on the note unless it's sliding there
+            let coefficient = if self.sliding { glide } else { 1.0 };
+            outputs[Self::PORT_PITCH].samples[i] = note_to_voct(self.glide.next(step_pitch as f32, coefficient));
 
             // Gate output: high if timer > 0 and step gate is enabled. A new
             // note over a gate that's still high dips for this one sample,
@@ -872,6 +998,9 @@ impl DspModule for StepSequencer {
         self.gate_timer = 0;
         self.tied = false;
         self.gate_high = false;
+        self.playing_note = false;
+        self.glide = Glide::NEW;
+        self.sliding = false;
         self.timer.forget();
         self.eoc_timer = 0;
         self.pattern = 0;
@@ -974,9 +1103,9 @@ mod tests {
         let params = seq.parameters();
 
         // 3 global + 16 steps * 3 params each, then Gate Mode and 16 ties,
-        // then the Chain and patterns B to D
+        // then the Chain and patterns B to D, then Glide and every slide
         assert_eq!(params.len(), StepSequencer::PARAM_COUNT);
-        assert_eq!(params.len(), 3 + MAX_STEPS * 3 + 1 + MAX_STEPS + CHAIN_SLOTS + 3 * MAX_STEPS * 4);
+        assert_eq!(params.len(), 3 + MAX_STEPS * 3 + 1 + MAX_STEPS + CHAIN_SLOTS + 3 * MAX_STEPS * 4 + 1 + 4 * MAX_STEPS);
         assert_eq!(params[StepSequencer::PARAM_GATE_MODE].id, "gate_mode");
         assert_eq!(params[StepSequencer::step_tie_param(0)].id, "step_1_tie");
         assert_eq!(params[StepSequencer::step_tie_param(15)].id, "step_16_tie");
@@ -1007,11 +1136,11 @@ mod tests {
     #[test]
     fn test_note_to_voct() {
         // C4 (60) = 0V
-        assert!((note_to_voct(60) - 0.0).abs() < 0.001);
+        assert!((note_to_voct(60.0) - 0.0).abs() < 0.001);
         // C5 (72) = +1V
-        assert!((note_to_voct(72) - 1.0).abs() < 0.001);
+        assert!((note_to_voct(72.0) - 1.0).abs() < 0.001);
         // C3 (48) = -1V
-        assert!((note_to_voct(48) - -1.0).abs() < 0.001);
+        assert!((note_to_voct(48.0) - -1.0).abs() < 0.001);
     }
 
     #[test]
@@ -1321,7 +1450,7 @@ mod tests {
         let params = seq.parameters();
         for pattern in 0..PATTERNS {
             for step in 0..MAX_STEPS {
-                for field in FIELDS {
+                for field in StepField::ALL {
                     let index = StepSequencer::step_param(pattern, step, field);
                     assert_eq!(params[index].name, StepSequencer::step_param_name(pattern, step, field));
                 }
@@ -1331,6 +1460,9 @@ mod tests {
         assert_eq!(StepSequencer::step_param_name(1, 2, StepField::Pitch), "Step B3 Pitch");
         assert_eq!(StepSequencer::step_param_name(3, 15, StepField::Tie), "Step D16 Tie");
         assert_eq!(params[StepSequencer::step_param(2, 9, StepField::Velocity)].id, "step_c10_velocity");
+        assert_eq!(params[StepSequencer::step_param(0, 0, StepField::Slide)].id, "step_1_slide");
+        assert_eq!(params[StepSequencer::step_param(3, 15, StepField::Slide)].id, "step_d16_slide");
+        assert_eq!(params[StepSequencer::PARAM_COUNT - 1].name, "Step D16 Slide");
         // Unique, or saving by name would mix them up
         let mut names: Vec<&str> = params.iter().map(|p| p.name).collect();
         names.sort();
@@ -1523,6 +1655,220 @@ mod tests {
         let at = PatternPosition::from_readout(&seq.readout(&params).unwrap());
         assert!(at.started && !at.pattern_cv);
         assert_eq!((at.pattern, at.chain_slot, at.next_pattern), (2, 1, 3));
+    }
+
+    /// Like `gate_over`, but returns the Pitch output (in semitones from C4)
+    /// and the Gate output.
+    fn play_over(params: &[f32], ms: usize, clocks: &[usize], resets: &[usize]) -> (Vec<f32>, Vec<f32>) {
+        let mut seq = StepSequencer::new();
+        seq.prepare(1000.0, ms);
+        let mut clock = SignalBuffer::control(ms);
+        let mut reset = SignalBuffer::control(ms);
+        for &t in clocks {
+            clock.samples[t] = 1.0;
+        }
+        for &t in resets {
+            reset.samples[t] = 1.0;
+        }
+        let mut outputs: Vec<SignalBuffer> = (0..5).map(|_| SignalBuffer::control(ms)).collect();
+        seq.process(&[&clock, &reset], &mut outputs, params, &ProcessContext::new(1000.0, ms));
+        let semitones = outputs[0].samples.iter().map(|v| v * 12.0).collect();
+        (semitones, outputs[1].samples.clone())
+    }
+
+    /// Four steps of C4, with step 3 an octave up and slid into over 100 ms.
+    fn slide_params() -> Vec<f32> {
+        let mut params = params_with(4.0, 0.0, 50.0);
+        params[StepSequencer::PARAM_GLIDE] = 0.1;
+        params[StepSequencer::step_pitch_param(2)] = 72.0;
+        params[StepSequencer::step_param(0, 2, StepField::Slide)] = 1.0;
+        params
+    }
+
+    #[test]
+    fn test_slides_come_last_and_are_off() {
+        let seq = StepSequencer::new();
+        let params = seq.parameters();
+        assert_eq!(params[StepSequencer::PARAM_GLIDE].id, "glide");
+        assert_eq!(params[StepSequencer::PARAM_GLIDE].default, 0.06);
+        assert_eq!(StepSequencer::PARAM_GLIDE, StepSequencer::PARAM_PATTERNS + (PATTERNS - 1) * MAX_STEPS * 4, "after everything before slides");
+        for pattern in 0..PATTERNS {
+            for step in 0..MAX_STEPS {
+                assert_eq!(params[StepSequencer::step_param(pattern, step, StepField::Slide)].default, 0.0, "off, so old patches play as before");
+            }
+        }
+    }
+
+    #[test]
+    fn test_slide_glides_and_keeps_the_gate_high() {
+        let (pitch, gate) = play_over(&slide_params(), 4000, &[0, 1000, 2000, 3000], &[]);
+
+        // Step 2 holds past its 50% to join step 3, which isn't struck
+        assert_eq!(rises(&gate), [0, 1000, 3000]);
+        assert_eq!(high_for(&gate, 1000), 1000 + 500);
+
+        // Pitch leaves C4 at the clock and climbs to C5 over the Glide time
+        assert!(pitch[2000] > 0.0 && pitch[2000] < 1.0, "starts from the note before: {}", pitch[2000]);
+        assert!((2001..2200).all(|t| pitch[t] >= pitch[t - 1]), "rises all the way");
+        assert!((pitch[2100] - 12.0).abs() < 0.13, "99% there after the Glide time: {}", pitch[2100]);
+        assert!(pitch[2050] < 11.9, "not there halfway: {}", pitch[2050]);
+    }
+
+    #[test]
+    fn test_plain_step_jumps_and_retriggers() {
+        let mut params = slide_params();
+        params[StepSequencer::step_param(0, 2, StepField::Slide)] = 0.0;
+        params[StepSequencer::PARAM_GATE_LENGTH] = 100.0;
+        let (pitch, gate) = play_over(&params, 4000, &[0, 1000, 2000, 3000], &[]);
+
+        // Lands on C5 at the clock, and the full gate dips to strike it
+        assert_eq!(pitch[2000], 12.0);
+        assert_eq!(pitch[1999], 0.0);
+        assert_eq!(gate[2000], 0.0);
+        assert_eq!(rises(&gate), [0, 1000, 2001, 3001]);
+    }
+
+    #[test]
+    fn test_slide_lands_and_the_next_plain_step_jumps() {
+        let (pitch, gate) = play_over(&slide_params(), 4000, &[0, 1000, 2000, 3000], &[]);
+        assert_eq!(pitch[3000], 0.0, "step 4 is back on C4 at once");
+        assert_eq!(gate[3000], 1.0, "and struck");
+        assert_eq!(gate[2999], 0.0);
+    }
+
+    #[test]
+    fn test_slide_after_a_rest_is_struck() {
+        let mut params = slide_params();
+        params[StepSequencer::step_gate_param(1)] = 0.0;
+        let (pitch, gate) = play_over(&params, 4000, &[0, 1000, 2000, 3000], &[]);
+
+        // No note to slide from: a new attack, on its own pitch
+        assert_eq!(rises(&gate), [0, 2000, 3000]);
+        assert_eq!(pitch[2000], 12.0);
+    }
+
+    #[test]
+    fn test_slide_after_a_reset_is_struck() {
+        // Step 1 slides, so step 2 would carry round into it, but a reset
+        // comes in between
+        let mut params = params_with(2.0, 0.0, 50.0);
+        params[StepSequencer::step_param(0, 0, StepField::Slide)] = 1.0;
+        params[StepSequencer::step_pitch_param(0)] = 72.0;
+        params[StepSequencer::step_pitch_param(1)] = 64.0;
+        let (pitch, gate) = play_over(&params, 3000, &[0, 1000, 2000], &[1500]);
+        assert_eq!(gate[1500], 0.0, "the reset lets go");
+        assert_eq!(pitch[2000], 12.0, "step 1 starts on its own pitch");
+        assert_eq!(rises(&gate), [0, 1000, 2000]);
+    }
+
+    #[test]
+    fn test_slide_carries_round_the_loop() {
+        let mut params = params_with(2.0, 0.0, 50.0);
+        params[StepSequencer::PARAM_GLIDE] = 0.1;
+        params[StepSequencer::step_pitch_param(0)] = 72.0;
+        params[StepSequencer::step_param(0, 0, StepField::Slide)] = 1.0;
+        let (pitch, gate) = play_over(&params, 3000, &[0, 1000, 2000], &[]);
+        // The first step has nothing to come from; the second time round it
+        // slides from step 2
+        assert_eq!(pitch[0], 12.0);
+        assert!(pitch[2000] < 1.0);
+        assert_eq!(rises(&gate), [0, 1000]);
+    }
+
+    #[test]
+    fn test_zero_glide_slide_is_legato_with_a_jump() {
+        let mut params = slide_params();
+        params[StepSequencer::PARAM_GLIDE] = 0.0;
+        let (pitch, gate) = play_over(&params, 4000, &[0, 1000, 2000, 3000], &[]);
+        assert_eq!(pitch[2000], 12.0);
+        assert_eq!(rises(&gate), [0, 1000, 3000]);
+    }
+
+    #[test]
+    fn test_tie_keeps_a_slide_gliding() {
+        // A one-second slide into step 3, tied on into step 4 on the same note
+        let mut params = slide_params();
+        params[StepSequencer::PARAM_GLIDE] = 1.0;
+        params[StepSequencer::step_tie_param(2)] = 1.0;
+        params[StepSequencer::step_pitch_param(3)] = 72.0;
+        let (pitch, gate) = play_over(&params, 4000, &[0, 1000, 2000, 3000], &[]);
+        assert!(pitch[2999] < 11.9 && pitch[3000] < 11.95, "still on its way: {}", pitch[3000]);
+        assert!((3001..4000).all(|t| pitch[t] >= pitch[t - 1]));
+        assert_eq!(rises(&gate), [0, 1000]);
+    }
+
+    #[test]
+    fn test_envelope_is_not_retriggered_across_a_slide() {
+        use crate::modules::envelope::AdsrEnvelope;
+
+        // A 303's filter envelope: fast attack, no sustain
+        let (_, gate) = play_over(&slide_params(), 3000, &[0, 1000, 2000], &[]);
+        let mut env = AdsrEnvelope::new();
+        env.prepare(1000.0, 3000);
+        let mut env_params: Vec<f32> = env.parameters().iter().map(|p| p.default).collect();
+        for (i, p) in env.parameters().iter().enumerate() {
+            match p.name {
+                "Attack" => env_params[i] = 0.001,
+                "Decay" => env_params[i] = 0.3,
+                "Sustain" => env_params[i] = 0.0,
+                _ => {}
+            }
+        }
+        let mut gate_buf = SignalBuffer::control(3000);
+        gate_buf.samples.copy_from_slice(&gate);
+        let mut out: Vec<SignalBuffer> = (0..env.ports().iter().filter(|p| p.is_output()).count())
+            .map(|_| SignalBuffer::control(3000))
+            .collect();
+        env.process(&[&gate_buf], &mut out, &env_params, &ProcessContext::new(1000.0, 3000));
+        let level = &out[0].samples;
+        assert!((1010..3000).all(|t| level[t] <= level[t - 1]), "one decay from step 2, never struck again");
+    }
+
+    #[test]
+    fn test_looking_ahead_keeps_the_random_order() {
+        // Each note looks ahead to see if the next step slides, which in Rnd
+        // draws the next step early. Rests don't look, so a pattern of rests
+        // draws only as it goes. Both must visit the same steps
+        let order = |gate: f32| {
+            let mut seq = StepSequencer::new();
+            seq.prepare(1000.0, 1);
+            let mut params = params_with(16.0, 3.0, 50.0);
+            for step in 0..MAX_STEPS {
+                params[StepSequencer::step_gate_param(step)] = gate;
+            }
+            (0..64)
+                .map(|_| {
+                    tick(&mut seq, &params, true, false);
+                    tick(&mut seq, &params, false, false);
+                    seq.current_step()
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(order(1.0), order(0.0));
+    }
+
+    #[test]
+    fn test_slide_into_the_next_pattern() {
+        // A then B, two steps each: B's first step slides up an octave from
+        // A's last, and A's last note holds to meet it
+        let mut params = params_with(2.0, 0.0, 50.0);
+        set_chain(&mut params, "AB");
+        params[StepSequencer::PARAM_GLIDE] = 0.1;
+        fill_pattern(&mut params, 1, 72);
+        params[StepSequencer::step_param(1, 0, StepField::Slide)] = 1.0;
+        let (pitch, gate) = play_over(&params, 4000, &[0, 1000, 2000, 3000], &[]);
+        assert_eq!(rises(&gate), [0, 1000, 3000]);
+        assert!(pitch[2000] < 1.0, "glides from A's C4: {}", pitch[2000]);
+        assert!((pitch[2100] - 12.0).abs() < 0.13);
+
+        // The same slide set in A instead doesn't play, since B is next
+        let mut params = params_with(2.0, 0.0, 50.0);
+        set_chain(&mut params, "AB");
+        fill_pattern(&mut params, 1, 72);
+        params[StepSequencer::step_param(0, 0, StepField::Slide)] = 1.0;
+        let (pitch, gate) = play_over(&params, 4000, &[0, 1000, 2000, 3000], &[]);
+        assert_eq!(rises(&gate), [0, 1000, 2000, 3000]);
+        assert_eq!(pitch[2000], 12.0);
     }
 
     #[test]

@@ -82,7 +82,7 @@ The **Library** is a shelf of ready-made groups that ships with Soba. Each one i
 | **Supersaw Pad** | Seven detuned saws, a slow swell and a filter that breathes | Pitch, Gate, Velocity → Out |
 | **String Machine** | A Solina-style ensemble: detuned saws at 8' and 4', thinned and swelling, through a three-voice chorus. **Cutoff** is the brightness, **Depth** the ensemble, **Atk** the swell and **2** the 4' octave | Pitch, Gate, Velocity → Out |
 | **Mallet** | A short strike rings a resonant filter tuned to the note, like a marimba bar | Pitch, Gate, Velocity → Out |
-| **Acid Bass** | A resonant, driven ladder snapped open on every note; velocity accents | Pitch, Gate, Velocity → Out |
+| **Acid Bass** | A resonant, driven ladder snapped open on every note; velocity accents. Step Sequencer [slides](../modules/utilities/sequencer.md#slides) glide it like a 303 | Pitch, Gate, Velocity → Out |
 | **Reese Bass** | Three detuned saws beating against each other, with a slow LFO in the filter | Pitch, Gate, Velocity → Out |
 | **Drum Kit** | Kick, snare and hats on a stereo mixer, the closed hat choking the open one | Kick, Snare, Hat, Open Hat, Accent → Out L, Out R |
 | **Random Melody** | Plays itself: a wandering voltage sampled on the beat and kept in a scale, A minor pentatonic until you change **Root** and **Scale**. **Amt** is its range, **Thresh** how many beats rest | → Pitch, Gate |

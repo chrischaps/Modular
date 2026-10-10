@@ -7,7 +7,7 @@
 
 The Step Sequencer plays a repeating pattern of up to 16 notes. Each clock pulse moves it one step along, and each step sends out its own pitch, a gate if the step is switched on, and a velocity. Patch **Pitch** into an oscillator and **Gate** into an envelope, and a [Clock](../modulation/clock.md) turns it into a bass line, an arpeggio or a riff.
 
-The pattern lives on the node itself: a grid of step buttons with each step's note name underneath. Ties join a step to the next one for held notes and legato lines. It holds four patterns, A to D, and plays them in the order its **Chain** gives, so a melody can run to 64 steps without repeating, and a verse and a chorus can share one sequencer.
+The pattern lives on the node itself: a grid of step buttons with each step's note name underneath. Ties join a step to the next one for held notes and legato lines, and slides glide the pitch into chosen notes, the way a 303 or a Minimoog lead slurs a phrase. It holds four patterns, A to D, and plays them in the order its **Chain** gives, so a melody can run to 64 steps without repeating, and a verse and a chorus can share one sequencer.
 
 ## Inputs
 
@@ -22,8 +22,8 @@ The pattern lives on the node itself: a grid of step buttons with each step's no
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Pitch** | Control (Orange) | The current step's note as V/Oct. Middle C (C4) is 0.0, the same as the Keyboard and MIDI modules |
-| **Gate** | Gate (Green) | High for each step that's switched on, for **Gate** of the step. Stays high across a tie |
+| **Pitch** | Control (Orange) | The current step's note as V/Oct. Middle C (C4) is 0.0, the same as the Keyboard and MIDI modules. Glides into a slide step |
+| **Gate** | Gate (Green) | High for each step that's switched on, for **Gate** of the step. Stays high across a tie and into a slide |
 | **Velocity** | Control (Orange) | The current step's velocity, 0 to 1 |
 | **Step** | Control (Orange) | The current position as a ramp: 0 on the first step, 1 on the last |
 | **EOC** | Gate (Green) | End of cycle: a 1 ms pulse each time the whole Chain comes round. With a cable in **Pattern**, each time a pattern does |
@@ -34,10 +34,11 @@ The pattern lives on the node itself: a grid of step buttons with each step's no
 |---------|-------|---------|-------------|
 | **Steps** | 1 – 16 | 8 | How many steps play before the pattern loops |
 | **Gate** (Gate Length) | 1 – 100% | 50% | How long each gate stays high, as a share of the step. 100% holds it until the next clock |
+| **Glide** | 0 – 1 s | 60 ms | How long a [slide](#slides) takes to reach its note |
 | **Dir** (Direction) | Fwd / Bwd / P-P / Rnd | Fwd | Playback order |
 | **Gate of** (Gate Mode) | Step / 100 ms | Step | What **Gate** is a share of: the time between clock pulses, or a fixed 100 ms |
 
-Each of the 16 steps of each pattern also stores a note (default C4), a gate on/off (default on), a tie (default off) and a velocity (default 100 of 127). The Chain has up to eight slots. Patches save all of them. **Steps**, **Dir** and the gate settings are shared by all four patterns.
+Each of the 16 steps of each pattern also stores a note (default C4), a gate on/off (default on), a tie (default off), a slide (default off) and a velocity (default 100 of 127). The Chain has up to eight slots. Patches save all of them. **Steps**, **Dir**, the gate settings and **Glide** are shared by all four patterns.
 
 ## Programming a pattern
 
@@ -45,6 +46,7 @@ The grid shows one button per active step, in rows of eight. Steps beyond **Step
 
 - **Click** a step to switch its gate on (green) or off (dark). An off step is a rest: Pitch still moves to its note, but no gate fires.
 - **Shift + click** a step to tie it into the next step. A bar joins the two. Shift + click again to untie.
+- **Ctrl + click** a step to [slide](#slides) into it from the step before. An orange slur arches over the two. Ctrl + click again to strike it instead.
 - **Drag** a step up or down to change its note, a semitone for every few pixels. The note it will land on shows above the step as you drag. Hold **Shift** while dragging to move by whole octaves. A drag is one undo step, however far it goes.
 - **Right-click** a step to open its piano (below).
 
@@ -60,6 +62,7 @@ Right-click a step and a two-octave piano opens under it, with the step's note l
 - **◂ ▸** (or the **←** **→** keys) move to the previous or next step without writing anything. Use them to skip a step you want to keep, or to leave a rest as it is.
 - **‹ ›** move the piano down or up an octave. It stays on that octave as you move from step to step.
 - **Tie into next step** ties the step being written, the same as Shift + click.
+- **Slide into this step** slides into the step being written, the same as Ctrl + click.
 - **Esc**, or a click anywhere outside the piano, closes it.
 
 Each note you write is its own undo step, so **Ctrl+Z** takes back the last key you played.
@@ -78,7 +81,7 @@ The **Chain** is the order the patterns play in, a pass each, round and round. T
 
 A new Step Sequencer plays `A`, and so do patches saved before it had patterns, exactly as they always did. For a 64-step line, write four bars of it into A, B, C and D, and make the Chain `A B C D`. For a 16-bar verse whose first half repeats, `A A B C` will do.
 
-A pass ends where the pattern comes round: after the last step going **Fwd**, after step 1 going **Bwd**, and at each turn in **P-P**, so a ping-pong bounces from one pattern into the next. In **Rnd** a pass is **Steps** clocks long. A tie on the last step carries into the first step of the next pattern, so a phrase can hold a note over the join.
+A pass ends where the pattern comes round: after the last step going **Fwd**, after step 1 going **Bwd**, and at each turn in **P-P**, so a ping-pong bounces from one pattern into the next. In **Rnd** a pass is **Steps** clocks long. A tie on the last step carries into the first step of the next pattern, so a phrase can hold a note over the join, and a slide on the next pattern's first step slurs in from this one's last note.
 
 ### Pattern CV
 
@@ -107,6 +110,24 @@ A tie into a rest just holds the note to the end of the tied step. A tie on a st
 The next step is whichever plays next, so in **Bwd**, **P-P** or **Rnd** a tie carries into that one, though the bar on the grid always points right. Tie the last step to carry the note round into the first. At the end of a row the bar reaches out of the step's right side and into the left side of the next row's first step.
 
 A held gate (a tie, or **Gate** at 100%) lets go after two steps' time if no clock comes, so stopping the clock doesn't leave a note hanging.
+
+### Slides
+
+![Slides on the grid](../../images/sequencer-slides.png)
+*D#2 slides down to C2, and G2 slides to C2. The slur into step 9 breaks at the end of the row: C2 slides up an octave to C3. Steps 4 to 5 and 15 to 16 are ties.*
+
+A slide step is slurred into from the note before it. Two things happen at its clock:
+
+- **Pitch glides** from the last note to this one over the **Glide** time, instead of jumping. The glide is the Keyboard's [Glide](../midi/keyboard.md): even in pitch, and as quick across an octave as across a semitone, so a sequenced slide and a hand-played one sound alike. **Glide** is the time to get 99% of the way there.
+- **The gate stays high.** The note before holds its gate until the slide begins, whatever **Gate** is set to, and the slide carries on from it without a new rising edge. An envelope isn't struck again, so a filter envelope with no sustain keeps falling through the slide instead of snapping open. That's the 303's sound: most notes are plucked, and the slid ones melt into the note before.
+
+A slide needs a note to come from. After a rest, or as the first note after a **Reset**, a slide step is struck like any other and starts on its own pitch. Its slur on the grid is drawn faint after a rest. A slide on a step that's switched off does nothing.
+
+Slides and ties combine. Tie a slide step into the next one on the same note to hold the slid note longer: a slow glide keeps gliding across the tie. A plain step after a slide jumps to its note and is struck as usual. With **Glide** at 0, a slide step jumps to its note but still keeps the gate high: one envelope, two pitches, the same as a tie into a different note.
+
+The note before is whichever plays before, so in **Bwd**, **P-P** or **Rnd** a slide comes from that step, though the slur on the grid always comes from the left. A slide on step 1 slurs in from the note before it, in this pattern or the last one: round the loop, or over the join from the Chain's previous pattern. Each pattern keeps its own slides.
+
+To hold the gate across the join, the note before a slide looks ahead to the step the next clock plays, in the pattern it will be in. With **Pattern** patched, it reads the CV as it is then, so a CV that changes pattern on the very clock of a slide can turn it back into a struck note.
 
 ### 100 ms gates
 
@@ -147,6 +168,18 @@ Ping-pong doesn't repeat the end steps, so a four-step pattern bounces over six 
 
 Set the Clock's **Div** to 1/8 or 1/16, switch a few steps off to make rests, and use the Oscillator's **Oct** knob to move the whole pattern up or down.
 
+### An acid line
+
+```text
+[Clock Gate] ──> [Step Sequencer Clock]        (Div 1/16)
+[Step Sequencer Pitch] ──> [Acid Bass Pitch]
+[Step Sequencer Gate] ──> [Acid Bass Gate]
+[Step Sequencer Velocity] ──> [Acid Bass Velocity]
+[Acid Bass Out] ──> [Audio Output Mono]
+```
+
+The [Library](../../concepts/groups.md#the-library)'s **Acid Bass** snaps its filter open on every new gate. Write a 16-step line in the octave around C2, then Ctrl + click two or three of its notes to slide into them: an octave leap, or a step back down to the root. Those notes glide in under a filter that's still closing, and the rest stay plucked. Keep **Glide** short, 40 to 80 ms, for the 303's quick slur, or raise it to 200 ms or more for a lazier Minimoog lead.
+
 ### Modulation sequences
 
 **Pitch** is a control signal like any other. Patch it into a filter's **Cutoff** and each step sets a brightness instead of a note: one octave of cutoff for each octave of pitch. Combine with a second sequencer for melody, both clocked together.
@@ -173,5 +206,6 @@ The [Clock](../modulation/clock.md)'s **Run** and **Reset** outputs are made for
 - [Trigger Sequencer](./trigger-sequencer.md): eight lanes of drum hits from one module, with chained patterns for fills
 - [Clock Divider](./divider.md): divides the clock, so a sequencer can play once every few bars from its **Run** and **Reset**
 - [ADSR Envelope](../modulation/adsr.md): shapes each step's note from the Gate output
+- [Slope](../modulation/slope.md): slews any signal, every change alike, where a slide picks its notes
 - [Oscillator](../sources/oscillator.md): plays the Pitch output
 - [Sample & Hold](./sample-hold.md): stepped values that aren't programmed by hand

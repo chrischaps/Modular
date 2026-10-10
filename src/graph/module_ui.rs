@@ -326,7 +326,7 @@ static MODULE_UI: &[ModuleUi] = &[
     },
     ModuleUi {
         module_id: "seq.step",
-        knobs: &[knob("Steps"), knob_as("Gate Length", "Gate")],
+        knobs: &[knob("Steps"), knob_as("Gate Length", "Gate"), knob("Glide")],
         labels: &[("Direction", "Dir"), ("Gate Mode", "Gate of")],
         // The grid, the pattern tabs and the Chain edit these
         hidden: &["Step *", "Chain *"],

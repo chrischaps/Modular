@@ -1,7 +1,7 @@
 //! The Step Sequencer's grid: a button per step in rows of eight, with its
 //! note underneath.
 //!
-//! - Click switches a step's gate, Shift+click its tie.
+//! - Click switches a step's gate, Shift+click its tie, Ctrl+click its slide.
 //! - Drag a step up or down to move its note a semitone at a time, or with
 //!   Shift an octave at a time. The note it will land on shows above it.
 //! - Right-click opens a two-octave piano under the step, for writing notes
@@ -13,6 +13,12 @@
 //! A tied step reaches across the gap into the next one, the way a held note
 //! looks on a piano roll. At the end of a row, or of the pattern, it reaches
 //! out of its right side and into the next step's left.
+//!
+//! A slide step has a slur over it from the step before, in the pitch cable's
+//! orange, since it's the pitch that glides. A tie is about the gate, so it
+//! stays green. The slur arches over the tops of the two steps it joins, and
+//! where they're on different rows it breaks at its peak, the way a printed
+//! slur breaks at the end of a line.
 //!
 //! Under the steps are the Trigger Sequencer's tabs: one for each pattern,
 //! A to D, which the grid shows and edits, and the Chain that plays them.
@@ -42,7 +48,9 @@ const TOP_BASE: u8 = 96;
 /// One octave of the piano, in points.
 const OCTAVE_WIDTH: f32 = 140.0;
 const KEY_HEIGHT: f32 = 48.0;
-const HINT: &str = "Click: gate · Shift+click: tie\nDrag up or down: note (Shift: by octave)\nRight-click: piano";
+/// The gap between steps, before zoom.
+const STEP_SPACING: f32 = 3.0;
+const HINT: &str = "Click: gate · Shift+click: tie · Ctrl+click: slide\nDrag up or down: note (Shift: by octave)\nRight-click: piano";
 
 /// The grid's width, before zoom.
 const GRID_WIDTH: f32 = 220.0;
@@ -61,6 +69,8 @@ pub(super) struct StepPattern {
     pub pitches: [u8; 16],
     pub gates: [bool; 16],
     pub ties: [bool; 16],
+    /// Steps slurred into from the step before.
+    pub slides: [bool; 16],
 }
 
 impl StepPattern {
@@ -117,6 +127,7 @@ pub(super) fn step_sequencer_display(
         pitches: std::array::from_fn(|step| values.field(editing, step, StepField::Pitch).map_or(60, |v| v as u8)),
         gates: std::array::from_fn(|step| values.field(editing, step, StepField::Gate).is_none_or(|v| v > 0.5)),
         ties: std::array::from_fn(|step| values.field(editing, step, StepField::Tie).is_some_and(|v| v > 0.5)),
+        slides: std::array::from_fn(|step| values.field(editing, step, StepField::Slide).is_some_and(|v| v > 0.5)),
     };
     step_grid(ui, zoom, &pattern, node_id, responses);
 
@@ -136,13 +147,13 @@ pub(super) fn step_sequencer_display(
 /// A pattern tab's right-click menu: copy the pattern to another, or clear
 /// it to rests, ready to write a new line over with the piano.
 fn pattern_menu(ui: &mut egui::Ui, node_id: NodeId, values: &Values, pattern: usize, edits: &mut Vec<SynthResponse>) {
-    const FIELDS: [StepField; 4] = [StepField::Pitch, StepField::Gate, StepField::Velocity, StepField::Tie];
+    const FIELDS: [StepField; 5] = StepField::ALL;
     let from = PATTERN_NAMES[pattern];
     let edit = |label: String, changes: Vec<(String, f32)>| SynthResponse::EditParameters { node_id, label, changes };
     ui.label(RichText::new(format!("Pattern {from}")).strong());
     ui.separator();
     for to in (0..PATTERNS).filter(|&p| p != pattern) {
-        let copy = ui.button(format!("Copy to {}", PATTERN_NAMES[to])).on_hover_text("Every step's note, gate, velocity and tie, to start a variation from");
+        let copy = ui.button(format!("Copy to {}", PATTERN_NAMES[to])).on_hover_text("Every step's note, gate, velocity, tie and slide, to start a variation from");
         if copy.clicked() {
             let mut changes = Vec::with_capacity(MAX_STEPS * FIELDS.len());
             for step in 0..MAX_STEPS {
@@ -159,7 +170,9 @@ fn pattern_menu(ui: &mut egui::Ui, node_id: NodeId, values: &Values, pattern: us
     ui.separator();
     if ui.button(format!("Clear {from}")).on_hover_text("Every step a rest, keeping its note").clicked() {
         let changes = (0..MAX_STEPS)
-            .flat_map(|step| [StepField::Gate, StepField::Tie].map(|field| (Seq::step_param_name(pattern, step, field).to_string(), 0.0)))
+            .flat_map(|step| {
+                [StepField::Gate, StepField::Tie, StepField::Slide].map(|field| (Seq::step_param_name(pattern, step, field).to_string(), 0.0))
+            })
             .collect();
         edits.push(edit(format!("Clear pattern {from}"), changes));
         ui.close_menu();
@@ -221,7 +234,7 @@ pub(super) fn step_grid(
     responses: &mut Vec<NodeResponse<SynthResponse, SynthNodeData>>,
 ) {
     let step_size = 24.0 * zoom;
-    let step_spacing = 3.0 * zoom;
+    let step_spacing = STEP_SPACING * zoom;
     let mut set = |param_name: String, value: f32| {
         responses.push(NodeResponse::User(SynthResponse::ParameterChanged { node_id, param_name, value }));
     };
@@ -298,8 +311,11 @@ pub(super) fn step_grid(
             );
 
             if response.clicked() {
-                if ui.input(|i| i.modifiers.shift) {
+                let modifiers = ui.input(|i| i.modifiers);
+                if modifiers.shift {
                     set(pattern.param(step, StepField::Tie), if pattern.ties[step] { 0.0 } else { 1.0 });
+                } else if modifiers.command {
+                    set(pattern.param(step, StepField::Slide), if pattern.slides[step] { 0.0 } else { 1.0 });
                 } else {
                     set(pattern.param(step, StepField::Gate), if pattern.gates[step] { 0.0 } else { 1.0 });
                 }
@@ -331,6 +347,15 @@ pub(super) fn step_grid(
             }
         }
 
+        // Slurs, over the steps. A slide after a rest is struck, so its slur
+        // is only a faint mark. Step 1's note before may be in another
+        // pattern, so it's always drawn whole
+        for step in (0..pattern.steps).filter(|&s| pattern.slides[s] && pattern.gates[s]) {
+            let before = (step + pattern.steps - 1) % pattern.steps;
+            let alpha = if step == 0 || pattern.gates[before] { 255 } else { 90 };
+            slur(painter, cells[before].0, cells[step].0, step == 0, alpha, zoom);
+        }
+
         let Some(mut open) = entry else {
             return;
         };
@@ -359,6 +384,39 @@ pub(super) fn step_grid(
             ui.data_mut(|d| d.remove::<StepEntry>(entry_id));
         }
     });
+}
+
+/// The slur from the step `from` into the slide step `to`: an arch from the
+/// top of one to the top of the other. Where the slide comes from the row
+/// above, or round from the pattern's end, the arch is broken at its peak:
+/// half leaves `from` to the right and half arrives at `to` from the left.
+fn slur(painter: &egui::Painter, from: egui::Rect, to: egui::Rect, wraps: bool, alpha: u8, zoom: f32) {
+    use egui::{epaint::CubicBezierShape, pos2, vec2, Pos2};
+
+    let color = theme::signal::CONTROL;
+    let color = Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha);
+    let shadow = Color32::from_black_alpha(alpha / 2);
+    // Control points this far above the feet put the arch's peak three
+    // quarters of the way up, a little above the steps' tops
+    let rise = vec2(0.0, -7.0 * zoom);
+    let foot = |rect: egui::Rect| pos2(rect.center().x, rect.top() + 1.5 * zoom);
+    let draw = |points: [Pos2; 4]| {
+        for (width, color) in [(3.5 * zoom, shadow), (1.8 * zoom, color)] {
+            painter.add(CubicBezierShape::from_points_stroke(points, false, Color32::TRANSPARENT, egui::Stroke::new(width, color)));
+        }
+    };
+    let arch = |a: Pos2, b: Pos2| [a, a + rise, b + rise, b];
+
+    if !wraps && (to.center().y - from.center().y).abs() < 1.0 {
+        draw(arch(foot(from), foot(to)));
+    } else {
+        // The arch between neighbouring steps, split at its middle
+        let along = vec2(to.width() + STEP_SPACING * zoom, 0.0);
+        let [a0, a1, a2, a3] = arch(foot(from), foot(from) + along).map(|p| p.to_vec2());
+        draw([a0, (a0 + a1) / 2.0, (a0 + 2.0 * a1 + a2) / 4.0, (a0 + 3.0 * a1 + 3.0 * a2 + a3) / 8.0].map(|v| v.to_pos2()));
+        let [b0, b1, b2, b3] = arch(foot(to) - along, foot(to)).map(|p| p.to_vec2());
+        draw([(b0 + 3.0 * b1 + 3.0 * b2 + b3) / 8.0, (b1 + 2.0 * b2 + b3) / 4.0, (b2 + b3) / 2.0, b3].map(|v| v.to_pos2()));
+    }
 }
 
 /// The note a drag will land on, floated above its step where the node's
@@ -435,6 +493,11 @@ fn step_piano(ui: &mut egui::Ui, open: &mut StepEntry, pattern: &StepPattern, se
     let hint = "Holds this note into the next step, which continues it without a new attack (Shift+click)";
     if ui.checkbox(&mut tie, "Tie into next step").on_hover_text(hint).changed() {
         set(pattern.param(step, StepField::Tie), if tie { 1.0 } else { 0.0 });
+    }
+    let mut slide = pattern.slides[step];
+    let hint = "Glides into this note from the one before, without a new attack (Ctrl+click)";
+    if ui.checkbox(&mut slide, "Slide into this step").on_hover_text(hint).changed() {
+        set(pattern.param(step, StepField::Slide), if slide { 1.0 } else { 0.0 });
     }
     ui.label(RichText::new("Each key writes this step, then moves to the next").small().weak());
 }
