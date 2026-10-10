@@ -247,30 +247,33 @@ static MODULE_UI: &[ModuleUi] = &[
     },
     ModuleUi {
         module_id: "util.mixer",
-        // A column per channel strip, its level over its pan over its send,
-        // and a fifth for the master section and the return. The display's
-        // meters sit over the columns
+        // The display lays every knob out itself, a row per channel strip
+        // (level, pan, width, send) and the bus row (return, master). The
+        // short labels are what a group's face shows when one is pinned
         knobs: &[
             modulatable("Level 1", "Lv 1"),
-            modulatable("Level 2", "Lv 2"),
-            modulatable("Level 3", "Lv 3"),
-            modulatable("Level 4", "Lv 4"),
-            knob("Master"),
             modulatable("Pan 1", "Pan 1"),
+            knob_as("Width 1", "Wid 1"),
+            knob_as("Send 1", "Snd 1"),
+            modulatable("Level 2", "Lv 2"),
             modulatable("Pan 2", "Pan 2"),
+            knob_as("Width 2", "Wid 2"),
+            knob_as("Send 2", "Snd 2"),
+            modulatable("Level 3", "Lv 3"),
             modulatable("Pan 3", "Pan 3"),
+            knob_as("Width 3", "Wid 3"),
+            knob_as("Send 3", "Snd 3"),
+            modulatable("Level 4", "Lv 4"),
             modulatable("Pan 4", "Pan 4"),
-            knob("Spread"),
-            knob("Send 1"),
-            knob("Send 2"),
-            knob("Send 3"),
-            knob("Send 4"),
-            knob("Return"),
+            knob_as("Width 4", "Wid 4"),
+            knob_as("Send 4", "Snd 4"),
+            knob_as("Return", "Ret"),
+            knob("Master"),
         ],
-        // Each strip's mute is a button under its meter
-        hidden: &["Mute *"],
+        // Each strip's mute and solo are buttons at the end of its row
+        hidden: &["Mute *", "Solo *"],
         display: NodeDisplay::MixerStrips,
-        knobs_per_row: 5,
+        knobs_per_row: 4,
         ..ModuleUi::DEFAULT
     },
     ModuleUi {

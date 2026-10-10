@@ -60,8 +60,8 @@ fn fill_bars(steps: &[f32]) -> Vec<usize> {
     steps.chunks_exact(16).enumerate().filter(|(_, bar)| bar[6] < -90.0).map(|(n, _)| n + 1).collect()
 }
 
-/// Backbeat with its divider's Offset set, and its snare kept out of the
-/// room: the Mixer whose sends chain into another sends nothing. The
+/// Backbeat with its divider's Offset set, and its kick and snare kept out
+/// of the room: the drum-bus Mixer chained into the main one sends nothing. The
 /// reverb returns through a loop, a 256-sample block late at 48 kHz, so its
 /// pre-delay gives back exactly that much of the fixture's 8 ms.
 fn backbeat(offset: f32, path: &Path) -> PathBuf {
@@ -70,9 +70,9 @@ fn backbeat(offset: f32, path: &Path) -> PathBuf {
         .as_array()
         .unwrap()
         .iter()
-        .find(|c| c["to_port"] == "Chain Send L")
+        .find(|c| c["to_port"] == "Chain In")
         .map(|c| c["from_node"].clone())
-        .expect("the kick and snare Mixer's sends chain into the main Mixer");
+        .expect("the kick and snare's drum bus chains into the main Mixer");
     for node in patch["nodes"].as_array_mut().unwrap() {
         let (divider, kick_and_snare) = (node["module_id"] == "util.divider", node["id"] == chained);
         if node["module_id"] == "fx.reverb" {

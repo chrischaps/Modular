@@ -2041,32 +2041,22 @@
           "value": -0.3
         },
         {
-          "name": "Mute 1",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 2",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 3",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 4",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Master",
+          "name": "Width 1",
           "type": "Number",
           "value": 0.0
         },
         {
-          "name": "Spread",
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
           "type": "Number",
           "value": 0.0
         },
@@ -2091,9 +2081,54 @@
           "value": 0.0
         },
         {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
           "name": "Return",
           "type": "Number",
           "value": 1.0
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 0.0
         }
       ]
     },
@@ -2101,7 +2136,7 @@
       "id": 13,
       "module_id": "fx.reverb",
       "position": [
-        1450.0,
+        1528.0,
         510.0
       ],
       "parameters": [
@@ -2146,7 +2181,7 @@
       "id": 14,
       "module_id": "output.audio",
       "position": [
-        1740.0,
+        1818.0,
         510.0
       ],
       "parameters": [
@@ -2305,7 +2340,7 @@
       "from_node": 3,
       "from_port": "Out",
       "to_node": 12,
-      "to_port": "Chain L"
+      "to_port": "Return L"
     },
     {
       "from_node": 5,
@@ -2401,8 +2436,8 @@
         486
       ],
       "size": [
-        885,
-        913
+        963.0,
+        433.0
       ],
       "color": "cyan"
     }

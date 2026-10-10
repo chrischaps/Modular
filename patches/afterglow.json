@@ -971,6 +971,46 @@
           "value": 0.0
         },
         {
+          "name": "Width 1",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 1",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
           "name": "Mute 1",
           "type": "Toggle",
           "value": false
@@ -991,14 +1031,34 @@
           "value": false
         },
         {
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Return",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
           "name": "Master",
           "type": "Number",
           "value": 3.0
-        },
-        {
-          "name": "Spread",
-          "type": "Number",
-          "value": 0.0
         }
       ]
     },
@@ -1006,7 +1066,7 @@
       "id": 15,
       "module_id": "fx.chorus",
       "position": [
-        1730.0,
+        1828.0,
         74.0
       ],
       "parameters": [
@@ -1051,7 +1111,7 @@
       "id": 16,
       "module_id": "fx.delay",
       "position": [
-        2050.0,
+        2148.0,
         74.0
       ],
       "parameters": [
@@ -1101,7 +1161,7 @@
       "id": 17,
       "module_id": "fx.reverb",
       "position": [
-        2370.0,
+        2468.0,
         74.0
       ],
       "parameters": [
@@ -1146,7 +1206,7 @@
       "id": 18,
       "module_id": "output.audio",
       "position": [
-        2680.0,
+        2778.0,
         114.0
       ],
       "parameters": [
@@ -1342,7 +1402,7 @@
       ],
       "size": [
         1320.0,
-        987.0
+        871.0
       ],
       "color": "blue"
     },
@@ -1365,8 +1425,8 @@
         16.0
       ],
       "size": [
-        1238.0,
-        747.0
+        1336.0,
+        507.0
       ],
       "color": "cyan"
     }

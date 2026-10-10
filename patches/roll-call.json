@@ -3396,32 +3396,22 @@
           "value": -0.45
         },
         {
-          "name": "Mute 1",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 2",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 3",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 4",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Master",
+          "name": "Width 1",
           "type": "Number",
           "value": 0.0
         },
         {
-          "name": "Spread",
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
           "type": "Number",
           "value": 0.0
         },
@@ -3446,9 +3436,54 @@
           "value": 0.0
         },
         {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
           "name": "Return",
           "type": "Number",
           "value": 1.0
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 0.0
         }
       ]
     },
@@ -3456,7 +3491,7 @@
       "id": 21,
       "module_id": "util.mixer",
       "position": [
-        1650.0,
+        1758.0,
         40.0
       ],
       "parameters": [
@@ -3501,32 +3536,22 @@
           "value": 0.0
         },
         {
-          "name": "Mute 1",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 2",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 3",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 4",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Master",
+          "name": "Width 1",
           "type": "Number",
           "value": 0.0
         },
         {
-          "name": "Spread",
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
           "type": "Number",
           "value": 0.0
         },
@@ -3551,9 +3576,54 @@
           "value": 0.0
         },
         {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
           "name": "Return",
           "type": "Number",
           "value": 1.0
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 0.0
         }
       ]
     },
@@ -3561,7 +3631,7 @@
       "id": 22,
       "module_id": "fx.reverb",
       "position": [
-        1970.0,
+        2176.0,
         40.0
       ],
       "parameters": [
@@ -3606,7 +3676,7 @@
       "id": 23,
       "module_id": "output.audio",
       "position": [
-        1970.0,
+        2176.0,
         360.0
       ],
       "parameters": [
@@ -3747,7 +3817,7 @@
       "from_node": 10,
       "from_port": "Out",
       "to_node": 20,
-      "to_port": "Chain L"
+      "to_port": "Return L"
     },
     {
       "from_node": 11,
@@ -3792,18 +3862,6 @@
       "to_port": "Ch 3"
     },
     {
-      "from_node": 20,
-      "from_port": "Out L",
-      "to_node": 21,
-      "to_port": "Chain L"
-    },
-    {
-      "from_node": 20,
-      "from_port": "Out R",
-      "to_node": 21,
-      "to_port": "Chain R"
-    },
-    {
       "from_node": 21,
       "from_port": "Out L",
       "to_node": 22,
@@ -3826,6 +3884,12 @@
       "from_port": "Out R",
       "to_node": 23,
       "to_port": "Right"
+    },
+    {
+      "from_node": 20,
+      "from_port": "Chain Out",
+      "to_node": 21,
+      "to_port": "Chain In"
     }
   ],
   "midi_mappings": [],
@@ -3873,8 +3937,8 @@
         16.0
       ],
       "size": [
-        900.0,
-        913.0
+        1106.0,
+        646.0
       ],
       "color": "cyan"
     }

@@ -396,32 +396,22 @@
           "value": 0.0
         },
         {
-          "name": "Mute 1",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 2",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 3",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 4",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Master",
+          "name": "Width 1",
           "type": "Number",
           "value": 0.0
         },
         {
-          "name": "Spread",
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
           "type": "Number",
           "value": 0.0
         },
@@ -446,9 +436,54 @@
           "value": 0.0
         },
         {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
           "name": "Return",
           "type": "Number",
           "value": 1.0
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 0.0
         }
       ]
     },
@@ -456,7 +491,7 @@
       "id": 10,
       "module_id": "output.audio",
       "position": [
-        1690.0,
+        1738.0,
         900.0
       ],
       "parameters": [
@@ -543,13 +578,13 @@
       "from_node": 6,
       "from_port": "Out L",
       "to_node": 9,
-      "to_port": "Chain L"
+      "to_port": "Return L"
     },
     {
       "from_node": 6,
       "from_port": "Out R",
       "to_node": 9,
-      "to_port": "Chain R"
+      "to_port": "Return R"
     },
     {
       "from_node": 7,

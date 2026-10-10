@@ -1979,7 +1979,7 @@
     },
     {
       "id": 32,
-      "module_id": "util.mixer",
+      "module_id": "util.mix",
       "position": [
         1820.0,
         74.0
@@ -2004,81 +2004,6 @@
           "name": "Level 4",
           "type": "Number",
           "value": 0.0
-        },
-        {
-          "name": "Pan 1",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Pan 2",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Pan 3",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Pan 4",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Mute 1",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 2",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 3",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 4",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Master",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Spread",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Send 1",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Send 2",
-          "type": "Number",
-          "value": 0.3
-        },
-        {
-          "name": "Send 3",
-          "type": "Number",
-          "value": 0.3
-        },
-        {
-          "name": "Send 4",
-          "type": "Number",
-          "value": 0.0
-        },
-        {
-          "name": "Return",
-          "type": "Number",
-          "value": 1.0
         }
       ]
     },
@@ -2133,6 +2058,146 @@
       ]
     },
     {
+      "id": 37,
+      "module_id": "util.mixer",
+      "position": [
+        2150.0,
+        470.0
+      ],
+      "parameters": [
+        {
+          "name": "Level 1",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Level 2",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Level 3",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Level 4",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Pan 1",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Pan 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Pan 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Pan 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 1",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 1",
+          "type": "Number",
+          "value": 0.15
+        },
+        {
+          "name": "Send 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Return",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 3.0103
+        }
+      ]
+    },
+    {
       "id": 34,
       "module_id": "util.mixer",
       "position": [
@@ -2181,32 +2246,22 @@
           "value": -0.4
         },
         {
-          "name": "Mute 1",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 2",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 3",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 4",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Master",
+          "name": "Width 1",
           "type": "Number",
-          "value": -2.0
+          "value": 0.0
         },
         {
-          "name": "Spread",
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
           "type": "Number",
           "value": 0.0
         },
@@ -2231,9 +2286,54 @@
           "value": 0.25
         },
         {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
           "name": "Return",
           "type": "Number",
           "value": 1.0
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": -2.0
         }
       ]
     },
@@ -2241,7 +2341,7 @@
       "id": 35,
       "module_id": "fx.reverb",
       "position": [
-        3030.0,
+        3118.0,
         1396.0
       ],
       "parameters": [
@@ -2286,7 +2386,7 @@
       "id": 36,
       "module_id": "output.audio",
       "position": [
-        3030.0,
+        3118.0,
         1100.0
       ],
       "parameters": [
@@ -2391,7 +2491,7 @@
       "from_node": 6,
       "from_port": "Out",
       "to_node": 32,
-      "to_port": "Ch 1"
+      "to_port": "In 1"
     },
     {
       "from_node": 7,
@@ -2457,13 +2557,13 @@
       "from_node": 12,
       "from_port": "HighPass",
       "to_node": 32,
-      "to_port": "Ch 3"
+      "to_port": "In 3"
     },
     {
       "from_node": 13,
       "from_port": "Out",
       "to_node": 32,
-      "to_port": "Ch 2"
+      "to_port": "In 2"
     },
     {
       "from_node": 14,
@@ -2654,20 +2754,8 @@
     {
       "from_node": 33,
       "from_port": "Out",
-      "to_node": 34,
-      "to_port": "Chain L"
-    },
-    {
-      "from_node": 32,
-      "from_port": "Send L",
-      "to_node": 34,
-      "to_port": "Chain Send L"
-    },
-    {
-      "from_node": 32,
-      "from_port": "Send R",
-      "to_node": 34,
-      "to_port": "Chain Send R"
+      "to_node": 37,
+      "to_port": "Ch 1"
     },
     {
       "from_node": 34,
@@ -2704,6 +2792,12 @@
       "from_port": "Out R",
       "to_node": 36,
       "to_port": "Right"
+    },
+    {
+      "from_node": 37,
+      "from_port": "Chain Out",
+      "to_node": 34,
+      "to_port": "Chain In"
     }
   ],
   "midi_mappings": [],
@@ -2800,7 +2894,7 @@
       ],
       "size": [
         764.0,
-        947.0
+        863.0
       ],
       "color": "cyan"
     },
@@ -2811,8 +2905,8 @@
         1042.0
       ],
       "size": [
-        868.0,
-        961.0
+        956.0,
+        735.0
       ],
       "color": "cyan"
     }

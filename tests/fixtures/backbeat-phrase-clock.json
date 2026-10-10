@@ -2376,6 +2376,46 @@
           "value": -0.4
         },
         {
+          "name": "Width 1",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 1",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
           "name": "Mute 1",
           "type": "Toggle",
           "value": false
@@ -2396,12 +2436,32 @@
           "value": false
         },
         {
-          "name": "Master",
-          "type": "Number",
-          "value": 0.0
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
         },
         {
-          "name": "Spread",
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Return",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Master",
           "type": "Number",
           "value": 0.0
         }

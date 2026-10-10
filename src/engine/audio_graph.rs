@@ -1344,8 +1344,8 @@ mod tests {
     /// the same mixer: a loop through its late Return L.
     fn send_and_return_loop() -> AudioGraph {
         use crate::modules::Mixer;
-        const SEND_L: PortIndex = 21;
-        const RETURN_L: PortIndex = 16;
+        const SEND_L: PortIndex = Mixer::INPUTS + Mixer::SEND_L;
+        const RETURN_L: PortIndex = Mixer::PORT_RETURN;
         let mut graph = AudioGraph::new(44100.0, 256);
         graph.add_module_instance(1, Box::new(TestOscillator::new(0.25)));
         graph.add_module_instance(2, Box::new(Mixer::new()));
@@ -1354,8 +1354,8 @@ mod tests {
         for (index, param) in mixer.parameters().iter().enumerate() {
             graph.set_parameter(2, index, param.default);
         }
-        graph.set_parameter(2, 4, -1.0); // Pan 1 hard left
-        graph.set_parameter(2, 14, 1.0); // Send 1 full
+        graph.set_parameter(2, Mixer::PARAM_PAN, -1.0); // Pan 1 hard left
+        graph.set_parameter(2, Mixer::PARAM_SEND, 1.0); // Send 1 full
         assert!(graph.connect(1, 0, 2, 0));
         assert!(graph.connect(2, SEND_L, 3, 0));
         assert!(graph.connect(3, 1, 2, RETURN_L), "a late input may close a loop");
@@ -1365,7 +1365,7 @@ mod tests {
     /// Out L of node 2, the loop's mixer, after the last block.
     fn mixer_out_l(plan: &GraphPlan) -> &[f32] {
         let node = plan.nodes.iter().find(|node| node.node_id == 2).unwrap();
-        &plan.outputs[node.outputs.start + 1].samples
+        &plan.outputs[node.outputs.start + crate::modules::Mixer::OUT_L].samples
     }
 
     #[test]
@@ -1408,9 +1408,9 @@ mod tests {
         graph.add_module_instance(1, Box::new(TestOscillator::new(0.25)));
         graph.add_module_instance(2, Box::new(Mixer::new()));
         graph.add_module_instance(3, Box::new(TestPassthrough));
-        graph.set_parameter(2, 18, 1.0); // Return at full
+        graph.set_parameter(2, Mixer::PARAM_RETURN, 1.0); // Return at full
         assert!(graph.connect(1, 0, 3, 0));
-        assert!(graph.connect(3, 1, 2, 16));
+        assert!(graph.connect(3, 1, 2, Mixer::PORT_RETURN));
         // Node 3 has the higher ID, yet runs first, as its cable asks
         let plan = run_block(&mut graph, 256);
         assert_eq!(graph.processing_order(), [1, 3, 2]);

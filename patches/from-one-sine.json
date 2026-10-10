@@ -9146,7 +9146,7 @@
       "id": 43,
       "module_id": "osc.sine",
       "position": [
-        2551.0,
+        2659.0,
         40.0
       ],
       "parameters": [
@@ -9206,7 +9206,7 @@
       "id": 44,
       "module_id": "mod.lfo",
       "position": [
-        2764.0,
+        2872.0,
         40.0
       ],
       "parameters": [
@@ -9241,7 +9241,7 @@
       "id": 45,
       "module_id": "util.attenuverter",
       "position": [
-        2764.0,
+        2872.0,
         427.0
       ],
       "parameters": [
@@ -9261,7 +9261,7 @@
       "id": 46,
       "module_id": "mod.adsr",
       "position": [
-        2977.0,
+        3085.0,
         40.0
       ],
       "parameters": [
@@ -9311,7 +9311,7 @@
       "id": 47,
       "module_id": "filter.svf",
       "position": [
-        3235.0,
+        3343.0,
         40.0
       ],
       "parameters": [
@@ -9336,7 +9336,7 @@
       "id": 48,
       "module_id": "util.vca",
       "position": [
-        3235.0,
+        3343.0,
         409.0
       ],
       "parameters": [
@@ -9706,7 +9706,7 @@
       "id": 50,
       "module_id": "osc.sine",
       "position": [
-        2551.0,
+        2659.0,
         733.0
       ],
       "parameters": [
@@ -9766,7 +9766,7 @@
       "id": 51,
       "module_id": "mod.adsr",
       "position": [
-        2764.0,
+        2872.0,
         733.0
       ],
       "parameters": [
@@ -9816,7 +9816,7 @@
       "id": 52,
       "module_id": "mod.adsr",
       "position": [
-        2764.0,
+        2872.0,
         1102.0
       ],
       "parameters": [
@@ -9866,7 +9866,7 @@
       "id": 53,
       "module_id": "filter.ladder",
       "position": [
-        3022.0,
+        3130.0,
         733.0
       ],
       "parameters": [
@@ -9891,7 +9891,7 @@
       "id": 54,
       "module_id": "util.vca",
       "position": [
-        3022.0,
+        3130.0,
         1058.0
       ],
       "parameters": [
@@ -9911,7 +9911,7 @@
       "id": 55,
       "module_id": "util.attenuverter",
       "position": [
-        3235.0,
+        3343.0,
         1058.0
       ],
       "parameters": [
@@ -9931,7 +9931,7 @@
       "id": 56,
       "module_id": "fx.distortion",
       "position": [
-        3235.0,
+        3343.0,
         733.0
       ],
       "parameters": [
@@ -9976,7 +9976,7 @@
       "id": 57,
       "module_id": "fx.eq",
       "position": [
-        3441.0,
+        3549.0,
         733.0
       ],
       "parameters": [
@@ -10376,7 +10376,7 @@
       "id": 59,
       "module_id": "source.sampler",
       "position": [
-        2551.0,
+        2659.0,
         1577.0
       ],
       "parameters": [
@@ -10452,7 +10452,7 @@
       "id": 60,
       "module_id": "source.noise",
       "position": [
-        2809.0,
+        2917.0,
         1577.0
       ],
       "parameters": [
@@ -10472,7 +10472,7 @@
       "id": 61,
       "module_id": "util.sample_hold",
       "position": [
-        3022.0,
+        3130.0,
         1577.0
       ],
       "parameters": [
@@ -10487,7 +10487,7 @@
       "id": 62,
       "module_id": "util.quantizer",
       "position": [
-        3022.0,
+        3130.0,
         1786.0
       ],
       "parameters": [
@@ -10517,7 +10517,7 @@
       "id": 63,
       "module_id": "osc.sine",
       "position": [
-        3274.0,
+        3382.0,
         1577.0
       ],
       "parameters": [
@@ -10577,7 +10577,7 @@
       "id": 64,
       "module_id": "mod.adsr",
       "position": [
-        3274.0,
+        3382.0,
         2164.0
       ],
       "parameters": [
@@ -10627,7 +10627,7 @@
       "id": 65,
       "module_id": "util.vca",
       "position": [
-        3532.0,
+        3640.0,
         1577.0
       ],
       "parameters": [
@@ -10667,7 +10667,7 @@
       "id": 67,
       "module_id": "filter.svf",
       "position": [
-        2426.0,
+        2534.0,
         2639.0
       ],
       "parameters": [
@@ -10692,7 +10692,7 @@
       "id": 68,
       "module_id": "mod.lfo",
       "position": [
-        2426.0,
+        2534.0,
         3008.0
       ],
       "parameters": [
@@ -10727,7 +10727,7 @@
       "id": 69,
       "module_id": "mod.adsr",
       "position": [
-        2639.0,
+        2747.0,
         2639.0
       ],
       "parameters": [
@@ -10777,7 +10777,7 @@
       "id": 70,
       "module_id": "osc.sine",
       "position": [
-        2897.0,
+        3005.0,
         2639.0
       ],
       "parameters": [
@@ -10837,7 +10837,7 @@
       "id": 71,
       "module_id": "filter.svf",
       "position": [
-        3110.0,
+        3218.0,
         2639.0
       ],
       "parameters": [
@@ -10862,7 +10862,7 @@
       "id": 72,
       "module_id": "util.vca",
       "position": [
-        3110.0,
+        3218.0,
         3008.0
       ],
       "parameters": [
@@ -14367,32 +14367,22 @@
           "value": 0.1
         },
         {
-          "name": "Mute 1",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 2",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 3",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 4",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Master",
+          "name": "Width 1",
           "type": "Number",
-          "value": 6.0
+          "value": 0.0
         },
         {
-          "name": "Spread",
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
           "type": "Number",
           "value": 0.0
         },
@@ -14417,9 +14407,54 @@
           "value": 0.3
         },
         {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
           "name": "Return",
           "type": "Number",
           "value": 1.0
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 6.0
         }
       ]
     },
@@ -14427,7 +14462,7 @@
       "id": 87,
       "module_id": "util.mixer",
       "position": [
-        2720.0,
+        2828.0,
         3924.0
       ],
       "parameters": [
@@ -14472,32 +14507,22 @@
           "value": 0.3
         },
         {
-          "name": "Mute 1",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 2",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 3",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 4",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Master",
+          "name": "Width 1",
           "type": "Number",
-          "value": 6.0
+          "value": 0.0
         },
         {
-          "name": "Spread",
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
           "type": "Number",
           "value": 0.0
         },
@@ -14522,9 +14547,54 @@
           "value": 0.08
         },
         {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
           "name": "Return",
           "type": "Number",
           "value": 1.0
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 6.0
         }
       ]
     },
@@ -14532,7 +14602,7 @@
       "id": 88,
       "module_id": "util.mixer",
       "position": [
-        3997.0,
+        4105.0,
         1740.0
       ],
       "parameters": [
@@ -14577,32 +14647,22 @@
           "value": 0.15
         },
         {
-          "name": "Mute 1",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 2",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 3",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 4",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Master",
+          "name": "Width 1",
           "type": "Number",
           "value": 0.0
         },
         {
-          "name": "Spread",
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
           "type": "Number",
           "value": 0.0
         },
@@ -14627,9 +14687,54 @@
           "value": 0.6
         },
         {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
           "name": "Return",
           "type": "Number",
           "value": 0.8
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 0.0
         }
       ]
     },
@@ -14637,7 +14742,7 @@
       "id": 89,
       "module_id": "fx.delay",
       "position": [
-        4307.0,
+        4523.0,
         1740.0
       ],
       "parameters": [
@@ -14687,7 +14792,7 @@
       "id": 90,
       "module_id": "fx.reverb",
       "position": [
-        4307.0,
+        4523.0,
         2097.0
       ],
       "parameters": [
@@ -14732,7 +14837,7 @@
       "id": 91,
       "module_id": "util.mixer",
       "position": [
-        4617.0,
+        4833.0,
         1740.0
       ],
       "parameters": [
@@ -14777,32 +14882,22 @@
           "value": -0.2
         },
         {
-          "name": "Mute 1",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 2",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 3",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 4",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Master",
+          "name": "Width 1",
           "type": "Number",
           "value": 0.0
         },
         {
-          "name": "Spread",
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
           "type": "Number",
           "value": 0.0
         },
@@ -14827,9 +14922,54 @@
           "value": 0.5
         },
         {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
           "name": "Return",
           "type": "Number",
           "value": 0.9
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 0.0
         }
       ]
     },
@@ -14837,7 +14977,7 @@
       "id": 92,
       "module_id": "util.mixer",
       "position": [
-        4927.0,
+        5251.0,
         1740.0
       ],
       "parameters": [
@@ -14882,32 +15022,22 @@
           "value": 0.0
         },
         {
-          "name": "Mute 1",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 2",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 3",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Mute 4",
-          "type": "Toggle",
-          "value": false
-        },
-        {
-          "name": "Master",
+          "name": "Width 1",
           "type": "Number",
           "value": 0.0
         },
         {
-          "name": "Spread",
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
           "type": "Number",
           "value": 0.0
         },
@@ -14932,9 +15062,54 @@
           "value": 0.5
         },
         {
+          "name": "Mute 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Mute 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
           "name": "Return",
           "type": "Number",
           "value": 0.8
+        },
+        {
+          "name": "Master",
+          "type": "Number",
+          "value": 0.0
         }
       ]
     },
@@ -14942,7 +15117,7 @@
       "id": 93,
       "module_id": "fx.reverb",
       "position": [
-        5237.0,
+        5669.0,
         1740.0
       ],
       "parameters": [
@@ -14987,7 +15162,7 @@
       "id": 94,
       "module_id": "output.audio",
       "position": [
-        5237.0,
+        5669.0,
         2045.0
       ],
       "parameters": [
@@ -15012,7 +15187,7 @@
       "id": 95,
       "module_id": "util.oscilloscope",
       "position": [
-        5237.0,
+        5669.0,
         2338.0
       ],
       "parameters": [
@@ -16015,54 +16190,6 @@
       "to_port": "Ch 4"
     },
     {
-      "from_node": 86,
-      "from_port": "Out L",
-      "to_node": 87,
-      "to_port": "Chain L"
-    },
-    {
-      "from_node": 86,
-      "from_port": "Out R",
-      "to_node": 87,
-      "to_port": "Chain R"
-    },
-    {
-      "from_node": 86,
-      "from_port": "Send L",
-      "to_node": 87,
-      "to_port": "Chain Send L"
-    },
-    {
-      "from_node": 86,
-      "from_port": "Send R",
-      "to_node": 87,
-      "to_port": "Chain Send R"
-    },
-    {
-      "from_node": 87,
-      "from_port": "Out L",
-      "to_node": 91,
-      "to_port": "Chain L"
-    },
-    {
-      "from_node": 87,
-      "from_port": "Out R",
-      "to_node": 91,
-      "to_port": "Chain R"
-    },
-    {
-      "from_node": 87,
-      "from_port": "Send L",
-      "to_node": 91,
-      "to_port": "Chain Send L"
-    },
-    {
-      "from_node": 87,
-      "from_port": "Send R",
-      "to_node": 91,
-      "to_port": "Chain Send R"
-    },
-    {
       "from_node": 88,
       "from_port": "Out L",
       "to_node": 90,
@@ -16109,34 +16236,10 @@
       "from_port": "Out R",
       "to_node": 91,
       "to_port": "Return R"
-    },
-    {
-      "from_node": 91,
-      "from_port": "Out L",
-      "to_node": 92,
-      "to_port": "Chain L"
-    },
-    {
-      "from_node": 91,
-      "from_port": "Out R",
-      "to_node": 92,
-      "to_port": "Chain R"
-    },
-    {
-      "from_node": 91,
-      "from_port": "Send L",
-      "to_node": 92,
-      "to_port": "Chain Send L"
-    },
-    {
-      "from_node": 91,
-      "from_port": "Send R",
-      "to_node": 92,
-      "to_port": "Chain Send R"
     },
     {
       "from_node": 92,
-      "from_port": "Out",
+      "from_port": "Out L",
       "to_node": 95,
       "to_port": "In 1"
     },
@@ -16175,6 +16278,24 @@
       "from_port": "Out R",
       "to_node": 92,
       "to_port": "Return R"
+    },
+    {
+      "from_node": 86,
+      "from_port": "Chain Out",
+      "to_node": 87,
+      "to_port": "Chain In"
+    },
+    {
+      "from_node": 87,
+      "from_port": "Chain Out",
+      "to_node": 91,
+      "to_port": "Chain In"
+    },
+    {
+      "from_node": 91,
+      "from_port": "Chain Out",
+      "to_node": 92,
+      "to_port": "Chain In"
     }
   ],
   "midi_mappings": [],
@@ -16235,7 +16356,7 @@
       ],
       "size": [
         2119.0,
-        965.0
+        698.0
       ],
       "color": "teal"
     },
@@ -16246,7 +16367,7 @@
         0.0
       ],
       "size": [
-        1255.0,
+        1363.0,
         623.0
       ],
       "color": "cyan"
@@ -16258,7 +16379,7 @@
         693.0
       ],
       "size": [
-        1714.0,
+        1822.0,
         774.0
       ],
       "color": "blue"
@@ -16270,7 +16391,7 @@
         1537.0
       ],
       "size": [
-        1493.0,
+        1601.0,
         992.0
       ],
       "color": "amber"
@@ -16282,7 +16403,7 @@
         2599.0
       ],
       "size": [
-        1130.0,
+        1238.0,
         792.0
       ],
       "color": "slate"
@@ -16294,7 +16415,7 @@
         3884.0
       ],
       "size": [
-        3026.0,
+        3246.0,
         965.0
       ],
       "color": "rose"
@@ -16302,11 +16423,11 @@
     {
       "title": "Mixing desk",
       "position": [
-        3973.0,
+        4081.0,
         1700.0
       ],
       "size": [
-        1518.0,
+        1842.0,
         1011.0
       ],
       "color": "cyan"

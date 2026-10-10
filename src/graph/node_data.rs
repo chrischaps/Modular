@@ -260,8 +260,9 @@ pub enum NodeDisplay {
     StepGrid,
     /// Audio Output: output stage level meter.
     OutputMeter,
-    /// Mixer: where each channel sits in the stereo field, its meter and
-    /// mute button, and the master meter.
+    /// Mixer: a row per channel strip, with its jacks, its lane of the
+    /// stereo field, meter, knobs, mute and solo, then the bus row. It
+    /// places its own jacks and knobs.
     MixerStrips,
     /// Audio Input: the input's meters, and Follow scrolling past the
     /// Threshold.
@@ -285,6 +286,14 @@ pub enum NodeDisplay {
     /// Looper: the loop as a ring with its playhead and overdub layers, and
     /// the footswitches.
     LooperRing,
+}
+
+impl NodeDisplay {
+    /// Whether the display lays out the node's knobs itself, in place of
+    /// the knob rows under it.
+    pub fn draws_own_knobs(self) -> bool {
+        self == NodeDisplay::MixerStrips
+    }
 }
 
 /// Data stored per node in the graph.
@@ -670,7 +679,8 @@ impl SynthNodeData {
                     format: spec.format(),
                     logarithmic: spec.logarithmic,
                     stepped: spec.stepped,
-                    label: Some(label.to_string()),
+                    // An untitled knob sits under a column title instead
+                    label: (!label.is_empty()).then(|| label.to_string()),
                     show_value: true,
                     value_text,
                     accent,
@@ -2170,11 +2180,10 @@ impl NodeDataTrait for SynthNodeData {
             super::clock_display::clock_display(ui, node_id, graph, user_state, zoom);
         }
 
-        // Mixer: the stereo panorama, and a meter and mute per strip
+        // Mixer: a row per channel strip, its jacks, lane, meter, knobs and
+        // buttons, and the bus row below
         if self.display == NodeDisplay::MixerStrips {
-            if let Some((param_name, value)) = super::mixer_strips::mixer_strips(ui, node_id, graph, user_state, zoom) {
-                responses.push(NodeResponse::User(SynthResponse::ParameterChanged { node_id, param_name, value }));
-            }
+            responses.extend(super::mixer_strips::mixer_strips(self, ui, node_id, graph, user_state, zoom));
         }
 
         if self.display == NodeDisplay::InputListen {
@@ -2213,7 +2222,7 @@ impl NodeDataTrait for SynthNodeData {
         }
 
         // Render horizontal row of knobs if this node has knob parameters
-        if !self.knob_params.is_empty() {
+        if !self.knob_params.is_empty() && !self.display.draws_own_knobs() {
             // Add spacing before the knob row (separator removed - it was expanding to fill available width)
             ui.add_space(8.0 * zoom);
 
@@ -2351,6 +2360,26 @@ impl NodeDataTrait for SynthNodeData {
 
     fn titlebar_text_style(&self) -> egui::TextStyle {
         crate::app::theme::title_text_style()
+    }
+
+    /// The Mixer lays its jacks out beside its channel rows.
+    fn places_port(
+        &self,
+        node_id: egui_node_graph2::NodeId,
+        graph: &egui_node_graph2::Graph<Self, Self::DataType, Self::ValueType>,
+        param: egui_node_graph2::AnyParameterId,
+    ) -> bool {
+        if self.display != NodeDisplay::MixerStrips {
+            return false;
+        }
+        let Some(node) = graph.nodes.get(node_id) else {
+            return false;
+        };
+        let name = match param {
+            egui_node_graph2::AnyParameterId::Input(id) => node.inputs.iter().find(|(_, i)| *i == id).map(|(n, _)| n),
+            egui_node_graph2::AnyParameterId::Output(id) => node.outputs.iter().find(|(_, o)| *o == id).map(|(n, _)| n),
+        };
+        name.is_some_and(|name| super::mixer_strips::places(name))
     }
 
     /// A group's Inputs and Outputs only go with the group.

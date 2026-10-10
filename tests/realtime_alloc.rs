@@ -25,6 +25,7 @@ use modular_synth::engine::{
     NodeId, Recording, TimestampedMidiEvent, UiHandle,
 };
 use modular_synth::modules::looper::{LoopState, Looper};
+use modular_synth::modules::Mixer;
 
 struct CountingAllocator;
 
@@ -395,9 +396,10 @@ fn poly_patch_never_allocates_with_eight_voices() {
     processor.set_midi_input(midi_input);
 
     // Poly MIDI -> osc -> SVF -> ladder -> VCA (opened by an envelope) ->
-    // mixer -> delay -> output. Everything up to the VCA runs 8 voices; the
-    // mixer spreads them across its stereo pair, and the delay hears that
-    let chain: [(NodeId, &'static str); 9] = [
+    // mixer -> chained mixer -> delay -> output. Everything up to the VCA
+    // runs 8 voices; the mixer spreads them across its stereo pair, passes
+    // its mix on a four-strand Bus to the next, and the delay hears that
+    let chain: [(NodeId, &'static str); 10] = [
         (1, "input.poly_midi"),
         (2, "osc.sine"),
         (3, "filter.svf"),
@@ -407,6 +409,7 @@ fn poly_patch_never_allocates_with_eight_voices() {
         (7, "util.mixer"),
         (8, "fx.delay"),
         (9, "output.audio"),
+        (10, "util.mixer"),
     ];
     for (node_id, module_id) in chain {
         ui.send_command(EngineCommand::AddModule { node_id, module_id });
@@ -428,19 +431,22 @@ fn poly_patch_never_allocates_with_eight_voices() {
     connect(&mut ui, (4, "filter.ladder", "LP24"), (6, "util.vca", "In"));
     connect(&mut ui, (5, "mod.adsr", "Out"), (6, "util.vca", "CV"));
     connect(&mut ui, (6, "util.vca", "Out"), (7, "util.mixer", "Ch 1"));
-    connect(&mut ui, (7, "util.mixer", "Out L"), (8, "fx.delay", "In L"));
-    connect(&mut ui, (7, "util.mixer", "Out R"), (8, "fx.delay", "In R"));
-    // Full spread, and the envelope sweeping channel 1's pan
-    ui.send_command(EngineCommand::SetParameter { node_id: 7, param_index: 13, value: 1.0 });
+    connect(&mut ui, (7, "util.mixer", "Chain Out"), (10, "util.mixer", "Chain In"));
+    connect(&mut ui, (10, "util.mixer", "Out L"), (8, "fx.delay", "In L"));
+    connect(&mut ui, (10, "util.mixer", "Out R"), (8, "fx.delay", "In R"));
+    // Full width, and the envelope sweeping channel 1's pan
+    ui.send_command(EngineCommand::SetParameter { node_id: 7, param_index: Mixer::PARAM_WIDTH, value: 1.0 });
     connect(&mut ui, (5, "mod.adsr", "Out"), (7, "util.mixer", "Pan 1"));
     connect(&mut ui, (8, "fx.delay", "Out L"), (9, "output.audio", "Left"));
     connect(&mut ui, (8, "fx.delay", "Out R"), (9, "output.audio", "Right"));
-    for node_id in 1..=9 {
+    for node_id in 1..=10 {
         for index in 0..4 {
             ui.send_command(EngineCommand::MonitorInput { node_id, input_index: index });
             ui.send_command(EngineCommand::MonitorOutput { node_id, output_index: index });
         }
     }
+    // The Bus between the mixers is watched too, as a cable drawing its strands
+    ui.send_command(EngineCommand::MonitorOutput { node_id: 7, output_index: Mixer::CHAIN_OUT });
     ui.send_command(EngineCommand::SetPlaying(true));
     assert!(ui.flush());
 

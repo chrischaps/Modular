@@ -191,6 +191,46 @@
           "value": 0.0
         },
         {
+          "name": "Width 1",
+          "type": "Number",
+          "value": 0.8
+        },
+        {
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 1",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
           "name": "Mute 1",
           "type": "Toggle",
           "value": false
@@ -211,14 +251,34 @@
           "value": false
         },
         {
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Return",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
           "name": "Master",
           "type": "Number",
           "value": 3.0
-        },
-        {
-          "name": "Spread",
-          "type": "Number",
-          "value": 0.8
         }
       ]
     },
@@ -226,7 +286,7 @@
       "id": 5,
       "module_id": "fx.chorus",
       "position": [
-        1367.0,
+        1465.0,
         74.0
       ],
       "parameters": [
@@ -271,7 +331,7 @@
       "id": 6,
       "module_id": "fx.reverb",
       "position": [
-        1687.0,
+        1785.0,
         74.0
       ],
       "parameters": [
@@ -316,7 +376,7 @@
       "id": 7,
       "module_id": "output.audio",
       "position": [
-        2006.0,
+        2104.0,
         114.0
       ],
       "parameters": [
@@ -525,8 +585,8 @@
         16.0
       ],
       "size": [
-        918.0,
-        707.0
+        1016.0,
+        467.0
       ],
       "color": "cyan"
     }

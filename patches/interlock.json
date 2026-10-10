@@ -1461,6 +1461,46 @@
           "value": 0.0
         },
         {
+          "name": "Width 1",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Width 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 1",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 2",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 3",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
+          "name": "Send 4",
+          "type": "Number",
+          "value": 0.0
+        },
+        {
           "name": "Mute 1",
           "type": "Toggle",
           "value": false
@@ -1481,12 +1521,32 @@
           "value": false
         },
         {
-          "name": "Master",
-          "type": "Number",
-          "value": 0.0
+          "name": "Solo 1",
+          "type": "Toggle",
+          "value": false
         },
         {
-          "name": "Spread",
+          "name": "Solo 2",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 3",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Solo 4",
+          "type": "Toggle",
+          "value": false
+        },
+        {
+          "name": "Return",
+          "type": "Number",
+          "value": 1.0
+        },
+        {
+          "name": "Master",
           "type": "Number",
           "value": 0.0
         }
@@ -1496,7 +1556,7 @@
       "id": 24,
       "module_id": "fx.reverb",
       "position": [
-        2236.0,
+        2342.0,
         74.0
       ],
       "parameters": [
@@ -1541,7 +1601,7 @@
       "id": 25,
       "module_id": "output.audio",
       "position": [
-        2236.0,
+        2342.0,
         400.0
       ],
       "parameters": [
@@ -1868,8 +1928,8 @@
         16.0
       ],
       "size": [
-        600.0,
-        700.0
+        706.0,
+        686.0
       ],
       "color": "cyan"
     }
