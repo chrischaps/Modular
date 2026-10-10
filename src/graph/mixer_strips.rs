@@ -485,6 +485,8 @@ fn draw_lane(
     // so the lights breathe with the music rather than flicker
     let glow = if is_heard { meter.fraction().powf(1.5) } else { 0.0 };
     let count = strip.voices.len();
+    // Many voices on one short lane: smaller lights, so each stays its own
+    let crowd = (1.0 - (count as f32 - 1.0) / 14.0).clamp(0.55, 1.0);
     for (v, &peak) in strip.voices.iter().enumerate() {
         let center = Pos2::new(x_at(voice_pan(strip.pan, strip.width, v, count)), y);
         let sounding = !playing || peak.is_none_or(|p| p.abs() > 1e-4);
@@ -507,9 +509,9 @@ fn draw_lane(
             painter.circle_stroke(center, 2.0 * z, Stroke::new(1.0 * z, hue.gamma_multiply(0.35)));
         } else {
             if glow > 0.02 {
-                painter.circle_filled(center, (4.5 + 4.5 * glow) * z, hue.gamma_multiply(0.18 * glow));
+                painter.circle_filled(center, (4.5 + 4.5 * glow) * crowd * z, hue.gamma_multiply(0.18 * glow));
             }
-            painter.circle_filled(center, (2.2 + 1.5 * glow) * z, hue.gamma_multiply(0.45 + 0.55 * glow));
+            painter.circle_filled(center, (2.2 + 1.5 * glow) * crowd * z, hue.gamma_multiply(0.45 + 0.55 * glow));
         }
     }
 }
