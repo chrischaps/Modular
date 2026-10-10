@@ -1,12 +1,12 @@
-"""Draws Modular's app icon: one glowing cable between two jacks, the way
+"""Draws Soba's app icon: one glowing cable between two jacks, the way
 the patch canvas draws them, on the canvas's dark grid. Blue is audio, the
 signal leaving a source; purple is the output it arrives at.
 
     python tools/icon/make_icon.py
 
-Writes assets/icon/: modular.png (1024 px), icon-256.png (the window icon),
-modular.ico (Windows: the exe, the Start Menu shortcut, the installer) and
-modular.icns (the macOS app bundle).
+Writes assets/icon/: soba.png (1024 px), icon-256.png (the window icon),
+soba.ico (Windows: the exe, the Start Menu shortcut, the installer) and
+soba.icns (the macOS app bundle).
 """
 
 import math
@@ -138,10 +138,10 @@ def draw():
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     icon = draw()
-    icon.save(OUT / "modular.png")
+    icon.save(OUT / "soba.png")
     icon.resize((256, 256), Image.LANCZOS).save(OUT / "icon-256.png", optimize=True)
-    icon.save(OUT / "modular.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
-    icon.save(OUT / "modular.icns")
+    icon.save(OUT / "soba.ico", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+    icon.save(OUT / "soba.icns")
     for f in sorted(OUT.iterdir()):
         print(f"{f.name}: {f.stat().st_size // 1024} KB")
 

@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use modular_synth::engine::{AudioProcessor, EngineChannels, EngineCommand, Recording, UiHandle};
+use soba::engine::{AudioProcessor, EngineChannels, EngineCommand, Recording, UiHandle};
 
 const SAMPLE_RATE: u32 = 48000;
 
@@ -26,7 +26,7 @@ fn recording_reads_back_sample_identical() {
     let mut output = vec![0.0_f32; 1024 * 2];
     processor.process(&mut output[..512 * 2], 2);
 
-    let path = std::env::temp_dir().join("modular-recording-test.wav");
+    let path = std::env::temp_dir().join("soba-recording-test.wav");
     let (recording, tap) = Recording::start(&path, SAMPLE_RATE, 2).unwrap();
     ui.start_recording(tap);
     assert!(ui.flush());
@@ -73,18 +73,18 @@ fn recording_reads_back_sample_identical() {
 }
 
 /// A long take at the device's pace loses nothing. Ten minutes by default
-/// (`MODULAR_RECORD_SECONDS` to change it); run it in a release build:
+/// (`SOBA_RECORD_SECONDS` to change it); run it in a release build:
 /// `cargo test --release --test recording -- --ignored`
 #[test]
 #[ignore = "runs in real time"]
 fn long_take_in_real_time_drops_nothing() {
-    let seconds: u64 = std::env::var("MODULAR_RECORD_SECONDS").ok().and_then(|s| s.parse().ok()).unwrap_or(600);
+    let seconds: u64 = std::env::var("SOBA_RECORD_SECONDS").ok().and_then(|s| s.parse().ok()).unwrap_or(600);
     let (mut ui, engine) = EngineChannels::with_defaults().split();
     let mut processor = AudioProcessor::new(SAMPLE_RATE as f32, 256, engine);
     sine_patch(&mut ui);
     assert!(ui.flush());
 
-    let path = std::env::temp_dir().join("modular-long-take.wav");
+    let path = std::env::temp_dir().join("soba-long-take.wav");
     let (recording, tap) = Recording::start(&path, SAMPLE_RATE, 2).unwrap();
     ui.start_recording(tap);
     assert!(ui.flush());

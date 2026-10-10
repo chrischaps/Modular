@@ -5,10 +5,10 @@ In a Balinese gamelan, the fastest melodies are played by two people at once. Ne
 This patch plays a kotekan, and [Logic](../modules/utilities/logic.md) is what splits it. Two [Clock Dividers](../modules/utilities/divider.md) count the same sixteenth notes in threes and in fours. Logic decides, pulse by pulse, whose turn it is: a deep tone where the two rhythms meet, the polos where exactly one of them falls, and the sangsih in every gap that's left. Every sixteenth belongs to exactly one voice. A slow tide brings the sangsih in and takes it away again. It plays itself; press Play and let it run.
 
 > **Load it:** choose **📚 Examples → Interlock** in the toolbar and press **▶ Play**. It needs no keyboard.
-> The patch file is [`patches/interlock.json`](https://github.com/chrischaps/Modular/blob/master/patches/interlock.json).
+> The patch file is [`patches/interlock.json`](https://github.com/chrischaps/Soba/blob/master/patches/interlock.json).
 
 <iframe class="patch-embed" src="../play/?patch=interlock" title="Interlock, playable in the browser" loading="lazy"></iframe>
-*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Modular**.*
+*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Soba**.*
 
 ![The Interlock patch](../images/recipe-interlock.png)
 *The rhythm and its three Logic modules are on the left: Where they meet, The gaps, and Tide in the sangsih lane. The two players are the blue and violet lanes. The meeting tone is at the bottom left and the tide at the bottom. Captured at high tide, with both parts playing and the pad in.*

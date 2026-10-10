@@ -1,6 +1,6 @@
 # Connections
 
-A cable carries a signal from one module's output to another module's input. Patching is the whole of Modular Synth: the modules decide what can happen, and the cables decide what does.
+A cable carries a signal from one module's output to another module's input. Patching is the whole of Soba: the modules decide what can happen, and the cables decide what does.
 
 ## Patching a cable
 
@@ -19,8 +19,8 @@ Patching and unpatching are recorded in the undo history, so **Ctrl + Z** puts b
 
 - **An output can feed any number of inputs.** Each one receives the full signal, with no loss of level.
 - **An input takes one cable.** Patching a second cable into an occupied input replaces the first.
-- **Signal types must be compatible.** Audio and control connect to each other freely, and a gate can drive a control input, but a gate input only accepts gates. The full table is on [Signal Types](./signal-types.md#which-types-connect). If a cable can't connect, Modular Synth removes it and the status bar explains why.
-- **A module can't patch into itself, and signals don't loop.** Modular Synth processes the patch in one direction, from sources to the output, so a cable that would feed a module's output back into its own input, directly or through other modules, has no effect. For echoes and feedback, use the [Delay](../modules/effects/delay.md)'s **Feedback** knob.
+- **Signal types must be compatible.** Audio and control connect to each other freely, and a gate can drive a control input, but a gate input only accepts gates. The full table is on [Signal Types](./signal-types.md#which-types-connect). If a cable can't connect, Soba removes it and the status bar explains why.
+- **A module can't patch into itself, and signals don't loop.** Soba processes the patch in one direction, from sources to the output, so a cable that would feed a module's output back into its own input, directly or through other modules, has no effect. For echoes and feedback, use the [Delay](../modules/effects/delay.md)'s **Feedback** knob.
 
 ## Empty jacks
 
@@ -49,7 +49,7 @@ While the patch plays, each cable shows what its signal has been doing over the 
 
 When you press **Stop**, the last of the signal drains out of the cables rather than vanishing.
 
-To change the marks, open **Cables** in the toolbar and choose **Chevrons**, **Dots** or **Comets**. Modular Synth remembers your choice.
+To change the marks, open **Cables** in the toolbar and choose **Chevrons**, **Dots** or **Comets**. Soba remembers your choice.
 
 Polyphonic cables are drawn as a bundle of strands, one per voice. See [Seeing polyphony](./polyphony.md#seeing-polyphony).
 

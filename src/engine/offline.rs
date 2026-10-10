@@ -468,7 +468,7 @@ mod tests {
     #[test]
     fn test_a_sampler_plays_its_file_from_beside_the_patch() {
         use crate::dsp::SampleData;
-        let folder = std::env::temp_dir().join(format!("modular-sampler-{}", std::process::id()));
+        let folder = std::env::temp_dir().join(format!("soba-sampler-{}", std::process::id()));
         std::fs::create_dir_all(folder.join("kit")).unwrap();
         // A 44.1 kHz tone, played at 48 kHz: still 440 Hz
         let tone: Vec<f32> = (0..44100).map(|n| (std::f32::consts::TAU * 440.0 * n as f32 / 44100.0).sin() * 0.5).collect();

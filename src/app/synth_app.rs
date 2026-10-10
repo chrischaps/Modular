@@ -1,4 +1,4 @@
-//! Main application struct for the Modular Synth
+//! Main application struct for the Soba
 //!
 //! Contains the SynthApp which implements eframe::App and manages
 //! the synthesizer's UI state, audio engine, and graph state.
@@ -81,7 +81,7 @@ const RECORDING_PATIENCE: std::time::Duration = std::time::Duration::from_secs(1
 const NOTICE_SECONDS: f64 = 12.0;
 
 /// The manual, for the Help menu.
-const MANUAL_URL: &str = "https://docs.chaps.dev/modular/";
+const MANUAL_URL: &str = "https://docs.chaps.dev/soba/";
 
 /// How long the input's status stays amber after a dropout.
 const INPUT_GLITCH_HOLD: std::time::Duration = std::time::Duration::from_secs(3);
@@ -104,7 +104,7 @@ pub struct MidiLearnTarget {
     pub max_value: f32,
 }
 
-/// Main application state for the Modular Synth
+/// Main application state for the Soba
 pub struct SynthApp {
     /// Audio engine handle
     audio_engine: Result<AudioEngine, AudioError>,
@@ -229,7 +229,7 @@ pub struct SynthApp {
     // --- Recording ---
     /// The take being recorded, or being finished after Stop.
     recording: Option<Recording>,
-    /// Where takes are written, if not the default Music/Modular.
+    /// Where takes are written, if not the default Music/Soba.
     recordings_folder: Option<PathBuf>,
     /// The note about the last finished take.
     record_toast: Option<Toast>,
@@ -1198,11 +1198,7 @@ impl SynthApp {
         };
 
         let row = |ui: &mut egui::Ui| {
-            // Application title
-            ui.label(RichText::new("MODULAR SYNTH")
-                .size(18.0)
-                .color(theme::text::PRIMARY)
-                .strong());
+            wordmark(ui);
 
             group_break(ui);
 
@@ -1253,7 +1249,7 @@ impl SynthApp {
                         actions.choose_recordings_folder = true;
                         ui.close_menu();
                     }
-                    if ui.add_enabled(self.recordings_folder.is_some(), egui::Button::new("Use Music/Modular")).clicked() {
+                    if ui.add_enabled(self.recordings_folder.is_some(), egui::Button::new("Use Music/Soba")).clicked() {
                         actions.reset_recordings_folder = true;
                         ui.close_menu();
                     }
@@ -1363,7 +1359,7 @@ impl SynthApp {
             .on_hover_text("How knobs are drawn");
 
             ui.menu_button("❓ Help", |ui| {
-                if ui.button("📖 Manual").on_hover_text("docs.chaps.dev/modular, in your browser").clicked() {
+                if ui.button("📖 Manual").on_hover_text("docs.chaps.dev/soba, in your browser").clicked() {
                     ui.ctx().open_url(egui::OpenUrl::new_tab(MANUAL_URL));
                     ui.close_menu();
                 }
@@ -2966,7 +2962,7 @@ impl SynthApp {
                             };
                             toggle = ui.button(RichText::new(text).color(color).strong()).clicked();
                             ui.add_space(4.0);
-                            let name = self.current_example.map_or("Modular", |e| e.name);
+                            let name = self.current_example.map_or("Soba", |e| e.name);
                             let label = ui.label(RichText::new(name).color(theme::text::PRIMARY).strong());
                             if let Some(example) = self.current_example {
                                 label.on_hover_text(example.description);
@@ -2990,7 +2986,7 @@ impl SynthApp {
                                 let file = self.current_example.map_or("", |e| e.file_name.trim_end_matches(".json"));
                                 // A new tab: in the frame it would replace the page's embed
                                 ui.add(egui::Hyperlink::from_label_and_url(
-                                    RichText::new("Open in Modular ↗").color(theme::text::SECONDARY).small(),
+                                    RichText::new("Open in Soba ↗").color(theme::text::SECONDARY).small(),
                                     format!("{}?open={}", app, file),
                                 ).open_in_new_tab(true))
                                 .on_hover_text("The whole app, with this patch, in a new tab");
@@ -3073,7 +3069,7 @@ impl SynthApp {
         self.sync_history();
         // Restarting would stop a take, so that waits for the take to end
         if action.restarts() && self.is_recording() {
-            self.raise_notice("Modular restarts to update, so that waits until the recording ends".to_string());
+            self.raise_notice("Soba restarts to update, so that waits until the recording ends".to_string());
             return;
         }
         // Quitting stops a take, so that asks too
@@ -3469,7 +3465,7 @@ impl SynthApp {
                     #[cfg(not(target_arch = "wasm32"))]
                     self.version_label(ui);
                     #[cfg(target_arch = "wasm32")]
-                    ui.label(RichText::new(concat!("Modular Synth v", env!("CARGO_PKG_VERSION"))).color(theme::text::DISABLED).small());
+                    ui.label(RichText::new(concat!("Soba v", env!("CARGO_PKG_VERSION"))).color(theme::text::DISABLED).small());
                 }
             });
         });
@@ -3734,6 +3730,43 @@ fn history_hint(verb: &str, label: Option<&str>, shortcut: &str) -> String {
         Some(label) => format!("{verb} {label} ({shortcut})"),
         None => format!("Nothing to {} ({shortcut})", verb.to_lowercase()),
     }
+}
+
+/// The wordmark that starts the toolbar: one short cable between two jacks,
+/// then "soba". Blender calls the wires between nodes noodles, and soba are
+/// long, fine ones.
+fn wordmark(ui: &mut egui::Ui) -> egui::Response {
+    let mut job = egui::text::LayoutJob::default();
+    job.append("soba", 0.0, egui::TextFormat {
+        font_id: egui::FontId::new(20.0, egui::FontFamily::Name(theme::TITLE_FAMILY.into())),
+        color: theme::text::PRIMARY,
+        extra_letter_spacing: 0.6,
+        ..Default::default()
+    });
+    let word = ui.fonts(|fonts| fonts.layout_job(job));
+    let cable = egui::vec2(20.0, word.size().y);
+    let gap = 7.0;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(cable.x + gap + word.size().x, cable.y), egui::Sense::hover());
+
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        // Centred on the lowercase letters, which sit low in the line
+        let mid = rect.left_center().y + 1.5;
+        let from = egui::pos2(rect.left() + 3.0, mid - 4.5);
+        let to = egui::pos2(rect.left() + cable.x - 3.0, mid + 4.5);
+        let pull = egui::vec2((to.x - from.x) * 0.7, 0.0);
+        let points = [from, from + pull, to - pull, to];
+        let curve = |width: f32, color: egui::Color32| {
+            egui::epaint::CubicBezierShape::from_points_stroke(points, false, egui::Color32::TRANSPARENT, egui::Stroke::new(width, color))
+        };
+        painter.add(curve(5.0, theme::signal::AUDIO.gamma_multiply(0.2)));
+        painter.add(curve(1.8, theme::signal::AUDIO));
+        for jack in [from, to] {
+            painter.circle(jack, 2.6, theme::background::WIDGET, egui::Stroke::new(1.2, theme::signal::AUDIO));
+        }
+        painter.galley(egui::pos2(rect.left() + cable.x + gap, rect.top()), word, theme::text::PRIMARY);
+    }
+    response.on_hover_text("Soba: a node-based modular synthesizer")
 }
 
 /// What the audio output is doing, as the status bar shows it.
@@ -4111,7 +4144,7 @@ impl eframe::App for SynthApp {
 
         // The title names the patch, with a dot while it has unsaved changes
         let title = format!(
-            "{}{} · Modular Synth",
+            "{}{} · Soba",
             if self.has_unsaved_changes() { "● " } else { "" },
             self.patch_title()
         );

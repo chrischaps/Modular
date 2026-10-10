@@ -1,8 +1,8 @@
-# Modular Synth - Claude Instructions
+# Soba - Claude Instructions
 
 ## Project Overview
 
-A **node-based modular audio synthesizer** in Rust. Unlike VCV Rack's hardware skeuomorphism, this uses a clean node-graph approach (like Blender nodes) while retaining rich visual feedback.
+**Soba** is a **node-based modular audio synthesizer** in Rust (it was called Modular Synth until issue #111; the vault's older notes use that name). Unlike VCV Rack's hardware skeuomorphism, this uses a clean node-graph approach (like Blender nodes) while retaining rich visual feedback.
 
 **Key characteristics:**
 - Node-graph UI (not virtual hardware)
@@ -192,7 +192,7 @@ cargo run -- patches/fm-synthesis.json
 # The browser build (see WEB.md): needs `rustup target add wasm32-unknown-unknown`
 # and `cargo install --locked trunk`. ?patch=lush-pad embeds an example
 trunk serve                # http://127.0.0.1:8080
-trunk build --release      # into dist/, published at docs.chaps.dev/modular/play/
+trunk build --release      # into dist/, published at docs.chaps.dev/soba/play/
 
 # GitHub CLI
 gh issue list --state open

@@ -1,10 +1,10 @@
 # Installation
 
-Modular Synth runs on Windows, macOS and Linux. You can download a prebuilt release or build it from source with Rust. Or, to hear it first, try it in the browser.
+Soba runs on Windows, macOS and Linux. You can download a prebuilt release or build it from source with Rust. Or, to hear it first, try it in the browser.
 
 ## Try it in the browser
 
-**[Open Modular in the browser](../play/)**: the whole app, nothing to install. It opens on the **First Sound** example. Press **▶ Play**, then play the `Z` to `M` keys, or hold the keys of the Keyboard module's piano with the mouse or a finger.
+**[Open Soba in the browser](../play/)**: the whole app, nothing to install. It opens on the **First Sound** example. Press **▶ Play**, then play the `Z` to `M` keys, or hold the keys of the Keyboard module's piano with the mouse or a finger.
 
 <iframe class="patch-embed" src="../play/?patch=first-sound" title="First Sound, playable in the browser" loading="lazy"></iframe>
 
@@ -20,42 +20,42 @@ Patches go in and out as files: **💾 Save** downloads the patch, and **📂 Op
 
 ## Download a release
 
-Each [release on GitHub](https://github.com/chrischaps/Modular/releases) has a download for Windows, macOS (Apple Silicon and Intel) and Linux.
+Each [release on GitHub](https://github.com/chrischaps/Soba/releases) has a download for Windows, macOS (Apple Silicon and Intel) and Linux.
 
 ### Windows
 
-Download **`modular_synth-windows-setup.exe`** and run it. It installs Modular for you alone, in `%LOCALAPPDATA%\Programs\Modular`, without asking for an administrator. It adds Modular to the Start Menu, and you can remove it from **Settings → Apps → Installed apps**, like any other app.
+Download **`soba-windows-setup.exe`** and run it. It installs Soba for you alone, in `%LOCALAPPDATA%\Programs\Soba`, without asking for an administrator. It adds Soba to the Start Menu, and you can remove it from **Settings → Apps → Installed apps**, like any other app.
 
-For playing live, download **`modular_synth-windows-asio-setup.exe`**, the low-latency build, instead. It runs exactly like the standard one, and can also use an audio interface's ASIO driver: see [Build with ASIO](#build-with-asio-windows-optional) for what that gives you, and skip the building. Installing either one replaces the other.
+For playing live, download **`soba-windows-asio-setup.exe`**, the low-latency build, instead. It runs exactly like the standard one, and can also use an audio interface's ASIO driver: see [Build with ASIO](#build-with-asio-windows-optional) for what that gives you, and skip the building. Installing either one replaces the other.
 
 The first time, Windows may show **"Windows protected your PC"**: the downloads aren't signed yet. Click **More info**, then **Run anyway**.
 
-If you'd rather not install anything, the zips (`modular_synth-windows.zip` and `modular_synth-windows-asio.zip`) hold the same app as one file. Unzip it anywhere and run `modular_synth.exe`.
+If you'd rather not install anything, the zips (`soba-windows.zip` and `soba-windows-asio.zip`) hold the same app as one file. Unzip it anywhere and run `soba.exe`.
 
 ### macOS
 
-Download the disk image for your Mac: **`modular_synth-macos-apple-silicon.dmg`** for an M-series Mac, or **`modular_synth-macos-intel.dmg`**. Open it and drag **Modular Synth** to **Applications**.
+Download the disk image for your Mac: **`soba-macos-apple-silicon.dmg`** for an M-series Mac, or **`soba-macos-intel.dmg`**. Open it and drag **Soba** to **Applications**.
 
-The app isn't signed by Apple yet, so the first time, macOS says it can't check it for malicious software. **Right-click** (or Control-click) Modular Synth in Applications and choose **Open**, then **Open** again. After that it opens normally. On recent versions of macOS, if there's no **Open** button, go to **System Settings → Privacy & Security** and click **Open Anyway** beside the message about Modular Synth.
+The app isn't signed by Apple yet, so the first time, macOS says it can't check it for malicious software. **Right-click** (or Control-click) Soba in Applications and choose **Open**, then **Open** again. After that it opens normally. On recent versions of macOS, if there's no **Open** button, go to **System Settings → Privacy & Security** and click **Open Anyway** beside the message about Soba.
 
 ### Linux
 
-Download `modular_synth-linux.zip`, unzip it, and run `modular_synth`. If it won't start, mark it as a program first: `chmod +x modular_synth`.
+Download `soba-linux.zip`, unzip it, and run `soba`. If it won't start, mark it as a program first: `chmod +x soba`.
 
 ## Updates
 
-Once a day, Modular asks GitHub whether a newer release is out. When one is, the dot after the version number in the bottom-right corner lights up blue, and a note says what's new. Click the version number to see the note again.
+Once a day, Soba asks GitHub whether a newer release is out. When one is, the dot after the version number in the bottom-right corner lights up blue, and a note says what's new. Click the version number to see the note again.
 
 - **What's New** shows the release notes for every version since yours.
-- **Install** downloads the new version, checks it against the release's published checksums (`SHA256SUMS`), puts it in place and restarts. Your patch, including changes you haven't saved, your audio and MIDI devices, and your view of the canvas come back as they were. If the patch has unsaved changes, Modular offers to save them first. Install waits while a recording is running.
+- **Install** downloads the new version, checks it against the release's published checksums (`SHA256SUMS`), puts it in place and restarts. Your patch, including changes you haven't saved, your audio and MIDI devices, and your view of the canvas come back as they were. If the patch has unsaved changes, Soba offers to save them first. Install waits while a recording is running.
 - **Later** puts the note away; the dot stays lit. **Skip this version** stops offering that version; a newer one is still offered.
 - **Help → Check for Updates…** checks now, and says so if you're up to date.
 
-**What the check sends:** one request to GitHub's public list of releases, saying it comes from `modular_synth` and which version. Nothing about you or your computer, and no usage data. A check that doesn't work, when you're offline say, does nothing visible and tries again next time. To stop checking altogether, turn off **Help → Check for Updates Automatically**; Modular then makes no requests at all.
+**What the check sends:** one request to GitHub's public list of releases, saying it comes from `soba` and which version. Nothing about you or your computer, and no usage data. A check that doesn't work, when you're offline say, does nothing visible and tries again next time. To stop checking altogether, turn off **Help → Check for Updates Automatically**; Soba then makes no requests at all.
 
 **Rolling back:** the version you updated from stays beside the new one, and **Help → Roll Back to …** swaps back to it and restarts. The version you left is skipped, so it isn't offered again straight away.
 
-Where Modular can't replace itself, **Install** becomes **Download**, which opens the release page:
+Where Soba can't replace itself, **Install** becomes **Download**, which opens the release page:
 
 - A copy built from source (`cargo run`), which only says that an update exists.
 - A copy in a folder it can't write to, such as `Program Files`.
@@ -86,7 +86,7 @@ cargo --version
 
 ### Install system libraries (Linux only)
 
-Windows and macOS need nothing more: Modular Synth uses WASAPI and CoreAudio, which come with the system. (ASIO on Windows is optional: see [Build with ASIO](#build-with-asio-windows-optional).)
+Windows and macOS need nothing more: Soba uses WASAPI and CoreAudio, which come with the system. (ASIO on Windows is optional: see [Build with ASIO](#build-with-asio-windows-optional).)
 
 On Linux, install the development packages for ALSA (audio), X11 and keyboard handling. On Debian and Ubuntu:
 
@@ -100,22 +100,22 @@ On other distributions, install the equivalent ALSA, xcb and xkbcommon developme
 ### Build and run
 
 ```bash
-git clone https://github.com/chrischaps/Modular.git
-cd Modular
+git clone https://github.com/chrischaps/Soba.git
+cd Soba
 cargo run --release
 ```
 
-The first build takes a few minutes. Always use `--release` to play: the debug build is much slower and can't keep up with a busy patch, so you'll hear dropouts. The finished binary is `target/release/modular_synth`.
+The first build takes a few minutes. Always use `--release` to play: the debug build is much slower and can't keep up with a busy patch, so you'll hear dropouts. The finished binary is `target/release/soba`.
 
 The app opens on the **First Sound** example. Press **▶ Play**, then play the `Z` to `M` keys on your computer keyboard. If you hear a note, everything is working.
 
 ### Build with ASIO (Windows, optional)
 
-For playing a guitar or singing through Modular, Windows Audio's round trip of 60 ms or so is too slow to play against. An audio interface's **ASIO** driver talks to the hardware directly and gets it down to 11–20 ms on a Scarlett 2i2.
+For playing a guitar or singing through Soba, Windows Audio's round trip of 60 ms or so is too slow to play against. An audio interface's **ASIO** driver talks to the hardware directly and gets it down to 11–20 ms on a Scarlett 2i2.
 
 <div class="asio-badge"><img src="../images/asio-compatible.svg" alt="ASIO Compatible"><span>ASIO is a registered trademark of Steinberg Media Technologies GmbH</span></div>
 
-The low-latency Windows download (`modular_synth-windows-asio.zip`, see [Download a release](#download-a-release)) has ASIO built in: install your interface's driver (step 1) and choose **ASIO** in the **Output** menu. To build it yourself, it's a build option, off by default:
+The low-latency Windows download (`soba-windows-asio.zip`, see [Download a release](#download-a-release)) has ASIO built in: install your interface's driver (step 1) and choose **ASIO** in the **Output** menu. To build it yourself, it's a build option, off by default:
 
 1. **Install your interface's ASIO driver** from its maker. For a Focusrite Scarlett, that's the Focusrite USB driver from [focusrite.com](https://focusrite.com/downloads). Restart, or unplug the interface and plug it back in, once it's installed: until then the driver may not find the interface.
 2. **Install LLVM**, which the build uses to read the ASIO headers:
@@ -142,7 +142,7 @@ The low-latency Windows download (`modular_synth-windows-asio.zip`, see [Downloa
 
 Then choose **ASIO** at the top of the **Output** menu. See [Audio Input](../modules/sources/audio-input.md#low-latency-with-asio-windows) for choosing a buffer size.
 
-Steinberg licenses the ASIO SDK under the GPLv3 (or its own proprietary terms). Modular's source is MIT, but a binary built with ASIO includes the SDK, so if you share one, the GPLv3 applies to it. The low-latency download is such a binary: it's distributed under the GPLv3, with the GPL, Steinberg's licence for the SDK and a notice in its zip and installer. The exact SDK it was built from (ASIO SDK 2.3.4, pinned by its checksum in `release.yml`) is attached to the same release as `asio-sdk-source.zip`. The other downloads leave ASIO out and stay MIT.
+Steinberg licenses the ASIO SDK under the GPLv3 (or its own proprietary terms). Soba's source is MIT, but a binary built with ASIO includes the SDK, so if you share one, the GPLv3 applies to it. The low-latency download is such a binary: it's distributed under the GPLv3, with the GPL, Steinberg's licence for the SDK and a notice in its zip and installer. The exact SDK it was built from (ASIO SDK 2.3.4, pinned by its checksum in `release.yml`) is attached to the same release as `asio-sdk-source.zip`. The other downloads leave ASIO out and stay MIT.
 
 ## Command line
 
@@ -171,9 +171,9 @@ A patch that waits for a player renders silence unless something inside it plays
 
 ## Microphone access
 
-Modular Synth opens a microphone or other input only when you choose one in the toolbar's **Input** menu.
+Soba opens a microphone or other input only when you choose one in the toolbar's **Input** menu.
 
-- **macOS** asks for permission the first time. If you run Modular Synth from a terminal (`cargo run`), macOS asks on behalf of the terminal app, and the permission belongs to it. If you said no, or the input stays silent, turn it on under **System Settings → Privacy & Security → Microphone**, then quit and reopen the terminal or the app.
+- **macOS** asks for permission the first time. If you run Soba from a terminal (`cargo run`), macOS asks on behalf of the terminal app, and the permission belongs to it. If you said no, or the input stays silent, turn it on under **System Settings → Privacy & Security → Microphone**, then quit and reopen the terminal or the app.
 - **Windows** lets desktop apps use the microphone unless it's turned off under **Settings → Privacy & security → Microphone** (**Let desktop apps access your microphone**).
 - **Linux** has no permission prompt; the input appears if ALSA (or PipeWire's ALSA support) lists it.
 
@@ -183,8 +183,8 @@ To run the test suite, use `cargo test`.
 
 **No sound.** Check that **▶ Play** is pressed: the app opens stopped. Then check the **Output** device menu in the toolbar. It lists every output device, with the system default marked **(Default)**; pick the one you're listening on. **🔄 Refresh** at the bottom of the menu picks up a device you plugged in after starting.
 
-**"Audio unavailable" in the toolbar.** Modular Synth couldn't open an output device. Make sure one is connected and that no other application holds it exclusively, then restart.
+**"Audio unavailable" in the toolbar.** Soba couldn't open an output device. Make sure one is connected and that no other application holds it exclusively, then restart.
 
 **Crackles and dropouts.** Make sure you're running the release build. The toolbar's CPU meter, shown while the patch plays, tells you how close the engine is to its limit. If it's near the top, remove modules or lower the voice count on Poly MIDI and the Oscillator's unison.
 
-**My MIDI controller does nothing.** Choose it in the toolbar's **MIDI In** menu: Modular Synth doesn't connect to a controller until you do. A filled dot (●) before the name means it's connected. Connection errors appear in the status bar at the bottom of the window. See [MIDI](./interface-overview.md#midi).
+**My MIDI controller does nothing.** Choose it in the toolbar's **MIDI In** menu: Soba doesn't connect to a controller until you do. A filled dot (●) before the name means it's connected. Connection errors appear in the status bar at the bottom of the window. See [MIDI](./interface-overview.md#midi).

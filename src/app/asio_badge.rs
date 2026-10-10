@@ -1,7 +1,7 @@
 //! The ASIO Compatible logo, in builds with the `asio` feature.
 //!
 //! Steinberg's ASIO licence asks for its logo wherever ASIO is switched on
-//! by hand, which in Modular is the Audio system list in the Output menu.
+//! by hand, which in Soba is the Audio system list in the Output menu.
 
 use eframe::egui::{self, RichText};
 

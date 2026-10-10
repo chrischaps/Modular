@@ -5,7 +5,7 @@
 ![Oscillator Module](../../images/module-oscillator.png)
 *The tune, timbre and ensemble rows, under a preview of the selected waveform.*
 
-The Oscillator is the main sound source in Modular Synth. It is a **VCO** (voltage-controlled oscillator): a tuned waveform whose pitch follows a keyboard, an LFO or another oscillator.
+The Oscillator is the main sound source in Soba. It is a **VCO** (voltage-controlled oscillator): a tuned waveform whose pitch follows a keyboard, an LFO or another oscillator.
 
 Beyond the four classic waveforms, it has the features that make an oscillator an instrument:
 

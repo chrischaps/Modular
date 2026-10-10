@@ -17,3 +17,6 @@ nul
 
 # The web build (trunk build)
 /dist/
+
+# The manual, built by mdbook (docs.yml builds it fresh)
+/docs/book/

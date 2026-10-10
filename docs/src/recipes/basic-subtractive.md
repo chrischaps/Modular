@@ -3,10 +3,10 @@
 A saw wave through a lowpass filter, with one envelope shaping its brightness and another its volume. Every note opens bright and settles darker as you hold it. This is the architecture behind most classic monosynths, and the patch to learn first: once you understand it, most other patches are variations on it.
 
 > **Load it:** choose **📚 Examples → Basic Subtractive** in the toolbar. Press **▶ Play**, then play the Z to M keys.
-> The patch file is [`patches/basic-subtractive.json`](https://github.com/chrischaps/Modular/blob/master/patches/basic-subtractive.json).
+> The patch file is [`patches/basic-subtractive.json`](https://github.com/chrischaps/Soba/blob/master/patches/basic-subtractive.json).
 
 <iframe class="patch-embed" src="../play/?patch=basic-subtractive" title="Basic Subtractive Synth, playable in the browser" loading="lazy"></iframe>
-*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Modular**.*
+*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Soba**.*
 
 ![The Basic Subtractive patch](../images/recipe-basic-subtractive.png)
 *Two envelopes from one gate: one for the filter, one for the VCA.*

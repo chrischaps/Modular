@@ -1,8 +1,8 @@
-; Modular's Windows installer, built by release.yml with Inno Setup 6:
+; Soba's Windows installer, built by release.yml with Inno Setup 6:
 ;
-;   iscc /DVersion=0.4.0 /DFlavor=standard /DSourceDir=<release folder> /DOutputDir=<out> packaging\windows\modular.iss
+;   iscc /DVersion=0.4.0 /DFlavor=standard /DSourceDir=<release folder> /DOutputDir=<out> packaging\windows\soba.iss
 ;
-; It installs for the current user only, into %LOCALAPPDATA%\Programs\Modular,
+; It installs for the current user only, into %LOCALAPPDATA%\Programs\Soba,
 ; so there's no admin prompt and the in-app updater can write there. It adds
 ; a Start Menu shortcut and an uninstaller in Apps & Features.
 ;
@@ -23,29 +23,29 @@
 #endif
 
 #if Flavor == "asio"
-  #define OutputName "modular_synth-windows-asio-setup"
+  #define OutputName "soba-windows-asio-setup"
   #define FlavorName " (ASIO)"
 #else
-  #define OutputName "modular_synth-windows-setup"
+  #define OutputName "soba-windows-setup"
   #define FlavorName ""
 #endif
 
 [Setup]
 AppId={{9C3F6E1A-4B7D-4E58-9A62-6D0E2B71C5F4}
-AppName=Modular Synth
+AppName=Soba
 AppVersion={#Version}
-AppVerName=Modular Synth {#Version}{#FlavorName}
+AppVerName=Soba {#Version}{#FlavorName}
 AppPublisher=Chris Chappelear
-AppPublisherURL=https://github.com/chrischaps/Modular
-AppSupportURL=https://docs.chaps.dev/modular/
-AppUpdatesURL=https://github.com/chrischaps/Modular/releases
+AppPublisherURL=https://github.com/chrischaps/Soba
+AppSupportURL=https://docs.chaps.dev/soba/
+AppUpdatesURL=https://github.com/chrischaps/Soba/releases
 ; {autopf} is %LOCALAPPDATA%\Programs when installing for one user
 PrivilegesRequired=lowest
-DefaultDirName={autopf}\Modular
+DefaultDirName={autopf}\Soba
 DisableProgramGroupPage=yes
-UninstallDisplayName=Modular Synth{#FlavorName}
-UninstallDisplayIcon={app}\modular_synth.exe
-SetupIconFile=..\..\assets\icon\modular.ico
+UninstallDisplayName=Soba{#FlavorName}
+UninstallDisplayIcon={app}\soba.exe
+SetupIconFile=..\..\assets\icon\soba.ico
 OutputDir={#OutputDir}
 OutputBaseFilename={#OutputName}
 Compression=lzma2/max
@@ -68,7 +68,7 @@ LicenseFile={#SourceDir}\LICENSE
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "{#SourceDir}\modular_synth.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\soba.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
 #if Flavor == "asio"
 Source: "{#SourceDir}\README-LOW-LATENCY.txt"; DestDir: "{app}"; Flags: ignoreversion
@@ -85,18 +85,18 @@ Type: files; Name: "{app}\ASIO-SDK-LICENSE.txt"
 #endif
 
 [Icons]
-Name: "{autoprograms}\Modular Synth"; Filename: "{app}\modular_synth.exe"; Comment: "A node-based modular synthesizer"
-Name: "{autodesktop}\Modular Synth"; Filename: "{app}\modular_synth.exe"; Tasks: desktopicon
+Name: "{autoprograms}\Soba"; Filename: "{app}\soba.exe"; Comment: "A node-based modular synthesizer"
+Name: "{autodesktop}\Soba"; Filename: "{app}\soba.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\modular_synth.exe"; Description: "{cm:LaunchProgram,Modular Synth}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\soba.exe"; Description: "{cm:LaunchProgram,Soba}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 ; What in-app updates leave beside the executable: the version kept to roll
 ; back to, an interrupted download, and any notes a later release brought
-Type: files; Name: "{app}\modular_synth.old"
-Type: files; Name: "{app}\modular_synth.old.version"
-Type: files; Name: "{app}\modular_synth.rollback"
-Type: filesandordirs; Name: "{app}\.modular-update"
+Type: files; Name: "{app}\soba.old"
+Type: files; Name: "{app}\soba.old.version"
+Type: files; Name: "{app}\soba.rollback"
+Type: filesandordirs; Name: "{app}\.soba-update"
 Type: files; Name: "{app}\*.txt"
 Type: dirifempty; Name: "{app}"

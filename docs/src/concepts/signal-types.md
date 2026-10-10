@@ -1,6 +1,6 @@
 # Signal Types
 
-Every jack in Modular Synth has a signal type, and every type has a color. The color of a jack tells you what it sends or expects, and a cable takes the color of the output it comes from, so you can read a patch's signal flow at a glance.
+Every jack in Soba has a signal type, and every type has a color. The color of a jack tells you what it sends or expects, and a cable takes the color of the output it comes from, so you can read a patch's signal flow at a glance.
 
 | Type | Color | Range | Carries |
 |------|-------|-------|---------|
@@ -74,7 +74,7 @@ Same-type connections always work. A few cross-type connections work too, and th
 
 Allowed cross-type connections pass the signal through unchanged. An audio cable into a control input is the raw waveform; a gate into a control input is exactly 0.0 or 1.0.
 
-If you drop a cable on a jack that can't take it, Modular Synth removes the cable and the status bar at the bottom of the window explains why, for example *Control cannot connect to Gate*.
+If you drop a cable on a jack that can't take it, Soba removes the cable and the status bar at the bottom of the window explains why, for example *Control cannot connect to Gate*.
 
 ## Signal color and category color
 

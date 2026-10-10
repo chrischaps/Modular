@@ -1,12 +1,12 @@
 # Sampled Keys
 
-A bell you can play across the keyboard, made from one recorded note. The recording is a single strike of the [FM Synthesis](./fm-synthesis.md) bell at middle C, rendered by Modular itself. A Sampler plays it back faster for higher keys and slower for lower ones, a voice for every key you hold, through a filter and a room.
+A bell you can play across the keyboard, made from one recorded note. The recording is a single strike of the [FM Synthesis](./fm-synthesis.md) bell at middle C, rendered by Soba itself. A Sampler plays it back faster for higher keys and slower for lower ones, a voice for every key you hold, through a filter and a room.
 
 > **Load it:** choose **📚 Examples → Sampled Keys** in the toolbar. Press **▶ Play**, then hold chords on a MIDI keyboard or on the Z to M keys.
-> The patch file is [`patches/sampled-keys.json`](https://github.com/chrischaps/Modular/blob/master/patches/sampled-keys.json), and its sample is [`patches/samples/fm-bell-c4.wav`](https://github.com/chrischaps/Modular/blob/master/patches/samples/fm-bell-c4.wav).
+> The patch file is [`patches/sampled-keys.json`](https://github.com/chrischaps/Soba/blob/master/patches/sampled-keys.json), and its sample is [`patches/samples/fm-bell-c4.wav`](https://github.com/chrischaps/Soba/blob/master/patches/samples/fm-bell-c4.wav).
 
 <iframe class="patch-embed" src="../play/?patch=sampled-keys" title="Sampled Keys, playable in the browser" loading="lazy"></iframe>
-*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Modular**.*
+*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Soba**.*
 
 ![The Sampled Keys patch](../images/recipe-sampled-keys.png)
 *A chord on the bell: each white line on the waveform is a key, playing the recording at its own speed.*
@@ -16,7 +16,7 @@ A bell you can play across the keyboard, made from one recorded note. The record
 - **Sampling.** A recording becomes an instrument. One note, played faster or slower, covers the whole keyboard.
 - **Pitch is speed.** As on tape, an octave up plays twice as fast and lasts half as long. The bell rings shorter at the top of the keyboard and longer at the bottom, as real ones do.
 - **Polyphony from one module.** The Sampler runs a voice for every channel of Poly MIDI's cables.
-- **Resampling with Modular itself.** The bell was rendered from another example with the `render` tool, so the sample has no licence to worry about.
+- **Resampling with Soba itself.** The bell was rendered from another example with the `render` tool, so the sample has no licence to worry about.
 
 ## Modules
 

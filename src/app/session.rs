@@ -257,7 +257,7 @@ pub fn recovery_prompt(ctx: &egui::Context, autosave: &Autosave) -> Option<bool>
         ui.add_space(4.0);
         ui.label(
             RichText::new(format!(
-                "Modular closed before “{}” was saved. The autosave from {} still has your changes.",
+                "Soba closed before “{}” was saved. The autosave from {} still has your changes.",
                 autosave.name,
                 autosave.age()
             ))

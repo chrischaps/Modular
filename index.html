@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <!--
-  Modular in the browser. Build with trunk (https://trunkrs.dev):
+  Soba in the browser. Build with trunk (https://trunkrs.dev):
     trunk serve            # http://127.0.0.1:8080, rebuilt on save
     trunk build --release  # into dist/, for the docs site
   Add ?patch=lush-pad to embed an example (just the canvas and a Play
@@ -12,17 +12,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
     <meta name="color-scheme" content="dark" />
     <meta name="theme-color" content="#1a1a2e" />
-    <title>Modular</title>
+    <title>Soba</title>
     <meta name="description" content="A node-based modular synthesizer, playable in the browser." />
 
-    <link data-trunk rel="rust" data-bin="modular_synth" data-wasm-opt="2" />
+    <link data-trunk rel="rust" data-bin="soba" data-wasm-opt="2" />
 
     <script>
         // Browsers hold a page's sound until it's clicked or a key is pressed
         // (their autoplay rule), and Safari only lets go inside the click
         // itself. So every audio context the app makes is noted here and
         // resumed from the first gesture, and the app asks
-        // modularAudioBlocked() to show "Click to start sound" until then.
+        // sobaAudioBlocked() to show "Click to start sound" until then.
         (function () {
             const contexts = [];
             const Native = window.AudioContext || window.webkitAudioContext;
@@ -38,7 +38,7 @@
             for (const gesture of ["pointerdown", "pointerup", "keydown", "touchend"]) {
                 window.addEventListener(gesture, resume, { capture: true });
             }
-            window.modularAudioBlocked = () => contexts.some((c) => c.state === "suspended");
+            window.sobaAudioBlocked = () => contexts.some((c) => c.state === "suspended");
 
             // The app's sound arrives as buffers, each scheduled to start as
             // the one before ends (cpal's WebAudio host). If the page is busy
@@ -47,9 +47,9 @@
             // start early, over the one still playing. So the schedule is
             // moved on by however late it fell, leaving one gap (a dropout)
             // instead of garbled sound from then on. The dropouts are counted
-            // in modularAudioStats, for the browser tests.
+            // in sobaAudioStats, for the browser tests.
             const stats = { buffers: 0, late: 0, lagMs: 0, peak: 0, renderMs: 0, renderMaxMs: 0 };
-            window.modularAudioStats = () => ({ ...stats, lagMs: Math.round(stats.lagMs), renderMs: +stats.renderMs.toFixed(1), renderMaxMs: +stats.renderMaxMs.toFixed(1), contexts: contexts.map((c) => c.state) });
+            window.sobaAudioStats = () => ({ ...stats, lagMs: Math.round(stats.lagMs), renderMs: +stats.renderMs.toFixed(1), renderMaxMs: +stats.renderMaxMs.toFixed(1), contexts: contexts.map((c) => c.state) });
             // How long the app takes to render each buffer, which is the
             // time the page's thread is busy with sound rather than drawing
             const listen = AudioBufferSourceNode.prototype.addEventListener;
@@ -100,7 +100,7 @@
             font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
         }
 
-        canvas#modular {
+        canvas#soba {
             position: absolute;
             inset: 0;
             width: 100%;
@@ -143,7 +143,7 @@
 </head>
 
 <body>
-    <canvas id="modular"></canvas>
+    <canvas id="soba"></canvas>
     <div id="loading">
         <svg viewBox="0 0 280 90" aria-hidden="true">
             <path class="cable" d="M 14 20 C 120 20, 160 70, 266 70" />
@@ -151,7 +151,7 @@
             <circle class="jack" cx="14" cy="20" r="7" />
             <circle class="jack" cx="266" cy="70" r="7" />
         </svg>
-        <div class="name">MODULAR</div>
+        <div class="name">soba</div>
         <div class="hint">Patching the cables…</div>
     </div>
 </body>

@@ -105,7 +105,7 @@ Set **Source** to **MIDI** to slave the Clock to a MIDI clock master, such as a 
 
 The **Gate** follows the master's beat too, so Div 1/16 pulses on every sixteenth of the DAW's grid. Patch **Run** and **Reset** into a sequencer to have it start, stop and restart with the DAW's transport.
 
-Modular's own **Play** button still has to be on: while Modular is stopped, it doesn't listen.
+Soba's own **Play** button still has to be on: while Soba is stopped, it doesn't listen.
 
 ## Patch examples
 

@@ -1,4 +1,4 @@
-//! Modular Synth Library
+//! Soba Library
 //!
 //! Core library for the modular audio synthesizer.
 

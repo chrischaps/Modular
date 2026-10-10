@@ -1,4 +1,4 @@
-//! Theme definitions for the Modular Synth UI
+//! Theme definitions for the Soba UI
 //!
 //! Provides color constants, styling utilities, and theme configuration
 //! for a dark, audio-software aesthetic.

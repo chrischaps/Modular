@@ -1,6 +1,6 @@
 # Audio Signal Flow Documentation
 
-This document describes how audio signals flow through the Modular Synth system, from UI interaction to speaker output. Understanding this flow is essential for debugging audio issues.
+This document describes how audio signals flow through the Soba system, from UI interaction to speaker output. Understanding this flow is essential for debugging audio issues.
 
 ## Architecture Overview
 

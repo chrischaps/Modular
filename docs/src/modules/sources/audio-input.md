@@ -7,7 +7,7 @@
 
 Audio Input brings sound from outside into the patch: a microphone, a guitar, a synth on a line input. Put your voice through the reverb, a guitar through the ladder filter and a tape delay, or let a drum loop play a synth.
 
-Choose the device in the toolbar's **Input** menu. It starts at **None**, so Modular never opens a microphone you didn't ask it to. Every Audio Input module in the patch hears that one device; until you choose one, they're silent.
+Choose the device in the toolbar's **Input** menu. It starts at **None**, so Soba never opens a microphone you didn't ask it to. Every Audio Input module in the patch hears that one device; until you choose one, they're silent.
 
 Alongside the audio, the module listens to how loud the input is. **Follow** traces the level as a control signal, and **Gate** opens when it rises above the **Threshold**, so a drum hit or a picked note can trigger envelopes.
 
@@ -68,20 +68,20 @@ Short **Attack** times catch the front of a drum hit. Longer ones, 20–50 ms, s
 
 ## Latency and devices
 
-Live input passes through two devices, each with its own clock and buffer: the input and the output. To keep the sound smooth, Modular holds a little audio between them, about one buffer of each. While an input is open, the status bar shows **In** and the round trip: how long a sound takes from the input jack to the speakers, often around 60 ms on Windows. Hover it for the parts that add up to it, then the device and any dropouts so far. It turns amber for a few seconds after a dropout, or after a glitch the device itself reports (a lone one when the input first opens is common, and harmless).
+Live input passes through two devices, each with its own clock and buffer: the input and the output. To keep the sound smooth, Soba holds a little audio between them, about one buffer of each. While an input is open, the status bar shows **In** and the round trip: how long a sound takes from the input jack to the speakers, often around 60 ms on Windows. Hover it for the parts that add up to it, then the device and any dropouts so far. It turns amber for a few seconds after a dropout, or after a glitch the device itself reports (a lone one when the input first opens is common, and harmless).
 
 | Part | Typical (Windows) | What it is |
 |------|-------------------|------------|
 | **Input device** | ~10 ms | The input device's own buffer: audio waits there until a packet is full |
-| **Buffer** | ~13 ms | What Modular holds between the two devices to ride out their uneven timing, once settled |
+| **Buffer** | ~13 ms | What Soba holds between the two devices to ride out their uneven timing, once settled |
 | **Output device** | ~30 ms | The output device's own buffer and the Windows audio engine behind it, before the speakers play it |
 | **Limiter** | 1 ms | The Audio Output limiter's look-ahead |
 
-Each device's figure comes from the timestamps it puts on its audio. Windows doesn't time captured audio usefully, so there the input is counted as one packet, the least it can be, and the hover marks it with **~**. If a device reports nothing at all, the label gets a **+** (**In 22+ ms**): the real round trip is longer than the parts Modular can count. Neither figure includes the converters inside the interface, usually another millisecond or two each way.
+Each device's figure comes from the timestamps it puts on its audio. Windows doesn't time captured audio usefully, so there the input is counted as one packet, the least it can be, and the hover marks it with **~**. If a device reports nothing at all, the label gets a **+** (**In 22+ ms**): the real round trip is longer than the parts Soba can count. Neither figure includes the converters inside the interface, usually another millisecond or two each way.
 
 The **Buffer** settles on its own. It opens holding enough for the worst timing the two devices could have, then over the first few seconds it watches how much of that they really need, and trims the rest, a frame at a time so you don't hear it. If the two devices' clocks drift apart, as separate devices' do, it eases a block a fraction faster or slower to keep in step rather than letting the audio drop out. After a dropout it holds a little more, then tries the leaner amount again after a quiet half minute. The hover shows how much it has trimmed and stretched.
 
-- **Different sample rates are fine.** Windows often runs a microphone at 48 kHz and speakers at 44.1 kHz, even on one interface. Modular converts the input to the output's rate on the way in. For the cleanest sound, set both to the same rate in your system's sound settings; the status bar tooltip says when it's converting.
+- **Different sample rates are fine.** Windows often runs a microphone at 48 kHz and speakers at 44.1 kHz, even on one interface. Soba converts the input to the output's rate on the way in. For the cleanest sound, set both to the same rate in your system's sound settings; the status bar tooltip says when it's converting.
 - **Changing the Output device** reopens the input at the new device's rate.
 - If the input device is unplugged, the status bar shows **⚠ Input lost**. Choose it again under **Input**.
 - A mono device is heard on both sides. With a two-input interface, set **Channel** to the input you're using; see [Choosing a channel](#choosing-a-channel).
@@ -90,9 +90,9 @@ The **Buffer** settles on its own. It opens holding enough for the worst timing 
 
 <div class="asio-badge"><img src="../../images/asio-compatible.svg" alt="ASIO Compatible"><span>ASIO is a registered trademark of Steinberg Media Technologies GmbH</span></div>
 
-Windows Audio is shared by every app, and each direction passes through the Windows audio engine: fine for a pad or a sampled loop, but a guitarist hears 60 ms as a slap-back echo of their own playing. An audio interface's **ASIO** driver skips all of that. Input and output come from one driver, on one clock, in buffers a few milliseconds long, and Modular holds nothing between them: each output buffer is computed from the input that arrived moments before.
+Windows Audio is shared by every app, and each direction passes through the Windows audio engine: fine for a pad or a sampled loop, but a guitarist hears 60 ms as a slap-back echo of their own playing. An audio interface's **ASIO** driver skips all of that. Input and output come from one driver, on one clock, in buffers a few milliseconds long, and Soba holds nothing between them: each output buffer is computed from the input that arrived moments before.
 
-To use it, download the low-latency Windows build, or build Modular with ASIO yourself (both in [Build with ASIO](../../getting-started/installation.md#build-with-asio-windows-optional)), then open the **Output** menu and choose **ASIO** under **Audio system**. The menu then lists ASIO drivers, and **Input** offers that driver's inputs. Choose it there to hear your interface.
+To use it, download the low-latency Windows build, or build Soba with ASIO yourself (both in [Build with ASIO](../../getting-started/installation.md#build-with-asio-windows-optional)), then open the **Output** menu and choose **ASIO** under **Audio system**. The menu then lists ASIO drivers, and **Input** offers that driver's inputs. Choose it there to hear your interface.
 
 **Buffer** sets how many frames the driver hands over at a time, and the closed Output menu shows it beside the driver's name:
 
@@ -104,11 +104,11 @@ To use it, download the low-latency Windows build, or build Modular with ASIO yo
 | **256** | 5.3 ms | 32 ms | Busy patches with long reverbs |
 | **512** | 10.7 ms | 52 ms | Room to spare; too slow to play against |
 
-Measured on a first-generation Scarlett 2i2 with Focusrite's driver. The round trip is more than one buffer in and one out: each driver keeps a safety margin of its own, Focusrite's about another buffer and a few milliseconds each way, and Modular's limiter adds 1 ms. The status bar's **In** shows yours. If you hear crackles, or the CPU meter runs high, go up a size. Smaller buffers make Modular answer more often, with less time for each answer.
+Measured on a first-generation Scarlett 2i2 with Focusrite's driver. The round trip is more than one buffer in and one out: each driver keeps a safety margin of its own, Focusrite's about another buffer and a few milliseconds each way, and Soba's limiter adds 1 ms. The status bar's **In** shows yours. If you hear crackles, or the CPU meter runs high, go up a size. Smaller buffers make Soba answer more often, with less time for each answer.
 
 - ASIO drivers serve one app at a time. If another app (a DAW, say) has the interface, choosing ASIO says so and stays on Windows Audio.
 - Changing the buffer from the driver's own control panel restarts audio at the driver's new size, with a note in the status bar.
-- Modular remembers the audio system and buffer between sessions.
+- Soba remembers the audio system and buffer between sessions.
 
 ## Feedback
 

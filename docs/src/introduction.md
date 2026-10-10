@@ -1,13 +1,15 @@
-# Modular Synth
+# Soba
 
-Modular Synth is a modular synthesizer you patch on a canvas. You place modules (oscillators, filters, envelopes, effects) as nodes, draw cables between their jacks, and hear the result as you go. Nothing is wired in advance: the patch is the instrument.
+Soba is a modular synthesizer you patch on a canvas. You place modules (oscillators, filters, envelopes, effects) as nodes, draw cables between their jacks, and hear the result as you go. Nothing is wired in advance: the patch is the instrument.
 
-![The Modular Synth window with a patch loaded](./images/interface-overview.png)
+The name comes from the cables. Blender, whose node editor Soba takes after, calls the wires between nodes *noodles*, and soba are long, fine noodles. In Japanese, *soba* (傍) also means "beside": an instrument whose patches sit by you and explain themselves.
+
+![The Soba window with a patch loaded](./images/interface-overview.png)
 *A patch on the canvas. Cables are colored by what they carry, and light up as signal passes through them.*
 
 ## A node graph, not a rack
 
-Most software modulars imitate hardware: rows of panels, screws, and cables that sag in front of everything. Modular Synth borrows instead from node editors like Blender's. Every module is a rounded card with inputs on its left edge, outputs on its right, and knobs along the bottom. You can put modules anywhere, zoom out to see the whole patch, and zoom in to work on one corner of it.
+Most software modulars imitate hardware: rows of panels, screws, and cables that sag in front of everything. Soba borrows instead from node editors like Blender's. Every module is a rounded card with inputs on its left edge, outputs on its right, and knobs along the bottom. You can put modules anywhere, zoom out to see the whole patch, and zoom in to work on one corner of it.
 
 What it keeps from hardware is the feedback. Cables glow with the signal they carry, so a note becomes a pulse of light running down the wire and an LFO draws its waveform along the cable. Knobs under modulation turn on their own. Oscillators, envelopes, filters and LFOs draw what they're doing on the module itself. You can see a patch working as well as hear it.
 
@@ -21,7 +23,7 @@ Each cable carries one of three kinds of signal, and takes its color from it:
 | <span class="swatch control"></span>Orange | Control | Modulation (CV): envelopes, LFOs, pitch |
 | <span class="swatch gate"></span>Green | Gate | On or off: a key held down, a clock tick |
 
-A cable can also carry up to eight voices at once, which is how Modular Synth plays chords. MIDI doesn't travel on cables: the MIDI modules listen to the controller you choose in the toolbar and turn what you play into pitch, gate and velocity. [Signal Types](./concepts/signal-types.md) and [Polyphony](./concepts/polyphony.md) cover both in depth.
+A cable can also carry up to eight voices at once, which is how Soba plays chords. MIDI doesn't travel on cables: the MIDI modules listen to the controller you choose in the toolbar and turn what you play into pitch, gate and velocity. [Signal Types](./concepts/signal-types.md) and [Polyphony](./concepts/polyphony.md) cover both in depth.
 
 ## Modules
 
@@ -50,6 +52,6 @@ If you already know your way around a modular, open the **📚 Examples** menu, 
 
 ## Under the hood
 
-Modular Synth is written in Rust, with [egui](https://github.com/emilk/egui) for the interface and [cpal](https://github.com/RustAudio/cpal) for audio. The audio engine runs on its own thread and never waits on the interface: edits travel to it over lock-free queues, every buffer is allocated before playback starts, and a test in the build fails if the audio thread ever allocates memory. That is what keeps the sound from glitching while you patch.
+Soba is written in Rust, with [egui](https://github.com/emilk/egui) for the interface and [cpal](https://github.com/RustAudio/cpal) for audio. The audio engine runs on its own thread and never waits on the interface: edits travel to it over lock-free queues, every buffer is allocated before playback starts, and a test in the build fails if the audio thread ever allocates memory. That is what keeps the sound from glitching while you patch.
 
-The source is on [GitHub](https://github.com/chrischaps/Modular).
+The source is on [GitHub](https://github.com/chrischaps/Soba).

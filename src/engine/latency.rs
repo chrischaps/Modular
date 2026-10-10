@@ -8,7 +8,7 @@
 //!   will be **played**, so `playback − callback` is the output device's.
 //!
 //! Each callback hands its figure to a [`LatencyGauge`], which smooths it
-//! with a store and nothing else. [`RoundTrip`] adds the two to Modular's own
+//! with a store and nothing else. [`RoundTrip`] adds the two to Soba's own
 //! share, the jitter buffer between the callbacks and the output limiter's
 //! look-ahead, for the status bar.
 //!

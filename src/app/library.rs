@@ -2,7 +2,7 @@
 //! And the Library: groups that ship with the app, added the same way.
 //!
 //! Each saved group is a small patch file holding just that group, named
-//! after it, in `Documents/Modular/My Modules`. Adding one is a paste of
+//! after it, in `Documents/Soba/My Modules`. Adding one is a paste of
 //! that patch, so it comes in whole: its modules, cables, jacks and
 //! pinned knobs. Saving a group under a name that's already there updates
 //! that module.
@@ -16,7 +16,7 @@ pub fn folder() -> PathBuf {
     dirs::document_dir()
         .or_else(|| dirs::home_dir().map(|home| home.join("Documents")))
         .unwrap_or_else(std::env::temp_dir)
-        .join("Modular")
+        .join("Soba")
         .join("My Modules")
 }
 
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn saved_groups_list_by_name_with_a_summary() {
-        let folder = std::env::temp_dir().join(format!("modular-my-modules-{}", std::process::id()));
+        let folder = std::env::temp_dir().join(format!("soba-my-modules-{}", std::process::id()));
         let (path, replaced) = save_in(&folder, &voice()).unwrap();
         assert!(!replaced);
         assert_eq!(path.file_name().unwrap(), "Voice  Lead.json");

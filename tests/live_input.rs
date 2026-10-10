@@ -7,9 +7,9 @@
 //! ```
 //!
 //! `LIVE_INPUT_SECONDS` sets how long it listens (3 s by default): 600
-//! makes it a ten-minute soak. `MODULAR_AUDIO_SYSTEM=asio` runs it through
+//! makes it a ten-minute soak. `SOBA_AUDIO_SYSTEM=asio` runs it through
 //! the first ASIO driver (build with `--features asio`), and
-//! `MODULAR_BUFFER=128` asks that driver for 128-frame buffers. On ASIO,
+//! `SOBA_BUFFER=128` asks that driver for 128-frame buffers. On ASIO,
 //! input and output share a clock, so any dropout at all fails the test.
 //!
 //! The patch is Audio Input into the output at volume 0, so nothing is
@@ -19,16 +19,16 @@
 
 use std::time::{Duration, Instant};
 
-use modular_synth::engine::{AudioEngine, AudioProcessor, AudioSystem, EngineChannels, EngineCommand, EngineEvent, RoundTrip};
+use soba::engine::{AudioEngine, AudioProcessor, AudioSystem, EngineChannels, EngineCommand, EngineEvent, RoundTrip};
 
 #[test]
 #[ignore = "needs audio hardware and an input device"]
 fn default_input_reaches_the_audio_input_module() {
-    let system = match std::env::var("MODULAR_AUDIO_SYSTEM") {
+    let system = match std::env::var("SOBA_AUDIO_SYSTEM") {
         Ok(key) => AudioSystem::from_key(&key).unwrap_or_else(|| panic!("this build has no {key} audio system")),
         Err(_) => AudioSystem::System,
     };
-    let buffer = std::env::var("MODULAR_BUFFER").ok().and_then(|s| s.parse().ok());
+    let buffer = std::env::var("SOBA_BUFFER").ok().and_then(|s| s.parse().ok());
     let mut engine = match AudioEngine::with_system(system, buffer) {
         Ok(engine) => engine,
         Err(e) => panic!("{}: {}", system.label(), e),

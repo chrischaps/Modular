@@ -1,5 +1,5 @@
 """Shot list for the chaps.dev showcase: writes each shot's capture script
-and films it with `modular_synth --capture`.
+and films it with `soba --capture`.
 
     python tools/showcase/shots.py <shot> [<shot> ...]   film shots
     python tools/showcase/shots.py --list                 list them
@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-EXE = ROOT / "target" / "capture" / "release" / "modular_synth.exe"
+EXE = ROOT / "target" / "capture" / "release" / "soba.exe"
 SCRIPTS = Path(__file__).resolve().parent / "scripts"
 OUT = ROOT / "target" / "showcase"
 

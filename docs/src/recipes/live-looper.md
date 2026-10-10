@@ -3,7 +3,7 @@
 Your own instrument, layered by yourself. Plug in a guitar, a microphone or a keyboard's audio out, and a [Looper](../modules/utilities/looper.md) records four bars of it on the downbeat, plays them back, and lets you play over them, layer on layer. A soft click keeps you in time, and the whole thing goes through tempo-synced echoes and a room.
 
 > **Load it:** choose **📚 Examples → Live Looper** in the toolbar. Pick your interface under **Input** in the toolbar, press **▶ Play**, tap **Rec** on the Looper and play.
-> The patch file is [`patches/live-looper.json`](https://github.com/chrischaps/Modular/blob/master/patches/live-looper.json).
+> The patch file is [`patches/live-looper.json`](https://github.com/chrischaps/Soba/blob/master/patches/live-looper.json).
 
 ![The Live Looper patch](../images/recipe-live-looper.png)
 *The patch as it opens. The Looper's ring is grey dashes: empty, waiting for Rec.*

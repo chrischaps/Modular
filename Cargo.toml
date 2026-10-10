@@ -1,11 +1,11 @@
 [package]
-name = "modular_synth"
+name = "soba"
 version = "0.3.1"
 edition = "2021"
 description = "A node-based modular audio synthesizer"
 authors = ["Chris"]
 license = "MIT"
-default-run = "modular_synth"
+default-run = "soba"
 
 [features]
 # Low-latency audio through an interface's ASIO driver (Windows). Needs LLVM

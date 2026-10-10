@@ -3,10 +3,10 @@
 A full drum kit on one [Trigger Sequencer](../modules/utilities/trigger-sequencer.md): eight [Drum](../modules/sources/drum.md) voices, each on its own lane, with ghost notes, hat rolls, a snare-roll fill every fourth bar and a crash on the bar after it. The whole patch is 14 modules. [Drum Machine](./drum-machine.md) needs a Step Sequencer for every drum to play five; here one module plays eight, and changes pattern for the fill by itself. It plays itself; press Play and let it run.
 
 > **Load it:** choose **📚 Examples → Roll Call** in the toolbar and press **▶ Play**. It needs no keyboard.
-> The patch file is [`patches/roll-call.json`](https://github.com/chrischaps/Modular/blob/master/patches/roll-call.json).
+> The patch file is [`patches/roll-call.json`](https://github.com/chrischaps/Soba/blob/master/patches/roll-call.json).
 
 <iframe class="patch-embed" src="../play/?patch=roll-call" title="Roll Call, playable in the browser" loading="lazy"></iframe>
-*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Modular**.*
+*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Soba**.*
 
 ![The Roll Call patch](../images/recipe-roll-call.png)
 *The Clock, then the Trigger Sequencer, whose eight lanes fan out to the kit two drums at a time: kick and snare, closed and open hat, tom and rim, cowbell and cymbal. Two Mixers, a room and the output sit at the right.*

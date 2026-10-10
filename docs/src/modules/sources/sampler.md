@@ -7,7 +7,7 @@
 
 Sampler plays a WAV file. Patch a gate in and it plays one-shots: a kick under a sequencer, a vocal chop, a door slam. Patch in V/Oct as well and a polyphonic gate, and it becomes an instrument: one recorded note spread across the keyboard, each key playing it at its own pitch.
 
-Every other sound in Modular is synthesized. The Sampler brings in sound you've recorded, or one Modular rendered itself, and keeps it with the patch.
+Every other sound in Soba is synthesized. The Sampler brings in sound you've recorded, or one Soba rendered itself, and keeps it with the patch.
 
 ## Loading a file
 
@@ -131,7 +131,7 @@ Voices read between samples on a cubic (Hermite) curve. That's clean at ordinary
 
 ### Sampled keys
 
-The [Sampled Keys](../../recipes/sampled-keys.md) example plays a bell across the keyboard: one strike of the FM Synthesis example, rendered by Modular and loaded into a Sampler.
+The [Sampled Keys](../../recipes/sampled-keys.md) example plays a bell across the keyboard: one strike of the FM Synthesis example, rendered by Soba and loaded into a Sampler.
 
 ### A drum kit from recordings
 

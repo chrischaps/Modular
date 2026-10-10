@@ -1,12 +1,14 @@
-# Modular Synth
+# Soba
 
 A node-based modular synthesizer, written in Rust. Patch oscillators, filters, envelopes and effects together on a canvas, the way you would in Blender's node editor, and hear the result as you go.
 
-![Modular Synth: a two-oscillator voice through a filter, delay and output, with an oscilloscope](Screenshot.png)
+*Why Soba:* Blender calls the wires between nodes *noodles*, and soba are long, fine ones. In Japanese, *soba* (傍) also means "beside": an instrument whose patches sit by you and explain themselves.
+
+![Soba: a two-oscillator voice through a filter, delay and output, with an oscilloscope](Screenshot.png)
 
 It doesn't imitate hardware panels. Every module is a node with jacks on its sides and knobs along its bottom, and every cable is coloured by what it carries. Knobs that are being modulated turn on their own, so you can watch the patch move.
 
-**Documentation:** [docs.chaps.dev/modular](https://docs.chaps.dev/modular/) has a first-patch walkthrough, a page for every module, and recipes to build.
+**Documentation:** [docs.chaps.dev/soba](https://docs.chaps.dev/soba/) has a first-patch walkthrough, a page for every module, and recipes to build.
 
 ## Features
 
@@ -32,14 +34,14 @@ It doesn't imitate hardware panels. Every module is a node with jacks on its sid
 - **Record what you hear.** **● Rec** (`Ctrl+R`) writes the output to a WAV, sample for sample, while you play and tweak. It never gets in the audio's way, and every take is saved with the patch that made it.
 - **Live input.** Put a microphone, guitar or line source through the filters and effects. Audio Input follows its level and opens a gate on loud hits, so a drum loop can play a synth.
 - **MIDI.** Play from any MIDI controller, map any knob to a CC with MIDI Learn, or play the computer keyboard.
-- **Your work is safe.** Modular asks before New, Open or Quit would lose unsaved changes. A patch with unsaved changes is autosaved every 30 seconds and offered back after a crash. Recently opened patches are a menu away.
+- **Your work is safe.** Soba asks before New, Open or Quit would lose unsaved changes. A patch with unsaved changes is autosaved every 30 seconds and offered back after a crash. Recently opened patches are a menu away.
 - **Real-time-safe engine.** The audio thread never allocates or locks. The UI sends it commands over lock-free ring buffers, and CI runs a test that fails if it ever allocates.
 
 ## Getting started
 
-**[Try it in the browser](https://docs.chaps.dev/modular/play/)**, nothing to install: press **Play**, then play the `Z` to `M` keys or the Keyboard module's piano. The browser build has every module and example; MIDI devices, audio input and recording need the desktop app (see [`WEB.md`](WEB.md)).
+**[Try it in the browser](https://docs.chaps.dev/soba/play/)**, nothing to install: press **Play**, then play the `Z` to `M` keys or the Keyboard module's piano. The browser build has every module and example; MIDI devices, audio input and recording need the desktop app (see [`WEB.md`](WEB.md)).
 
-**[Download it](https://github.com/chrischaps/Modular/releases/latest)** for Windows (an installer, or a zip), macOS (a disk image) or Linux. It tells you when there's a newer version and installs it in place, bringing your patch back where you left it: see [Updates](https://docs.chaps.dev/modular/getting-started/installation.html#updates).
+**[Download it](https://github.com/chrischaps/Soba/releases/latest)** for Windows (an installer, or a zip), macOS (a disk image) or Linux. It tells you when there's a newer version and installs it in place, bringing your patch back where you left it: see [Updates](https://docs.chaps.dev/soba/getting-started/installation.html#updates).
 
 Or build it from source. You need a [Rust toolchain](https://rustup.rs). On Linux you also need the ALSA and X11/Wayland development packages listed in `.github/workflows/ci.yml`.
 
@@ -92,4 +94,4 @@ cargo test   # 800+ tests, including the audio-thread allocation guard
 
 ## License
 
-Modular is MIT ([`LICENSE`](LICENSE)). The low-latency Windows download (*with ASIO*) is distributed under the GPLv3 instead, because it includes Steinberg's ASIO SDK, which Steinberg licenses under the GPLv3. Its source is this repository at the release's tag, built with `--features asio` against ASIO SDK 2.3.4. Every other download is MIT.
+Soba is MIT ([`LICENSE`](LICENSE)). The low-latency Windows download (*with ASIO*) is distributed under the GPLv3 instead, because it includes Steinberg's ASIO SDK, which Steinberg licenses under the GPLv3. Its source is this repository at the release's tag, built with `--features asio` against ASIO SDK 2.3.4. Every other download is MIT.

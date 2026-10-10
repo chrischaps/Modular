@@ -1,4 +1,4 @@
-//! Modular Synth - A node-based modular audio synthesizer
+//! Soba - A node-based modular audio synthesizer
 //!
 //! Entry point for the application: a window on the desktop, or a canvas
 //! in the browser (`trunk serve`, see `index.html`).
@@ -9,17 +9,17 @@ use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use eframe::egui;
 #[cfg(not(target_arch = "wasm32"))]
-use modular_synth::app::capture::CaptureConfig;
+use soba::app::capture::CaptureConfig;
 #[cfg(not(target_arch = "wasm32"))]
-use modular_synth::app::update::{resume, Resume};
-use modular_synth::app::SynthApp;
+use soba::app::update::{resume, Resume};
+use soba::app::SynthApp;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result<()> {
     // Parse command line arguments
     let args: Vec<String> = std::env::args().collect();
     let test_tone = args.iter().any(|arg| arg == "--test-tone");
-    // Filming the app: `modular_synth <patch> --capture <script> --out <dir>`
+    // Filming the app: `soba <patch> --capture <script> --out <dir>`
     let capture = match CaptureConfig::from_args(&args) {
         Ok(capture) => capture,
         Err(e) => {
@@ -27,7 +27,7 @@ fn main() -> eframe::Result<()> {
             std::process::exit(2);
         }
     };
-    // A patch file to open, e.g. `modular_synth patches/lush-pad.json`
+    // A patch file to open, e.g. `soba patches/lush-pad.json`
     // (skipping the values that follow options)
     let patch_path = args
         .iter()
@@ -42,7 +42,7 @@ fn main() -> eframe::Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1280.0, 720.0])
         .with_min_inner_size([800.0, 600.0])
-        .with_title("Modular Synth")
+        .with_title("Soba")
         .with_icon(std::sync::Arc::new(
             eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon/icon-256.png")).unwrap_or_default(),
         ));
@@ -55,15 +55,15 @@ fn main() -> eframe::Result<()> {
         persist_window: capture.is_none(),
         // A folder of its own for the settings and autosave, so a test copy
         // (an update tried end to end, say) leaves the everyday one's alone
-        persistence_path: std::env::var_os("MODULAR_DATA_DIR").map(PathBuf::from),
+        persistence_path: std::env::var_os("SOBA_DATA_DIR").map(PathBuf::from),
         ..Default::default()
     };
 
     eframe::run_native(
-        "Modular Synth",
+        "Soba",
         options,
         Box::new(move |cc| {
-            modular_synth::app::theme::install_fonts(&cc.egui_ctx);
+            soba::app::theme::install_fonts(&cc.egui_ctx);
             let mut app = SynthApp::new(test_tone);
             if resume.is_none() {
                 app.open_on_launch(patch_path.as_deref());
@@ -90,11 +90,11 @@ fn main() -> eframe::Result<()> {
 #[cfg(target_arch = "wasm32")]
 fn main() {
     use eframe::wasm_bindgen::JsCast;
-    use modular_synth::app::web;
+    use soba::app::web;
 
     let document = web_sys::window().and_then(|w| w.document()).expect("a page to run in");
     let canvas = document
-        .get_element_by_id("modular")
+        .get_element_by_id("soba")
         .and_then(|c| c.dyn_into::<web_sys::HtmlCanvasElement>().ok())
         .expect("index.html's canvas");
 
@@ -104,7 +104,7 @@ fn main() {
                 canvas,
                 eframe::WebOptions::default(),
                 Box::new(|cc| {
-                    modular_synth::app::theme::install_fonts(&cc.egui_ctx);
+                    soba::app::theme::install_fonts(&cc.egui_ctx);
                     let mut app = SynthApp::new(false);
                     let (patch, open) = (web::query_param("patch"), web::query_param("open"));
                     if !app.open_from_address(patch.as_deref(), open.as_deref()) {
@@ -125,7 +125,7 @@ fn main() {
                 Ok(()) => loading.remove(),
                 Err(e) => {
                     web_sys::console::error_1(&e);
-                    loading.set_inner_html("Modular couldn't start here: it needs WebGL 2 and WebAssembly. Try a recent Chrome, Firefox or Safari.");
+                    loading.set_inner_html("Soba couldn't start here: it needs WebGL 2 and WebAssembly. Try a recent Chrome, Firefox or Safari.");
                 }
             }
         }

@@ -5,10 +5,10 @@ A whole song in one patch: four and a half minutes of D minor at 112 BPM, from a
 Nothing outside the patch tells it what to do. Two [Trigger Sequencers](../modules/utilities/trigger-sequencer.md) take one step every four bars, and those 32 steps are the score: each lane rides one part's fader, picks the drum pattern, or presses a pedal. Ninety-five modules play their part, of 27 kinds: every module in the rack except the five that wait for a player. Left running, it plays the song again from the top.
 
 > **Load it:** choose **📚 Examples → From One Sine** in the toolbar and press **▶ Play**. It needs no keyboard.
-> The patch file is [`patches/from-one-sine.json`](https://github.com/chrischaps/Modular/blob/master/patches/from-one-sine.json).
+> The patch file is [`patches/from-one-sine.json`](https://github.com/chrischaps/Soba/blob/master/patches/from-one-sine.json).
 
 <iframe class="patch-embed" src="../play/?patch=from-one-sine" title="From One Sine, playable in the browser" loading="lazy"></iframe>
-*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Modular**.*
+*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Soba**.*
 
 ![The From One Sine patch](../images/recipe-from-one-sine.png)
 *The whole song at the widest zoom. The score and harmony are on the top left, the instruments are in strips with signal running left to right, the drums run along the bottom, and the mixing desk is on the right. Orange cables from the score reach every fader.*

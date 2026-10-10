@@ -7,7 +7,7 @@ In this tutorial you build a playable synthesizer voice from an empty canvas: an
 
 ## Before you start: First Sound
 
-When Modular Synth opens, it loads the **First Sound** example: a Keyboard, an Oscillator, an ADSR Envelope and a VCA, already patched to the Audio Output. Press **▶ Play** in the toolbar and play the `Z` to `M` keys on your computer keyboard. That patch is a smaller version of the one you're about to build, so it's worth a minute of listening first.
+When Soba opens, it loads the **First Sound** example: a Keyboard, an Oscillator, an ADSR Envelope and a VCA, already patched to the Audio Output. Press **▶ Play** in the toolbar and play the `Z` to `M` keys on your computer keyboard. That patch is a smaller version of the one you're about to build, so it's worth a minute of listening first.
 
 To start from scratch, click **📄 New** (`Ctrl + N`). The canvas empties; the status bar says *Right-click to add nodes*. Make sure **▶ Play** is still on (the button reads **⏹ Stop** while the patch plays).
 

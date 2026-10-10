@@ -6,7 +6,7 @@ on:
       - master
     paths:
       - 'docs/**'
-      # The app in the browser, published beside the manual at /modular/play/
+      # The app in the browser, published beside the manual at /soba/play/
       - 'src/**'
       - 'patches/**'
       - 'assets/**'
@@ -20,7 +20,7 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Modular
+      - name: Checkout Soba
         uses: actions/checkout@v4
 
       - name: Install mdBook
@@ -57,9 +57,23 @@ jobs:
 
       - name: Copy built docs
         run: |
+          rm -rf docs-site/soba
+          cp -r docs/book docs-site/soba
+          cp -r dist docs-site/soba/play
+
+      # Until the rename, the manual lived at /modular/. Each page there now
+      # forwards to the same page under /soba/, keeping ?patch=… and #anchors
+      - name: Forward the old addresses
+        run: |
           rm -rf docs-site/modular
-          cp -r docs/book docs-site/modular
-          cp -r dist docs-site/modular/play
+          cd docs-site/soba
+          find . -name '*.html' | while read -r page; do
+            page="${page#./}"
+            target="/soba/${page%index.html}"
+            mkdir -p "../modular/$(dirname "$page")"
+            printf '<!doctype html><meta charset="utf-8"><title>Soba</title><link rel="canonical" href="%s"><script>location.replace("%s" + location.search + location.hash)</script><meta http-equiv="refresh" content="0; url=%s"><p>This page is now at <a href="%s">docs.chaps.dev%s</a>.</p>\n' \
+              "$target" "$target" "$target" "$target" "$target" > "../modular/$page"
+          done
 
       - name: Push to docs site
         run: |
@@ -67,5 +81,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update modular docs"
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update Soba docs"
           git push

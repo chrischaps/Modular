@@ -270,7 +270,7 @@
   ],
   "notes": [
     {
-      "text": "The bell is one strike of the FM Synthesis example at C4, rendered by Modular itself. The Sampler plays it at every key's pitch, as tape would: an octave up is twice as fast and half as long.",
+      "text": "The bell is one strike of the FM Synthesis example at C4, rendered by Soba itself. The Sampler plays it at every key's pitch, as tape would: an octave up is twice as fast and half as long.",
       "position": [
         300.0,
         740.0

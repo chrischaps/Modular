@@ -1,4 +1,4 @@
-//! Knowing when a newer Modular is out, and installing it.
+//! Knowing when a newer Soba is out, and installing it.
 //!
 //! Once a day at most, and never in the first seconds after launch, a
 //! worker thread asks GitHub for the list of releases. If there's a newer
@@ -396,9 +396,9 @@ impl Updater {
             State::Checking => (theme::text::DISABLED, "Checking for updates…".to_string(), None),
             State::UpToDate => (theme::accent::SUCCESS, "You're up to date".to_string(), Some(UP_TO_DATE_SECONDS)),
             State::CheckFailed(_) => (theme::accent::WARNING, "Couldn't check for updates".to_string(), None),
-            State::Available => (theme::accent::PRIMARY, format!("Modular {latest_name} is out"), Some(OFFER_SECONDS)),
-            State::Downloading(_) => (theme::accent::PRIMARY, format!("Downloading Modular {latest_name}"), None),
-            State::Ready(staged) => (theme::accent::SUCCESS, format!("Modular {} is ready", staged.version), None),
+            State::Available => (theme::accent::PRIMARY, format!("Soba {latest_name} is out"), Some(OFFER_SECONDS)),
+            State::Downloading(_) => (theme::accent::PRIMARY, format!("Downloading Soba {latest_name}"), None),
+            State::Ready(staged) => (theme::accent::SUCCESS, format!("Soba {} is ready", staged.version), None),
             State::Failed(_) => (theme::accent::ERROR, format!("Couldn't update to {latest_name}"), None),
         };
         let mode = self.mode().clone();
@@ -424,7 +424,7 @@ impl Updater {
                 let mut click = None;
                 match &self.state {
                     State::Idle | State::Checking => {}
-                    State::UpToDate => secondary(ui, &format!("Modular {} is the newest version.", release::CURRENT)),
+                    State::UpToDate => secondary(ui, &format!("Soba {} is the newest version.", release::CURRENT)),
                     State::CheckFailed(e) => secondary(ui, &sentence(e)),
                     State::Available => {
                         if let Some(latest) = &latest {
@@ -556,7 +556,7 @@ impl Updater {
                     for (release, (_, blocks)) in self.newer.iter().zip(&self.notes) {
                         ui.horizontal(|ui| {
                             let family = egui::FontFamily::Name(theme::TITLE_FAMILY.into());
-                            ui.label(RichText::new(format!("Modular {}", release.version)).font(egui::FontId::new(20.0, family)).color(theme::text::PRIMARY));
+                            ui.label(RichText::new(format!("Soba {}", release.version)).font(egui::FontId::new(20.0, family)).color(theme::text::PRIMARY));
                             ui.label(RichText::new(&release.date).small().color(theme::text::DISABLED));
                         });
                         if !release.subtitle().is_empty() {
@@ -617,7 +617,7 @@ fn install_button(ui: &mut egui::Ui, mode: &Mode, recording: bool) -> Option<Cli
         Mode::InPlace => ui
             .add_enabled(!recording, primary_button("Install"))
             .on_hover_text("Download it, check it and restart into it")
-            .on_disabled_hover_text("Once the recording ends: installing restarts Modular")
+            .on_disabled_hover_text("Once the recording ends: installing restarts Soba")
             .clicked()
             .then_some(Click::Install),
         Mode::DownloadOnly(why) => ui

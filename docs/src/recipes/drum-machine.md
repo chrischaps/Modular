@@ -3,10 +3,10 @@
 A drum machine in 14 modules: one Clock, five sequencer lanes, and a [Drum](../modules/sources/drum.md) voice on each lane. It plays a swung groove with a kick, a snare with ghost notes, closed and open hats, and three tuned toms. [Backbeat](./backbeat.md) builds a kit like this from oscillators, noise and envelopes, in 35 modules and 66 cables. Here each drum is one module, and the whole patch has 31 cables. It plays itself; press Play and let it run.
 
 > **Load it:** choose **📚 Examples → Drum Machine** in the toolbar and press **▶ Play**. It needs no keyboard.
-> The patch file is [`patches/drum-machine.json`](https://github.com/chrischaps/Modular/blob/master/patches/drum-machine.json).
+> The patch file is [`patches/drum-machine.json`](https://github.com/chrischaps/Soba/blob/master/patches/drum-machine.json).
 
 <iframe class="patch-embed" src="../play/?patch=drum-machine" title="Drum Machine, playable in the browser" loading="lazy"></iframe>
-*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Modular**.*
+*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Soba**.*
 
 ![The Drum Machine patch](../images/recipe-drum-machine.png)
 *Time on the left, then one lane per drum from the top: kick, snare, closed hat, open hat, toms. Each sequencer plays the Drum beside it. The Mixer, a touch of room and the output sit at the right.*

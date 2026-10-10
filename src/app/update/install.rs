@@ -1,10 +1,10 @@
 //! Installing an update in place: the download, checked against the
 //! release's `SHA256SUMS` before anything is unpacked, then a swap of one
-//! executable for another. Modular is one file (fonts and examples are
+//! executable for another. Soba is one file (fonts and examples are
 //! compiled in), so that's all an update is.
 //!
 //! Windows won't let a running `.exe` be overwritten, but it will let one be
-//! renamed. So the running copy steps aside as `modular_synth.old`, the new
+//! renamed. So the running copy steps aside as `soba.old`, the new
 //! one takes its name, and the old one stays there, with its version beside
 //! it, to roll back to.
 
@@ -19,7 +19,7 @@ use super::signature;
 
 /// The folder beside the executable that a download is unpacked in. On the
 /// same volume, so the swap is a rename.
-const STAGING: &str = ".modular-update";
+const STAGING: &str = ".soba-update";
 
 /// The executable, as it was when the app started. Read once: after a swap
 /// the OS may report the running file under its new name, `.old`.
@@ -39,7 +39,7 @@ fn simplify(path: PathBuf) -> PathBuf {
 
 /// The previous version's executable, kept for rolling back.
 fn backup_path(exe: &Path) -> PathBuf {
-    exe.with_file_name(format!("{}.old", exe.file_stem().and_then(|s| s.to_str()).unwrap_or("modular_synth")))
+    exe.with_file_name(format!("{}.old", exe.file_stem().and_then(|s| s.to_str()).unwrap_or("soba")))
 }
 
 /// The file beside the backup that says which version it is.
@@ -68,7 +68,7 @@ pub fn mode() -> Mode {
         return Mode::DownloadOnly("No release is built for this computer.".into());
     }
     let Some(exe) = exe_path() else {
-        return Mode::DownloadOnly("Couldn't find where Modular is installed.".into());
+        return Mode::DownloadOnly("Couldn't find where Soba is installed.".into());
     };
     if cfg!(target_os = "linux") && ["/usr/", "/snap/", "/nix/", "/app/"].iter().any(|p| exe.starts_with(p)) {
         return Mode::DownloadOnly("This copy was installed by a package manager, which updates it.".into());
@@ -78,14 +78,14 @@ pub fn mode() -> Mode {
     }
     let folder = exe.parent().unwrap_or(Path::new("."));
     if !writable(folder) {
-        return Mode::DownloadOnly(format!("Modular can't write to {}.", folder.display()));
+        return Mode::DownloadOnly(format!("Soba can't write to {}.", folder.display()));
     }
     Mode::InPlace
 }
 
 /// Whether a file can be made in `folder`.
 fn writable(folder: &Path) -> bool {
-    let probe = folder.join(format!(".modular-write-test-{}", std::process::id()));
+    let probe = folder.join(format!(".soba-write-test-{}", std::process::id()));
     let ok = std::fs::write(&probe, b"").is_ok();
     let _ = std::fs::remove_file(&probe);
     ok
@@ -123,7 +123,7 @@ pub struct Staged {
 /// Downloads `release`'s zip for this build, checks it and unpacks it. On
 /// any failure nothing outside the staging folder has changed.
 pub fn stage(release: &Release, progress: &Progress) -> Result<Staged, String> {
-    let exe = exe_path().ok_or("couldn't find where Modular is installed")?;
+    let exe = exe_path().ok_or("couldn't find where Soba is installed")?;
     let name = release::own_asset().ok_or("no release is built for this computer")?;
     let asset = release.asset(name).ok_or_else(|| format!("{} has no {name}", release.title))?;
     let sums = release
@@ -202,7 +202,7 @@ fn unpack(zip: &Path, expected: &str, actual: &str, into: &Path) -> Result<(Path
 /// Puts the staged version in the running one's place, keeping the running
 /// one as `.old`. If the new one can't be moved in, the old one goes back.
 pub fn swap(staged: &Staged) -> Result<(), String> {
-    let exe = exe_path().ok_or("couldn't find where Modular is installed")?;
+    let exe = exe_path().ok_or("couldn't find where Soba is installed")?;
     swap_at(exe, staged, release::CURRENT)
 }
 
@@ -246,7 +246,7 @@ fn backup_version(exe: &Path) -> Option<Version> {
 /// Swaps the running version and the kept one, so the next start is the
 /// kept one. Returns the version rolled back to.
 pub fn roll_back() -> Result<Version, String> {
-    let exe = exe_path().ok_or("couldn't find where Modular is installed")?;
+    let exe = exe_path().ok_or("couldn't find where Soba is installed")?;
     roll_back_at(exe, release::CURRENT)
 }
 
@@ -282,7 +282,7 @@ pub fn clean_up() {
 
 /// Starts the executable (the new version, after a swap) with `args`.
 pub fn relaunch(args: &[std::ffi::OsString]) -> Result<(), String> {
-    let exe = exe_path().ok_or("couldn't find where Modular is installed")?;
+    let exe = exe_path().ok_or("couldn't find where Soba is installed")?;
     std::process::Command::new(exe)
         .args(args)
         .current_dir(exe.parent().unwrap_or(Path::new(".")))
@@ -297,7 +297,7 @@ mod tests {
     use std::io::Write;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("modular-install-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("soba-install-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -368,7 +368,7 @@ mod tests {
         swap_at(&exe, &staged, "0.3.1").unwrap();
         assert_eq!(std::fs::read(&exe).unwrap(), b"0.4.0");
         assert_eq!(std::fs::read(backup_path(&exe)).unwrap(), b"0.3.1");
-        assert_eq!(backup_path(&exe).file_name().unwrap(), "modular_synth.old");
+        assert_eq!(backup_path(&exe).file_name().unwrap(), "soba.old");
         assert_eq!(backup_version(&exe), Some(Version::new(0, 3, 1)));
         assert!(dir.join("NOTICE.txt").exists());
         assert!(!staging.exists());

@@ -24,12 +24,12 @@ const TOAST_SECONDS: f64 = 14.0;
 /// One breath of the recording light, in seconds.
 const PULSE_PERIOD: f64 = 1.6;
 
-/// Where takes go unless another folder is chosen: Music/Modular.
+/// Where takes go unless another folder is chosen: Music/Soba.
 pub fn default_folder() -> PathBuf {
     dirs::audio_dir()
         .or_else(|| dirs::home_dir().map(|home| home.join("Music")))
         .unwrap_or_else(std::env::temp_dir)
-        .join("Modular")
+        .join("Soba")
 }
 
 /// The path for a new take of `patch_name` in `folder`, started at `when`:
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn takes_are_named_after_the_patch_and_minute() {
-        let dir = std::env::temp_dir().join("modular-take-names");
+        let dir = std::env::temp_dir().join("soba-take-names");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let when = chrono::Local.with_ymd_and_hms(2026, 10, 8, 14, 3, 59).unwrap();

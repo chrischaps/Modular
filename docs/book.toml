@@ -2,7 +2,7 @@
 authors = ["Chris"]
 language = "en"
 src = "src"
-title = "Modular Synth Documentation"
+title = "Soba Documentation"
 description = "A node-based modular audio synthesizer in Rust"
 
 [build]
@@ -12,9 +12,9 @@ create-missing = false
 [output.html]
 default-theme = "coal"
 preferred-dark-theme = "coal"
-site-url = "/modular/"
-git-repository-url = "https://github.com/chrischaps/Modular"
-edit-url-template = "https://github.com/chrischaps/Modular/edit/master/docs/{path}"
+site-url = "/soba/"
+git-repository-url = "https://github.com/chrischaps/Soba"
+edit-url-template = "https://github.com/chrischaps/Soba/edit/master/docs/{path}"
 no-section-label = false
 additional-css = ["theme/custom.css"]
 

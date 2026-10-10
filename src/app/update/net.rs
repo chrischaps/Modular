@@ -1,6 +1,6 @@
 //! The two kinds of request the updater makes: one for the list of releases,
 //! and one per download. Each says which app is asking (`User-Agent:
-//! modular_synth/<version>`, which GitHub requires) and nothing else: no
+//! soba/<version>`, which GitHub requires) and nothing else: no
 //! identifiers, no telemetry. They block, so they run on worker threads.
 
 use std::io::{Read, Write};
@@ -14,7 +14,7 @@ use super::release::{self, Release, REPO};
 
 /// Overrides where releases are listed (a full `.../releases` API URL), to
 /// try an update against a fork or a local server.
-pub const URL_OVERRIDE: &str = "MODULAR_UPDATE_URL";
+pub const URL_OVERRIDE: &str = "SOBA_UPDATE_URL";
 
 /// The releases list to ask for.
 pub fn releases_url() -> String {
@@ -28,7 +28,7 @@ fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(10))
         .timeout_read(Duration::from_secs(30))
-        .user_agent(concat!("modular_synth/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("soba/", env!("CARGO_PKG_VERSION")))
         .build()
 }
 
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn hashes_match_sha256sum() {
-        let path = std::env::temp_dir().join("modular-sha256-test.txt");
+        let path = std::env::temp_dir().join("soba-sha256-test.txt");
         std::fs::write(&path, b"abc").unwrap();
         assert_eq!(sha256_file(&path).unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
         let _ = std::fs::remove_file(path);

@@ -94,7 +94,7 @@ To start takes on a downbeat rather than any beat, patch a [Clock Divider](./div
 
 Live input arrives late. Your guitar reaches the patch one input latency after you played it, and you played along with what you heard one output latency earlier. Left alone, every overdub would land late by the whole **round trip**, typically 20 to 50 ms, and the layers would flam.
 
-Modular measures that round trip (the **In** figure in the status bar, see [Audio Input](../sources/audio-input.md)). With **Auto latency** on, the Looper writes everything fed by an Audio Input that much earlier, through any chain of modules in between, so each layer lines up with what you heard while you played it. Sound made inside the patch (a sequencer, an oscillator) has no round trip, so nothing is moved even with Auto latency on.
+Soba measures that round trip (the **In** figure in the status bar, see [Audio Input](../sources/audio-input.md)). With **Auto latency** on, the Looper writes everything fed by an Audio Input that much earlier, through any chain of modules in between, so each layer lines up with what you heard while you played it. Sound made inside the patch (a sequencer, an oscillator) has no round trip, so nothing is moved even with Auto latency on.
 
 **Offset** trims by ear on top of that. If your interface's converters add latency no timestamp reports, layers will still sit a little late: turn Offset up until they're tight. Turn Auto latency off if the input isn't something played along with the loop, such as a drum machine slaved to the patch's clock.
 

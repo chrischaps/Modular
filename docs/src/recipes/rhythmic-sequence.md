@@ -3,10 +3,10 @@
 A 16-step acid bassline at 120 BPM: a saw through a resonant lowpass that snaps open on every note, warmed with distortion and pushed along by a dotted-eighth echo, over a ticking line of noise hi-hats. It plays itself, and it's built to be tweaked while it runs. Grab the filter's **Cutoff** and **Res** knobs and play them like a 303.
 
 > **Load it:** choose **📚 Examples → Rhythmic Sequence** in the toolbar and press **▶ Play**. It needs no keyboard.
-> The patch file is [`patches/rhythmic-sequence.json`](https://github.com/chrischaps/Modular/blob/master/patches/rhythmic-sequence.json).
+> The patch file is [`patches/rhythmic-sequence.json`](https://github.com/chrischaps/Soba/blob/master/patches/rhythmic-sequence.json).
 
 <iframe class="patch-embed" src="../play/?patch=rhythmic-sequence" title="Rhythmic Sequence, playable in the browser" loading="lazy"></iframe>
-*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Modular**.*
+*Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Soba**.*
 
 ![The Rhythmic Sequence patch](../images/recipe-rhythmic-sequence.png)
 *Two envelopes from the sequencer's gate: one squelches the filter, one shapes the volume. Along the bottom, the clock plays noise hi-hats.*

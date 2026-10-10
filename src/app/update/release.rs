@@ -1,4 +1,4 @@
-//! What GitHub says about Modular's releases, and which of them matter to
+//! What GitHub says about Soba's releases, and which of them matter to
 //! this copy: the ones newer than it, and the download built like it.
 //!
 //! Everything here is plain data, so it's tested without a network.
@@ -10,11 +10,11 @@ use serde::{Deserialize, Serialize};
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
 /// Where releases are published.
-pub const REPO: &str = "chrischaps/Modular";
+pub const REPO: &str = "chrischaps/Soba";
 
 /// Set by `release.yml` when it builds a release. A copy built from source
 /// (`cargo run`) only says an update exists; it never replaces itself.
-pub const RELEASE_BUILD: bool = option_env!("MODULAR_RELEASE_BUILD").is_some();
+pub const RELEASE_BUILD: bool = option_env!("SOBA_RELEASE_BUILD").is_some();
 
 /// Which of the two Windows downloads this is: `asio` includes Steinberg's
 /// ASIO SDK (and is GPLv3), `standard` doesn't. Read from the build's own
@@ -28,20 +28,20 @@ pub const CHECKSUMS: &str = "SHA256SUMS";
 /// `release.yml` names it. `None` where no release is built.
 pub fn own_asset() -> Option<&'static str> {
     if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-        Some(if cfg!(feature = "asio") { "modular_synth-windows-asio.zip" } else { "modular_synth-windows.zip" })
+        Some(if cfg!(feature = "asio") { "soba-windows-asio.zip" } else { "soba-windows.zip" })
     } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        Some("modular_synth-macos-apple-silicon.zip")
+        Some("soba-macos-apple-silicon.zip")
     } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
-        Some("modular_synth-macos-intel.zip")
+        Some("soba-macos-intel.zip")
     } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-        Some("modular_synth-linux.zip")
+        Some("soba-linux.zip")
     } else {
         None
     }
 }
 
 /// The executable's name inside a release zip.
-pub const BINARY: &str = if cfg!(windows) { "modular_synth.exe" } else { "modular_synth" };
+pub const BINARY: &str = if cfg!(windows) { "soba.exe" } else { "soba" };
 
 /// A version from a tag: `v0.3.0` or `0.3.0`.
 pub fn parse_version(tag: &str) -> Option<Version> {
@@ -219,6 +219,7 @@ mod tests {
         assert_eq!(latest.title, "v0.3.1 — a low-latency Windows download");
         assert_eq!(latest.subtitle(), "a low-latency Windows download");
         assert_eq!(latest.date, "2026-10-09");
+        // Releases from before the rename to Soba (#111), under their old names
         assert_eq!(latest.page, "https://github.com/chrischaps/Modular/releases/tag/v0.3.1");
         assert!(latest.notes.contains("**Licence:**"));
         assert!(!latest.notes.contains('\r'));
@@ -269,11 +270,11 @@ mod tests {
     fn checksums_are_found_by_file_name() {
         let a = "a".repeat(64);
         let b = "B".repeat(64);
-        let sums = format!("{a}  modular_synth-windows.zip\n{b} *modular_synth-windows-asio.zip\nnonsense\n");
-        assert_eq!(checksum_for(&sums, "modular_synth-windows.zip"), Some(a));
-        assert_eq!(checksum_for(&sums, "modular_synth-windows-asio.zip"), Some("b".repeat(64)));
-        assert_eq!(checksum_for(&sums, "modular_synth-linux.zip"), None);
-        assert_eq!(checksum_for("abc  modular_synth-linux.zip", "modular_synth-linux.zip"), None, "not a SHA-256");
+        let sums = format!("{a}  soba-windows.zip\n{b} *soba-windows-asio.zip\nnonsense\n");
+        assert_eq!(checksum_for(&sums, "soba-windows.zip"), Some(a));
+        assert_eq!(checksum_for(&sums, "soba-windows-asio.zip"), Some("b".repeat(64)));
+        assert_eq!(checksum_for(&sums, "soba-linux.zip"), None);
+        assert_eq!(checksum_for("abc  soba-linux.zip", "soba-linux.zip"), None, "not a SHA-256");
     }
 
     #[test]

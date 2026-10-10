@@ -282,7 +282,7 @@ mod tests {
     use super::*;
 
     fn temp_wav(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join("modular-recorder-tests");
+        let dir = std::env::temp_dir().join("soba-recorder-tests");
         std::fs::create_dir_all(&dir).unwrap();
         dir.join(name)
     }

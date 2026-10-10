@@ -3,12 +3,12 @@
 //! who published it.
 //!
 //! Releases are signed through SignPath Foundation's open-source programme,
-//! which signs as itself. If Modular moves to its own certificate, both
+//! which signs as itself. If Soba moves to its own certificate, both
 //! names stay accepted for a release, so either can update to the other.
 
 use std::path::Path;
 
-/// The publishers a Modular release can be signed by.
+/// The publishers a Soba release can be signed by.
 pub const PUBLISHERS: &[&str] = &["SignPath Foundation", "Chris Chappelear"];
 
 /// An executable's Authenticode signature.
@@ -30,7 +30,7 @@ pub fn allowed(current: &Signature, new: &Signature) -> Result<(), String> {
     match (current, new) {
         (_, Signature::Broken(status)) => Err(format!("The new version's signature doesn't hold ({status}), so it wasn't installed.")),
         (_, Signature::Signed(publisher)) if !ours(publisher) => {
-            Err(format!("The new version is signed by {publisher}, not Modular's publisher, so it wasn't installed."))
+            Err(format!("The new version is signed by {publisher}, not Soba's publisher, so it wasn't installed."))
         }
         (_, Signature::Signed(_)) => Ok(()),
         (Signature::Signed(publisher), _) => {
@@ -54,11 +54,11 @@ pub fn read(path: &Path) -> Signature {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     // The path goes in through the environment, so nothing needs quoting
-    let script = "$s = Get-AuthenticodeSignature -LiteralPath $env:MODULAR_SIGNED_FILE; \
+    let script = "$s = Get-AuthenticodeSignature -LiteralPath $env:SOBA_SIGNED_FILE; \
                   Write-Output $s.Status; Write-Output $s.SignerCertificate.Subject";
     let output = std::process::Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
-        .env("MODULAR_SIGNED_FILE", path)
+        .env("SOBA_SIGNED_FILE", path)
         // Windows PowerShell can't load its own modules with PowerShell 7's path
         .env_remove("PSModulePath")
         .creation_flags(CREATE_NO_WINDOW)

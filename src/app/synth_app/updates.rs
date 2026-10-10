@@ -18,13 +18,13 @@ impl SynthApp {
             ui.close_menu();
         }
         ui.checkbox(&mut self.updater.auto_check, "Check for Updates Automatically")
-            .on_hover_text("Once a day, Modular asks GitHub whether there's a newer release: one request, with nothing about you or this computer in it");
+            .on_hover_text("Once a day, Soba asks GitHub whether there's a newer release: one request, with nothing about you or this computer in it");
         if let Some(version) = self.updater.rollback_version() {
             let label = format!("Roll Back to {version}");
             let button = ui.add_enabled(!self.is_recording(), egui::Button::new(label));
             if button
                 .on_hover_text(format!("Go back to the version you had before updating, {version}, and restart"))
-                .on_disabled_hover_text("Once the recording ends: rolling back restarts Modular")
+                .on_disabled_hover_text("Once the recording ends: rolling back restarts Soba")
                 .clicked()
             {
                 actions.roll_back = true;
@@ -41,7 +41,7 @@ impl SynthApp {
             Some(_) => theme::accent::PRIMARY,
             None => theme::background::WIDGET_ACTIVE,
         })).sense(egui::Sense::click()));
-        let version = RichText::new(concat!("Modular Synth v", env!("CARGO_PKG_VERSION")))
+        let version = RichText::new(concat!("Soba v", env!("CARGO_PKG_VERSION")))
             .color(if pending.is_some() { theme::text::SECONDARY } else { theme::text::DISABLED })
             .small();
         let label = ui.add(egui::Label::new(version).sense(egui::Sense::click()));
@@ -49,7 +49,7 @@ impl SynthApp {
             // A soft halo, so it's seen without shouting. Still, not
             // breathing: a waiting update shouldn't keep the UI redrawing
             ui.painter().circle_filled(dot.rect.center(), 6.0, theme::accent::PRIMARY.gamma_multiply(0.18));
-            let hint = format!("Modular {version} is out: click for what's new");
+            let hint = format!("Soba {version} is out: click for what's new");
             if dot.on_hover_text(&hint).clicked() | label.on_hover_text(&hint).clicked() {
                 self.updater.show_note();
             }
@@ -65,7 +65,7 @@ impl SynthApp {
     /// of a note already in the corner.
     pub(super) fn run_updates(&mut self, ctx: &egui::Context, check_now: bool, roll_back: bool, above: f32) {
         // A film's frames are the script's, and an embed is someone's page.
-        // A test server (MODULAR_UPDATE_URL) lets a capture try an update
+        // A test server (SOBA_UPDATE_URL) lets a capture try an update
         let allowed = (self.capture.is_none() || update::test_source()) && !self.embedded;
         self.updater.tick(ctx, allowed);
         if check_now {
@@ -88,14 +88,14 @@ impl SynthApp {
     /// can't be put in place, the note says why and nothing changes.
     pub(super) fn restart_for_update(&mut self, ctx: &egui::Context) {
         if self.updater.swap() {
-            self.restart(ctx, "The new version is in place, and starts next time Modular opens");
+            self.restart(ctx, "The new version is in place, and starts next time Soba opens");
         }
     }
 
     /// Swaps back to the version from before the last update, and restarts.
     pub(super) fn roll_back(&mut self, ctx: &egui::Context) {
         match self.updater.roll_back() {
-            Ok(version) => self.restart(ctx, &format!("Modular {version} is back in place, and starts next time Modular opens")),
+            Ok(version) => self.restart(ctx, &format!("Soba {version} is back in place, and starts next time Soba opens")),
             Err(e) => self.raise_notice(format!("Couldn't roll back: {e}")),
         }
     }
@@ -184,9 +184,9 @@ impl SynthApp {
 
         let from = release::parse_version(&resume.from_version);
         self.status_message = Some(match from {
-            Some(from) if from < release::current() => format!("Updated to Modular {} from {from}", release::CURRENT),
-            Some(from) if from > release::current() => format!("Rolled back to Modular {} from {from}", release::CURRENT),
-            _ => format!("Picked up where Modular {} left off", resume.from_version),
+            Some(from) if from < release::current() => format!("Updated to Soba {} from {from}", release::CURRENT),
+            Some(from) if from > release::current() => format!("Rolled back to Soba {} from {from}", release::CURRENT),
+            _ => format!("Picked up where Soba {} left off", resume.from_version),
         });
     }
 

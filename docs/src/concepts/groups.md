@@ -46,7 +46,7 @@ Right-click a knob on the face and choose **Hide from group** to take it off. If
 
 ## My Modules
 
-Right-click a group and choose **Save to My Modules**. The group is saved as a file named after it, in *Documents/Modular/My Modules*.
+Right-click a group and choose **Save to My Modules**. The group is saved as a file named after it, in *Documents/Soba/My Modules*.
 
 Saved groups come first in the [quick-add palette](../getting-started/interface-overview.md#quick-add) (`Space`), under **My Modules**, and in the add menu's **My Modules** submenu. Each one is described by its jacks and size, such as *In, Gate, Velocity → Out · 2 modules*. Choosing one adds a copy of the whole group at the cursor, with its modules, cables, jacks and pinned knobs.
 
@@ -54,7 +54,7 @@ Saving a group under a name that's already there updates it. The folder holds or
 
 ## The Library
 
-The **Library** is a shelf of ready-made groups that ships with Modular Synth. Each one is an ordinary group: add it, play it from the knobs on its face, then open it to see how it's made and change anything inside. Find them under **Library** at the bottom of the add menu, sorted into sections, or type a name or `lib` into the [quick-add palette](../getting-started/interface-overview.md#quick-add).
+The **Library** is a shelf of ready-made groups that ships with Soba. Each one is an ordinary group: add it, play it from the knobs on its face, then open it to see how it's made and change anything inside. Find them under **Library** at the bottom of the add menu, sorted into sections, or type a name or `lib` into the [quick-add palette](../getting-started/interface-overview.md#quick-add).
 
 | Group | What it is | Jacks |
 |-------|------------|-------|
@@ -84,7 +84,7 @@ Copy, paste, duplicate and delete treat a group as a whole: deleting one deletes
 
 The audio engine never sees a group. It only hears the modules and the cables between them, followed through any number of jacks. Groups use no CPU, and grouping or ungrouping never interrupts the sound. A grouped patch plays sample for sample what the ungrouped patch plays, and the test suite checks this for every example.
 
-Groups are saved in the patch file, each holding its own modules, cables and groups. A patch with groups needs this version of Modular Synth or later to open. A patch without groups is saved just as before, so older versions still open it.
+Groups are saved in the patch file, each holding its own modules, cables and groups. A patch with groups needs this version of Soba or later to open. A patch without groups is saved just as before, so older versions still open it.
 
 ## Limits
 

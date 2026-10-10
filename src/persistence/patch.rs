@@ -627,7 +627,7 @@ mod tests {
             position: (400.0, -12.0),
             width: 260.0,
         });
-        let path = std::env::temp_dir().join(format!("modular-annotated-{}.json", std::process::id()));
+        let path = std::env::temp_dir().join(format!("soba-annotated-{}.json", std::process::id()));
         save_to_file(&patch, &path).unwrap();
         let loaded = load_from_file(&path);
         std::fs::remove_file(&path).ok();

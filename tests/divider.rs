@@ -12,7 +12,7 @@
 
 use std::path::{Path, PathBuf};
 
-use modular_synth::engine::read_wav;
+use soba::engine::read_wav;
 
 /// A sixteenth at Backbeat's 96 BPM, at the render tool's 48 kHz.
 const STEP: usize = 7500;
@@ -26,7 +26,7 @@ fn repo(path: &str) -> PathBuf {
 }
 
 fn scratch() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("modular-divider-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("soba-divider-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

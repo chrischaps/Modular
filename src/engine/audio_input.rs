@@ -93,7 +93,7 @@ struct InputStats {
     /// Set by the input stream's error callback (unplugged, say).
     failed: AtomicBool,
     /// Glitches the input device itself reported (it dropped audio before
-    /// Modular saw it), which the stream recovers from.
+    /// Soba saw it), which the stream recovers from.
     device_xruns: AtomicU64,
     /// The input device's own delay, from its buffers' timestamps.
     device_latency: LatencyGauge,

@@ -1,6 +1,6 @@
 # Polyphony
 
-A cable in Modular Synth can carry up to **eight channels** at once, one per voice. Patch a chord through a single chain of modules and every note gets its own oscillator, its own filter and its own envelope. The result is a chord of separate voices, each shaping itself, rather than one voice playing a blend of notes.
+A cable in Soba can carry up to **eight channels** at once, one per voice. Patch a chord through a single chain of modules and every note gets its own oscillator, its own filter and its own envelope. The result is a chord of separate voices, each shaping itself, rather than one voice playing a blend of notes.
 
 This is the approach VCV Rack takes. You don't build eight copies of your voice. You build one, and the cables carry the voices through it.
 

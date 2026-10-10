@@ -1,4 +1,4 @@
-# Modular Audio Synthesis Application - Implementation Plan
+# Soba - Implementation Plan
 
 ## Overview
 
@@ -127,7 +127,7 @@ pub trait DspModule: Send + 'static {
 ## File Structure
 
 ```
-modular_synth/
+soba/
 ├── Cargo.toml
 ├── src/
 │   ├── main.rs

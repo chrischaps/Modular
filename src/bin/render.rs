@@ -23,10 +23,10 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use modular_synth::dsp::analysis::{amp_to_db, peak, rms};
-use modular_synth::engine::{create_module_registry, read_wav, EngineCommand, OfflineRenderer};
-use modular_synth::persistence::sample_files::SampleBase;
-use modular_synth::persistence::{load_from_file, CompiledPatch, Patch};
+use soba::dsp::analysis::{amp_to_db, peak, rms};
+use soba::engine::{create_module_registry, read_wav, EngineCommand, OfflineRenderer};
+use soba::persistence::sample_files::SampleBase;
+use soba::persistence::{load_from_file, CompiledPatch, Patch};
 
 const USAGE: &str =
     "usage: render <patch.json> <out.wav> [--seconds N] [--sample-rate HZ] [--block-size N] [--audition] [--input in.wav] [--cue cues.txt]";

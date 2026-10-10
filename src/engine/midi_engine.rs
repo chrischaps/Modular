@@ -402,7 +402,7 @@ impl MidiEngine {
         let (ports, port_names): (Vec<MidiInputPort>, Vec<String>) = if cfg!(target_arch = "wasm32") {
             (Vec::new(), Vec::new())
         } else {
-            let midi_in = MidiInput::new("Modular Synth")
+            let midi_in = MidiInput::new("Soba")
                 .map_err(|e| MidiError::InitError(e.to_string()))?;
             let ports: Vec<MidiInputPort> = midi_in.ports().into_iter().collect();
             let port_names = ports
@@ -493,14 +493,14 @@ impl MidiEngine {
         };
 
         // Create a new MIDI input for this connection
-        let midi_in = MidiInput::new("Modular Synth Input")
+        let midi_in = MidiInput::new("Soba Input")
             .map_err(|e| MidiError::InitError(e.to_string()))?;
 
         // Connect with callback
         let connection = midi_in
             .connect(
                 &port,
-                "Modular Synth Input",
+                "Soba Input",
                 {
                     let senders = Arc::clone(&self.senders);
                     move |_timestamp_us, data, _| {
@@ -582,7 +582,7 @@ fn spawn_scanner(state: Arc<Mutex<MidiState>>, running: Arc<AtomicBool>) -> Opti
             }
 
             // Rescan MIDI ports
-            if let Ok(midi_in) = MidiInput::new("Modular Synth Scanner") {
+            if let Ok(midi_in) = MidiInput::new("Soba Scanner") {
                 let new_ports: Vec<MidiInputPort> = midi_in.ports().into_iter().collect();
                 let new_names: Vec<String> = new_ports
                     .iter()

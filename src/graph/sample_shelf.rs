@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn a_missing_file_is_remembered_as_missing() {
         let mut shelf = SampleShelf::default();
-        let key = std::env::temp_dir().join("modular-no-such.wav").to_string_lossy().into_owned();
+        let key = std::env::temp_dir().join("soba-no-such.wav").to_string_lossy().into_owned();
         assert!(shelf.playing(&key, 48000.0).is_none());
         assert!(matches!(shelf.get(&key), Some(Err(_))));
         shelf.forget(&key);

@@ -1,8 +1,8 @@
 # Interface Overview
 
-The Modular Synth window has three parts: a toolbar along the top, the canvas where you build patches, and a status bar along the bottom.
+The Soba window has three parts: a toolbar along the top, the canvas where you build patches, and a status bar along the bottom.
 
-![The Modular Synth window](../images/interface-overview.png)
+![The Soba window](../images/interface-overview.png)
 *The toolbar, the canvas with a patch on it, and the status bar.*
 
 ## The toolbar
@@ -125,7 +125,7 @@ If the module is part of a selection, the item applies to the whole selection.
 
 **Copy** (`Ctrl + C`) and **Cut** (`Ctrl + X`) put the selected modules on the clipboard. **Paste** (`Ctrl + V`) drops them at the mouse cursor, keeping their layout, settings and the cables between them. Pasting again without moving the mouse fans the copies out.
 
-The clipboard holds modules as patch text, so you can paste between two Modular Synth windows, or paste the contents of a whole patch file to add its modules to the current patch. MIDI mappings stay with the original modules.
+The clipboard holds modules as patch text, so you can paste between two Soba windows, or paste the contents of a whole patch file to add its modules to the current patch. MIDI mappings stay with the original modules.
 
 ### Bypass
 
@@ -157,7 +157,7 @@ A patch can explain itself. A **frame** is a titled, tinted backdrop behind a gr
 
 Click a frame's title or a note to select it, and `Shift`-click to add to the selection. `Delete`, `Ctrl + C`, `Ctrl + X`, `Ctrl + D` and `Ctrl + V` work on selected frames and notes along with any selected modules, so a framed section copies and pastes as a whole. Undo covers adding, moving, resizing, renaming, recoloring, editing and deleting them; typing a frame's name or a note is one step.
 
-Frames and notes are saved with the patch. Versions of Modular Synth from before frames and notes existed open the patch without them.
+Frames and notes are saved with the patch. Versions of Soba from before frames and notes existed open the patch without them.
 
 ## Groups
 
@@ -199,7 +199,7 @@ The keys play every [Keyboard](../modules/midi/keyboard.md) module in the patch;
 
 ### MIDI
 
-Choose your controller in the toolbar's **MIDI In** menu; Modular Synth doesn't connect to one until you do. If the controller isn't listed, plug it in and click **🔄 Refresh** at the bottom of the menu. **None (Disconnect)** lets it go. Disconnecting or switching devices releases any notes that were held. If a controller can't be opened, the reason appears in the status bar.
+Choose your controller in the toolbar's **MIDI In** menu; Soba doesn't connect to one until you do. If the controller isn't listed, plug it in and click **🔄 Refresh** at the bottom of the menu. **None (Disconnect)** lets it go. Disconnecting or switching devices releases any notes that were held. If a controller can't be opened, the reason appears in the status bar.
 
 Three modules listen to the controller: [MIDI Note](../modules/midi/midi-note.md) for a single voice, [Poly MIDI](../modules/midi/poly-midi.md) for chords, and [MIDI Monitor](../modules/midi/midi-monitor.md) to see what's arriving.
 
@@ -221,7 +221,7 @@ When something good happens (a filter sweep you rode by hand, a lucky generative
 While recording, the button turns red, with a slowly pulsing light and the length of the take so far. Press it again, press `Ctrl + R`, or press **⏹ Stop** to end the take. A note pops up in the corner with the take's name and length, and **📂 Show in folder** opens it in your file manager.
 
 - **What's recorded:** exactly what you hear, after the output limiter, sample for sample. It's a 32-bit float WAV at your audio device's sample rate and channel count.
-- **Where it goes:** `Music/Modular`, named after the patch and the minute you pressed Rec, such as `First Sound 2026-10-08 14-03.wav`. To use another folder, right-click **● Rec** and choose **Change…**; **Open Folder** opens it.
+- **Where it goes:** `Music/Soba`, named after the patch and the minute you pressed Rec, such as `First Sound 2026-10-08 14-03.wav`. To use another folder, right-click **● Rec** and choose **Change…**; **Open Folder** opens it.
 - **The patch comes too.** Every take is saved with the patch beside it, as a `.json` with the same name, so you can always open the patch that made a recording. It's saved when the take ends, so knobs you rode during the take are saved where you left them.
 - **Edit freely.** Turning knobs, patching cables, even opening another patch: the recording keeps going through all of it.
 - Switching the **Output** device ends the take cleanly. Closing the window while recording asks first, and then saves the take.
@@ -253,7 +253,7 @@ A [Sampler](../modules/sources/sampler.md) keeps the path to its WAV file in the
 
 ### Unsaved changes
 
-While a patch has unsaved changes, the window title starts with a dot (`● Lush Pad · Modular Synth`), and so does its name in the status bar. Undoing back to the saved state clears the dot.
+While a patch has unsaved changes, the window title starts with a dot (`● Lush Pad · Soba`), and so does its name in the status bar. Undoing back to the saved state clears the dot.
 
 **New**, **Open**, opening an example or a recent file, and closing the window all ask first when there are unsaved changes:
 
@@ -265,15 +265,15 @@ Closing the window while a [recording](#recording) is running asks too, even wit
 
 ### Autosave and recovery
 
-Every 30 seconds, a patch with unsaved changes is autosaved alongside the app's settings. Saving the patch, or choosing **Quit Without Saving**, clears the autosave, so one only survives if Modular Synth closes without asking: after a crash or a forced quit.
+Every 30 seconds, a patch with unsaved changes is autosaved alongside the app's settings. Saving the patch, or choosing **Quit Without Saving**, clears the autosave, so one only survives if Soba closes without asking: after a crash or a forced quit.
 
 The next time the app starts, it offers the patch back. **Recover** reopens it exactly as it was at the last autosave, still marked unsaved; **Discard** lets it go. At most, you lose the last 30 seconds of work.
 
 Recent files, the autosave, your cable style and the window's size and position are kept in the settings file:
 
-- Windows: `%APPDATA%\Modular Synth\data\app.ron`
-- macOS: `~/Library/Application Support/Modular-Synth/app.ron`
-- Linux: `~/.local/share/modularsynth/app.ron`
+- Windows: `%APPDATA%\Soba\data\app.ron`
+- macOS: `~/Library/Application Support/Soba/app.ron`
+- Linux: `~/.local/share/soba/app.ron`
 
 ## Keyboard shortcuts
 

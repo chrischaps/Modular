@@ -291,14 +291,14 @@ mod tests {
 
     #[test]
     fn inline_styles_and_links() {
-        let spans = inline("Or [try it in the browser](https://docs.chaps.dev/modular/play/) first, *gently*.");
+        let spans = inline("Or [try it in the browser](https://docs.chaps.dev/soba/play/) first, *gently*.");
         assert_eq!(text(&spans), "Or try it in the browser first, gently.");
         assert!(spans.iter().any(|s| s.link && s.text == "try it in the browser"));
         assert!(spans.iter().any(|s| s.italic && s.text == "gently"));
 
         // Not emphasis: a product, a snake_case name, a lone star
-        assert_eq!(text(&inline("2 * 3 and modular_synth_v2 *")), "2 * 3 and modular_synth_v2 *");
-        assert!(inline("modular_synth_v2").iter().all(|s| !s.italic));
+        assert_eq!(text(&inline("2 * 3 and soba_v2 *")), "2 * 3 and soba_v2 *");
+        assert!(inline("soba_v2").iter().all(|s| !s.italic));
         // Unclosed things stay as typed
         assert_eq!(text(&inline("a `b and [c")), "a `b and [c");
         assert_eq!(text(&inline(r"\*not\*")), "*not*");

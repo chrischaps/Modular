@@ -4,7 +4,7 @@ A patch has one tempo and one beat, and modules that care about time share them.
 
 ## The transport
 
-The patch's first Clock is its **transport**. Before each block of audio, Modular reads three things from it and hands them to every module:
+The patch's first Clock is its **transport**. Before each block of audio, Soba reads three things from it and hands them to every module:
 
 - the **tempo**, in beats per minute;
 - the **beat**: how many beats have passed since the Clock started, counted from its downbeat;

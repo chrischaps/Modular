@@ -8,11 +8,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use egui::{pos2, vec2, Rect};
 use egui_node_graph2::NodeId;
-use modular_synth::engine::OfflineRenderer;
-use modular_synth::graph::groups::{self, GroupId, NodeKind};
-use modular_synth::graph::{create_editor_state, SynthGraphEditorState};
-use modular_synth::persistence::sample_files::SampleBase;
-use modular_synth::persistence::{capture_patch, patch_from_json, stage_patch, Patch, EXAMPLES};
+use soba::engine::OfflineRenderer;
+use soba::graph::groups::{self, GroupId, NodeKind};
+use soba::graph::{create_editor_state, SynthGraphEditorState};
+use soba::persistence::sample_files::SampleBase;
+use soba::persistence::{capture_patch, patch_from_json, stage_patch, Patch, EXAMPLES};
 
 /// An editor holding a patch, its modules under their patch IDs.
 struct Editor {
@@ -158,7 +158,7 @@ fn render_in_own_process(patch: &Patch, path: &std::path::Path) -> Vec<u8> {
 
 #[test]
 fn grouped_noise_patches_render_the_same_with_the_render_tool() {
-    let dir = std::env::temp_dir().join(format!("modular-groups-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("soba-groups-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let mut compared = 0;
     for (i, example) in EXAMPLES.iter().enumerate() {

@@ -66,7 +66,7 @@ impl std::fmt::Display for AudioError {
                 "{} wouldn't start: check that the interface is plugged in and that no other app is using it",
                 name
             ),
-            AudioError::SystemUnavailable(system) => write!(f, "This build of Modular can't use {}", system.label()),
+            AudioError::SystemUnavailable(system) => write!(f, "This build of Soba can't use {}", system.label()),
         }
     }
 }
@@ -162,7 +162,7 @@ fn web_buffer() -> BufferSize {
     BufferSize::Default
 }
 
-/// The buffer sizes, in frames, offered on systems that let Modular choose.
+/// The buffer sizes, in frames, offered on systems that let Soba choose.
 pub const BUFFER_CHOICES: [u32; 5] = [32, 64, 128, 256, 512];
 
 /// An input device's stream, while it's open.
@@ -263,7 +263,7 @@ pub struct AudioEngine {
     config: StreamConfig,
     /// The output's sample format: f32, or what an ASIO driver takes.
     format: SampleFormat,
-    /// The buffer size asked for, in frames, on systems that let Modular
+    /// The buffer size asked for, in frames, on systems that let Soba
     /// choose; `None` leaves it to the driver.
     buffer_request: Option<u32>,
     /// The ASIO drivers, listed while none was loaded: ASIO loads one at a
@@ -286,7 +286,7 @@ impl AudioEngine {
 
     /// Creates an engine on `system`'s default output device (an ASIO
     /// system's first driver), asking for `buffer` frames per callback
-    /// where the system lets Modular choose.
+    /// where the system lets Soba choose.
     pub fn with_system(system: AudioSystem, buffer: Option<u32>) -> Result<Self, AudioError> {
         let host = system.host()?;
         let asio_devices = list_asio_devices(&host, system);
@@ -380,7 +380,7 @@ impl AudioEngine {
         self.stream.as_ref().and_then(|stream| stream.buffer_size().ok())
     }
 
-    /// Asks for `frames` per callback where the system lets Modular choose
+    /// Asks for `frames` per callback where the system lets Soba choose
     /// (`None` leaves it to the driver), rebuilding a running stream to
     /// take it. The input closes, as for
     /// [`set_audio_system`](Self::set_audio_system). A driver that won't run
@@ -586,7 +586,7 @@ impl AudioEngine {
         };
         if format_rank(supported_config.sample_format()).is_none() {
             return Err(AudioError::ConfigurationFailed(format!(
-                "{} records {:?} samples, which Modular can't read",
+                "{} records {:?} samples, which Soba can't read",
                 name,
                 supported_config.sample_format()
             )));
@@ -950,7 +950,7 @@ fn default_output_device(host: &Host, system: AudioSystem, asio_devices: &[Devic
 }
 
 /// The stream config and sample format to run `device` at, asking for
-/// `buffer` frames per callback on systems that let Modular choose.
+/// `buffer` frames per callback on systems that let Soba choose.
 fn output_config(device: &Device, system: AudioSystem, buffer: Option<u32>) -> Result<(StreamConfig, SampleFormat), AudioError> {
     let supported = device
         .default_output_config()
@@ -961,7 +961,7 @@ fn output_config(device: &Device, system: AudioSystem, buffer: Option<u32>) -> R
         _ => BufferSize::Default,
     };
     let channels = match system {
-        // An interface's first pair: Modular plays stereo
+        // An interface's first pair: Soba plays stereo
         AudioSystem::Asio => supported.channels().min(2),
         // Shared mode runs at the device's own layout
         AudioSystem::System => supported.channels(),

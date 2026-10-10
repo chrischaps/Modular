@@ -64,7 +64,7 @@ pub fn full_app_url() -> Option<String> {
 /// (its autoplay rule). `index.html` keeps track of the audio contexts.
 pub fn audio_blocked() -> bool {
     let Some(window) = web_sys::window() else { return false };
-    js_sys::Reflect::get(&window, &"modularAudioBlocked".into())
+    js_sys::Reflect::get(&window, &"sobaAudioBlocked".into())
         .ok()
         .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
         .and_then(|f| f.call0(&window).ok())

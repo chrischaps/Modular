@@ -1,6 +1,6 @@
 //! Frame-stepped capture: films the app with its sound, in lockstep.
 //!
-//! `modular_synth <patch.json> --capture <script.txt> --out <dir>` opens the
+//! `soba <patch.json> --capture <script.txt> --out <dir>` opens the
 //! patch, plays a timed script into it, and records every frame along with
 //! exactly the audio that frame covers. The clock advances one video frame
 //! per UI frame, however long each frame takes to draw and save, and the

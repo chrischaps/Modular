@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Modular Synth.app's description. release.yml fills in @VERSION@ -->
+<!-- Soba.app's description. release.yml fills in @VERSION@ -->
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Modular Synth</string>
+    <string>Soba</string>
     <key>CFBundleDisplayName</key>
-    <string>Modular Synth</string>
+    <string>Soba</string>
     <key>CFBundleIdentifier</key>
-    <string>dev.chaps.modular</string>
+    <string>dev.chaps.soba</string>
     <key>CFBundleExecutable</key>
-    <string>modular_synth</string>
+    <string>soba</string>
     <key>CFBundleIconFile</key>
-    <string>modular</string>
+    <string>soba</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

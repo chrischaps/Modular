@@ -1,8 +1,8 @@
-# Modular in the browser
+# Soba in the browser
 
 The same app, compiled to WebAssembly and drawn on a canvas, so a page can
 hand a visitor a patch to play instead of a video of one. It's published
-beside the manual at **docs.chaps.dev/modular/play/**, and every recipe page
+beside the manual at **docs.chaps.dev/soba/play/**, and every recipe page
 embeds its patch.
 
 ```bash
@@ -16,7 +16,7 @@ trunk build --release       # into dist/
 |---|---|
 | `play/` | The full app on First Sound, with the last session's settings and any autosave |
 | `play/?patch=lush-pad` | An **embed**: just the canvas and a Play bar, for an iframe. Any example's file name works |
-| `play/?open=lush-pad` | That example in the full app (the embed's **Open in Modular** link) |
+| `play/?open=lush-pad` | That example in the full app (the embed's **Open in Soba** link) |
 
 An embed keeps nothing: it doesn't restore or autosave a session, so playing
 with a recipe never leaves an autosave for the full app to offer back.
@@ -54,7 +54,7 @@ one still playing. A single hiccup becomes garbled sound for good.
 `index.html` wraps `AudioBufferSourceNode.start`: when a buffer would start
 in the past, the schedule moves on by however late it was (plus 10 ms), so a
 hiccup is one short dropout and then clean sound, a little later. The same
-wrapper counts what the measurements below report (`modularAudioStats()` in
+wrapper counts what the measurements below report (`sobaAudioStats()` in
 the console).
 
 ## How steady is it

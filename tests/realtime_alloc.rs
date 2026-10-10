@@ -18,14 +18,14 @@ use std::cell::Cell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use modular_synth::dsp::SampleData;
+use soba::dsp::SampleData;
 
-use modular_synth::engine::{
+use soba::engine::{
     create_module_registry, input_channel, input_channel_same_clock, AudioProcessor, EngineChannels, EngineCommand, EngineEvent, MidiEvent,
     NodeId, Recording, TimestampedMidiEvent, UiHandle,
 };
-use modular_synth::modules::looper::{LoopState, Looper};
-use modular_synth::modules::Mixer;
+use soba::modules::looper::{LoopState, Looper};
+use soba::modules::Mixer;
 
 struct CountingAllocator;
 
@@ -185,7 +185,7 @@ fn audio_callback_never_allocates() {
     let mut looper_states = std::collections::HashSet::new();
 
     // Record the whole run: the tap copies every callback into its ring
-    let takes = std::env::temp_dir().join("modular-realtime-alloc");
+    let takes = std::env::temp_dir().join("soba-realtime-alloc");
     std::fs::create_dir_all(&takes).unwrap();
     let (mut recording, tap) = Recording::start(&takes.join("take1.wav"), 48000, 2).unwrap();
     ui.start_recording(tap);

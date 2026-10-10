@@ -10,16 +10,16 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  BINARY_NAME: modular_synth
+  BINARY_NAME: soba
   # These builds may replace themselves with a newer release (src/app/update);
   # a copy built from source only says one exists
-  MODULAR_RELEASE_BUILD: "1"
+  SOBA_RELEASE_BUILD: "1"
   # The ASIO build is made from this copy of Steinberg's ASIO SDK 2.3.4 and
   # no other: the one v0.3.1 was built from, checked by its SHA-256. Left to
   # itself, asio-sys downloads whatever steinberg.net serves that day, so
   # the licence could change between releases unnoticed. Moving to a new SDK
   # is a deliberate change here, made after reading its LICENSE.txt
-  ASIO_SDK_URL: https://github.com/chrischaps/Modular/releases/download/v0.3.1/asio-sdk-source.zip
+  ASIO_SDK_URL: https://github.com/chrischaps/Soba/releases/download/v0.3.1/asio-sdk-source.zip
   ASIO_SDK_SHA256: d79a79b9515070ebc6962c4b782b7357f6ddbb3c8cc022eaa1a2aeed0d3523ef
 
 jobs:
@@ -30,29 +30,29 @@ jobs:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: modular_synth.exe
-            asset_name: modular_synth-windows
+            artifact_name: soba.exe
+            asset_name: soba-windows
             flavor: standard
           # The low-latency build: ASIO as well as Windows Audio. It contains
           # Steinberg's ASIO SDK, under the GPLv3 (see packaging/asio)
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: modular_synth.exe
-            asset_name: modular_synth-windows-asio
+            artifact_name: soba.exe
+            asset_name: soba-windows-asio
             features: asio
             flavor: asio
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact_name: modular_synth
-            asset_name: modular_synth-macos-intel
+            artifact_name: soba
+            asset_name: soba-macos-intel
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact_name: modular_synth
-            asset_name: modular_synth-macos-apple-silicon
+            artifact_name: soba
+            asset_name: soba-macos-apple-silicon
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact_name: modular_synth
-            asset_name: modular_synth-linux
+            artifact_name: soba
+            asset_name: soba-linux
 
     runs-on: ${{ matrix.os }}
 
@@ -134,7 +134,7 @@ jobs:
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'modular' }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'soba' }}
           signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
           github-artifact-id: ${{ steps.unsigned-exe.outputs.artifact-id }}
           wait-for-completion: true
@@ -145,15 +145,15 @@ jobs:
         shell: pwsh
         run: Copy-Item -Force signed-exe/${{ matrix.artifact_name }} "$env:RELEASE_DIR/"
 
-      # Per user, into %LOCALAPPDATA%\Programs\Modular, with a Start Menu
-      # shortcut and an uninstaller (packaging/windows/modular.iss)
+      # Per user, into %LOCALAPPDATA%\Programs\Soba, with a Start Menu
+      # shortcut and an uninstaller (packaging/windows/soba.iss)
       - name: Build the installer
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
-          & $iscc /Q "/DVersion=$env:VERSION" "/DFlavor=${{ matrix.flavor }}" "/DSourceDir=$PWD\$env:RELEASE_DIR" "/DOutputDir=$PWD\installer" packaging\windows\modular.iss
+          & $iscc /Q "/DVersion=$env:VERSION" "/DFlavor=${{ matrix.flavor }}" "/DSourceDir=$PWD\$env:RELEASE_DIR" "/DOutputDir=$PWD\installer" packaging\windows\soba.iss
           if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
           Get-ChildItem installer
 
@@ -172,26 +172,26 @@ jobs:
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'modular' }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'soba' }}
           signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
           github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
           wait-for-completion: true
           output-artifact-directory: installer
 
-      # A Modular Synth.app in a disk image, with a shortcut to Applications.
+      # A Soba.app in a disk image, with a shortcut to Applications.
       # Unsigned for now: the first open is right-click → Open
       - name: Bundle the macOS app
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          app="dmg/Modular Synth.app"
+          app="dmg/Soba.app"
           mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-          cp "$RELEASE_DIR/modular_synth" "$app/Contents/MacOS/"
-          cp assets/icon/modular.icns "$app/Contents/Resources/"
+          cp "$RELEASE_DIR/soba" "$app/Contents/MacOS/"
+          cp assets/icon/soba.icns "$app/Contents/Resources/"
           sed "s/@VERSION@/$VERSION/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
           ln -s /Applications dmg/Applications
           mkdir -p disk-image
-          hdiutil create -volname "Modular Synth" -srcfolder dmg -ov -format UDZO "disk-image/${{ matrix.asset_name }}.dmg"
+          hdiutil create -volname "Soba" -srcfolder dmg -ov -format UDZO "disk-image/${{ matrix.asset_name }}.dmg"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

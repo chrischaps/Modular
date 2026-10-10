@@ -41,7 +41,7 @@ impl Resume {
     /// Writes the handover and locks it until this process exits. Returns
     /// the file, to pass to the next copy after [`OPTION`].
     pub fn hand_over(&self) -> Result<PathBuf, String> {
-        let path = std::env::temp_dir().join(format!("modular-resume-{}.json", std::process::id()));
+        let path = std::env::temp_dir().join(format!("soba-resume-{}.json", std::process::id()));
         // Held, and so locked, until the process ends
         std::mem::forget(self.write_locked(&path)?);
         Ok(path)
@@ -100,7 +100,7 @@ mod tests {
             playing: true,
             from_version: "0.3.1".into(),
         };
-        let path = std::env::temp_dir().join(format!("modular-resume-test-{}.json", std::process::id()));
+        let path = std::env::temp_dir().join(format!("soba-resume-test-{}.json", std::process::id()));
         let held = resume.write_locked(&path).unwrap();
         // The writer lets go a moment later, as the old copy does by exiting
         let started = Instant::now();
@@ -108,7 +108,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(300));
             drop(held);
         });
-        let args: Vec<String> = ["modular_synth", OPTION, path.to_str().unwrap()].map(String::from).to_vec();
+        let args: Vec<String> = ["soba", OPTION, path.to_str().unwrap()].map(String::from).to_vec();
         assert_eq!(Resume::file_from_args(&args), Some(path.clone()));
 
         let back = Resume::take(&path).expect("the handover");

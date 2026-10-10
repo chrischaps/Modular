@@ -30,7 +30,7 @@ impl Example {
 /// The samples the examples play, as (path in `patches/`, the WAV),
 /// compiled in with them.
 pub const EXAMPLE_SAMPLES: &[(&str, &[u8])] = &[
-    // One strike of the FM Synthesis bell at C4, rendered by Modular
+    // One strike of the FM Synthesis bell at C4, rendered by Soba
     ("samples/fm-bell-c4.wav", include_bytes!("../../patches/samples/fm-bell-c4.wav")),
 ];
 
