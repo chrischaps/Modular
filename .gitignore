@@ -20,3 +20,4 @@ nul
 
 # The manual, built by mdbook (docs.yml builds it fresh)
 /docs/book/
+__pycache__/
