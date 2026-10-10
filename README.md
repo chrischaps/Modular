@@ -10,6 +10,8 @@ It doesn't imitate hardware panels. Every module is a node with jacks on its sid
 
 **Documentation:** [docs.chaps.dev/soba](https://docs.chaps.dev/soba/) has a first-patch walkthrough, a page for every module, and recipes to build.
 
+**Project page:** [chaps.dev/projects/soba](https://chaps.dev/projects/soba/) shows it playing, with sound: a first patch built from nothing, chords travelling down one cable, and a whole song from one patch.
+
 ## Features
 
 - **Colour-coded signals.** Blue cables carry audio, orange carry control voltage, green carry gates, and purple carry MIDI. Connections that can't work are refused as you make them.
