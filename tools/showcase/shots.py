@@ -7,9 +7,9 @@ and films it with `soba --capture`.
     python tools/showcase/shots.py <shot> --preview       film frame 0 only, to aim from
 
 Each shot is a function that builds a cue script (see src/app/capture.rs for
-the cue language). Output goes to target/showcase/<shot>/: a lossless
-video.mkv, audio.wav and any stills as PNG. encode.py turns those into
-web clips.
+the cue language). Output goes to target/showcase/<shot>/: video.mkv
+(lossless, unless the shot asks for a crf), audio.wav and any stills as
+PNG. encode.py turns those into web clips.
 
 Coordinates are in points at the shot's ppp (1.55 by default, which shows
 the toolbar up to the Edit section in a 1920x1080 frame). Find them from a
@@ -33,10 +33,11 @@ OUT = ROOT / "target" / "showcase"
 SHOTS = {}
 
 
-def shot(patch, ppp=1.55):
-    """Registers a shot function that fills in a Script."""
+def shot(patch, ppp=1.55, fps=60, crf=0, preset="ultrafast"):
+    """Registers a shot function that fills in a Script. A long shot wants a
+    crf: lossless 1080p is about 20 MB a second at 30 fps."""
     def register(fn):
-        SHOTS[fn.__name__.replace("_", "-")] = (fn, patch, ppp)
+        SHOTS[fn.__name__.replace("_", "-")] = (fn, patch, ppp, fps, crf, preset)
         return fn
     return register
 
@@ -276,8 +277,62 @@ def cover(s):
     s.at(5.2, "end")
 
 
+# From One Sine is in 4-bar units of 8.571 s (112 BPM); unit n starts at u(n)
+SONG_UNIT = 16 * 60 / 112
+
+
+def u(n):
+    return (n - 1) * SONG_UNIT
+
+
+@shot("patches/from-one-sine.json", ppp=1.0, fps=30, crf=12, preset="fast")
+def from_one_sine(s):
+    """The whole song, 4:41: the camera follows the score part by part, and
+    ends where it began."""
+    # Each shot centres a point in patch space at a zoom. At ppp 1.0 in a
+    # 1920x1080 frame the editor's centre is (960, 551), and patch y = 0 sits
+    # 43 points down (below the toolbar), so the camera offset that centres P
+    # is -(P - c) * zoom with c = (960, 508). The frames below are the
+    # patch's own: e.g. Drums spans x 0..3246, y 3884..4849. The whole rack
+    # is 5923 x 4849, so it fits at the 0.2 minimum zoom.
+    c = (960.0, 508.0)
+    whole = (2962, 2425)
+    motif = (888, 2283)
+    opening = (500, 2090)
+    # (start, glide seconds, centre, zoom, what)
+    shots = [
+        (-1.0, 0.05, opening, 1.5, "the sine and its sequencer, alone, with the note that explains them"),
+        (3.0, 13.0, (860, 2140), 1.25, "a slow drift along the motif"),
+        (u(3), 12.0, (1895, 2375), 0.43, "back out: the pad, sparkles and harmony arrive"),
+        (u(5) - 1.0, 3.0, (3100, 734), 0.64, "Pulse: arp and bass"),
+        (u(7) - 0.5, 3.0, (2990, 2033), 0.88, "the bells and sparkles"),
+        (u(8) + 1.0, 3.0, (2808, 2995), 1.1, "the riser"),
+        (u(9) - 0.6, 1.4, (1623, 4366), 0.56, "Groove: the kit"),
+        (u(11), 4.0, (5002, 2206), 0.9, "the desk"),
+        (u(13) - 1.0, 3.0, (1150, 2283), 0.95, "Lift: the lead takes the motif"),
+        (u(15), 6.0, whole, 0.2, "the whole rack"),
+        (u(17) - 1.0, 4.0, (1640, 2117), 1.25, "Memory: the Looper plays the opening back"),
+        (u(18) + 4.0, 5.0, (897, 798), 0.95, "the score turning the faders"),
+        (u(20) - 0.5, 9.0, whole, 0.2, "the build pulls back to the whole rack"),
+        (u(22), 8.0, (2962, 2347), 0.21, "Everything: a breath closer, every module still in frame"),
+        (u(23) + 3.0, 5.0, (3100, 1080), 0.95, "the bass, driven harder as the song brightens"),
+        (u(25) - 1.0, 3.0, motif, 0.88, "Second wave: the sine over the groove, its ghost beneath"),
+        (u(27), 4.0, (1623, 3866), 0.48, "the pad breathing over the kick"),
+        (u(29), 6.0, whole, 0.2, "Return"),
+        (u(31), 12.0, opening, 1.5, "back to the one sine"),
+    ]
+    s.at(0.0, "play")
+    for start, glide, (x, y), zoom, what in shots:
+        s.at(start, f"camera {-(x - c[0]) * zoom:.1f} {-(y - c[1]) * zoom:.1f} {zoom} {glide}   # {what}")
+    s.at(u(9) + 0.5, "still groove")
+    s.at(u(23), "still everything")
+    # The song's last unit ends; stop the clock and let the echoes ring out
+    s.at(u(33) - 0.01, "param util.clock Run 0")
+    s.at(281.0, "end")
+
+
 def run(name, script_only=False, preview=False):
-    fn, patch, ppp = SHOTS[name]
+    fn, patch, ppp, fps, crf, preset = SHOTS[name]
     s = Script()
     fn(s)
     if preview:
@@ -295,7 +350,8 @@ def run(name, script_only=False, preview=False):
     for old in out.glob("*.ppm"):
         old.unlink()
     print(f"filming {name} ...", flush=True)
-    subprocess.run([str(EXE), str(ROOT / patch), "--capture", str(script), "--out", str(out), "--ppp", str(ppp)],
+    subprocess.run([str(EXE), str(ROOT / patch), "--capture", str(script), "--out", str(out), "--ppp", str(ppp),
+                    "--fps", str(fps), "--crf", str(crf), "--preset", preset],
                    check=True, cwd=ROOT)
     from PIL import Image
     for ppm in out.glob("*.ppm"):
@@ -306,7 +362,7 @@ def run(name, script_only=False, preview=False):
 if __name__ == "__main__":
     args = sys.argv[1:]
     if not args or "--list" in args:
-        for name, (fn, patch, _) in SHOTS.items():
+        for name, (fn, patch, *_) in SHOTS.items():
             print(f"{name:20} {patch:36} {(fn.__doc__ or '').strip().splitlines()[0]}")
         sys.exit(0)
     only = "--script-only" in args

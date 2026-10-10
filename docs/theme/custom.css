@@ -29,6 +29,17 @@
     margin: 1em 0 0.25em;
 }
 
+/* A film of a patch playing, with its sound: a YouTube embed (docs/src/recipes) */
+.patch-film {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border: 1px solid #2e2e4a;
+    border-radius: 8px;
+    background: #1a1a2e;
+    margin: 1em 0 0.25em;
+}
+
 /* Steinberg's ASIO Compatible logo and trademark line, which its licence
    asks for on every page that mentions ASIO. A dark tile keeps the white
    logo visible in the light themes too */

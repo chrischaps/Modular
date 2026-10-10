@@ -185,6 +185,10 @@ CARGO_TARGET_DIR=target/capture cargo build --release
 python tools/showcase/shots.py --list            # shots for the chaps.dev page
 python tools/showcase/shots.py hero --preview    # frame 0 only, to aim from
 python tools/showcase/encode.py hero out.mp4 --loop 2 --fps 30 --crf 27 --poster 0.5
+# Captures are lossless by default (~20 MB/s at 1080p30). A long shot passes
+# `--crf 12 --preset fast` to soba --capture (a shot sets crf= in shots.py): ~4-5 MB/s
+python tools/showcase/shots.py from-one-sine     # the whole 4:41 song, ~10 min to film, 1.3 GB
+# Never stop a capture with taskkill /IM: it closes every open copy of Soba. Kill by PID
 
 # Open a patch at launch (otherwise the First Sound example opens)
 cargo run -- patches/fm-synthesis.json

@@ -15,7 +15,11 @@
 //! while capturing.
 //!
 //! Output, in `--out`:
-//! - `video.mkv`: lossless RGB frames (ffmpeg must be on the PATH)
+//! - `video.mkv`: RGB frames (ffmpeg must be on the PATH), lossless unless
+//!   `--crf N [--preset P]` says otherwise. Lossless is about 20 MB a second
+//!   at 1080p30, so a shot of more than a minute or two wants `--crf 12
+//!   --preset fast`: about a quarter the size for a busy patch, with nothing
+//!   visible lost once it's encoded for the web.
 //! - `audio.wav`: 32-bit float stereo
 //! - `<name>.ppm`: stills taken with the `still` cue
 //!
@@ -82,11 +86,15 @@ pub struct CaptureConfig {
     pub size: [u32; 2],
     /// Pixels per point: how large the interface is drawn.
     pub ppp: f32,
+    /// x264's quality for the video: 0 is lossless.
+    pub crf: u32,
+    /// x264's speed preset: slower presets make smaller files.
+    pub preset: String,
 }
 
 impl CaptureConfig {
-    /// Reads `--capture <script> [--out DIR] [--fps N] [--size WxH] [--ppp X]`
-    /// from the command line, or `None` without `--capture`.
+    /// Reads `--capture <script> [--out DIR] [--fps N] [--size WxH] [--ppp X]
+    /// [--crf N] [--preset P]` from the command line, or `None` without `--capture`.
     pub fn from_args(args: &[String]) -> Result<Option<Self>, String> {
         let Some(at) = args.iter().position(|a| a == "--capture") else {
             return Ok(None);
@@ -107,6 +115,8 @@ impl CaptureConfig {
             sample_rate: 48_000,
             size,
             ppp: value("--ppp").map(|f| f.parse()).transpose().map_err(|_| "bad --ppp")?.unwrap_or(1.5),
+            crf: value("--crf").map(|f| f.parse()).transpose().map_err(|_| "bad --crf")?.unwrap_or(0),
+            preset: value("--preset").unwrap_or_else(|| "ultrafast".into()),
         }))
     }
 
@@ -118,7 +128,7 @@ impl CaptureConfig {
     /// The command-line arguments that aren't capture options, such as the
     /// patch to open.
     pub fn is_option(arg: &str) -> bool {
-        matches!(arg, "--capture" | "--out" | "--fps" | "--size" | "--ppp")
+        matches!(arg, "--capture" | "--out" | "--fps" | "--size" | "--ppp" | "--crf" | "--preset")
     }
 }
 
@@ -301,7 +311,7 @@ impl Capture {
         let ffmpeg = Command::new("ffmpeg")
             .args(["-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba"])
             .args(["-s", &format!("{}x{}", w, h), "-r", &config.fps.to_string(), "-i", "-"])
-            .args(["-c:v", "libx264rgb", "-crf", "0", "-preset", "ultrafast"])
+            .args(["-c:v", "libx264rgb", "-crf", &config.crf.to_string(), "-preset", &config.preset])
             .arg(config.out_dir.join("video.mkv"))
             .stdin(Stdio::piped())
             .spawn()
@@ -941,6 +951,17 @@ mod tests {
     fn script_needs_an_end() {
         assert!(parse_script("0 play").is_err());
         assert!(parse_script("0 bogus\n1 end").is_err());
+    }
+
+    #[test]
+    fn capture_is_lossless_unless_asked() {
+        let args = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        let c = CaptureConfig::from_args(&args("soba p.json --capture s.txt")).unwrap().unwrap();
+        assert_eq!((c.crf, c.preset.as_str()), (0, "ultrafast"));
+        let c = CaptureConfig::from_args(&args("soba p.json --capture s.txt --crf 12 --preset fast")).unwrap().unwrap();
+        assert_eq!((c.crf, c.preset.as_str()), (12, "fast"));
+        assert!(CaptureConfig::from_args(&args("soba --capture s.txt --crf high")).is_err());
+        assert!(CaptureConfig::is_option("--crf") && CaptureConfig::is_option("--preset"));
     }
 
     #[test]
