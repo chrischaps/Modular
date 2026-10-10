@@ -37,6 +37,7 @@ pub mod sample_hold;
 pub mod sampler;
 pub mod sequencer;
 pub mod slope;
+pub mod tape;
 pub mod trigger_sequencer;
 pub mod vca;
 
@@ -75,5 +76,6 @@ pub use reverb::Reverb;
 pub use sample_hold::SampleHold;
 pub use sequencer::StepSequencer;
 pub use slope::Slope;
+pub use tape::Tape;
 pub use trigger_sequencer::TriggerSequencer;
 pub use vca::Vca;

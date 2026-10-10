@@ -7,7 +7,7 @@
 
 The Stereo Delay plays back a copy of its input a moment later, then feeds that copy back in to make repeats. Filters in the feedback path darken or thin each repeat, **P-P** bounces the repeats between left and right, and **Sync** locks the time to the patch tempo.
 
-Switch on **Tape** and it becomes a worn tape echo: the repeats waver in pitch, saturate as they build, and get darker each time around. Push the feedback far enough and they run away into the classic dub swell.
+Switch on **Tape** and it becomes a worn tape echo: the repeats waver in pitch, saturate as they build, and get darker each time around. Push the feedback far enough and they run away into the classic dub swell. The [Tape](./tape.md) module puts the same machine on a whole bus.
 
 ## How it works
 
@@ -116,5 +116,6 @@ Click the power switch in the node header, press **Ctrl+B** with the module sele
 
 - [Reverb](./reverb.md): a diffuse space instead of distinct echoes
 - [Chorus](./chorus.md): thickening without echoes
+- [Tape](./tape.md): the tape machine of Tape mode, for a whole bus
 - [Clock](../modulation/clock.md): sets the tempo Sync follows
 - [LFO](../modulation/lfo.md): modulates the delay time

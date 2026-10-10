@@ -18,7 +18,13 @@ impl NoiseFloor {
 
     /// Noise peaking at ±`level`.
     pub const fn new(level: f32) -> Self {
-        Self { seed: 0x2545_f491, scale: level / 2_147_483_648.0 }
+        Self::with_seed(level, 0x2545_f491)
+    }
+
+    /// Noise peaking at ±`level`, from its own (nonzero) seed, so two
+    /// sources don't play the same noise.
+    pub const fn with_seed(level: f32, seed: u32) -> Self {
+        Self { seed, scale: level / 2_147_483_648.0 }
     }
 
     /// The next noise sample.

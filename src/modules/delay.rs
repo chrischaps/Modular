@@ -11,7 +11,7 @@ use crate::dsp::{
     denormal::flush,
     parameter::ParameterDefinition,
     port::PortDefinition,
-    primitives::{fast_tanh, FracDelay},
+    primitives::{FracDelay, RecordHead, TapeTransport},
     signal::SignalBuffer,
     smoothed_value::SmoothedValue,
     connected_input, ParameterDisplay, SignalType,
@@ -40,137 +40,6 @@ const TAPE_LOSS_MAX_HZ: f32 = 12000.0;
 
 /// Tape can't record DC; this removes what the lopsided record head adds.
 const TAPE_DC_HZ: f32 = 10.0;
-
-/// A sine oscillator kept as a rotating unit vector: one complex multiply per
-/// sample instead of a `sin` call.
-#[derive(Clone, Copy, Debug)]
-struct Rotor {
-    re: f32,
-    im: f32,
-    cos: f32,
-    sin: f32,
-}
-
-impl Rotor {
-    fn new(freq_hz: f32, sample_rate: f32) -> Self {
-        let mut rotor = Self { re: 1.0, im: 0.0, cos: 1.0, sin: 0.0 };
-        rotor.set_frequency(freq_hz, sample_rate);
-        rotor
-    }
-
-    fn set_frequency(&mut self, freq_hz: f32, sample_rate: f32) {
-        let w = std::f32::consts::TAU * freq_hz / sample_rate;
-        self.cos = w.cos();
-        self.sin = w.sin();
-    }
-
-    /// Advances one sample and returns the sine.
-    #[inline]
-    fn next(&mut self) -> f32 {
-        let re = self.re * self.cos - self.im * self.sin;
-        self.im = self.re * self.sin + self.im * self.cos;
-        self.re = re;
-        self.im
-    }
-
-    /// Pulls the vector back onto the unit circle (rounding drifts it).
-    fn renormalize(&mut self) {
-        let gain = 1.5 - 0.5 * (self.re * self.re + self.im * self.im);
-        self.re *= gain;
-        self.im *= gain;
-    }
-
-    fn reset(&mut self) {
-        self.re = 1.0;
-        self.im = 0.0;
-    }
-}
-
-/// The wobble of a tape transport, as an offset to the read head in samples.
-///
-/// Wow is the slow lurch of an off-centre reel, flutter the fast shiver of the
-/// capstan. Each is a pair of sines at unrelated rates, so the pattern never
-/// quite repeats. Depths are given as peak pitch deviation: a read head
-/// swinging `A·sin(2πft)` samples bends the pitch by up to `A·2πf/sr`.
-#[derive(Clone, Debug)]
-struct TapeTransport {
-    partials: [Rotor; 4],
-    /// Peak offset of each partial, in samples.
-    depths: [f32; 4],
-}
-
-impl TapeTransport {
-    /// (rate in Hz, peak pitch deviation) for each partial.
-    const PARTIALS: [(f32, f32); 4] = [
-        (0.53, 0.0020), // wow
-        (0.21, 0.0010), // slow drift of the reel
-        (6.3, 0.0005),  // flutter
-        (9.7, 0.0003),  // capstan shimmer
-    ];
-
-    fn new(sample_rate: f32) -> Self {
-        let mut transport = Self {
-            partials: [Rotor::new(1.0, sample_rate); 4],
-            depths: [0.0; 4],
-        };
-        transport.set_sample_rate(sample_rate);
-        transport
-    }
-
-    fn set_sample_rate(&mut self, sample_rate: f32) {
-        for (i, &(freq, deviation)) in Self::PARTIALS.iter().enumerate() {
-            self.partials[i].set_frequency(freq, sample_rate);
-            self.depths[i] = deviation * sample_rate / (std::f32::consts::TAU * freq);
-        }
-    }
-
-    /// The read-head offset for the next sample. Zero-mean, starting at zero.
-    #[inline]
-    fn next(&mut self) -> f32 {
-        let mut offset = 0.0;
-        for (rotor, depth) in self.partials.iter_mut().zip(self.depths) {
-            offset += rotor.next() * depth;
-        }
-        offset
-    }
-
-    fn renormalize(&mut self) {
-        self.partials.iter_mut().for_each(Rotor::renormalize);
-    }
-
-    fn reset(&mut self) {
-        self.partials.iter_mut().for_each(Rotor::reset);
-    }
-}
-
-/// The record head: unity gain for quiet signals, a soft and slightly
-/// lopsided squash for loud ones.
-///
-/// `level·(tanh(x/level + b) − tanh b)·cosh²b` passes zero through zero with a
-/// slope of exactly 1, so it leaves the loop gain alone until the tape fills
-/// up. The bias tilts the ceilings (+0.78 / −1.06), which adds the even
-/// harmonics of magnetised tape.
-#[derive(Clone, Copy, Debug)]
-struct RecordHead {
-    tanh_bias: f32,
-    slope_gain: f32,
-}
-
-impl RecordHead {
-    const LEVEL: f32 = 0.9;
-    const BIAS: f32 = 0.15;
-
-    fn new() -> Self {
-        // The same tanh as `record`, so silence records as exactly zero
-        let tanh_bias = fast_tanh(Self::BIAS);
-        Self { tanh_bias, slope_gain: 1.0 / (1.0 - tanh_bias * tanh_bias) }
-    }
-
-    #[inline]
-    fn record(&self, x: f32) -> f32 {
-        Self::LEVEL * (fast_tanh(x / Self::LEVEL + Self::BIAS) - self.tanh_bias) * self.slope_gain
-    }
-}
 
 /// One channel of the tape path after the record head: a DC blocker, then
 /// the high-frequency loss of the tape itself.
@@ -528,7 +397,7 @@ impl DspModule for StereoDelay {
             // Convert time to samples, and let the tape transport wobble the read head
             let delay_samples = (modulated_time_ms * 0.001 * self.sample_rate)
                 .clamp(1.0, max_delay_samples);
-            let read_at = delay_samples - 1.0 + self.transport.next() * tape_amount;
+            let read_at = delay_samples - 1.0 + self.transport.next_offset() * tape_amount;
 
             // Get dry input samples
             let dry_left = in_left
@@ -992,16 +861,6 @@ mod tests {
         for pair in ratios.windows(2) {
             assert!(pair[1] < pair[0] * 0.8, "repeats not darkening: {ratios:?}");
         }
-    }
-
-    #[test]
-    fn test_record_head_is_transparent_when_quiet() {
-        let head = RecordHead::new();
-        assert!((head.record(1e-3) - 1e-3).abs() < 1e-6);
-        assert_eq!(head.record(0.0), 0.0);
-        // Loud signals squash, harder on one side than the other
-        assert!(head.record(10.0) < 0.8 && head.record(10.0) > 0.7);
-        assert!(head.record(-10.0) < -1.0 && head.record(-10.0) > -1.1);
     }
 
     #[test]

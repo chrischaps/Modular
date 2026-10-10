@@ -1,6 +1,6 @@
 # Module Overview
 
-Soba has 36 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
+Soba has 37 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
 
 The **ID** is the name a patch file uses to refer to the module.
 
@@ -51,6 +51,7 @@ The **ID** is the name a patch file uses to refer to the module.
 | [3-Band EQ](./effects/eq.md) | `fx.eq` | Low shelf, parametric mid and high shelf |
 | [Distortion](./effects/distortion.md) | `fx.distortion` | Oversampled soft clip, hard clip, wavefolder, tube and bit crush |
 | [Chorus](./effects/chorus.md) | `fx.chorus` | Stereo chorus and flanger |
+| [Tape](./effects/tape.md) | `fx.tape` | A tape machine for a bus: wow, flutter, saturation, age and hiss |
 | [Compressor](./effects/compressor.md) | `fx.compressor` | Dynamics compressor with sidechain and a gain-reduction output |
 
 ### Utility
@@ -143,7 +144,7 @@ Drive a voice from a sequence instead of a keyboard:
 | Combine signals | [Mix](./utilities/mix.md) |
 | Place sounds left and right | [Mixer](./utilities/mixer.md) |
 | Add space and depth | [Stereo Delay](./effects/delay.md), [Reverb](./effects/reverb.md), [Chorus](./effects/chorus.md) |
-| Add grit or warmth | [Distortion](./effects/distortion.md) |
+| Add grit or warmth | [Distortion](./effects/distortion.md), [Tape](./effects/tape.md) |
 | Balance tone and dynamics | [3-Band EQ](./effects/eq.md), [Compressor](./effects/compressor.md) |
 | See a signal | [Oscilloscope](./visualization/oscilloscope.md), [MIDI Monitor](./midi/midi-monitor.md) |
 | Hear the result | [Audio Output](./output/audio-output.md) |

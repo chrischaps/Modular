@@ -109,3 +109,4 @@ Distortion raises the level, especially at high drive. Use **Out** to match the 
 - [SVF Filter](../filters/svf-filter.md) and [Ladder Filter](../filters/ladder-filter.md): shape the harmonics distortion adds. The Ladder has its own saturating Drive
 - [Compressor](./compressor.md): control dynamics before or after
 - [EQ](./eq.md): fine-tune the distorted tone
+- [Tape](./tape.md): saturation with the wobble and dulling of a tape machine, for a whole bus

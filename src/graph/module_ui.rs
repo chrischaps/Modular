@@ -432,6 +432,22 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "fx.tape",
+        // The tape's colour on top, the transport's motion below
+        knobs: &[
+            knob_as("Saturation", "Sat"),
+            knob("Age"),
+            knob("Hiss"),
+            knob("Mix"),
+            modulatable("Wow", "Wow"),
+            knob_as("Flutter", "Flut"),
+            knob("Width"),
+        ],
+        display: NodeDisplay::TapeReels,
+        knobs_per_row: 4,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "fx.compressor",
         knobs: &[
             knob_as("Threshold", "Thresh"),

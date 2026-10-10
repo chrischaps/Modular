@@ -292,6 +292,8 @@ pub enum NodeDisplay {
     LooperRing,
     /// Slope: the rise and fall to proportion, with a dot riding them.
     SlopeShape,
+    /// Tape: two reels turning, and the tape trembling across a glowing head.
+    TapeReels,
     /// Arranger: the song's sections beside its own jacks, each lane's
     /// level beside its CV and Gate, and a playhead through them all.
     Timeline,
@@ -2258,6 +2260,10 @@ impl NodeDataTrait for SynthNodeData {
 
         if self.display == NodeDisplay::SlopeShape {
             super::slope_display::slope_display(ui, node_id, graph, user_state, zoom);
+        }
+
+        if self.display == NodeDisplay::TapeReels {
+            super::tape_display::tape_display(ui, node_id, graph, user_state, zoom);
         }
 
         if self.display == NodeDisplay::DrumHit {

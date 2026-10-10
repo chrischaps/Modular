@@ -37,6 +37,7 @@
   - [3-Band EQ](./modules/effects/eq.md)
   - [Distortion](./modules/effects/distortion.md)
   - [Chorus](./modules/effects/chorus.md)
+  - [Tape](./modules/effects/tape.md)
   - [Compressor](./modules/effects/compressor.md)
   - [Clock](./modules/modulation/clock.md)
   - [VCA](./modules/utilities/vca.md)
