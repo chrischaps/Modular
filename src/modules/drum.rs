@@ -1032,9 +1032,11 @@ mod tests {
 
     #[test]
     fn test_softer_hits_are_quieter_and_darker() {
+        // Both hits draw the same noise, so only the accent tells them apart
+        let drum = || Drum { rng: Pcg32::new(1), ..Drum::new() };
         for kind in DrumType::ALL {
-            let full = play(&mut Drum::new(), &params(kind), 0.15, &[0], &[], Some(1.0));
-            let soft = play(&mut Drum::new(), &params(kind), 0.15, &[0], &[], Some(0.4));
+            let full = play(&mut drum(), &params(kind), 0.15, &[0], &[], Some(1.0));
+            let soft = play(&mut drum(), &params(kind), 0.15, &[0], &[], Some(0.4));
             let drop = amp_to_db(rms(&soft)) - amp_to_db(rms(&full));
             assert!((-11.0..-5.0).contains(&drop), "{}: accent 0.4 is {drop:.1} dB", kind.name());
             assert!(brightness(&soft) < brightness(&full), "{}: a soft hit isn't darker", kind.name());

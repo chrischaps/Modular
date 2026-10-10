@@ -42,7 +42,9 @@ impl Pcg32 {
 
     const MULTIPLIER: u64 = 6_364_136_223_846_793_005;
 
-    fn new(stream: u64) -> Self {
+    /// A generator on the given stream. Tests use it to give two modules
+    /// the same noise, so they differ only in what's being tested.
+    pub(crate) fn new(stream: u64) -> Self {
         let mut rng = Self { state: 0, increment: (stream << 1) | 1 };
         rng.next_u32();
         rng.state = rng.state.wrapping_add(stream.wrapping_mul(0x9E37_79B9_7F4A_7C15));
