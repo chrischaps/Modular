@@ -139,3 +139,4 @@ The ADSR Envelope is polyphonic. Patch a polyphonic gate (from [Poly MIDI](../mi
 - [SVF Filter](../filters/svf-filter.md) and [Ladder Filter](../filters/ladder-filter.md) to shape brightness
 - [Keyboard Input](../midi/keyboard.md), [MIDI Note](../midi/midi-note.md) and [Poly MIDI](../midi/poly-midi.md) for gates and velocity
 - [LFO](./lfo.md) for modulation that repeats instead of following the note
+- [Slope](./slope.md) for an envelope a trigger plays whole, however short the trigger

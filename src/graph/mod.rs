@@ -16,6 +16,7 @@ mod divider_display;
 mod drum_display;
 mod logic_display;
 mod looper_display;
+mod slope_display;
 mod trigger_display;
 mod step_grid;
 mod mixer_strips;

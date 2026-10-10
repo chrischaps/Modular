@@ -206,7 +206,7 @@ pub fn drum_display(ui: &mut egui::Ui, node_id: NodeId, graph: &SynthGraph, user
 }
 
 /// A time to read at a glance: "45 ms", "1.8 s".
-fn duration(seconds: f32) -> String {
+pub(super) fn duration(seconds: f32) -> String {
     if seconds < 1.0 {
         format!("{} ms", (seconds * 1000.0).round())
     } else {
@@ -216,7 +216,7 @@ fn duration(seconds: f32) -> String {
 
 /// Fills between a curve and the baseline, fading from `top` at the curve
 /// to `bottom` at the baseline.
-fn fill_under(painter: &egui::Painter, points: &[Pos2], baseline: f32, top: Color32, bottom: Color32) {
+pub(super) fn fill_under(painter: &egui::Painter, points: &[Pos2], baseline: f32, top: Color32, bottom: Color32) {
     let mut mesh = egui::Mesh::default();
     for point in points {
         mesh.colored_vertex(*point, top);

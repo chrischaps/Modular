@@ -395,11 +395,12 @@ fn poly_patch_never_allocates_with_eight_voices() {
     let (mut midi, midi_input) = rtrb::RingBuffer::new(512);
     processor.set_midi_input(midi_input);
 
-    // Poly MIDI -> osc -> SVF -> ladder -> VCA (opened by an envelope) ->
-    // mixer -> chained mixer -> delay -> output. Everything up to the VCA
-    // runs 8 voices; the mixer spreads them across its stereo pair, passes
-    // its mix on a four-strand Bus to the next, and the delay hears that
-    let chain: [(NodeId, &'static str); 10] = [
+    // Poly MIDI -> Slope (a glide per voice) -> osc -> SVF -> ladder -> VCA
+    // (opened by an envelope) -> mixer -> chained mixer -> delay -> output.
+    // Everything up to the VCA runs 8 voices; the mixer spreads them across
+    // its stereo pair, passes its mix on a four-strand Bus to the next, and
+    // the delay hears that
+    let chain: [(NodeId, &'static str); 11] = [
         (1, "input.poly_midi"),
         (2, "osc.sine"),
         (3, "filter.svf"),
@@ -410,6 +411,7 @@ fn poly_patch_never_allocates_with_eight_voices() {
         (8, "fx.delay"),
         (9, "output.audio"),
         (10, "util.mixer"),
+        (11, "mod.slope"),
     ];
     for (node_id, module_id) in chain {
         ui.send_command(EngineCommand::AddModule { node_id, module_id });
@@ -422,7 +424,8 @@ fn poly_patch_never_allocates_with_eight_voices() {
             to_port: port(to.1, to.2),
         });
     }
-    connect(&mut ui, (1, "input.poly_midi", "Pitch"), (2, "osc.sine", "V/Oct"));
+    connect(&mut ui, (1, "input.poly_midi", "Pitch"), (11, "mod.slope", "In"));
+    connect(&mut ui, (11, "mod.slope", "Out"), (2, "osc.sine", "V/Oct"));
     connect(&mut ui, (1, "input.poly_midi", "Gate"), (5, "mod.adsr", "Gate"));
     connect(&mut ui, (1, "input.poly_midi", "Velocity"), (5, "mod.adsr", "Velocity"));
     connect(&mut ui, (2, "osc.sine", "Out"), (3, "filter.svf", "In"));
@@ -439,7 +442,7 @@ fn poly_patch_never_allocates_with_eight_voices() {
     connect(&mut ui, (5, "mod.adsr", "Out"), (7, "util.mixer", "Pan 1"));
     connect(&mut ui, (8, "fx.delay", "Out L"), (9, "output.audio", "Left"));
     connect(&mut ui, (8, "fx.delay", "Out R"), (9, "output.audio", "Right"));
-    for node_id in 1..=10 {
+    for node_id in 1..=11 {
         for index in 0..4 {
             ui.send_command(EngineCommand::MonitorInput { node_id, input_index: index });
             ui.send_command(EngineCommand::MonitorOutput { node_id, output_index: index });
@@ -498,6 +501,7 @@ fn poly_patch_never_allocates_with_eight_voices() {
     assert!(output.iter().all(|s| s.is_finite()));
     assert!(output.iter().any(|&s| s != 0.0), "the chords are heard");
     let plan = processor.plan();
+    assert_eq!(plan.output_channels(11, 0), Some(8), "each voice glides on its own");
     assert_eq!(plan.output_channels(2, 0), Some(8), "the oscillator runs 8 voices");
     assert_eq!(plan.output_channels(6, 0), Some(8), "so does the VCA");
     assert_eq!(plan.output_channels(7, 0), Some(1), "the mixer sums them");

@@ -1,6 +1,6 @@
 # Module Overview
 
-Soba has 32 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
+Soba has 34 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
 
 The **ID** is the name a patch file uses to refer to the module.
 
@@ -38,6 +38,7 @@ The **ID** is the name a patch file uses to refer to the module.
 |--------|----|--------------|
 | [ADSR Envelope](./modulation/adsr.md) | `mod.adsr` | Attack, decay, sustain and release, with exact stage times, curve shaping and velocity |
 | [LFO](./modulation/lfo.md) | `mod.lfo` | Low-frequency oscillator for cyclic modulation, free or locked to the beat |
+| [Slope](./modulation/slope.md) | `mod.slope` | Rises and falls at set rates: slew and glide, a trigger envelope, or a cycling LFO with skew |
 
 ### Effect
 
@@ -85,7 +86,7 @@ Header colors describe what a module *is*. The colors of its jacks and cables de
 
 ## Polyphonic modules
 
-The Oscillator, Noise, Drum, both filters, the ADSR Envelope, the VCA, the Attenuverter, Sample & Hold and the Quantizer run one voice per channel when a polyphonic cable reaches them. Everything else treats a polyphonic cable as one signal. See [Polyphony](../concepts/polyphony.md).
+The Oscillator, Noise, Drum, both filters, the ADSR Envelope, Slope, the VCA, the Attenuverter, Mix, Sample & Hold and the Quantizer run one voice per channel when a polyphonic cable reaches them. Everything else treats a polyphonic cable as one signal. See [Polyphony](../concepts/polyphony.md).
 
 ## Common signal chains
 
@@ -125,10 +126,12 @@ Drive a voice from a sequence instead of a keyboard:
 | Play a microphone or guitar through the patch | [Audio Input](./sources/audio-input.md) |
 | Let a live sound or drum loop move or trigger the patch | [Audio Input](./sources/audio-input.md)'s **Follow** and **Gate** |
 | Play notes | [Keyboard](./midi/keyboard.md), [MIDI Note](./midi/midi-note.md), or [Poly MIDI](./midi/poly-midi.md) for chords |
-| Slide from note to note | **Glide** on [Keyboard](./midi/keyboard.md#glide), [MIDI Note](./midi/midi-note.md#glide) or [Poly MIDI](./midi/poly-midi.md#glide) |
+| Slide from note to note | **Glide** on [Keyboard](./midi/keyboard.md#glide), [MIDI Note](./midi/midi-note.md#glide) or [Poly MIDI](./midi/poly-midi.md#glide); a [Slope](./modulation/slope.md) on any pitch, a sequencer's included |
 | Darken or brighten a sound | [SVF Filter](./filters/svf-filter.md) or [Ladder Filter](./filters/ladder-filter.md) |
 | Give each note a shape in time | [ADSR Envelope](./modulation/adsr.md) into a [VCA](./utilities/vca.md) |
-| Add slow, repeating movement | [LFO](./modulation/lfo.md) |
+| Play a whole envelope from a short trigger | [Slope](./modulation/slope.md) |
+| Smooth a stepped or jumpy signal | [Slope](./modulation/slope.md) |
+| Add slow, repeating movement | [LFO](./modulation/lfo.md), or a cycling [Slope](./modulation/slope.md) for a swell that drops away |
 | Tame or flip a modulation signal | [Attenuverter](./utilities/attenuverter.md) |
 | Play a pattern | [Clock](./modulation/clock.md) into the [Step Sequencer](./utilities/sequencer.md) |
 | Program a drum kit, with fills | [Clock](./modulation/clock.md) into the [Trigger Sequencer](./utilities/trigger-sequencer.md), a lane for each [Drum](./sources/drum.md) |

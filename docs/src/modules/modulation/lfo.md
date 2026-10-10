@@ -155,3 +155,4 @@ Each Clock pulse freezes wherever the LFO happens to be, and [Sample & Hold](../
 - [Clock](./clock.md), which sets the beat a synced LFO follows
 - [Attenuverter](../utilities/attenuverter.md) to scale, invert or offset the LFO
 - [Sample & Hold](../utilities/sample-hold.md) for stepped patterns
+- [Slope](./slope.md) for a cycle with its rise and fall set apart, from a ramp through a triangle to a saw

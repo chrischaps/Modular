@@ -31,6 +31,7 @@
   - [Ladder Filter](./modules/filters/ladder-filter.md)
   - [ADSR Envelope](./modules/modulation/adsr.md)
   - [LFO](./modules/modulation/lfo.md)
+  - [Slope](./modules/modulation/slope.md)
   - [Stereo Delay](./modules/effects/delay.md)
   - [Reverb](./modules/effects/reverb.md)
   - [3-Band EQ](./modules/effects/eq.md)

@@ -20,6 +20,7 @@ These modules run one voice per channel of their widest input:
 | [SVF Filter](../modules/filters/svf-filter.md) | Filter state and resonance |
 | [Ladder Filter](../modules/filters/ladder-filter.md) | Filter state and resonance |
 | [ADSR Envelope](../modules/modulation/adsr.md) | Stage and level |
+| [Slope](../modules/modulation/slope.md) | Level, so a chord glides voice by voice |
 | [VCA](../modules/utilities/vca.md) | Gain |
 | [Attenuverter](../modules/utilities/attenuverter.md) | Scaling |
 | [Mix](../modules/utilities/mix.md) | Sum |

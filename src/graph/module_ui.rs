@@ -222,6 +222,13 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "mod.slope",
+        knobs: &[modulatable("Rise", "Rise"), modulatable("Fall", "Fall"), knob("Shape")],
+        monitor: &["EOR", "EOC"],
+        display: NodeDisplay::SlopeShape,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "util.clock",
         knobs: &[knob_as("Tempo", "BPM"), knob_as("Gate Length", "Gate"), knob("Swing")],
         labels: &[("Division", "Div")],

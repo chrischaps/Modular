@@ -110,6 +110,8 @@ The highpass filter at 4.5 kHz keeps only the sizzle. Pink noise rather than whi
 
 **Different tempo.** Turn the Clock's **BPM**. The delay follows, staying on the dotted eighth.
 
+**Slide.** Patch the sequencer's **Pitch** through a [Slope](../modules/modulation/slope.md) on its way to the Oscillator's **V/Oct**, with **Rise** and **Fall** at 60 ms and **Shape** at 0. Every note now slides into the next: the octave leap to C3 in 60 ms, a fifth in 35 ms, so each slide is over well inside its step and the line still lands on its notes. Repeated notes don't slide, so the pattern keeps its stabs. Turn **Rise** and **Fall** up to 200 ms for a lazier, more vocal line.
+
 **Shorter loop.** Set **Steps** to 12 or 7 for a pattern that cycles against the bar.
 
 **Fatter.** Swap the SVF for a [Ladder Filter](../modules/filters/ladder-filter.md) and use its **LP24** output. Raise its **Drive** to 3x.

@@ -98,3 +98,4 @@ Raise **Slew** to 0.1–0.3 s on any of the patches above and the steps become s
 - [Attenuverter](./attenuverter.md): scale the held values to a useful range
 - [Quantizer](./quantizer.md): snap held values to the notes of a scale
 - [Step Sequencer](./sequencer.md): stepped values you choose yourself
+- [Slope](../modulation/slope.md): slew any signal, not only a held one, with separate rise and fall rates

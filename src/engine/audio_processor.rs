@@ -10,7 +10,7 @@ use rtrb::Consumer;
 
 use crate::dsp::denormal::DenormalGuard;
 use crate::dsp::{InputAudio, MidiEvent, ModuleRegistry, Poly, ProcessContext};
-use crate::modules::{AdsrEnvelope, Attenuverter, AudioInput, AudioOutput, Chorus, Clock, ClockDivider, Compressor, Distortion, Drum, KeyboardInput, LadderFilter, Lfo, Logic, Looper, MidiMonitor, MidiNote, Mix, Mixer, Noise, Oscilloscope, PolyMidi, ParametricEq, Quantizer, Reverb, SampleHold, Sampler, Oscillator, StepSequencer, StereoDelay, TriggerSequencer, SvfFilter, Vca};
+use crate::modules::{AdsrEnvelope, Attenuverter, AudioInput, AudioOutput, Chorus, Clock, ClockDivider, Compressor, Distortion, Drum, KeyboardInput, LadderFilter, Lfo, Logic, Looper, MidiMonitor, MidiNote, Mix, Mixer, Noise, Oscilloscope, PolyMidi, ParametricEq, Quantizer, Reverb, SampleHold, Sampler, Oscillator, Slope, StepSequencer, StereoDelay, TriggerSequencer, SvfFilter, Vca};
 
 use super::audio_input::InputFeed;
 use super::channels::EngineHandle;
@@ -42,6 +42,7 @@ pub fn create_module_registry() -> ModuleRegistry {
     registry.register::<Poly<LadderFilter>>();
     registry.register::<Poly<AdsrEnvelope>>();
     registry.register::<Lfo>();
+    registry.register::<Poly<Slope>>();
     registry.register::<Clock>();
     registry.register::<Poly<Vca>>();
     registry.register::<Poly<Attenuverter>>();
@@ -554,7 +555,8 @@ mod tests {
         assert!(registry.contains("source.sampler"));
         assert!(registry.contains("seq.trigger"));
         assert!(registry.contains("util.looper"));
-        assert_eq!(registry.len(), 33);
+        assert!(registry.contains("mod.slope"));
+        assert_eq!(registry.len(), 34);
     }
 
     #[test]

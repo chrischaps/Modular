@@ -287,6 +287,8 @@ pub enum NodeDisplay {
     /// Looper: the loop as a ring with its playhead and overdub layers, and
     /// the footswitches.
     LooperRing,
+    /// Slope: the rise and fall to proportion, with a dot riding them.
+    SlopeShape,
 }
 
 impl NodeDisplay {
@@ -2195,6 +2197,10 @@ impl NodeDataTrait for SynthNodeData {
 
         if self.display == NodeDisplay::DividerRing {
             super::divider_display::divider_display(ui, node_id, graph, user_state, zoom);
+        }
+
+        if self.display == NodeDisplay::SlopeShape {
+            super::slope_display::slope_display(ui, node_id, graph, user_state, zoom);
         }
 
         if self.display == NodeDisplay::DrumHit {
