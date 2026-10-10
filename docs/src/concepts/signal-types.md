@@ -8,14 +8,15 @@ Every jack in Modular Synth has a signal type, and every type has a color. The c
 | **Control** | <span class="swatch control"></span>Orange | 0.0 to 1.0, or −1.0 to 1.0 | Modulation and pitch (CV) |
 | **Gate** | <span class="swatch gate"></span>Green | 0.0 or 1.0 | Notes, clock pulses, triggers |
 | **MIDI** | <span class="swatch midi"></span>Purple | Note and controller events | Reserved; see [MIDI](#midi) |
+| **Bus** | <span class="swatch bus"></span>Pale steel | A whole stereo mix and its sends | A Mixer's **Chain Out** into the next Mixer's **Chain In**; see [Bus](#bus) |
 
 Underneath, audio, control and gate signals are all the same thing: a stream of numbers at the audio sample rate. The type describes what the numbers mean, and it decides which jacks a cable may connect (see [Which types connect](#which-types-connect)).
 
 ## Audio
 
-Audio is the sound itself: a waveform swinging between −1.0 and 1.0, at your audio device's sample rate (typically 44.1 or 48 kHz). Oscillators make it; filters, the VCA, the Mixer and the effects shape it; the [Audio Output](../modules/output/audio-output.md) sends it to your speakers.
+Audio is the sound itself: a waveform swinging between −1.0 and 1.0, at your audio device's sample rate (typically 44.1 or 48 kHz). Oscillators make it; filters, the VCA, the Mix, the Mixer and the effects shape it; the [Audio Output](../modules/output/audio-output.md) sends it to your speakers.
 
-Keep audio within ±1.0 and it passes through the output untouched. Louder than that and the output stage's limiter, on by default, catches the peaks before they clip. It's a safety net, though, not a mixing tool. When several voices or oscillators add up, bring the level down with a VCA or the Mixer.
+Keep audio within ±1.0 and it passes through the output untouched. Louder than that and the output stage's limiter, on by default, catches the peaks before they clip. It's a safety net, though, not a mixing tool. When several voices or oscillators add up, bring the level down with a VCA or the [Mixer](../modules/utilities/mixer.md).
 
 ## Control
 
@@ -54,6 +55,10 @@ Gates come from the **Gate** outputs of Keyboard, MIDI Note, Poly MIDI, the [Clo
 
 MIDI is the purple signal type, and today no jack uses it. MIDI from your controller doesn't arrive over a cable. It goes straight into the modules that listen for it: MIDI Note, Poly MIDI and the [MIDI Monitor](../modules/midi/midi-monitor.md). Those modules turn notes into ordinary **Pitch**, **Gate** and **Velocity** signals that the rest of the patch understands. The Keyboard module does the same for your computer keyboard.
 
+## Bus
+
+Bus is the pale steel signal type. One Bus cable carries a [Mixer](../modules/utilities/mixer.md)'s whole mix and its sends from its **Chain Out** to the next Mixer's **Chain In**, so Mixers can be chained for more than four channels. It connects only to another Bus: no audio, control or gate jack takes it, and a Bus jack takes nothing else.
+
 ## Which types connect
 
 Same-type connections always work. A few cross-type connections work too, and the rest are refused:
@@ -61,7 +66,7 @@ Same-type connections always work. A few cross-type connections work too, and th
 | From | To | Allowed? | Why |
 |------|----|----------|-----|
 | Audio | Control | Yes | Audio-rate modulation, such as FM |
-| Control | Audio | Yes | Mix or process a CV like audio, such as an LFO into the Mixer |
+| Control | Audio | Yes | Mix or process a CV like audio, such as an LFO into the [Mix](../modules/utilities/mix.md) |
 | Gate | Control | Yes | Use a gate as a 0-or-1 modulation signal |
 | Gate | Audio | No | A gate needs an envelope or VCA to become sound |
 | Audio or Control | Gate | No | Gate inputs only take gates |

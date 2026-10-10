@@ -11,7 +11,7 @@ To learn how drums are made, build them like this. To make a beat quickly, use t
 *Or play it here: press **▶ Play** in the corner. The full app is a click away under **Open in Modular**.*
 
 ![The Backbeat patch](../images/recipe-backbeat.png)
-*One lane per drum, from the top: kick, snare, hi-hats, toms, crash. The clock is at the top left. The Clock Divider that schedules the fill sits lower down in the same column. Kick and snare mix to the centre at the top right. Below and to the right, the main Mixer brings the whole kit together, shares one small room among every drum, and feeds the output.*
+*One lane per drum, from the top: kick, snare, hi-hats, toms, crash. The clock is at the top left. The Clock Divider that schedules the fill sits lower down in the same column. Kick and snare mix, compress and land on a drum bus at the top right. Below and to the right, the main Mixer brings the whole kit together, shares one small room among every drum, and feeds the output.*
 
 ## What it teaches
 
@@ -19,7 +19,7 @@ To learn how drums are made, build them like this. To make a beat quickly, use t
 - **Accents and ghost notes.** Each sequencer step has a velocity, and the envelopes turn velocity into loudness. The same snare plays a backbeat and a whisper.
 - **A sequencer's pitch as a switch.** The hi-hat lane's pitch output is a flag that says whether the hat is open. That flag also chokes it.
 - **Phrases longer than a bar.** A 16-step sequencer loops every bar. For a fill every fourth bar, a Clock Divider counts the sixteenths and opens a gate once every 64.
-- **One room for the whole kit.** Two Mixers chain together, and each drum sends its own amount to a single reverb, as on a mixing console.
+- **One room for the whole kit.** A drum-bus Mixer chains into the main one over a single cable, and each part sends its own amount to a single reverb, as on a mixing console.
 
 ## The pattern
 
@@ -57,8 +57,9 @@ crash    on the downbeat after each fill
 | [Noise](../modules/sources/noise.md) + [SVF Filter](../modules/filters/svf-filter.md) (crash) | **Level** 0%; HighPass, **Cutoff** 4.2 kHz, **Res** 20% |
 | [ADSR Envelope](../modules/modulation/adsr.md) (crash) | **Dec** 1.6 s, **Rel** 1.6 s, **Vel** 0% |
 | [Attenuverter](../modules/utilities/attenuverter.md) (hat mute) | **Amount** -1.0 |
-| [Mixer](../modules/utilities/mixer.md) (kick and snare) | **Lv 1** 60% kick, **Lv 2** 40% snare body, **Lv 3** 45% snare noise; **Send 2** and **Send 3** 30% |
+| [Mix](../modules/utilities/mix.md) (kick and snare) | **Level 1** 60% kick, **Level 2** 40% snare body, **Level 3** 45% snare noise |
 | [Compressor](../modules/effects/compressor.md) | **Thresh** -16 dB, **Ratio** 3:1, **Atk** 8 ms, **Rel** 120 ms, **Mkup** 2 dB |
+| [Mixer](../modules/utilities/mixer.md) (drum bus) | **Level 1** 100%, centred; **Send 1** 15%; **Master** +3 dB |
 | [Mixer](../modules/utilities/mixer.md) (main) | Hats 44% at R 30 / R 35, toms 40%, crash 36% at L 40; every **Send** 25%; **Master** −2 dB |
 | [Reverb](../modules/effects/reverb.md) | **Size** 35%, **Decay** 0.9 s, **Damp** 55%, **PreD** 2.5 ms, **Mix** 100% |
 | [Audio Output](../modules/output/audio-output.md) | **Vol** 91% |
@@ -131,17 +132,17 @@ One oscillator plays all four toms. The sequencer's **Pitch** picks the drum, wi
 ### Mixing
 
 ```text
-[Kick/Snare Mixer Out] ──> [Compressor In]
-[Compressor Out] ──> [Main Mixer Chain L]
-[Kick/Snare Mixer Send L/R] ──> [Main Mixer Chain Send L/R]
+[Kick/Snare Mix Out] ──> [Compressor In]
+[Compressor Out] ──> [Drum Bus Mixer Ch 1]
+[Drum Bus Mixer Chain Out] ──> [Main Mixer Chain In]
 [Main Mixer Send L/R] ──> [Reverb In L/R]
 [Reverb Out L/R] ──> [Main Mixer Return L/R]
 [Main Mixer Out L/R] ──> [Audio Output Left/Right]
 ```
 
-Kick and snare go to the first Mixer's mono **Out** and through a compressor, which glues them together. The compressor's 8 ms attack lets each hit's crack through before it starts to work. Its output comes into the main Mixer on **Chain L** alone, so it lands dead centre. Hats, toms and crash have the main Mixer's four channels, each panned to its place.
+Kick and snare are added on a [Mix](../modules/utilities/mix.md) and go through a compressor, which glues them together. The compressor's 8 ms attack lets each hit's crack through before it starts to work. Its output is the only channel of a small drum-bus Mixer, centred. A centred channel is 3 dB down on each side, so the bus's **Master** at +3 dB gives it back. The bus's **Chain Out** carries its mix and its send into the main Mixer's **Chain In** on one cable. Hats, toms and crash have the main Mixer's four channels, each panned to its place.
 
-There is one room for the whole kit: a short reverb, 0.9 seconds long and fully wet. Every drum decides how much of it to hear. On the main Mixer each channel sends 25%. On the first Mixer, the snare's two channels send 30% and the kick sends nothing, so the low end stays tight and dry. The snare's sends travel to the main Mixer on **Chain Send**, join its own, and the reverb hears them all on the main Mixer's **Send L** and **Send R**.
+There is one room for the whole kit: a short reverb, 0.9 seconds long and fully wet. Every part decides how much of it to hear. On the main Mixer each channel sends 25%. The drum bus sends 15% of the compressed kick and snare, less than the rest, to keep the low end tight. Its send travels to the main Mixer on the chain, joins the main Mixer's own, and the reverb hears them all on the main Mixer's **Send L** and **Send R**.
 
 The reverb comes back on the main Mixer's **Return**. That closes a loop, from the Mixer to the reverb and back, which the Return allows by hearing the reverb one audio block late, about 5 ms. The reverb's pre-delay is 2.5 ms, a little shorter than the room's natural 8 ms, to make up for it.
 
@@ -159,7 +160,7 @@ The hats, toms and crash have exactly the balance they had when the whole second
 
 **A different fill.** The toms play steps 9 to 16. Turn on steps 1 to 8 for a whole-bar fill, or change the pitches for a different run.
 
-**More room, or less.** The snare's **Send 2** and **Send 3** on the kick-and-snare Mixer set how far back it sits: 60% pushes it to the back of the room, 0% puts it right in your ear. Turn the main Mixer's **Send 1** and **Send 2** down for dry, close hats, or **Send 4** up for a crash that hangs in the air.
+**More room, or less.** The drum bus's **Send 1** sets how far back the kick and snare sit: 40% pushes them to the back of the room, 0% puts them right in your ear, dry and tight. Turn the main Mixer's **Send 1** and **Send 2** down for dry, close hats, or **Send 4** up for a crash that hangs in the air.
 
 **Swing it.** Turn the Clock's **Swing** to about 58%. Every off-beat sixteenth lands a little late, while the downbeats and the backbeat stay on the grid. The pattern stops sounding programmed and starts to sit in a pocket. At 66% it becomes a full triplet shuffle.
 

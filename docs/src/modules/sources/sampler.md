@@ -142,7 +142,7 @@ The [Sampled Keys](../../recipes/sampled-keys.md) example plays a bell across th
 ...
 ```
 
-One Sampler per sound, each in **One-Shot** mode, into a [Mixer](../utilities/mixer.md). Mix them with [Drum](./drum.md) voices for a kit that's part recorded and part synthesized.
+One Sampler per sound, each in **One-Shot** mode, into a [Mixer](../utilities/mixer.md) to place them. Mix them with [Drum](./drum.md) voices for a kit that's part recorded and part synthesized.
 
 ### A drone from anything
 

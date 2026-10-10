@@ -3,60 +3,63 @@
 **Module ID** `util.mixer` · **Category** Utility
 
 ![Mixer Module](../../images/module-mixer.png)
-*Four channel strips, a stereo field, a send to an effect, and a master.*
+*Four channel strips, a row each, over the bus row: the return, the master and the outputs.*
 
-The Mixer brings up to four signals together into a stereo pair. Each channel has its own level, pan, mute and send. Use it to place sounds left and right, to pan one to and fro with an LFO, to open a polyphonic pad across the stereo field, to share one reverb among every channel, or to add two modulation sources into one CV. For more than four channels, chain Mixers: the stereo mix and the sends of one pass through the next.
+The Mixer is a small stereo console. It brings up to four channels together into a stereo pair, and each one has its own level, pan, width, send, mute and solo. Use it to place sounds left and right, to pan one to and fro with an LFO, to open a polyphonic pad across the stereo field, or to share one reverb among every channel. For more than four channels, chain Mixers: one cable carries a Mixer's whole mix and its sends into the next.
 
-It works on any signal that isn't MIDI. Audio and control signals both patch straight in, so the same module mixes sound or modulation.
+Audio and control signals both patch into a channel. To add up CVs or mono signals, without placing them in the stereo field, use the smaller [Mix](./mix.md).
 
-## Reading the display
+## Reading the node
 
-The display reads like a mixing desk: each channel is a column, from its light at the top down to its send knob.
+The Mixer is a console turned on its side. Each channel is one row, read left to right the way its signal travels:
 
-- **The panorama**, at the top, is the stereo field from **L** to **R**, with a lane for each channel. A light shows where each channel sits. A polyphonic channel has a light per voice, fanned out by **Spread**. The lights brighten with the channel's level. A channel with its **Send** up blooms sideways along its lane, wider the more it sends, the way a sound spreads into a room. A hollow ring is a voice with nothing to play, and a grey ring is a muted channel.
-- **The meters** show each channel's level after its fader. The pair on the right, over **Master**, is the stereo output. A notch either side of each meter marks full scale, and a white line holds the latest peak for a moment.
-- **The M buttons** mute a channel. A muted channel's button turns red and its meter dims. Muting fades over 10 ms, so it doesn't click.
+- **Its jacks**, on the left edge: **in** for the channel, then **lvl** and **pan**, CV for its level and its pan. A jack's label lights up when it's patched.
+- **Its number**, in the channel's colour.
+- **Its lane** of the stereo field, from **L** to **R**. A light shows where the channel sits. A polyphonic channel has a light per voice, fanned out by its **Width**. The lights brighten with the channel's level. A channel with its **Send** up blooms sideways along its lane, wider the more it sends, the way a sound spreads into a room. A hollow ring is a voice with nothing to play, and a grey ring is a channel you can't hear, because it's muted or another channel is soloed.
+- **Its meter**: the level after its fader. It dims while the channel can't be heard.
+- **Its knobs**: **Level**, **Pan**, **Width** and **Send**, under the titles at the top.
+- **M** mutes the channel and turns red. **S** solos it and turns amber.
+
+Below the strips is the bus row. On the left come in the **chain** from another Mixer and the effect **return**. Their labels brighten with the level they bring. Then come the **Return** and **Master** knobs and the stereo output meter, and on the right, every output.
 
 ## Inputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Ch 1** – **Ch 4** | Audio (Blue) | The channels. A polyphonic cable keeps its voices apart, for **Spread** |
-| **Level 1** – **Level 4** | Control (Orange) | CV added to each channel's level |
-| **Pan 1** – **Pan 4** | Control (Orange) | CV added to each channel's pan. An LFO here pans it to and fro |
-| **Chain L**, **Chain R** | Audio (Blue) | A stereo mix added after the faders, such as another Mixer's **Out L** and **Out R**. **Chain R** copies **Chain L** when only the left is patched |
-| **Chain Send L**, **Chain Send R** | Audio (Blue) | Another Mixer's **Send L** and **Send R**, added to this one's send bus |
-| **Return L**, **Return R** | Audio (Blue) | An effect's output, added to the mix at the **Return** knob. It may come from an effect fed by this same Mixer. **Return R** copies **Return L** when only the left is patched |
+| **Ch 1** – **Ch 4** (in) | Audio (Blue) | The channels. A polyphonic cable keeps its voices apart, for **Width** |
+| **Level 1** – **Level 4** (lvl) | Control (Orange) | CV added to each channel's level |
+| **Pan 1** – **Pan 4** (pan) | Control (Orange) | CV added to each channel's pan. An LFO here pans it to and fro |
+| **Chain In** | Bus (Steel) | Another Mixer's **Chain Out**: its mix joins this one after the faders, and its sends join this one's send bus |
+| **Return L**, **Return R** | Audio (Blue) | An effect's output, added to the mix at the **Return** knob. It may come from an effect fed by this same Mixer. **Return R** copies **Return L** when only the left is patched, so a mono source comes in centred |
 
 ## Outputs
 
 | Port | Signal Type | Description |
 |------|-------------|-------------|
-| **Out** | Audio (Blue) | Mono sum of every channel at its level, ignoring pan and spread |
-| **Out L** | Audio (Blue) | Left side of the stereo mix |
-| **Out R** | Audio (Blue) | Right side of the stereo mix |
+| **Out L**, **Out R** | Audio (Blue) | The stereo mix |
 | **Send L**, **Send R** | Audio (Blue) | The send bus: each channel at its **Send** knob, after its fader and pan. Patch it to a reverb or delay |
+| **Chain Out** | Bus (Steel) | **Out L/R** and **Send L/R** on one cable, for the next Mixer's **Chain In** |
 
 ## Parameters
 
 | Control | Range | Default | Description |
 |---------|-------|---------|-------------|
-| **Lv 1** – **Lv 4** (Level) | 0 – 100% | 100% | Each channel's volume |
-| **Pan 1** – **Pan 4** | L 100 – R 100 | C | Each channel's place in the stereo field |
+| **Level** 1 – 4 | 0 – 100% | 100% | Each channel's volume |
+| **Pan** 1 – 4 | L 100 – R 100 | C | Each channel's place in the stereo field |
+| **Width** 1 – 4 | 0 – 100% | 0% | How far a polyphonic channel's voices fan out around its pan |
+| **Send** 1 – 4 | 0 – 100% | 0% | How much of each channel goes to **Send L** and **Send R** |
 | **M** (Mute 1 – 4) | on / off | off | Silences a channel |
-| **Master** | −60 – +6 dB | 0 dB | Volume of **Out**, **Out L** and **Out R**. At −60 dB they are silent. The sends don't follow it |
-| **Spread** | 0 – 100% | 0% | How far a polyphonic channel's voices fan out around its pan |
-| **Send 1** – **Send 4** | 0 – 100% | 0% | How much of each channel goes to **Send L** and **Send R** |
+| **S** (Solo 1 – 4) | on / off | off | Hears only the soloed channels |
 | **Return** | 0 – 100% | 100% | Level of **Return L** and **Return R** in the mix |
+| **Master** | −60 – +6 dB | 0 dB | Volume of the mix. At −60 dB it's silent. The sends don't follow it |
 
-Levels, pans, sends, **Return**, **Master** and **Spread** are smoothed, so you can ride them while the patch plays without clicks. A **Pan** knob's arc grows outward from the centre, so you can read which side a channel leans to at a glance. The readout says the same: **C**, or **L** or **R** and how far, out of 100.
+Levels, pans, widths, sends, **Return** and **Master** are smoothed, so you can ride them while the patch plays without clicks. Mute and solo fade over 10 ms, so they don't click either. A **Pan** knob's arc grows outward from the centre, so you can read which side a channel leans to at a glance. The readout says the same: **C**, or **L** or **R** and how far, out of 100.
 
 ## How it works
 
 ```text
 Out L  = (Ch 1 × Level 1 × left(Pan 1) + … + Chain L + Return L × Return) × Master
 Out R  = (Ch 1 × Level 1 × right(Pan 1) + … + Chain R + Return R × Return) × Master
-Out    = (Ch 1 × Level 1 + … + Ch 4 × Level 4 + (Chain L + Chain R + …) × 0.71) × Master
 Send L = Ch 1 × Level 1 × left(Pan 1) × Send 1 + … + Chain Send L
 Send R = Ch 1 × Level 1 × right(Pan 1) × Send 1 + … + Chain Send R
 ```
@@ -65,25 +68,23 @@ Send R = Ch 1 × Level 1 × right(Pan 1) × Send 1 + … + Chain Send R
 
 Panning is **equal power**: as a channel moves from left to right, one side fades as the other rises, and their power always adds up to the same. A sound swept across the field keeps its loudness all the way. In the centre each side is at −3 dB. Hard left, the right side is silent.
 
-So a channel panned centre is 3 dB quieter on each output than it is on **Out**. If a patch moves from **Out** to **Out L** and **Out R** and you want its old loudness back, set **Master** to +3 dB.
+So a channel panned centre is 3 dB quieter on each side than it went in. To win that back, set **Master** to +3 dB.
 
 ### Level and Pan CV
 
 Both add to their knob. A **Level** CV can take a channel from silence to full, but never past 100% or below silence. A **Pan** CV of +1 moves a centred channel hard right, and a bipolar LFO swinging ±1 sweeps it from side to side. Set the **Pan** knob off centre and the LFO swings around that point instead, stopping at the edge.
 
-A patched knob shows an orange dot and keeps its own setting. The CV moves the sound around it.
+A patched knob shows an orange dot at its top right and keeps its own setting. The CV moves the sound around it.
+
+### Mute and solo
+
+**M** silences a channel. **S** solos it: while any channel is soloed, only the soloed ones are heard. Solo two channels to hear the pair. Mute wins over solo, so a muted channel stays silent even when it's soloed.
+
+A soloed channel keeps its sends, so you hear it in its room. The return is never silenced by a solo, and a mix arriving on **Chain In** is, as if it were one more channel that isn't soloed. Solo works on one Mixer at a time: soloing a channel on a Mixer earlier in a chain doesn't silence the channels of the ones after it.
 
 ### Headroom
 
 At the default levels, two full-scale signals add up to twice full scale. Anything within ±1 passes through untouched. Past that, each output soft-clips: the sum bends smoothly over and eases toward ±1.5 without ever reaching it, so two full-scale signals come out at about 1.48. The bend rounds off the peaks of loud audio, so when you mix loud sources and want them clean, bring the levels down to around 50–70% each.
-
-The headroom above 1 is deliberate. Summing two envelopes for a filter's **Cutoff**, as the [Rhythmic Sequence](../../recipes/rhythmic-sequence.md) example does, opens the filter further than one envelope can.
-
-### The mono Out
-
-**Out** is the plain sum of the channels at their levels, times **Master**. Pan and **Spread** don't touch it. It's the same sum the Mixer gave when it had two mono channels, so patches built on it sound exactly as they did. Use **Out** when you're adding up CVs, or feeding one mono input.
-
-The stereo pairs coming in on **Chain** and **Return** reach **Out** folded to one: left plus right, times 0.71. A centred sound comes back at the level it had before it was panned, and a hard-panned one at −3 dB.
 
 ### Sends and returns
 
@@ -95,21 +96,23 @@ The sends ignore **Master**: turning the mix down doesn't change what the effect
 
 Patching a loop into any other input is still refused.
 
+The return is also a spare stereo input with its own level. A mono source on **Return L** alone comes in centred, at its full level on each side, so it's a good place for a kick drum when the four channels are full.
+
 ### Chaining Mixers
 
-Two Mixers cascade like a console and its sidecar. Patch one Mixer's **Out L** and **Out R** into the next one's **Chain L** and **Chain R**, and its **Send L** and **Send R** into **Chain Send L** and **Chain Send R**. The first Mixer's stereo image passes through untouched, and its sends join the second's, so one reverb on the last Mixer serves all eight channels. The last Mixer's **Master** sets the volume of the whole mix.
+Two Mixers cascade like a console and its sidecar, over one cable. Patch one Mixer's **Chain Out** into the next one's **Chain In**. The cable is a **Bus**, drawn in pale steel, with four strands: the first Mixer's left and right, then its send bus's left and right. Its stereo image passes through untouched, and its sends join the second's, so one reverb on the last Mixer serves all eight channels. The last Mixer's **Master** sets the volume of the whole mix.
 
-**Chain L** works alone too: a mono source patched into it arrives centred, at its full level on each side.
+A Bus only goes into a **Chain In**. Nothing else would know which strand is which.
 
-### Polyphonic cables and Spread
+### Polyphonic cables and Width
 
-The Mixer hears each voice of a polyphonic cable on its own. With **Spread** at 0% every voice sits at the channel's pan. That's the same as summing them first, so a whole polyphonic voice can go straight into a channel.
+The Mixer hears each voice of a polyphonic cable on its own. With **Width** at 0% every voice sits at the channel's pan. That's the same as summing them first, so a whole polyphonic voice can go straight into a channel.
 
-Turn **Spread** up and the voices fan out across the field around the pan. They take evenly spaced places, alternating left and right from the outside in: the first voice hard left, the second hard right, the third just inside the first, and so on. [Poly MIDI](../midi/poly-midi.md) hands notes to voices in turn, and neighbouring voices sit on opposite sides, so even two notes held on an eight-voice cable land either side of the pan, and a chord opens up instead of sitting in the middle. Each voice keeps the power it had, so the chord is as loud spread as it was centred.
+Turn **Width** up and the voices fan out across the field around the pan. They take evenly spaced places, alternating left and right from the outside in: the first voice hard left, the second hard right, the third just inside the first, and so on. [Poly MIDI](../midi/poly-midi.md) hands notes to voices in turn, and neighbouring voices sit on opposite sides, so even two notes held on an eight-voice cable land either side of the pan, and a chord opens up instead of sitting in the middle. Each voice keeps the power it had, so the chord is as loud spread as it was centred.
 
-A place belongs to a voice, not to a note. A melody played on a polyphonic cable moves from side to side as each note takes the next voice. That can sound lively. To keep a line steady, play it on a mono cable, or turn **Spread** down.
+Each channel has its own **Width**, so a pad can fan out while a polyphonic lead on the next channel stays put. A place belongs to a voice, not to a note. A melody played on a polyphonic cable with its **Width** up moves from side to side as each note takes the next voice. That can sound lively. To keep a line steady, play it on a mono cable, or leave its **Width** at 0%.
 
-The Mixer's outputs carry one channel each. Effects after it hear a single stereo pair.
+The Mixer's **Out** and **Send** outputs carry one channel each. Effects after it hear a single stereo pair.
 
 ## Patches
 
@@ -118,7 +121,7 @@ The Mixer's outputs carry one channel each. Effects after it hear a single stere
 Hold a chord, and the Mixer spreads its voices across the field before the effects hear it:
 
 ```text
-[VCA Out] ──> [Mixer Ch 1]          (VCA on a polyphonic voice, Spread 80%)
+[VCA Out] ──> [Mixer Ch 1]          (VCA on a polyphonic voice, Width 1 at 80%)
 [Mixer Out L] ──> [Chorus In L]
 [Mixer Out R] ──> [Chorus In R]
 ```
@@ -152,16 +155,6 @@ Give each part its own place, the way a band stands on a stage. Keep bass and ki
 
 The [Afterglow](../../recipes/afterglow.md) example sets its arpeggio a little right of its pad, so the ping-pong echoes answer from the other side.
 
-### Two modulation sources
-
-A slow LFO and an envelope together: the filter follows each note and drifts as well.
-
-```text
-[LFO Out] ──> [Mixer Ch 1]          (Lv 1 around 30%)
-[ADSR Out] ──> [Mixer Ch 2]
-[Mixer Out] ──> [SVF Filter Cutoff]
-```
-
 ### One room for every channel
 
 Send each channel as much reverb as it needs, through one reverb:
@@ -179,13 +172,10 @@ Turn **Send** up on the channels that should sit further back. A vocal-like lead
 
 ### More than four channels
 
-Chain Mixers. The first one's mix and sends pass through the second:
+Chain Mixers. The first one's mix and sends pass through the second on one cable:
 
 ```text
-[Mixer A Out L] ──> [Mixer B Chain L]
-[Mixer A Out R] ──> [Mixer B Chain R]
-[Mixer A Send L] ──> [Mixer B Chain Send L]
-[Mixer A Send R] ──> [Mixer B Chain Send R]
+[Mixer A Chain Out] ──> [Mixer B Chain In]
 [Mixer B Send L] ──> [Reverb In L]
 [Mixer B Send R] ──> [Reverb In R]
 [Reverb Out L] ──> [Mixer B Return L]
@@ -194,10 +184,11 @@ Chain Mixers. The first one's mix and sends pass through the second:
 [Mixer B Out R] ──> [Audio Output Right]
 ```
 
-The [Backbeat](../../recipes/backbeat.md) example mixes a seven-piece drum kit this way, with one room for the whole kit.
+The [Backbeat](../../recipes/backbeat.md) example compresses its kick and snare on a drum-bus Mixer chained into the main one, with one room for the whole kit. [From One Sine](../../recipes/from-one-sine.md) chains four.
 
 ## Related modules
 
+- [Mix](./mix.md): four signals added into one, for CVs and mono sums
 - [VCA](./vca.md): level control from a CV
 - [Attenuverter](./attenuverter.md): scale, invert or offset a signal before mixing, such as an LFO before it reaches **Pan**
 - [Audio Output](../output/audio-output.md): the final mix, with metering and a limiter

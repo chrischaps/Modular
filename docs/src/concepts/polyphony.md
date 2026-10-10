@@ -43,7 +43,7 @@ A **polyphonic cable into a mono module** is folded down to one channel:
 
 - **Audio inputs** hear every channel summed. That's why a polyphonic voice can go straight into an effect or the Audio Output.
 
-The [Mixer](../modules/utilities/mixer.md) is the exception. It hears each voice of a polyphonic cable apart, and its **Spread** knob fans them out across the stereo field, so a chord opens up instead of sitting in the middle. With **Spread** at 0% it sums them like any mono module.
+The [Mixer](../modules/utilities/mixer.md) is the exception. It hears each voice of a polyphonic cable apart, and its per-channel **Width** knobs fan them out across the stereo field, so a chord opens up instead of sitting in the middle. With **Width** at 0% it sums them like any mono module.
 - **Control and gate inputs** take the first channel only, since adding CVs together rarely means anything useful.
 
 Voices add up, so a four-note chord is roughly four times as loud as one note. Leave headroom with the VCA's **Level** or the Mixer.

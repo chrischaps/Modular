@@ -120,9 +120,9 @@ For a vocal or lead, start from the Chamber with Mix around 20% and Damp near 60
 **Shared room.** Mix several voices into one reverb so they sound like they're in the same space:
 
 ```text
-[VCA 1 Out] ──> [Mixer Ch 1]
-[VCA 2 Out] ──> [Mixer Ch 2]
-[Mixer Out] ──> [Reverb In L] ──> [Audio Output]
+[VCA 1 Out] ──> [Mix In 1]
+[VCA 2 Out] ──> [Mix In 2]
+[Mix Out] ──> [Reverb In L] ──> [Audio Output]
 ```
 
 **Echoes of the room.** Put a [Delay](./delay.md) after the reverb and the tail itself repeats in rhythm.
@@ -132,4 +132,5 @@ For a vocal or lead, start from the Chamber with Mix around 20% and Damp near 60
 - [Delay](./delay.md): distinct echoes instead of a diffuse space
 - [Chorus](./chorus.md): width and movement without a room
 - [EQ](./eq.md): shape the reverb's tone
-- [Mixer](../utilities/mixer.md): feed several voices into one reverb
+- [Mix](../utilities/mix.md): feed several voices into one reverb
+- [Mixer](../utilities/mixer.md): send each channel to one shared reverb and bring it back

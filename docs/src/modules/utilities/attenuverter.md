@@ -109,5 +109,5 @@ In a polyphonic patch, scale each voice's velocity before it moves the filter, s
 ## Related modules
 
 - [VCA](./vca.md): scale a signal by another signal instead of by a knob
-- [Mixer](./mixer.md): add two signals together
+- [Mix](./mix.md): add two signals together
 - [LFO](../modulation/lfo.md) and [ADSR Envelope](../modulation/adsr.md): the signals you'll most often scale

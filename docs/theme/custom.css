@@ -7,6 +7,7 @@
     --signal-control: #f59e42;    /* Orange */
     --signal-gate: #42f587;       /* Green */
     --signal-midi: #b266ff;       /* Purple */
+    --signal-bus: #c8cdd7;        /* Pale steel */
 
     /* Header colors, from ModuleCategory::color() in src/dsp/module_trait.rs */
     --category-source: #42a5f5;     /* Blue */
@@ -127,6 +128,7 @@ table th:first-child {
 .signal-control { color: var(--signal-control); font-weight: 500; }
 .signal-gate { color: var(--signal-gate); font-weight: 500; }
 .signal-midi { color: var(--signal-midi); font-weight: 500; }
+.signal-bus { color: var(--signal-bus); font-weight: 500; }
 
 /* Color swatches: a glowing jack for signal types, a header bar for categories */
 .swatch {
@@ -150,6 +152,7 @@ table th:first-child {
 .swatch.control { color: var(--signal-control); }
 .swatch.gate { color: var(--signal-gate); }
 .swatch.midi { color: var(--signal-midi); }
+.swatch.bus { color: var(--signal-bus); }
 .swatch.source { color: var(--category-source); }
 .swatch.filter { color: var(--category-filter); }
 .swatch.modulation { color: var(--category-modulation); }

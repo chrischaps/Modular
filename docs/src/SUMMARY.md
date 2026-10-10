@@ -40,6 +40,7 @@
   - [Clock](./modules/modulation/clock.md)
   - [VCA](./modules/utilities/vca.md)
   - [Attenuverter](./modules/utilities/attenuverter.md)
+  - [Mix](./modules/utilities/mix.md)
   - [Mixer](./modules/utilities/mixer.md)
   - [Sample & Hold](./modules/utilities/sample-hold.md)
   - [Quantizer](./modules/utilities/quantizer.md)

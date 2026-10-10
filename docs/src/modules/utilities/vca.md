@@ -115,4 +115,5 @@ That way the delay and reverb hear each note's release and carry its tail on aft
 - [ADSR Envelope](../modulation/adsr.md): the usual CV source
 - [LFO](../modulation/lfo.md): tremolo and modulation depth
 - [Attenuverter](./attenuverter.md): scale or invert a CV before it reaches the VCA
-- [Mixer](./mixer.md): combine several VCA outputs
+- [Mix](./mix.md): combine several VCA outputs
+- [Mixer](./mixer.md): place VCA outputs in the stereo field

@@ -98,8 +98,9 @@ The filter follows the notes you play, so high notes are as bright as low ones. 
 
 ```text
 [Oscillator Out] ──> [SVF Filter In]
-[SVF Filter LowPass] ──> [Mixer Ch 1]
-[SVF Filter BandPass] ──> [Mixer Ch 2] ──> [Audio Output]
+[SVF Filter LowPass] ──> [Mix In 1]
+[SVF Filter BandPass] ──> [Mix In 2]
+[Mix Out] ──> [Audio Output]
 ```
 
 Blending lowpass with a little bandpass gives body plus a resonant edge.

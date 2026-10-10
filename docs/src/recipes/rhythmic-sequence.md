@@ -27,7 +27,7 @@ A 16-step acid bassline at 120 BPM: a saw through a resonant lowpass that snaps 
 | [Oscillator](../modules/sources/oscillator.md) | **Wave** Saw |
 | [SVF Filter](../modules/filters/svf-filter.md) | **Cutoff** 300 Hz, **Res** 70% |
 | [ADSR Envelope](../modules/modulation/adsr.md) (filter) | **Atk** 1 ms, **Dec** 200 ms, **Sus** 10%, **Rel** 50 ms |
-| [Mixer](../modules/utilities/mixer.md) | **Lv 1** 100%, **Lv 2** 100% |
+| [Mix](../modules/utilities/mix.md) | **Level 1** 100%, **Level 2** 100% |
 | [ADSR Envelope](../modules/modulation/adsr.md) (amp) | **Atk** 1 ms, **Dec** 150 ms, **Sus** 30%, **Rel** 50 ms |
 | [VCA](../modules/utilities/vca.md) | Defaults |
 | [Distortion](../modules/effects/distortion.md) | **Type** Soft, **Drive** 30%, **Mix** 70% |
@@ -59,14 +59,14 @@ A dash is a step with its gate off: a rest. The line sits on the root, C2, and m
 ```text
 [Oscillator Out] ──> [SVF Filter In]
 [Step Sequencer Gate] ──> [ADSR (filter) Gate]
-[ADSR (filter) Out] ──> [Mixer Ch 1]
-                    ──> [Mixer Ch 2]
-[Mixer Out] ──> [SVF Filter Cutoff]
+[ADSR (filter) Out] ──> [Mix In 1]
+                    ──> [Mix In 2]
+[Mix Out] ──> [SVF Filter Cutoff]
 ```
 
 The filter sits low, at 300 Hz, with **Res** at 70%. The filter envelope kicks it open on every step with a gate, then drops it back in 200 ms. That fast sweep of a sharp resonant peak is the acid sound.
 
-The filter's **Cutoff** input works in octaves, and an envelope peaks at 1.0, so one envelope on its own opens the filter by one octave. The patch sends the envelope into both inputs of a Mixer to add two copies together, which opens it further. The Mixer soft-clips anything over 1.0, easing it toward 1.5, so in practice the peak is nearly an octave and a half, up to roughly 840 Hz.
+The filter's **Cutoff** input works in octaves, and an envelope peaks at 1.0, so one envelope on its own opens the filter by one octave. The patch sends the envelope into both inputs of a Mix to add two copies together, which opens it further. The Mix soft-clips anything over 1.0, easing it toward 1.5, so in practice the peak is nearly an octave and a half, up to roughly 840 Hz.
 
 ### Volume, drive and echo
 

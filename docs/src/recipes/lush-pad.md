@@ -28,7 +28,7 @@ A wide, slow-blooming pad for holding chords. Each note fades in over most of a 
 | [LFO](../modules/modulation/lfo.md) | **Rate** 0.1 Hz, **Wave** Sine, **Bipolar** on |
 | [ADSR Envelope](../modules/modulation/adsr.md) | **Atk** 800 ms, **Dec** 500 ms, **Sus** 80%, **Rel** 2 s |
 | [VCA](../modules/utilities/vca.md) | **Level** 50% |
-| [Mixer](../modules/utilities/mixer.md) | **Spread** 80%, **Master** +3 dB |
+| [Mixer](../modules/utilities/mixer.md) | **Width 1** 80%, **Master** +3 dB |
 | [Chorus](../modules/effects/chorus.md) | **Rate** 0.5 Hz, **Depth** 40%, **Delay** 10 ms, **Voices** 2, **Mix** 50% |
 | [Reverb](../modules/effects/reverb.md) | **Size** 70%, **Decay** 4 s, **Damp** 40%, **PreD** 50 ms, **Mix** 50% |
 | [Audio Output](../modules/output/audio-output.md) | **Vol** 80% |
@@ -79,7 +79,7 @@ The VCA's **Level** sits at 50%. Voices add up, so a full chord is several times
 [Mixer Out R] ──> [Chorus In R]
 ```
 
-The Mixer hears each voice of the polyphonic cable on its own. With **Spread** at 80% it fans them out across the stereo field. Poly MIDI hands each new note the next voice, and neighbouring voices sit on opposite sides, so the notes of a chord alternate left and right. Hold a chord and watch the lights on the Mixer's panorama open out.
+The Mixer hears each voice of the polyphonic cable on its own. With **Width 1** at 80% it fans them out across the stereo field. Poly MIDI hands each new note the next voice, and neighbouring voices sit on opposite sides, so the notes of a chord alternate left and right. Hold a chord and watch the lights on the Mixer's panorama open out.
 
 Panning costs a centred sound 3 dB on each side, so the Mixer's **Master** sits at +3 dB to win it back. The pad is as loud as it would be summed to mono, only wider.
 
@@ -108,7 +108,7 @@ The Chorus and the Reverb aren't polyphonic: they hear the chord as one stereo p
 
 **Cheaper.** Set the Oscillator's **Voices** to 1 and add more chorus **Depth**. It's thinner, but costs a fifth of the CPU.
 
-**Narrow or wide.** Turn the Mixer's **Spread** down to 0% and the chord gathers in the middle, the way it sounded before it was spread. At 100% the outer voices sit hard left and right.
+**Narrow or wide.** Turn the Mixer's **Width 1** down to 0% and the chord gathers in the middle, the way it sounded before it was spread. At 100% the outer voices sit hard left and right.
 
 ## Related
 

@@ -112,9 +112,9 @@ The [FM Synthesis](../../recipes/fm-synthesis.md) recipe builds a complete patch
 **Sub** is a square wave one octave below the tuned pitch. It divides the main oscillator's own cycle, so it follows V/Oct, FM and sync. Mix it in under a saw for weight:
 
 ```text
-[Oscillator Out] ──> [Mixer Ch 1]
-[Oscillator Sub] ──> [Mixer Ch 2]
-[Mixer Out] ──> [Ladder Filter In]
+[Oscillator Out] ──> [Mix In 1]
+[Oscillator Sub] ──> [Mix In 2]
+[Mix Out] ──> [Ladder Filter In]
 ```
 
 ## Unison and supersaw

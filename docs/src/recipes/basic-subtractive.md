@@ -67,7 +67,7 @@ The **filter envelope** shapes the brightness. The SVF's **Cutoff** input works 
 
 **Supersaw.** On the Oscillator, set **Voices** to 7 and **Detune** to about 40%. Seven detuned saws through the same filter make a wide, shimmering lead.
 
-**More sweep.** To open the filter by more than an octave, double the envelope by patching it into both inputs of a [Mixer](../modules/utilities/mixer.md), as the [Rhythmic Sequence](./rhythmic-sequence.md) example does.
+**More sweep.** To open the filter by more than an octave, double the envelope by patching it into both inputs of a [Mix](../modules/utilities/mix.md), as the [Rhythmic Sequence](./rhythmic-sequence.md) example does.
 
 **Space.** Add a [Stereo Delay](../modules/effects/delay.md) and a [Reverb](../modules/effects/reverb.md) between the VCA and the Audio Output.
 

@@ -30,7 +30,7 @@ Surf rolls in and draws back, and a glass chime somewhere up the beach turns in 
 | [VCA](../modules/utilities/vca.md) (chime) | Defaults |
 | [Reverb](../modules/effects/reverb.md) | **Size** 85%, **Decay** 6 s, **Damp** 40%, **PreD** 40 ms, **Mix** 45% |
 | [LFO](../modules/modulation/lfo.md) | **Rate** 0.12 Hz, **Wave** Sine, **Bipolar** off |
-| [Mixer](../modules/utilities/mixer.md) | **Lv 1** 100%, **Lv 2** 60% |
+| [Mix](../modules/utilities/mix.md) | **Level 1** 100%, **Level 2** 60% |
 | [VCA](../modules/utilities/vca.md) (surf) | **Level** 90%, **CV Amt** 75% |
 | [SVF Filter](../modules/filters/svf-filter.md) | **Cutoff** 500 Hz, **Res** 15% |
 | [Audio Output](../modules/output/audio-output.md) | **Vol** 80% |
@@ -40,9 +40,9 @@ Surf rolls in and draws back, and a glass chime somewhere up the beach turns in 
 ### The surf
 
 ```text
-[Noise Pink]  ──> [Mixer Ch 1]
-[Noise Brown] ──> [Mixer Ch 2]
-[Mixer Out] ──> [VCA (surf) In]
+[Noise Pink]  ──> [Mix In 1]
+[Noise Brown] ──> [Mix In 2]
+[Mix Out] ──> [VCA (surf) In]
 [VCA (surf) Out] ──> [SVF Filter In]
 [SVF Filter LowPass] ──> [Audio Output Mono]
 ```
@@ -104,7 +104,7 @@ A large, six-second reverb spreads the chime across the stereo field and blurs e
 
 ## Variations
 
-**Stormier.** Raise the LFO's **Rate** to 0.3 Hz and the filter's **Res** to 40%. Swap Ch 1 and Ch 2 levels on the Mixer for a heavier, browner sea.
+**Stormier.** Raise the LFO's **Rate** to 0.3 Hz and the filter's **Res** to 40%. Swap the **Level 1** and **Level 2** settings on the Mix for a heavier, browner sea.
 
 **A wider chime.** Turn Noise **Level** up to 100% and the chime ranges a full octave either way. The surf gets louder too, so lower the surf VCA's **Level** to match.
 

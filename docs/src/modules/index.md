@@ -61,7 +61,8 @@ The **ID** is the name a patch file uses to refer to the module.
 | [Clock](./modulation/clock.md) | `util.clock` | Steady gate pulses at a tempo; sets the patch tempo, and can follow MIDI clock |
 | [VCA](./utilities/vca.md) | `util.vca` | Voltage-controlled amplifier: sets a signal's level from a CV |
 | [Attenuverter](./utilities/attenuverter.md) | `util.attenuverter` | Scale, invert and offset a control signal |
-| [Mixer](./utilities/mixer.md) | `util.mixer` | Four-channel stereo mixer with pan, mute and poly spread |
+| [Mix](./utilities/mix.md) | `util.mix` | Add up to four signals, audio or CV, into one mono sum |
+| [Mixer](./utilities/mixer.md) | `util.mixer` | Four-channel stereo console with pan, width, sends, mute and solo |
 | [Sample & Hold](./utilities/sample-hold.md) | `util.sample_hold` | Capture a signal's value on each trigger and hold it |
 | [Quantizer](./utilities/quantizer.md) | `util.quantizer` | Snap a pitch to the nearest note of a scale |
 | [Clock Divider](./utilities/divider.md) | `util.divider` | Fire once every so many clocks, and hold a gate open for a phrase |
@@ -133,7 +134,8 @@ Drive a voice from a sequence instead of a keyboard:
 | Program a drum kit, with fills | [Clock](./modulation/clock.md) into the [Trigger Sequencer](./utilities/trigger-sequencer.md), a lane for each [Drum](./sources/drum.md) |
 | Make random changes | [Noise](./sources/noise.md) into [Sample & Hold](./utilities/sample-hold.md) for steps, or its **Random** output for glides |
 | Keep random notes in key | [Quantizer](./utilities/quantizer.md) |
-| Combine signals, or place them left and right | [Mixer](./utilities/mixer.md) |
+| Combine signals | [Mix](./utilities/mix.md) |
+| Place sounds left and right | [Mixer](./utilities/mixer.md) |
 | Add space and depth | [Stereo Delay](./effects/delay.md), [Reverb](./effects/reverb.md), [Chorus](./effects/chorus.md) |
 | Add grit or warmth | [Distortion](./effects/distortion.md) |
 | Balance tone and dynamics | [3-Band EQ](./effects/eq.md), [Compressor](./effects/compressor.md) |

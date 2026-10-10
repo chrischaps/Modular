@@ -26,7 +26,7 @@ Your own instrument, layered by yourself. Plug in a guitar, a microphone or a ke
 | [Stereo Delay](../modules/effects/delay.md) | **Sync** 1/8D, **P-P** and **Tape** on, **FB** 30%, **Mix** 20%, **HiCut** 6 kHz, **LoCut** 150 Hz |
 | [Reverb](../modules/effects/reverb.md) | **Size** 55%, **Decay** 2.2 s, **PreD** 15 ms, **Mod** 30%, **Mix** 22% |
 | [Drum](../modules/sources/drum.md) ×2 | A **Rim** on every beat (**Decay** 25%, **Level** 50%), a **Cowbell** on each bar (**Decay** 15%, **Level** 35%) |
-| [Mixer](../modules/utilities/mixer.md) | The click on channels 1 and 2 at 60%, the effects on **Chain L/R** |
+| [Mixer](../modules/utilities/mixer.md) | The click on channels 1 and 2 at 60%, the effects on **Return L/R** |
 | [Audio Output](../modules/output/audio-output.md) | **Vol** 80% |
 
 ## How it's built
@@ -66,7 +66,7 @@ The status bar's **In** figure is the round trip from the input jack to your spe
 ```text
 [Clock Gate]         ──> [Drum (Rim) Trig]     ──> [Mixer Ch 1]
 [Clock Divider Trig] ──> [Drum (Cowbell) Trig] ──> [Mixer Ch 2]
-[Looper Out L/R] ──> [Stereo Delay In L/R] ──> [Reverb In L/R] ──> [Mixer Chain L/R]
+[Looper Out L/R] ──> [Stereo Delay In L/R] ──> [Reverb In L/R] ──> [Mixer Return L/R]
 [Mixer Out L/R]  ──> [Audio Output Left/Right]
 ```
 

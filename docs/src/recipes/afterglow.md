@@ -29,13 +29,13 @@ A patch that plays itself and sounds finished: a soft, plucked arpeggio rolls th
 | [Ladder Filter](../modules/filters/ladder-filter.md) | **Cutoff** 900 Hz, **Res** 35%, **Drive** 2.2x |
 | [ADSR Envelope](../modules/modulation/adsr.md) 1 | **Atk** 2 ms, **Dec** 350 ms, **Sus** 0%, **Rel** 350 ms, **Vel** 60% |
 | [LFO](../modules/modulation/lfo.md) | **Rate** 0.04 Hz, **Wave** Sine, **Bipolar** on |
-| [Mixer](../modules/utilities/mixer.md) 1 (filter sweep) | **Lv 1** 100%, **Lv 2** 70% |
+| [Mix](../modules/utilities/mix.md) (filter sweep) | **Level 1** 100%, **Level 2** 70% |
 | [VCA](../modules/utilities/vca.md) 1 | Defaults |
 | [Oscillator](../modules/sources/oscillator.md) 2 | **Wave** Saw, **Oct** −1, **Voices** 5, **Detune** 25%, **Spread** 60% |
 | [SVF Filter](../modules/filters/svf-filter.md) | **Cutoff** 420 Hz, **Res** 15% |
 | [ADSR Envelope](../modules/modulation/adsr.md) 2 | **Atk** 80 ms, **Dec** 100 ms, **Sus** 100%, **Rel** 2.2 s, **Vel** 0% |
 | [VCA](../modules/utilities/vca.md) 2 | **Level** 75%, **CV Amt** 60% |
-| [Mixer](../modules/utilities/mixer.md) 2 | **Lv 1** 100%, **Lv 2** 65%, **Pan 1** R 35, **Master** +3 dB |
+| [Mixer](../modules/utilities/mixer.md) | **Level 1** 100%, **Level 2** 65%, **Pan 1** R 35, **Master** +3 dB |
 | [Chorus](../modules/effects/chorus.md) | **Rate** 0.3 Hz, **Depth** 35%, **Delay** 12 ms, **Voices** 2, **Mix** 35% |
 | [Stereo Delay](../modules/effects/delay.md) | **Sync** 1/8D, **FB** 45%, **Mix** 30%, **HiCut** 3.5 kHz, **LoCut** 350 Hz, **P-P** on, **Tape** on |
 | [Reverb](../modules/effects/reverb.md) | **Size** 80%, **Decay** 5 s, **PreD** 30 ms, **Mix** 35%, **Mod** 30% |
@@ -66,14 +66,14 @@ The shape has no third. Without one, a chord is neither major nor minor (it's a 
 [Step Sequencer 1 Gate] ──> [ADSR 1 Gate]
 [Step Sequencer 1 Velocity] ──> [ADSR 1 Velocity]
 [ADSR 1 Out] ──> [VCA 1 CV]
-             ──> [Mixer 1 Ch 1]
-[LFO Out] ──> [Mixer 1 Ch 2]
-[Mixer 1 Out] ──> [Ladder Filter Cutoff]
+             ──> [Mix In 1]
+[LFO Out] ──> [Mix In 2]
+[Mix Out] ──> [Ladder Filter Cutoff]
 ```
 
 Two slightly detuned saws go through the ladder filter's 24 dB lowpass. A fast envelope opens both the VCA and the filter, so each note starts bright and dulls as it fades, like a plucked string. Each step has its own velocity. The loud ones fall on steps 1, 4, 7, 11 and 14, a 3-3-4-3-3 pattern that pushes against the even sixteenths, so the line grooves instead of ticking.
 
-The Mixer adds a very slow LFO to the envelope before both reach **Cutoff**. Over 25 seconds the whole arpeggio gets darker and then brighter again. One cycle of the LFO lasts nearly ten bars, so each pass through the progression sounds a little different.
+The Mix adds a very slow LFO to the envelope before both reach **Cutoff**. Over 25 seconds the whole arpeggio gets darker and then brighter again. One cycle of the LFO lasts nearly ten bars, so each pass through the progression sounds a little different.
 
 ### The pad
 
@@ -92,9 +92,9 @@ VCA 2's **CV Amt** of 60% means the envelope controls only part of the level, an
 ### Echoes and space
 
 ```text
-[VCA 1 Out] ──> [Mixer 2 Ch 1]       (Pan R 35)
-[VCA 2 Out] ──> [Mixer 2 Ch 2]       (Pan C)
-[Mixer 2 Out L/R] ──> [Chorus In L/R]
+[VCA 1 Out] ──> [Mixer Ch 1]       (Pan R 35)
+[VCA 2 Out] ──> [Mixer Ch 2]       (Pan C)
+[Mixer Out L/R] ──> [Chorus In L/R]
 [Chorus Out L/R] ──> [Stereo Delay In L/R]
 [Stereo Delay Out L/R] ──> [Reverb In L/R]
 [Reverb Out L/R] ──> [Audio Output Left/Right]

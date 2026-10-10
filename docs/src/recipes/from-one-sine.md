@@ -32,11 +32,11 @@ Each section is four units of four bars, sixteen bars in all.
 
 - **A patch can hold its own arrangement.** Trigger Sequencer lanes are more than drum triggers: a lane's **Vel** holds its last hit's velocity, so a slow sequencer is a set of faders that move on cue.
 - **Smoothing a control voltage.** A [Sample & Hold](../modules/utilities/sample-hold.md) with **Slew** turns a jump into a glide. Triggered by the lane's own gate, it samples exactly when the level changes.
-- **The Mixer adds control voltages.** Its mono **Out** is the sum of its channels, so it can add two CVs, here the score's drum pattern and a fill.
+- **Mix adds control voltages.** A [Mix](../modules/utilities/mix.md) adds its inputs into one **Out**, so it can add two CVs, here the score's drum pattern and a fill.
 - **Harmony from mono parts.** A sequencer for each pad voice, stepping once a bar, sings real chords with real voice-leading. A root sequencer transposes the arpeggio and bass through **Exp FM**.
 - **Gates make decisions.** A [Clock Divider](../modules/utilities/divider.md), [Logic](../modules/utilities/logic.md) and an [Attenuverter](../modules/utilities/attenuverter.md) put a fill in the last bar of a phrase only when the score asks for one.
 - **Sidechain ducking.** The [Compressor](../modules/effects/compressor.md) on the pad listens to the kick.
-- **Send and return.** Four [Mixers](../modules/utilities/mixer.md) chain their outputs and their sends, so one delay and two reverbs serve the whole song.
+- **Send and return.** Four [Mixers](../modules/utilities/mixer.md) chain their mixes and their sends along one cable each, so one delay and two reverbs serve the whole song.
 
 ## Modules
 
@@ -65,7 +65,8 @@ Each section is four units of four bars, sixteen bars in all.
 | [Chorus](../modules/effects/chorus.md) | Pad, into stereo |
 | [Distortion](../modules/effects/distortion.md) | Bass, **Tube** |
 | [3-Band EQ](../modules/effects/eq.md) | Bass: lows up, boxiness out |
-| [Mixer](../modules/utilities/mixer.md) ×7 | The pad's four voices, the fill adder, two for the kit, and Echoes, Body and Sky |
+| [Mix](../modules/utilities/mix.md) ×2 | The pad's four voices, and the fill adder |
+| [Mixer](../modules/utilities/mixer.md) ×5 | Two for the kit, and Echoes, Body and Sky |
 | [Stereo Delay](../modules/effects/delay.md) | **Sync** 1/8D, **P-P** and **Tape** on, on the Echoes send |
 | [Reverb](../modules/effects/reverb.md) ×2 | A hall on Echoes, a plate on the send everyone shares |
 | [Oscilloscope](../modules/visualization/oscilloscope.md) | The mix and the kick, to watch |
@@ -103,7 +104,7 @@ The event lanes use the gates. Score II's **Gate Length** is 95%, so a hit holds
 [Pad Voice n Pitch] ──> [Pad Oscillator n V/Oct]
 ```
 
-Sixteen bars of chords: Dm9, Bbmaj7, Fmaj7 and Cadd9 twice, then Gm7, Bb, Dm, C, Gm7, Bbmaj7, Csus4 and C. Four sequencers each take a step a bar. **Roots** plays the low voice, an octave down. The other three are the upper voices, and each one sings its own line through the changes, so the chords move by step instead of jumping in parallel. The four saws meet in a small Mixer, pass through one Ladder Filter, and duck under the kick in the Compressor. The Chorus spreads them into stereo.
+Sixteen bars of chords: Dm9, Bbmaj7, Fmaj7 and Cadd9 twice, then Gm7, Bb, Dm, C, Gm7, Bbmaj7, Csus4 and C. Four sequencers each take a step a bar. **Roots** plays the low voice, an octave down. The other three are the upper voices, and each one sings its own line through the changes, so the chords move by step instead of jumping in parallel. The four saws meet in a [Mix](../modules/utilities/mix.md), pass through one Ladder Filter, and duck under the kick in the Compressor. The Chorus spreads them into stereo.
 
 The arpeggio and the bass are written over C, and **Roots** moves them to each chord through **Exp FM** at 1 octave per volt, as in [Afterglow](./afterglow.md). That only stays in key if the shapes have no third, so the arpeggio is made of roots, ninths and fifths, and the bass of roots, fifths and octaves. Over these roots, every note they play is in D minor.
 
@@ -126,34 +127,33 @@ The Looper listens to the sine. At bar 5, Score II presses **Rec**. With bar pul
 ### Drums and fills
 
 ```text
-[Score I Vel 6] ──> [Mixer Pattern Ch 1]
+[Score I Vel 6] ──> [Mix Pattern In 1]
                 ──> [Logic CV]                 (Threshold 0.55)
 [Clock Divider "last bar" Gate] ──> [Logic A]
 [Logic AND] ──> [Attenuverter In]              (Amount 0.25)
-[Attenuverter Out] ──> [Mixer Pattern Ch 2]
-[Mixer Pattern Out] ──> [Drum Trigger Sequencer Pattern]
+[Attenuverter Out] ──> [Mix Pattern In 2]
+[Mix Pattern Out] ──> [Drum Trigger Sequencer Pattern]
 ```
 
 The drum sequencer's **Pattern** input picks a pattern for each new bar in quarters: 0 to 0.25 is A, then B, C and D. A is silence, B is a pulse of kick, rim and offbeat hats, C is the groove, and D is a build: four-on-the-floor kicks, toms, and a snare roll whose ratchets climb to four hits a step.
 
-The score's drum lane sets the pattern for a whole unit: 0.10 for A, 0.35 for B, 0.52 for C and 0.85 for D. For a fill, one Clock Divider opens a gate for the last bar of every unit. Logic passes it through only while the score's CV is above 0.55, the Attenuverter scales it to 0.25, and the pattern Mixer adds it to the score's CV. So a unit marked 0.60 plays C for three bars and D for one. The divider's gate is a **Gate**, and the Mixer's inputs are audio, which a gate can't drive. The Attenuverter takes the gate as a control voltage, and scales it.
+The score's drum lane sets the pattern for a whole unit: 0.10 for A, 0.35 for B, 0.52 for C and 0.85 for D. For a fill, one Clock Divider opens a gate for the last bar of every unit. Logic passes it through only while the score's CV is above 0.55, the Attenuverter scales it to 0.25, and the pattern Mix adds it to the score's CV. So a unit marked 0.60 plays C for three bars and D for one. The divider's gate is a **Gate**, and the Mix's inputs are audio, which a gate can't drive. The Attenuverter takes the gate as a control voltage, and scales it.
 
 The closed hat's gate chokes the open hat. The kick is tuned to A1, the fifth of D, and the tom to A2, so the drums sit in the key.
 
 ### The desk
 
 ```text
-[Mixer Kit 2 Out L/R] ──> [Mixer Kit Chain L/R]
-[Mixer Kit Out L/R] ──> [Mixer Body Chain L/R]
-[Mixer Body Out L/R] ──> [Mixer Sky Chain L/R]
+[Mixer Kit 2 Chain Out] ──> [Mixer Kit Chain In]
+[Mixer Kit Chain Out] ──> [Mixer Body Chain In]
+[Mixer Body Chain Out] ──> [Mixer Sky Chain In]
 [Mixer Sky Out L/R] ──> [Audio Output Left/Right]
-(each mixer's Send L/R ──> the next one's Chain Send L/R)
 [Mixer Sky Send L/R] ──> [Plate Reverb In L/R] ──> [Mixer Sky Return L/R]
 [Mixer Echoes Send L/R] ──> [Stereo Delay] ──> [Mixer Echoes Return L/R]
 [Mixer Echoes Out L/R] ──> [Hall Reverb] ──> [Mixer Body Return L/R]
 ```
 
-The sine, arpeggio, bells and sparkles share the Echoes mixer, whose send feeds a ping-pong tape delay on dotted eighths. Its output passes through a big hall and comes back on Body's **Return**. Body carries the bass, the pad in stereo and the wind. Sky carries the lead, the Looper's two sides and the riser. The two kit mixers chain into Body. Every mixer's send chains along to Sky, where one plate reverb serves them all.
+The sine, arpeggio, bells and sparkles share the Echoes mixer, whose send feeds a ping-pong tape delay on dotted eighths. Its output passes through a big hall and comes back on Body's **Return**. Body carries the bass, the pad in stereo and the wind. Sky carries the lead, the Looper's two sides and the riser. The two kit mixers chain into Body, and Body into Sky. Each chain cable carries a mixer's mix and its sends together, so the sends of all four ride along to Sky, where one plate reverb serves them. Echoes keeps its send for the delay.
 
 ## Variations
 

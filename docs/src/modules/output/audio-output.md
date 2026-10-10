@@ -106,6 +106,7 @@ With **Voices** above 1, the Oscillator spreads its unison voices across the two
 
 ## Related modules
 
-- [Mixer](../utilities/mixer.md): combine sources before the output
+- [Mix](../utilities/mix.md): add sources into one mono signal
+- [Mixer](../utilities/mixer.md): place sources in the stereo field before the output
 - [VCA](../utilities/vca.md): shape and set the level of each voice
 - [Reverb](../effects/reverb.md) and [Delay](../effects/delay.md): stereo effects that usually come last

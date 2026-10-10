@@ -67,8 +67,8 @@ The rim plays one quiet hit every 3 steps, and the cowbell one every 5, three ti
 | [Drum](../modules/sources/drum.md) (rim) | **Type** Rim, **Decay** 30%, **Tone** 50%, **Snap** 50%, **Level** 60% |
 | [Drum](../modules/sources/drum.md) (cowbell) | **Type** Cowbell, **Decay** 35%, **Tone** 50%, **Snap** 50%, **Level** 50% |
 | [Drum](../modules/sources/drum.md) (cymbal) | **Type** Cymbal, **Decay** 70%, **Tone** 55%, **Snap** 50%, **Level** 50% |
-| [Mixer](../modules/utilities/mixer.md) (skins) | Snare 75% at R 10, tom 70% at L 30, rim 50% at R 45, cowbell 45% at L 45; the kick on **Chain L** |
-| [Mixer](../modules/utilities/mixer.md) (metal) | Closed hat 55% and open hat 50% at R 30, cymbal 45% at L 25; the skins Mixer on **Chain L/R** |
+| [Mixer](../modules/utilities/mixer.md) (skins) | Snare 75% at R 10, tom 70% at L 30, rim 50% at R 45, cowbell 45% at L 45; the kick on **Return L** |
+| [Mixer](../modules/utilities/mixer.md) (metal) | Closed hat 55% and open hat 50% at R 30, cymbal 45% at L 25; the skins Mixer on **Chain In** |
 | [Reverb](../modules/effects/reverb.md) | **Size** 30%, **Decay** 0.6 s, **Damp** 60%, **PreD** 8 ms, **Mix** 14% |
 | [Audio Output](../modules/output/audio-output.md) | **Vol** 90% |
 
@@ -90,7 +90,7 @@ Accents raise the velocity of every hit on beats 1 to 4 a third of the way to fu
 
 ### Two mixers
 
-Five drums go to the first Mixer: the kick on its **Chain L**, which puts it in the centre, and the snare, tom, rim and cowbell on its four channels. That Mixer's output comes into the second one's **Chain L/R**, which adds the hats and the cymbal and sends the whole kit through a small room.
+Five drums go to the first Mixer: the kick on its **Return L**, which puts it in the centre, and the snare, tom, rim and cowbell on its four channels. That Mixer's **Chain Out** comes into the second one's **Chain In**, on one cable, and the second adds the hats and the cymbal and sends the whole kit through a small room.
 
 ## Try this
 

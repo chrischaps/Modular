@@ -28,7 +28,7 @@ A patch that plays itself. A slow pentatonic melody repeats every twelve seconds
 | [Oscillator](../modules/sources/oscillator.md) 2 | **Wave** Sine |
 | [Noise](../modules/sources/noise.md) | **Rate** 0.2 Hz |
 | [Quantizer](../modules/utilities/quantizer.md) | **Root** C, **Scale** Pentatonic Major |
-| [Mixer](../modules/utilities/mixer.md) | **Lv 1** 100%, **Lv 2** 50% |
+| [Mix](../modules/utilities/mix.md) | **Level 1** 100%, **Level 2** 50% |
 | [SVF Filter](../modules/filters/svf-filter.md) | **Cutoff** 1.5 kHz, **Res** 20% |
 | [ADSR Envelope](../modules/modulation/adsr.md) | **Atk** 300 ms, **Dec** 500 ms, **Sus** 70%, **Rel** 2 s |
 | [VCA](../modules/utilities/vca.md) | Defaults |
@@ -61,9 +61,9 @@ Oscillator 1 plays the melody as a triangle, an octave down: a soft, hollow tone
 ```text
 [Noise Random] ──> [Quantizer In]
 [Quantizer Out] ──> [Oscillator 2 V/Oct]
-[Oscillator 1 Out] ──> [Mixer Ch 1]
-[Oscillator 2 Out] ──> [Mixer Ch 2]
-[Mixer Out] ──> [SVF Filter In]
+[Oscillator 1 Out] ──> [Mix In 1]
+[Oscillator 2 Out] ──> [Mix In 2]
+[Mix Out] ──> [SVF Filter In]
 ```
 
 The Noise module's **Random** output picks a new value every five seconds or so, and glides to it. On its own, that would bend Oscillator 2's pitch smoothly through every frequency in between. The Quantizer snaps it to the C major pentatonic scale, the same five notes the melody uses, so the glide becomes a walk: one scale step at a time, up or down, from C3 to C5.
