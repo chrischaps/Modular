@@ -15,6 +15,7 @@ pub mod input_display;
 mod divider_display;
 mod drum_display;
 mod logic_display;
+mod looper_display;
 mod trigger_display;
 mod mixer_strips;
 mod module_ui;

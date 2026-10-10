@@ -62,6 +62,9 @@ const SCOPE_FRAME_BUFFER_SIZE: usize = 8;
 struct AudioConfig {
     sample_rate_bits: AtomicU32,
     block_size: AtomicUsize,
+    /// The round trip live input takes from the input jack to the
+    /// speakers, in frames, or 0 with no input open.
+    input_latency: AtomicUsize,
 }
 
 impl AudioConfig {
@@ -69,6 +72,7 @@ impl AudioConfig {
         Self {
             sample_rate_bits: AtomicU32::new(sample_rate.to_bits()),
             block_size: AtomicUsize::new(block_size),
+            input_latency: AtomicUsize::new(0),
         }
     }
 
@@ -269,6 +273,14 @@ impl UiHandle {
     pub fn stop_recording(&mut self) {
         self.unsent_handoffs.push(AudioMessage::StopRecording);
         self.send_handoffs();
+    }
+
+    /// Tells the audio thread how late live input reaches the speakers, in
+    /// frames: the round trip measured for the input that's open, or 0
+    /// with none. Modules fed by an Audio Input hear it as
+    /// [`ProcessContext::input_latency`](crate::dsp::ProcessContext::input_latency).
+    pub fn set_input_latency(&self, frames: usize) {
+        self.config.input_latency.store(frames, Ordering::Relaxed);
     }
 
     /// Hands an audio input's feed to the audio thread, which reads from it
@@ -486,6 +498,14 @@ impl EngineHandle {
             debug_assert!(false, "retired sample queue full");
             drop(sample);
         }
+    }
+
+    /// How late live input reaches the speakers, in frames, as the UI last
+    /// measured it.
+    ///
+    /// REAL-TIME SAFE: an atomic load.
+    pub fn input_latency(&self) -> usize {
+        self.config.input_latency.load(Ordering::Relaxed)
     }
 
     /// Records the settings the audio thread runs at, so the UI prepares new

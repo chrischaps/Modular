@@ -13,15 +13,15 @@ It doesn't imitate hardware panels. Every module is a node with jacks on its sid
 - **Colour-coded signals.** Blue cables carry audio, orange carry control voltage, green carry gates, and purple carry MIDI. Connections that can't work are refused as you make them.
 - **Inputs vs. knobs.** Most parameters have a knob and a jack. Patch a cable into the jack and it takes over: the knob dims and follows the incoming signal, as on an analog modular.
 - **Polyphony on a single cable.** Poly MIDI sends up to 8 voices down one cable, and every module after it plays each voice on its own. Poly cables are drawn as a bundle of strands, one per voice.
-- **30 modules:**
+- **32 modules:**
 
   | Category | Modules |
   |---|---|
-  | Sources | Oscillator (BLEP anti-aliasing, sync, through-zero FM, sub, supersaw unison), Noise (white, pink, brown, smooth random), Drum (kick, snare, tom, clap, hats, cymbal, rim, cowbell, with accent and choke), Audio Input (mic or line in, envelope follower, gate), Keyboard, MIDI Note, Poly MIDI |
+  | Sources | Oscillator (BLEP anti-aliasing, sync, through-zero FM, sub, supersaw unison), Noise (white, pink, brown, smooth random), Drum (kick, snare, tom, clap, hats, cymbal, rim, cowbell, with accent and choke), Sampler (one-shots or a poly instrument from a WAV), Audio Input (mic or line in, envelope follower, gate), Keyboard, MIDI Note, Poly MIDI |
   | Filters | SVF Filter (self-oscillating, notch), Ladder Filter (oversampled) |
   | Modulation | ADSR Envelope, LFO, Clock |
   | Effects | Stereo Delay (with tape mode), Reverb (8-line FDN), Chorus, Distortion (oversampled, wavefolder), Compressor, Parametric EQ |
-  | Utilities | VCA, Mixer (4 stereo channels, pan, mute, poly spread), Attenuverter, Sample & Hold, Quantizer (scales, custom scale from a clickable piano), Clock Divider, Logic (AND/OR/XOR/NOT, comparator), Step Sequencer, Trigger Sequencer (8 drum lanes, chained patterns, probability, ratchets) |
+  | Utilities | VCA, Mixer (4 stereo channels, pan, mute, poly spread), Attenuverter, Sample & Hold, Quantizer (scales, custom scale from a clickable piano), Clock Divider, Logic (AND/OR/XOR/NOT, comparator), Looper (record, overdub and undo live layers, clock-synced), Step Sequencer, Trigger Sequencer (8 drum lanes, chained patterns, probability, ratchets) |
   | Output | Audio Output (with metering and limiter), Oscilloscope, MIDI Monitor |
 
 - **Visual feedback.** Waveform, envelope and filter-response displays sit on their modules, LEDs light on active outputs, and the scope shows what's actually there. Hover any jack or knob to see what it does.
@@ -45,7 +45,7 @@ cargo run --release                           # opens with the First Sound examp
 cargo run --release -- patches/lush-pad.json  # or open a patch
 ```
 
-Twelve example patches are in [`patches/`](patches) and in the app's **Examples** menu. Press **Play**, then hold a few keys on the computer keyboard (`Z` to `M` is a white-key octave, with the sharps on the row above).
+Fourteen example patches are in [`patches/`](patches) and in the app's **Examples** menu. Press **Play**, then hold a few keys on the computer keyboard (`Z` to `M` is a white-key octave, with the sharps on the row above).
 
 ### Render a patch offline
 

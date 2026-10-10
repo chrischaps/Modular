@@ -7,8 +7,9 @@
 //! bypassed and brought back, live MIDI plays its MIDI Note modules, a live
 //! audio input feeds its Audio Input module (the input device switched
 //! midway), the output is recorded (one take stopped and a new one
-//! started midway), and its Sampler is given new recordings while it plays
-//! them. Edits are compiled on the "UI" side (outside the counted
+//! started midway), its Sampler is given new recordings while it plays
+//! them, and its Looper is taken round its whole cycle again and again:
+//! record, overdub, undo, redo, stop, restart, clear. Edits are compiled on the "UI" side (outside the counted
 //! region); installing them happens inside it. The input device's callback
 //! is counted too.
 
@@ -20,9 +21,10 @@ use std::sync::Arc;
 use modular_synth::dsp::SampleData;
 
 use modular_synth::engine::{
-    create_module_registry, input_channel, input_channel_same_clock, AudioProcessor, EngineChannels, EngineCommand, MidiEvent, NodeId,
-    Recording, TimestampedMidiEvent, UiHandle,
+    create_module_registry, input_channel, input_channel_same_clock, AudioProcessor, EngineChannels, EngineCommand, EngineEvent, MidiEvent,
+    NodeId, Recording, TimestampedMidiEvent, UiHandle,
 };
+use modular_synth::modules::looper::{LoopState, Looper};
 
 struct CountingAllocator;
 
@@ -162,6 +164,25 @@ fn audio_callback_never_allocates() {
     ui.send_command(EngineCommand::LoadSample { node_id: sampler, sample: tone(220.0) });
     let mut loads = 1;
 
+    // A Looper fed by the live input (with a round trip to take off its
+    // overdubs), pressed through its cycle by its footswitches
+    let looper = node_of(&nodes, "util.looper");
+    ui.send_command(EngineCommand::Connect {
+        from_node: node_of(&nodes, "source.audio_input"),
+        from_port: 0,
+        to_node: looper,
+        to_port: port("util.looper", "In L"),
+    });
+    ui.set_input_latency(1500);
+    let pedal = |pedal: usize, down: bool| EngineCommand::SetParameter {
+        node_id: looper,
+        param_index: Looper::PARAM_PEDALS + pedal,
+        value: if down { 1.0 } else { 0.0 },
+    };
+    // (round within each 120, footswitch): Rec, Stop, Undo, Clear
+    let presses = [(5, 0), (30, 0), (45, 0), (70, 0), (78, 2), (84, 2), (90, 1), (96, 1), (102, 0), (106, 2), (112, 3)];
+    let mut looper_states = std::collections::HashSet::new();
+
     // Record the whole run: the tap copies every callback into its ring
     let takes = std::env::temp_dir().join("modular-realtime-alloc");
     std::fs::create_dir_all(&takes).unwrap();
@@ -227,6 +248,14 @@ fn audio_callback_never_allocates() {
                 ui.send_command(EngineCommand::SetBypass { node_id, bypassed: round % 16 == 3 });
             }
         }
+        for &(at, which) in &presses {
+            if round % 120 == at {
+                ui.send_command(pedal(which, true));
+            }
+            if round % 120 == at + 2 {
+                ui.send_command(pedal(which, false));
+            }
+        }
         if round % 37 == 11 {
             ui.send_command(EngineCommand::LoadSample { node_id: sampler, sample: tone(220.0 + round as f32) });
             loads += 1;
@@ -249,7 +278,13 @@ fn audio_callback_never_allocates() {
             midi.push(TimestampedMidiEvent::now(event)).unwrap();
         }
         ui.flush();
-        ui.drain_events().for_each(drop);
+        for event in ui.drain_events() {
+            if let EngineEvent::Readout { node_id, readout } = event {
+                if node_id == looper {
+                    looper_states.insert(format!("{:?}", LoopState::from_code(readout.values[Looper::READOUT_STATE])));
+                }
+            }
+        }
 
         // The input device keeps time with the output, 480 frames at a time
         input_due += frames;
@@ -277,6 +312,9 @@ fn audio_callback_never_allocates() {
     assert!(monitor.device_latency().is_some(), "the input's timestamps were taken in");
     assert!(output.iter().all(|s| s.is_finite()));
     assert!(loads > 25);
+    for state in ["Recording", "Playing", "Overdubbing", "Stopped", "Empty"] {
+        assert!(looper_states.contains(state), "the Looper never reached {state}: {looper_states:?}");
+    }
     assert_eq!(allocations, 0, "audio callback allocated {allocations} times over {blocks} callbacks");
 }
 

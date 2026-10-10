@@ -738,6 +738,21 @@ impl SynthApp {
         }
     }
 
+    /// Plays a parameter from the node, as a MIDI controller would: sent at
+    /// once, and not an undo step (a Looper's footswitch).
+    fn play_parameter(&mut self, node_id: egui_node_graph2::NodeId, param_name: &str, value: f32) {
+        let Some(engine_node_id) = self.user_state.get_engine_node_id(node_id) else { return };
+        let Some(module_id) = self.graph_state.graph.nodes.get(node_id).map(|n| n.user_data.module_id) else { return };
+        let Some(param_index) = crate::graph::SynthNodeTemplate::from_module_id(module_id)
+            .and_then(|template| template.parameter_names().iter().position(|name| name == param_name))
+        else {
+            return;
+        };
+        self.send_command(EngineCommand::SetParameter { node_id: engine_node_id, param_index, value });
+        self.cached_params.insert((engine_node_id, param_index), value);
+        self.update_graph_param_from_cc(engine_node_id, param_index, value);
+    }
+
     /// Update a graph parameter value from a CC change.
     fn update_graph_param_from_cc(&mut self, engine_node_id: u64, param_index: usize, value: f32) {
         // Find the graph node ID for this engine node
@@ -1738,6 +1753,9 @@ impl SynthApp {
                                     }
                                 }
                             }
+                        }
+                        NodeResponse::User(crate::graph::SynthResponse::PlayParameter { node_id: response_node_id, param_name, value }) => {
+                            self.play_parameter(response_node_id, &param_name, value);
                         }
                         NodeResponse::User(crate::graph::SynthResponse::EditParameters {
                             node_id: response_node_id,
@@ -3978,6 +3996,18 @@ impl eframe::App for SynthApp {
             || self.user_state.annotations.is_editing()
             || self.user_state.renaming.is_some();
         self.history.record(&self.graph_state, &self.user_state, gesture_held, Instant::now());
+
+        // How late live input is, for Loopers to take off their overdubs
+        if let Some(ref handle) = self.ui_handle {
+            let frames = match (&self.input_monitor, &self.audio_engine) {
+                (Some(monitor), Ok(engine)) => {
+                    let trip = RoundTrip::of(monitor, engine.output_latency(), engine.sample_rate());
+                    (trip.total().as_secs_f64() * engine.sample_rate() as f64).round() as usize
+                }
+                _ => 0,
+            };
+            handle.set_input_latency(frames);
+        }
 
         // Ship this frame's graph edits to the audio thread as one compiled plan
         if let Some(ref mut handle) = self.ui_handle {

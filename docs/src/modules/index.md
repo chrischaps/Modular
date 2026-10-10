@@ -1,6 +1,6 @@
 # Module Overview
 
-Modular Synth has 31 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
+Modular Synth has 32 modules in six categories. Each category has its own header color, so you can tell what a module is for at a glance across a crowded patch. The categories match the right-click menu and the quick-add palette, and the modules are listed here in the order the menu shows them.
 
 The **ID** is the name a patch file uses to refer to the module.
 
@@ -54,7 +54,7 @@ The **ID** is the name a patch file uses to refer to the module.
 
 ### Utility
 
-<span class="swatch bar utility"></span>Gray header. The plumbing of a patch: levels, timing, sequencing, and tools for seeing what a signal is doing.
+<span class="swatch bar utility"></span>Gray header. The plumbing of a patch: levels, timing, sequencing, looping, and tools for seeing what a signal is doing.
 
 | Module | ID | What it does |
 |--------|----|--------------|
@@ -66,6 +66,7 @@ The **ID** is the name a patch file uses to refer to the module.
 | [Quantizer](./utilities/quantizer.md) | `util.quantizer` | Snap a pitch to the nearest note of a scale |
 | [Clock Divider](./utilities/divider.md) | `util.divider` | Fire once every so many clocks, and hold a gate open for a phrase |
 | [Logic](./utilities/logic.md) | `util.logic` | Combine gates with AND, OR, XOR and NOT, and turn a control voltage into a gate |
+| [Looper](./utilities/looper.md) | `util.looper` | Record, overdub and undo live layers, like a looper pedal, in time with the Clock |
 | [Oscilloscope](./visualization/oscilloscope.md) | `util.oscilloscope` | Draw up to two signals as waveforms |
 | [Step Sequencer](./utilities/sequencer.md) | `seq.step` | 16 steps of pitch, gate and velocity |
 | [Trigger Sequencer](./utilities/trigger-sequencer.md) | `seq.trigger` | Eight lanes of drum hits in four chained patterns, with accents, probability and ratchets |

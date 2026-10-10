@@ -173,6 +173,8 @@ cargo run --release --bin render -- patch.json out.wav --seconds 5
 cargo run --release --bin render -- patches/lush-pad.json out.wav --audition
 # ...feeding a WAV to Audio Input modules (a capture script's `input file.wav` cue does the same)
 cargo run --release --bin render -- patch.json out.wav --input voice.wav
+# ...pressing knobs and footswitches from a cue script (`<seconds> param <module> <param> <value>`)
+cargo run --release --bin render -- patches/live-looper.json out.wav --seconds 30 --input take.wav --cue cues.txt
 # The real input device, end to end (needs a mic; the patch is muted)
 cargo test --release --test live_input -- --ignored --nocapture
 

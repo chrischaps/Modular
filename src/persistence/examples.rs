@@ -67,6 +67,12 @@ pub const EXAMPLES: &[Example] = &[
         json: include_str!("../../patches/sampled-keys.json"),
     },
     Example {
+        name: "Live Looper",
+        file_name: "live-looper.json",
+        description: "Play your own instrument into a looper: record four bars on the downbeat, overdub layers over them and undo the last, through tempo-synced echo and a room",
+        json: include_str!("../../patches/live-looper.json"),
+    },
+    Example {
         name: "Generative Ambient",
         file_name: "generative-ambient.json",
         description: "Plays itself: a slow pentatonic sequence, sample-and-hold brightness, long echoes",
@@ -168,6 +174,23 @@ mod tests {
         }
     }
 
+    /// The audition phrase, plucked: each note a decaying tone with an
+    /// octave above it, as a guitar into an Audio Input might play it.
+    fn plucked_audition(sample_rate: f32, seconds: f32) -> crate::engine::StereoBuffer {
+        let frames = (sample_rate * seconds) as usize;
+        let mut left = vec![0.0_f32; frames];
+        for &(note, start, length) in crate::engine::AUDITION {
+            let hz = 440.0 * 2f32.powf((note as f32 - 69.0) / 12.0);
+            let from = (start * sample_rate) as usize;
+            for (n, sample) in left.iter_mut().enumerate().skip(from).take((length * sample_rate) as usize) {
+                let t = (n - from) as f32 / sample_rate;
+                let phase = std::f32::consts::TAU * hz * t;
+                *sample += 0.25 * (-3.0 * t).exp() * (phase.sin() + 0.3 * (2.0 * phase).sin());
+            }
+        }
+        crate::engine::StereoBuffer { right: left.clone(), left }
+    }
+
     #[test]
     fn test_examples_make_sound() {
         for example in EXAMPLES {
@@ -175,6 +198,10 @@ mod tests {
             let (mut renderer, compiled) = OfflineRenderer::from_patch(&patch, 48_000.0, 256).unwrap();
             let missing = renderer.load_samples(&compiled, super::super::sample_files::SampleBase::Example);
             assert!(missing.is_empty(), "{}: {:?}", example.name, missing);
+            // Patches played live hear the audition phrase plucked into them
+            if patch.all_nodes().iter().any(|n| n.module_id == "source.audio_input") {
+                renderer.set_audio_input(plucked_audition(48_000.0, 5.0));
+            }
             let audio = renderer.render_audition(&patch, &compiled, 5.0);
 
             for (side, channel) in [("left", &audio.left), ("right", &audio.right)] {

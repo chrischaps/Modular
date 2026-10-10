@@ -55,6 +55,8 @@ impl NumberSpec {
         match self.unit {
             "Hz" => ParamFormat::Frequency,
             "s" => ParamFormat::Time,
+            // A shift either way (the Looper's Offset) has no "Off": 0 is just 0
+            "ms" if self.min < 0.0 => ParamFormat::RawWithUnit { decimals: 1, unit: "ms" },
             "ms" => ParamFormat::Milliseconds,
             "dB" => ParamFormat::Decibels,
             "st" => ParamFormat::Semitones,

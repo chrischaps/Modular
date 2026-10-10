@@ -60,6 +60,8 @@ struct NodeSpec {
     bypassed: bool,
     /// Whether the module works per channel of a polyphonic cable.
     polyphonic: bool,
+    /// Whether the module brings live input into the patch.
+    live_input: bool,
     /// A module created and prepared here but not yet handed to a plan.
     /// Once compiled into a plan it lives on the audio thread, and later
     /// plans take it over from their predecessor.
@@ -83,6 +85,7 @@ impl NodeSpec {
             bypass_routes,
             bypassed: false,
             polyphonic: module.polyphonic(),
+            live_input: module.is_live_input(),
             fresh: Some(module),
             sample: None,
         }
@@ -679,6 +682,11 @@ impl AudioGraph {
         // Late cables whose sources come later, waiting for their buffers
         let mut late_cables: Vec<(usize, &Connection)> = Vec::new();
 
+        // Nodes that hear live input, through any chain of modules. Sources
+        // come first in processing order, so each is settled before its
+        // listeners are looked at
+        let mut hears_live: HashSet<NodeId> = HashSet::new();
+
         for &node_id in &self.processing_order {
             let Some(spec) = self.nodes.get(&node_id) else {
                 continue;
@@ -747,6 +755,14 @@ impl AudioGraph {
                 })
                 .collect();
 
+            let live = spec.live_input
+                || spec.inputs().any(|(port_index, _)| {
+                    feeds.get(&(node_id, port_index)).is_some_and(|conn| hears_live.contains(&conn.from_node))
+                });
+            if live {
+                hears_live.insert(node_id);
+            }
+
             plan.nodes.push(PlanNode {
                 node_id,
                 module: None,
@@ -756,6 +772,7 @@ impl AudioGraph {
                 bypassed: spec.bypassed,
                 wet: if spec.bypassed { 0.0 } else { 1.0 },
                 dry,
+                hears_live: live,
             });
         }
 
@@ -2036,5 +2053,24 @@ mod tests {
             let inputs = module.ports().iter().filter(|p| p.is_input()).count();
             assert!(inputs <= MAX_INPUTS, "{id} has {inputs} inputs");
         }
+    }
+
+    /// Live input reaches every module an Audio Input feeds, however many
+    /// modules lie between, and no others.
+    #[test]
+    fn test_modules_fed_by_live_input_hear_its_latency() {
+        let registry = crate::engine::create_module_registry();
+        let mut graph = AudioGraph::with_registry(48000.0, 256, registry);
+        for (node_id, module_id) in [(1, "source.audio_input"), (2, "util.vca"), (3, "util.looper"), (4, "util.looper"), (5, "util.looper")] {
+            assert!(graph.handle_command(EngineCommand::AddModule { node_id, module_id }));
+        }
+        // Input L -> VCA In; VCA Out -> Looper 3 In L; Looper 3 Out L -> Looper 4 In L
+        for (from_node, from_port, to_node, to_port) in [(1, 0, 2, 0), (2, 2, 3, 0), (3, 7, 4, 0)] {
+            assert!(graph.handle_command(EngineCommand::Connect { from_node, from_port, to_node, to_port }));
+        }
+        let plan = graph.compile();
+        let hears = |id: NodeId| plan.nodes.iter().find(|n| n.node_id == id).unwrap().hears_live;
+        assert!(hears(1) && hears(2) && hears(3) && hears(4));
+        assert!(!hears(5), "a Looper nothing live feeds");
     }
 }

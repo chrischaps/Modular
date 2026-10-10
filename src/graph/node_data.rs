@@ -282,6 +282,9 @@ pub enum NodeDisplay {
     /// Trigger Sequencer: each lane's steps beside its Gate and Vel jacks,
     /// then the pattern tabs and the Chain.
     TriggerGrid,
+    /// Looper: the loop as a ring with its playhead and overdub layers, and
+    /// the footswitches.
+    LooperRing,
 }
 
 /// Data stored per node in the graph.
@@ -2193,6 +2196,11 @@ impl NodeDataTrait for SynthNodeData {
 
         if self.display == NodeDisplay::SamplerWave {
             let actions = super::sampler_display::sampler_display(ui, node_id, graph, user_state, zoom);
+            responses.extend(actions.into_iter().map(NodeResponse::User));
+        }
+
+        if self.display == NodeDisplay::LooperRing {
+            let actions = super::looper_display::looper_display(ui, node_id, graph, user_state, zoom);
             responses.extend(actions.into_iter().map(NodeResponse::User));
         }
 

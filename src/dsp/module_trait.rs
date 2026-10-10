@@ -361,6 +361,13 @@ pub trait DspModule: Send + 'static {
         false
     }
 
+    /// Whether this module brings live input into the patch (Audio Input).
+    /// Modules it feeds, through any chain, are told how late live input
+    /// reaches them: see [`ProcessContext::input_latency`].
+    fn is_live_input(&self) -> bool {
+        false
+    }
+
     /// Gives the module a recording to play (a Sampler's file), or takes
     /// its recording away with `None`. Called on the audio thread, or on
     /// the UI side before the module has been handed to it.

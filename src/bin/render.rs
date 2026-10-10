@@ -1,7 +1,7 @@
 //! Render a patch to a WAV file without opening the app.
 //!
 //! ```text
-//! cargo run --release --bin render -- <patch.json> <out.wav> [--seconds N] [--sample-rate HZ] [--audition] [--input in.wav]
+//! cargo run --release --bin render -- <patch.json> <out.wav> [--seconds N] [--sample-rate HZ] [--audition] [--input in.wav] [--cue cues.txt]
 //! ```
 //!
 //! Prints the peak and RMS level of each channel so renders can be compared
@@ -10,16 +10,26 @@
 //! triggers them, such as a Clock or Sequencer, or `--audition` is given to
 //! play a short phrase into them. Audio Input modules are silent too, unless
 //! `--input` gives them a WAV file to hear in place of the input device.
+//!
+//! `--cue` plays a script of parameter changes into the patch, in the
+//! capture kit's `param` form, one per line (`#` starts a comment):
+//!
+//! ```text
+//! 1.0   param util.looper Pedal Rec 1     # press the Looper's Rec
+//! 1.05  param util.looper Pedal Rec 0     # and let go
+//! 2.0   param filter.svf#2 Cutoff 800     # the second SVF Filter
+//! ```
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use modular_synth::dsp::analysis::{amp_to_db, peak, rms};
-use modular_synth::engine::{read_wav, OfflineRenderer};
+use modular_synth::engine::{create_module_registry, read_wav, EngineCommand, OfflineRenderer};
 use modular_synth::persistence::sample_files::SampleBase;
-use modular_synth::persistence::load_from_file;
+use modular_synth::persistence::{load_from_file, CompiledPatch, Patch};
 
-const USAGE: &str = "usage: render <patch.json> <out.wav> [--seconds N] [--sample-rate HZ] [--block-size N] [--audition] [--input in.wav]";
+const USAGE: &str =
+    "usage: render <patch.json> <out.wav> [--seconds N] [--sample-rate HZ] [--block-size N] [--audition] [--input in.wav] [--cue cues.txt]";
 
 struct Args {
     patch: PathBuf,
@@ -30,6 +40,8 @@ struct Args {
     audition: bool,
     /// A WAV file for Audio Input modules to hear.
     input: Option<PathBuf>,
+    /// A script of parameter changes to play into the patch.
+    cue: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -39,6 +51,7 @@ fn parse_args() -> Result<Args, String> {
     let mut block_size = 256;
     let mut audition = false;
     let mut input = None;
+    let mut cue = None;
 
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -53,6 +66,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "--audition" => audition = true,
             "--input" => input = Some(PathBuf::from(value("--input")?)),
+            "--cue" => cue = Some(PathBuf::from(value("--cue")?)),
             "-h" | "--help" => return Err(USAGE.to_string()),
             flag if flag.starts_with("--") => return Err(format!("unknown option {}\n{}", flag, USAGE)),
             _ => positional.push(PathBuf::from(arg)),
@@ -68,6 +82,7 @@ fn parse_args() -> Result<Args, String> {
             block_size,
             audition,
             input,
+            cue,
         }),
         _ => Err(USAGE.to_string()),
     }
@@ -100,7 +115,14 @@ fn run(args: Args) -> Result<(), String> {
         renderer.set_audio_input(input);
     }
 
-    let audio = if args.audition {
+    let audio = if let Some(path) = &args.cue {
+        if args.audition {
+            return Err("--cue and --audition can't be used together".to_string());
+        }
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {}", path.display(), e))?;
+        let commands = parse_cues(&text, &patch, &compiled, args.sample_rate as f32)?;
+        renderer.render_with_commands(args.seconds, commands)
+    } else if args.audition {
         renderer.render_audition(&patch, &compiled, args.seconds)
     } else {
         renderer.render_seconds(args.seconds)
@@ -139,6 +161,48 @@ fn run(args: Args) -> Result<(), String> {
         return Err("render contains NaN or infinite samples".to_string());
     }
     Ok(())
+}
+
+/// Reads a cue script into engine commands at their frames: `<seconds>
+/// param <module>[#n] <parameter name> <value>`.
+fn parse_cues(text: &str, patch: &Patch, compiled: &CompiledPatch, sample_rate: f32) -> Result<Vec<(u64, EngineCommand)>, String> {
+    let registry = create_module_registry();
+    let mut commands = Vec::new();
+    for (line_no, line) in text.lines().enumerate() {
+        let line = match line.find('#').filter(|&at| at == 0 || line[..at].ends_with(' ')) {
+            Some(at) => &line[..at],
+            None => line,
+        };
+        let words: Vec<&str> = line.split_whitespace().collect();
+        if words.is_empty() {
+            continue;
+        }
+        let err = |msg: &str| format!("cue line {}: {} ({})", line_no + 1, msg, line.trim());
+        let seconds: f64 = words[0].parse().map_err(|_| err("not a time"))?;
+        if words.get(1) != Some(&"param") || words.len() < 5 {
+            return Err(err("expected <seconds> param <module>[#n] <parameter> <value>"));
+        }
+        let (module, nth) = match words[2].split_once('#') {
+            Some((m, n)) => (m, n.parse::<usize>().map_err(|_| err("bad #n"))?.max(1) - 1),
+            None => (words[2], 0),
+        };
+        let value: f32 = words[words.len() - 1].parse().map_err(|_| err("not a value"))?;
+        let name = words[3..words.len() - 1].join(" ");
+        let node = patch
+            .all_nodes()
+            .into_iter()
+            .filter(|n| n.module_id == module)
+            .nth(nth)
+            .and_then(|n| compiled.node_ids.get(&n.id).copied())
+            .ok_or_else(|| err("no such module in the patch"))?;
+        let param_index = registry
+            .create(module)
+            .and_then(|m| m.parameters().iter().position(|p| p.name == name))
+            .ok_or_else(|| err("no such parameter"))?;
+        let frame = (seconds * sample_rate as f64).round().max(0.0) as u64;
+        commands.push((frame, EngineCommand::SetParameter { node_id: node, param_index, value }));
+    }
+    Ok(commands)
 }
 
 fn main() -> ExitCode {

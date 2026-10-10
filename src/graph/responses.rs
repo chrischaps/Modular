@@ -24,6 +24,14 @@ pub enum SynthResponse {
         label: String,
         changes: Vec<(String, f32)>,
     },
+    /// A parameter played rather than edited, like a Looper's footswitch
+    /// pressed on the node: it reaches the engine at once, as a MIDI
+    /// controller's would, and isn't an undo step.
+    PlayParameter {
+        node_id: egui_node_graph2::NodeId,
+        param_name: String,
+        value: f32,
+    },
     /// A node was selected by right-clicking it, so its menu acts on it.
     NodeSelected(egui_node_graph2::NodeId),
     /// A node was deselected.

@@ -137,6 +137,12 @@ pub struct ProcessContext<'a> {
     pub midi: &'a [MidiEvent],
     /// Audio from the input device for this block.
     pub input: InputAudio<'a>,
+    /// How late live input reaches this module, in samples: the round trip
+    /// from the input jack to the speakers, when an Audio Input feeds the
+    /// module through any chain of modules, and 0 otherwise. A player
+    /// playing along with the patch is heard this long after the moment
+    /// they played to, which a Looper takes back off its overdubs.
+    pub input_latency: usize,
 }
 
 impl<'a> ProcessContext<'a> {
@@ -148,6 +154,7 @@ impl<'a> ProcessContext<'a> {
             transport: TransportState::new(),
             midi: &[],
             input: InputAudio::default(),
+            input_latency: 0,
         }
     }
 
@@ -159,6 +166,7 @@ impl<'a> ProcessContext<'a> {
             transport,
             midi: &[],
             input: InputAudio::default(),
+            input_latency: 0,
         }
     }
 
@@ -176,6 +184,12 @@ impl<'a> ProcessContext<'a> {
         'a: 'b,
     {
         ProcessContext { input, ..self }
+    }
+
+    /// The same context, with live input `frames` late (see
+    /// [`input_latency`](Self::input_latency)).
+    pub fn with_input_latency(self, frames: usize) -> Self {
+        Self { input_latency: frames, ..self }
     }
 
     /// Returns the duration of the current block in seconds.

@@ -10,7 +10,7 @@ use rtrb::Consumer;
 
 use crate::dsp::denormal::DenormalGuard;
 use crate::dsp::{InputAudio, MidiEvent, ModuleRegistry, Poly, ProcessContext};
-use crate::modules::{AdsrEnvelope, Attenuverter, AudioInput, AudioOutput, Chorus, Clock, ClockDivider, Compressor, Distortion, Drum, KeyboardInput, LadderFilter, Lfo, Logic, MidiMonitor, MidiNote, Mixer, Noise, Oscilloscope, PolyMidi, ParametricEq, Quantizer, Reverb, SampleHold, Sampler, Oscillator, StepSequencer, StereoDelay, TriggerSequencer, SvfFilter, Vca};
+use crate::modules::{AdsrEnvelope, Attenuverter, AudioInput, AudioOutput, Chorus, Clock, ClockDivider, Compressor, Distortion, Drum, KeyboardInput, LadderFilter, Lfo, Logic, Looper, MidiMonitor, MidiNote, Mixer, Noise, Oscilloscope, PolyMidi, ParametricEq, Quantizer, Reverb, SampleHold, Sampler, Oscillator, StepSequencer, StereoDelay, TriggerSequencer, SvfFilter, Vca};
 
 use super::audio_input::InputFeed;
 use super::channels::EngineHandle;
@@ -50,6 +50,7 @@ pub fn create_module_registry() -> ModuleRegistry {
     registry.register::<Poly<Quantizer>>();
     registry.register::<ClockDivider>();
     registry.register::<Logic>();
+    registry.register::<Looper>();
     registry.register::<Oscilloscope>();
     registry.register::<StepSequencer>();
     registry.register::<TriggerSequencer>();
@@ -241,7 +242,8 @@ impl AudioProcessor {
         if let Some(feed) = self.input.feed.as_mut() {
             feed.begin(num_frames);
         }
-        Self::render(&mut self.plan, self.sample_rate, output, channels, midi, RenderInput::Live(&mut self.input));
+        let latency = if self.input.feed.is_some() { self.engine_handle.input_latency() } else { 0 };
+        Self::render(&mut self.plan, self.sample_rate, output, channels, midi, RenderInput::Live(&mut self.input), latency);
         self.record(output, channels);
 
         self.send_monitor_values();
@@ -286,7 +288,8 @@ impl AudioProcessor {
             return;
         }
 
-        Self::render(&mut self.plan, self.sample_rate, output, channels, midi, RenderInput::Given(input));
+        // Input given with the picture is already in time with it
+        Self::render(&mut self.plan, self.sample_rate, output, channels, midi, RenderInput::Given(input), 0);
         self.record(output, channels);
 
         self.send_monitor_values();
@@ -297,8 +300,8 @@ impl AudioProcessor {
     }
 
     /// Runs the graph over a buffer in plan-sized blocks, each with the MIDI
-    /// that falls inside it and the next block of `input`, and writes the
-    /// output module's audio into it.
+    /// that falls inside it and the next block of `input` (`latency` frames
+    /// late), and writes the output module's audio into it.
     fn render(
         plan: &mut GraphPlan,
         sample_rate: f32,
@@ -306,6 +309,7 @@ impl AudioProcessor {
         channels: usize,
         mut midi: &mut [MidiEvent],
         mut input: RenderInput<'_>,
+        latency: usize,
     ) {
         let block = plan.max_block_size().max(1);
         for (index, chunk) in output.chunks_mut(block * channels).enumerate() {
@@ -316,7 +320,10 @@ impl AudioProcessor {
                 RenderInput::Live(input) => input.next_block(frames),
                 RenderInput::Given(given) => given.slice(start, frames),
             };
-            let context = ProcessContext::new(sample_rate, frames).with_midi(chunk_midi).with_input(chunk_input);
+            let context = ProcessContext::new(sample_rate, frames)
+                .with_midi(chunk_midi)
+                .with_input(chunk_input)
+                .with_input_latency(latency);
             plan.process(&context);
             Self::write_output(plan, chunk, channels, frames);
         }
@@ -544,7 +551,8 @@ mod tests {
         assert!(registry.contains("source.drum"));
         assert!(registry.contains("source.sampler"));
         assert!(registry.contains("seq.trigger"));
-        assert_eq!(registry.len(), 31);
+        assert!(registry.contains("util.looper"));
+        assert_eq!(registry.len(), 32);
     }
 
     #[test]

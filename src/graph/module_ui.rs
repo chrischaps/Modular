@@ -291,6 +291,16 @@ static MODULE_UI: &[ModuleUi] = &[
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
+        module_id: "util.looper",
+        knobs: &[knob_as("Feedback", "FB"), knob_as("Loop Level", "Loop"), knob_as("Dry Level", "Dry"), knob("Offset")],
+        labels: &[("Latency", "Auto latency")],
+        // The display's footswitches
+        hidden: &["Pedal *"],
+        monitor: &["Start"],
+        display: NodeDisplay::LooperRing,
+        ..ModuleUi::DEFAULT
+    },
+    ModuleUi {
         module_id: "util.oscilloscope",
         knobs: &[knob_as("Trigger Level", "Trig")],
         display: NodeDisplay::Scope,

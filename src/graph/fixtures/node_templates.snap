@@ -358,6 +358,39 @@ knob Threshold          "Thresh" KnobOnly
 monitor [0, 1, 2, 3, 4]
 display LogicLamps
 
+== util.looper "Looper" finder="Looper" Utility
+in   In L               Audio    ConnectionOnly       inline=true  port
+in   In R               Audio    ConnectionOnly       inline=true  port
+in   Rec                Gate     ConnectionOnly       inline=true  port
+in   Stop               Gate     ConnectionOnly       inline=true  port
+in   Undo               Gate     ConnectionOnly       inline=true  port
+in   Clear              Gate     ConnectionOnly       inline=true  port
+in   Clock              Gate     ConnectionOnly       inline=true  port
+in   Speed              Control  ConstantOnly         inline=true  select 1 ["½×", "1×", "2×"] "Speed"
+in   Reverse            Control  ConstantOnly         inline=true  toggle false "Reverse"
+in   Bars               Control  ConstantOnly         inline=true  select 0 ["Free", "1", "2", "4", "8", "16"] "Bars"
+in   Latency            Control  ConstantOnly         inline=true  toggle true "Auto latency"
+in   Feedback           Control  ConstantOnly         inline=false num 1 [0..1] %
+in   Loop Level         Control  ConstantOnly         inline=false num 1 [0..1]
+in   Dry Level          Control  ConstantOnly         inline=false num 1 [0..1]
+in   Offset             Control  ConstantOnly         inline=false num 0 [-50..50] ms
+in   Pedal Rec          Control  ConstantOnly         inline=false toggle false ""
+in   Pedal Stop         Control  ConstantOnly         inline=false toggle false ""
+in   Pedal Undo         Control  ConstantOnly         inline=false toggle false ""
+in   Pedal Clear        Control  ConstantOnly         inline=false toggle false ""
+out  Out L              Audio
+out  Out R              Audio
+out  Loop L             Audio
+out  Loop R             Audio
+out  Start              Gate
+out  Phase              Control
+knob Feedback           "FB" KnobOnly
+knob Loop Level         "Loop" KnobOnly
+knob Dry Level          "Dry" KnobOnly
+knob Offset             "Offset" KnobOnly
+monitor [4]
+display LooperRing
+
 == util.oscilloscope "Oscilloscope" finder="Oscilloscope" Utility
 in   In 1               Audio    ConnectionOnly       inline=true  port
 in   In 2               Audio    ConnectionOnly       inline=true  port

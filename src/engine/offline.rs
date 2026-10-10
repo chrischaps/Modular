@@ -215,6 +215,29 @@ impl OfflineRenderer {
         self.render(frames)
     }
 
+    /// Renders `seconds` of audio, applying each command at its frame on
+    /// the renderer's sample clock, as a player turning knobs and pressing
+    /// footswitches would. A command lands at the start of the block its
+    /// frame falls in, as one sent to the live engine does.
+    pub fn render_with_commands(&mut self, seconds: f32, mut commands: Vec<(u64, EngineCommand)>) -> StereoBuffer {
+        commands.sort_by_key(|&(frame, _)| frame);
+        let start = self.position;
+        let end = start + (seconds * self.context.sample_rate).round() as u64;
+        let block = self.context.block_size as u64;
+        let mut out = StereoBuffer::default();
+        for (at, command) in commands {
+            // Whole blocks only, so no rendered frames are dropped between calls
+            let frames = at.min(end).saturating_sub(self.position) / block * block;
+            out.append(self.render(frames as usize));
+            self.apply(command);
+        }
+        out.append(self.render(end.saturating_sub(self.position) as usize));
+        let frames = (end - start) as usize;
+        out.left.truncate(frames);
+        out.right.truncate(frames);
+        out
+    }
+
     /// Renders `seconds` of audio while [`AUDITION`] is played into every
     /// Keyboard, MIDI Note and Poly MIDI node of `patch`, so patches that wait
     /// for a player make sound offline too. `compiled` must be the patch's

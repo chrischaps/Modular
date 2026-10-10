@@ -125,6 +125,10 @@ impl Default for AudioInput {
 }
 
 impl DspModule for AudioInput {
+    fn is_live_input(&self) -> bool {
+        true
+    }
+
     fn info(&self) -> &ModuleInfo {
         static INFO: ModuleInfo = ModuleInfo {
             id: "source.audio_input",

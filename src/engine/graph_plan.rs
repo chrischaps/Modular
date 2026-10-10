@@ -85,6 +85,9 @@ pub(crate) struct PlanNode {
     /// For each output, the input (index into `inputs`) it passes while
     /// bypassed. Empty for modules that can't be bypassed.
     pub(crate) dry: Vec<Option<usize>>,
+    /// Whether live input reaches the module, through any chain of modules,
+    /// so it's told how late (see [`ProcessContext::input_latency`]).
+    pub(crate) hears_live: bool,
 }
 
 /// A cable that closes a loop, heard a constant one block behind.
@@ -308,7 +311,9 @@ impl GraphPlan {
         if let Some(transport) = self.transport() {
             context.transport = transport;
         }
-        let context = &context;
+        // Only modules live input reaches hear how late it is
+        let live_context = context;
+        let context = &context.with_input_latency(0);
         let fade_step = 1.0 / (BYPASS_FADE_SECONDS * context.sample_rate).max(1.0);
 
         let Self { nodes, outputs, defaults, mixdowns, late, max_block_size, .. } = self;
@@ -362,7 +367,7 @@ impl GraphPlan {
                 module.reset();
             }
 
-            module.process(inputs, own, &node.params, context);
+            module.process(inputs, own, &node.params, if node.hears_live { &live_context } else { context });
 
             let target = if node.bypassed { 0.0 } else { 1.0 };
             if node.wet != target {
