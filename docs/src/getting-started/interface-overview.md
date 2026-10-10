@@ -16,6 +16,7 @@ From left to right:
 | **Edit** | **↩ Undo** and **↪ Redo**. Hover either to see which edit it will undo or redo. |
 | **〰 Cables** | How signal flow is drawn along cables: **Chevrons**, **Dots** or **Comets** |
 | **◉ Knobs** | How knobs are drawn: **LED ring**, **Hybrid**, **Arc**, **Machined** or **Classic** |
+| **❓ Help** | **📖 Manual** opens this manual. **Check for Updates…**, **Check for Updates Automatically**, and **Roll Back** after an update: see [Updates](installation.md#updates) |
 | **Output** | The audio device to play through |
 | **Input** | The microphone, guitar or line input that [Audio Input](../modules/sources/audio-input.md) modules hear. It starts at **None**: nothing is opened until you choose a device. A filled dot (●) means it's open. |
 | **MIDI In** | The MIDI controller to listen to. A filled dot (●) means it's connected. |
@@ -24,7 +25,7 @@ At the right end, the toolbar shows a CPU meter while the patch plays, the devic
 
 ## The status bar
 
-The status bar reports what just happened: a file saved, modules pasted, a cable refused and why. When there's nothing to report, it counts the modules and cables in the patch. On the right it names the open patch, with a dot (●) if it has unsaved changes.
+The status bar reports what just happened: a file saved, modules pasted, a cable refused and why. When there's nothing to report, it counts the modules and cables in the patch. On the right it names the open patch, with a dot (●) if it has unsaved changes. At the far right is the version, with a small dot after it that lights up blue when a newer version is out: click it to see what's new, or, while it's dark, to check.
 
 If a patch loads with problems (a module this version doesn't know, a cable to a jack that no longer exists), a **⚠ load warning** appears on the right. Hover it to read the warnings; click it to dismiss them.
 

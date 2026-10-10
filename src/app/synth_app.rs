@@ -40,12 +40,16 @@ use super::recording::{self, RecState, Toast, ToastAction};
 use super::session::{self, Answer, Autosave, Discard, RecentFiles};
 use super::theme;
 use super::undo::{Applied, History};
+#[cfg(not(target_arch = "wasm32"))]
+use super::update::Updater;
 use super::WEB;
 #[cfg(target_arch = "wasm32")]
 use super::web;
 
 mod grouping;
 mod samples;
+#[cfg(not(target_arch = "wasm32"))]
+mod updates;
 
 /// Type alias for our graph editor state
 type SynthGraphEditorState = GraphEditorState<SynthNodeData, SynthDataType, SynthValueType, SynthNodeTemplate, SynthGraphState>;
@@ -75,6 +79,9 @@ const RECORDING_PATIENCE: std::time::Duration = std::time::Duration::from_secs(1
 
 /// How long a warning stays in the status bar, unless clicked away.
 const NOTICE_SECONDS: f64 = 12.0;
+
+/// The manual, for the Help menu.
+const MANUAL_URL: &str = "https://docs.chaps.dev/modular/";
 
 /// How long the input's status stays amber after a dropout.
 const INPUT_GLITCH_HOLD: std::time::Duration = std::time::Duration::from_secs(3);
@@ -226,6 +233,16 @@ pub struct SynthApp {
     recordings_folder: Option<PathBuf>,
     /// The note about the last finished take.
     record_toast: Option<Toast>,
+
+    // --- Updates ---
+    /// The check for new versions, and installing them.
+    #[cfg(not(target_arch = "wasm32"))]
+    updater: Updater,
+    /// Restarting into another version: the autosave is kept on the way out.
+    resuming: bool,
+    /// A view to put back (zoom, and the patch point at the middle), once
+    /// the editor has been laid out.
+    pending_view: Option<(f32, egui::Pos2)>,
 
     // --- Audio input ---
     /// Input devices, for the Input menu.
@@ -415,6 +432,10 @@ impl SynthApp {
             recording: None,
             recordings_folder: None,
             record_toast: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            updater: Updater::new(),
+            resuming: false,
+            pending_view: None,
             input_devices,
             input_monitor: None,
             input_glitches: (0, Instant::now()),
@@ -1341,6 +1362,15 @@ impl SynthApp {
             .response
             .on_hover_text("How knobs are drawn");
 
+            ui.menu_button("❓ Help", |ui| {
+                if ui.button("📖 Manual").on_hover_text("docs.chaps.dev/modular, in your browser").clicked() {
+                    ui.ctx().open_url(egui::OpenUrl::new_tab(MANUAL_URL));
+                    ui.close_menu();
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                self.update_menu(ui, &mut actions);
+            });
+
             // Device selectors (engine status lives in the status bar). The
             // browser plays through its own output, and has no MIDI or input yet
             match &self.audio_engine {
@@ -1663,6 +1693,10 @@ impl SynthApp {
                 let grid_origin = editor_rect.min + self.graph_state.pan_zoom.pan + self.history.view_origin();
                 theme::draw_grid_background(ui.painter(), editor_rect, grid_origin, self.graph_state.pan_zoom.zoom);
                 self.draw_level_backdrop(ui.painter(), editor_rect);
+
+                // The view the copy before this one had, after an update
+                #[cfg(not(target_arch = "wasm32"))]
+                self.apply_pending_view(ui, editor_rect);
 
                 // Draw the node graph editor
                 let (zoom_before, pan_before) = (self.graph_state.pan_zoom.zoom, self.graph_state.pan_zoom.pan);
@@ -3037,6 +3071,11 @@ impl SynthApp {
     /// Does `action` now if nothing would be lost, or asks first.
     fn request(&mut self, ctx: &egui::Context, action: Discard) {
         self.sync_history();
+        // Restarting would stop a take, so that waits for the take to end
+        if action.restarts() && self.is_recording() {
+            self.raise_notice("Modular restarts to update, so that waits until the recording ends".to_string());
+            return;
+        }
         // Quitting stops a take, so that asks too
         let stops_take = matches!(action, Discard::Quit) && self.is_recording();
         if self.has_unsaved_changes() || stops_take {
@@ -3059,6 +3098,10 @@ impl SynthApp {
                 self.allow_close = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            Discard::Update => self.restart_for_update(ctx),
+            #[cfg(not(target_arch = "wasm32"))]
+            Discard::RollBack => self.roll_back(ctx),
         }
     }
 
@@ -3120,6 +3163,8 @@ impl SynthApp {
     /// left, which is offered back on the first frame.
     pub fn restore_session(&mut self, storage: Option<&dyn eframe::Storage>) {
         self.recent_files = RecentFiles::load(storage);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.updater.load(storage);
         self.recovery = Autosave::load(storage);
         if let Some(glyph) = storage.and_then(|s| s.get_string(FLOW_GLYPH_KEY)) {
             self.user_state.flow_glyph = FlowGlyph::ALL
@@ -3419,11 +3464,12 @@ impl SynthApp {
                 }
                 // The version gives way on a narrow screen (a phone), rather
                 // than running over the status message
-                let version = RichText::new(concat!("Modular Synth v", env!("CARGO_PKG_VERSION")))
-                    .color(theme::text::DISABLED)
-                    .small();
+                // On the desktop a dot after it lights up when there's a newer one
                 if ui.available_width() >= 140.0 {
-                    ui.label(version);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    self.version_label(ui);
+                    #[cfg(target_arch = "wasm32")]
+                    ui.label(RichText::new(concat!("Modular Synth v", env!("CARGO_PKG_VERSION"))).color(theme::text::DISABLED).small());
                 }
             });
         });
@@ -3731,6 +3777,9 @@ struct ToolbarActions {
     connect_midi_device: Option<usize>,
     disconnect_midi: bool,
     refresh_midi_devices: bool,
+    // Help menu
+    check_updates: bool,
+    roll_back: bool,
 }
 
 impl eframe::App for SynthApp {
@@ -4004,8 +4053,11 @@ impl eframe::App for SynthApp {
 
         // A stopped take's note, once its file is finished
         self.poll_recording(ctx);
+        let mut corner = 0.0;
         if let Some(toast) = &self.record_toast {
-            match recording::show_toast(ctx, toast) {
+            let (action, height) = recording::show_toast(ctx, toast);
+            corner = height;
+            match action {
                 Some(ToastAction::ShowInFolder) => {
                     if let Err(e) = recording::reveal_in_folder(&toast.summary.path) {
                         self.status_message = Some(format!("Couldn't open the folder: {}", e));
@@ -4015,6 +4067,10 @@ impl eframe::App for SynthApp {
                 None => {}
             }
         }
+        // New versions: the daily check, and its note above the take's
+        #[cfg(not(target_arch = "wasm32"))]
+        self.run_updates(ctx, toolbar_actions.check_updates, toolbar_actions.roll_back, corner);
+        let _ = corner;
 
         // "Save changes?" and crash recovery, over everything else
         self.show_prompts(ctx);
@@ -4097,6 +4153,8 @@ impl eframe::App for SynthApp {
             return;
         }
         self.recent_files.store(storage);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.updater.store(storage);
         storage.set_string(FLOW_GLYPH_KEY, self.user_state.flow_glyph.name().to_string());
         storage.set_string(KNOB_STYLE_KEY, self.user_state.knob_style.name().to_string());
         if let Ok(engine) = &self.audio_engine {
@@ -4108,12 +4166,13 @@ impl eframe::App for SynthApp {
         let autosave = if let Some(recovery) = &self.recovery {
             // Not answered yet: keep it for next time
             Some(recovery.clone())
-        } else if self.has_unsaved_changes() && !self.allow_close {
+        } else if self.has_unsaved_changes() && (!self.allow_close || self.resuming) {
             let patch = self.create_patch(&self.patch_title());
             let example = self.current_example.map(|e| e.name.to_string());
             Autosave::new(&patch, self.current_patch_path.clone(), example).ok()
         } else {
-            // Saved, or let go on the way out
+            // Saved, or let go on the way out. A restart into another
+            // version keeps it, in case the next copy doesn't start
             None
         };
         Autosave::store(storage, autosave.as_ref());

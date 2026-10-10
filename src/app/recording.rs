@@ -12,6 +12,7 @@ use std::time::Duration;
 use eframe::egui::{self, RichText};
 
 use crate::engine::RecordingSummary;
+use super::notice::Notice;
 use super::theme;
 
 /// Storage key for the folder takes are written to, when it isn't the default.
@@ -123,90 +124,56 @@ pub enum ToastAction {
 
 /// The note in the corner after a take: its name and length, whether any
 /// audio was lost, and a way to find it.
-pub fn show_toast(ctx: &egui::Context, toast: &Toast) -> Option<ToastAction> {
+pub fn show_toast(ctx: &egui::Context, toast: &Toast) -> (Option<ToastAction>, f32) {
     let summary = &toast.summary;
-    let mut action = None;
     let name = summary.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-
-    let area = egui::Area::new(egui::Id::new("recording_toast"))
-        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -40.0))
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            egui::Frame::popup(ui.style())
-                .fill(theme::background::PANEL)
-                .stroke(egui::Stroke::new(1.0, theme::background::WIDGET_ACTIVE))
-                .rounding(theme::ROUNDING)
-                .inner_margin(egui::Margin::same(14.0))
-                .show(ui, |ui| {
-                    ui.set_max_width(340.0);
-                    ui.horizontal(|ui| {
-                        let failed = summary.error.is_some();
-                        let (dot, title) = if failed {
-                            (theme::accent::ERROR, "Recording stopped early")
-                        } else {
-                            (theme::accent::SUCCESS, "Recorded")
-                        };
-                        ui.label(RichText::new("●").color(dot));
-                        ui.label(RichText::new(title).color(theme::text::PRIMARY).strong());
-                        ui.label(RichText::new(clock(summary.duration())).monospace().color(theme::text::SECONDARY));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if close_button(ui).on_hover_text("Dismiss").clicked() {
-                                action = Some(ToastAction::Dismiss);
-                            }
-                        });
-                    });
-                    ui.label(RichText::new(name).color(theme::text::SECONDARY));
-                    if let Some(folder) = summary.path.parent() {
-                        ui.label(RichText::new(format!("in {}", short_path(folder))).small().color(theme::text::DISABLED));
-                    }
-                    if toast.patch.is_some() {
-                        ui.label(RichText::new("The patch is saved beside it.").small().color(theme::text::DISABLED));
-                    }
-                    if summary.dropped_frames > 0 {
-                        let seconds = summary.dropped_frames as f64 / summary.sample_rate.max(1) as f64;
-                        ui.add_space(4.0);
-                        ui.label(
-                            RichText::new(format!(
-                                "⚠ {} frames ({:.2} s) were dropped: the disk fell behind.",
-                                summary.dropped_frames, seconds
-                            ))
-                            .color(theme::accent::WARNING),
-                        );
-                    }
-                    if let Some(error) = &summary.error {
-                        ui.add_space(4.0);
-                        ui.label(RichText::new(format!("⚠ {error}")).color(theme::accent::ERROR));
-                    }
-                    ui.add_space(8.0);
-                    if ui.button("📂 Show in folder").clicked() {
-                        action = Some(ToastAction::ShowInFolder);
-                    }
-                });
-        });
-
-    let hovered = area.response.contains_pointer();
-    let now = ctx.input(|i| i.time);
-    if hovered {
-        // Reading it holds it up
-        ctx.request_repaint();
-    } else if now - toast.shown_at > TOAST_SECONDS {
-        return Some(ToastAction::Dismiss);
+    let failed = summary.error.is_some();
+    let (dot, title) = if failed {
+        (theme::accent::ERROR, "Recording stopped early")
     } else {
-        ctx.request_repaint_after(Duration::from_secs_f64(TOAST_SECONDS - (now - toast.shown_at) + 0.05));
-    }
-    action
-}
+        (theme::accent::SUCCESS, "Recorded")
+    };
 
-/// A small painted cross (the UI font has no ✕).
-fn close_button(ui: &mut egui::Ui) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::click());
-    let color = if response.hovered() { theme::text::PRIMARY } else { theme::text::SECONDARY };
-    let r = 4.0;
-    let c = rect.center();
-    let stroke = egui::Stroke::new(1.5, color);
-    ui.painter().line_segment([c + egui::vec2(-r, -r), c + egui::vec2(r, r)], stroke);
-    ui.painter().line_segment([c + egui::vec2(-r, r), c + egui::vec2(r, -r)], stroke);
-    response
+    let response = Notice::new("recording_toast", dot, title).lifetime(toast.shown_at, TOAST_SECONDS).show(
+        ctx,
+        |ui| {
+            ui.label(RichText::new(clock(summary.duration())).monospace().color(theme::text::SECONDARY));
+        },
+        |ui| {
+            ui.label(RichText::new(name).color(theme::text::SECONDARY));
+            if let Some(folder) = summary.path.parent() {
+                ui.label(RichText::new(format!("in {}", short_path(folder))).small().color(theme::text::DISABLED));
+            }
+            if toast.patch.is_some() {
+                ui.label(RichText::new("The patch is saved beside it.").small().color(theme::text::DISABLED));
+            }
+            if summary.dropped_frames > 0 {
+                let seconds = summary.dropped_frames as f64 / summary.sample_rate.max(1) as f64;
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(format!(
+                        "⚠ {} frames ({:.2} s) were dropped: the disk fell behind.",
+                        summary.dropped_frames, seconds
+                    ))
+                    .color(theme::accent::WARNING),
+                );
+            }
+            if let Some(error) = &summary.error {
+                ui.add_space(4.0);
+                ui.label(RichText::new(format!("⚠ {error}")).color(theme::accent::ERROR));
+            }
+            ui.add_space(8.0);
+            ui.button("📂 Show in folder").clicked()
+        },
+    );
+    let action = if response.closed || response.expired {
+        Some(ToastAction::Dismiss)
+    } else if response.inner {
+        Some(ToastAction::ShowInFolder)
+    } else {
+        None
+    };
+    (action, response.height)
 }
 
 /// Opens the file manager with `path` selected (or its folder open, where

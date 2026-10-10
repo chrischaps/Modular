@@ -10,6 +10,8 @@ use std::path::PathBuf;
 use eframe::egui;
 #[cfg(not(target_arch = "wasm32"))]
 use modular_synth::app::capture::CaptureConfig;
+#[cfg(not(target_arch = "wasm32"))]
+use modular_synth::app::update::{resume, Resume};
 use modular_synth::app::SynthApp;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -31,13 +33,19 @@ fn main() -> eframe::Result<()> {
         .iter()
         .enumerate()
         .skip(1)
-        .find(|(i, arg)| !arg.starts_with("--") && !CaptureConfig::is_option(&args[i - 1]))
+        .find(|(i, arg)| !arg.starts_with("--") && !CaptureConfig::is_option(&args[i - 1]) && args[i - 1] != resume::OPTION)
         .map(|(_, arg)| PathBuf::from(arg));
+    // Restarted after an update: the session the copy before handed over.
+    // Taking it waits for that copy to close
+    let resume = Resume::file_from_args(&args).and_then(|file| Resume::take(&file));
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1280.0, 720.0])
         .with_min_inner_size([800.0, 600.0])
-        .with_title("Modular Synth");
+        .with_title("Modular Synth")
+        .with_icon(std::sync::Arc::new(
+            eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon/icon-256.png")).unwrap_or_default(),
+        ));
     if let Some(capture) = &capture {
         viewport = viewport.with_inner_size(capture.size_in_points()).with_resizable(false);
     }
@@ -45,6 +53,9 @@ fn main() -> eframe::Result<()> {
         viewport,
         // A capture's window size is its own, not one to remember
         persist_window: capture.is_none(),
+        // A folder of its own for the settings and autosave, so a test copy
+        // (an update tried end to end, say) leaves the everyday one's alone
+        persistence_path: std::env::var_os("MODULAR_DATA_DIR").map(PathBuf::from),
         ..Default::default()
     };
 
@@ -54,7 +65,9 @@ fn main() -> eframe::Result<()> {
         Box::new(move |cc| {
             modular_synth::app::theme::install_fonts(&cc.egui_ctx);
             let mut app = SynthApp::new(test_tone);
-            app.open_on_launch(patch_path.as_deref());
+            if resume.is_none() {
+                app.open_on_launch(patch_path.as_deref());
+            }
             match capture {
                 Some(config) => {
                     if let Err(e) = app.start_capture(config) {
@@ -62,7 +75,12 @@ fn main() -> eframe::Result<()> {
                         std::process::exit(2);
                     }
                 }
-                None => app.restore_session(cc.storage),
+                None => {
+                    app.restore_session(cc.storage);
+                    if let Some(resume) = resume {
+                        app.resume(resume);
+                    }
+                }
             }
             Ok(Box::new(app))
         }),

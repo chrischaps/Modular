@@ -1,0 +1,177 @@
+[
+ {
+  "tag_name": "v0.4.0-beta.1",
+  "name": "v0.4.0 beta",
+  "body": "Testing",
+  "html_url": "https://github.com/chrischaps/Modular/releases/tag/v0.4.0-beta.1",
+  "draft": false,
+  "prerelease": true,
+  "published_at": "2026-10-10T00:00:00Z",
+  "assets": []
+ },
+ {
+  "tag_name": "v0.1.0",
+  "name": "v0.1.0",
+  "body": "**Full Changelog**: https://github.com/chrischaps/Modular/commits/v0.1.0",
+  "html_url": "https://github.com/chrischaps/Modular/releases/tag/untagged-c116078fd58d751afd78",
+  "draft": true,
+  "prerelease": false,
+  "published_at": "2026-01-23T20:26:06Z",
+  "assets": [
+   {
+    "name": "modular_synth-linux.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/untagged-c116078fd58d751afd78/modular_synth-linux.zip",
+    "size": 7074371
+   },
+   {
+    "name": "modular_synth-macos-apple-silicon.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/untagged-c116078fd58d751afd78/modular_synth-macos-apple-silicon.zip",
+    "size": 2802778
+   },
+   {
+    "name": "modular_synth-macos-intel.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/untagged-c116078fd58d751afd78/modular_synth-macos-intel.zip",
+    "size": 2884229
+   },
+   {
+    "name": "modular_synth-windows.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/untagged-c116078fd58d751afd78/modular_synth-windows.zip",
+    "size": 2600818
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.3.1",
+  "name": "v0.3.1 — a low-latency Windows download",
+  "body": "**New download: `modular_synth-windows-asio.zip`, the low-latency Windows build.** It runs exactly like the standard Windows build, and can also use an audio interface's ASIO driver. That takes the round trip from input to output from about 60 ms (Windows Audio) to 11–20 ms on a Focusrite Scarlett 2i2, quick enough to play a guitar or sing through Modular. Install your interface's ASIO driver, then choose **ASIO** under **Output**.\n\n<img src=\"https://raw.githubusercontent.com/chrischaps/Modular/master/assets/asio/asio-compatible-bw.png\" alt=\"ASIO Compatible. ASIO is a registered trademark of Steinberg Media Technologies GmbH\" width=\"110\">\n\nASIO is a registered trademark of Steinberg Media Technologies GmbH.\n\n**Licence:** the low-latency build contains Steinberg's ASIO SDK, which Steinberg offers under the GPLv3, so that build is distributed under the **GPLv3**. The licence and a notice are in its zip, and the exact SDK it was built from is attached here as `asio-sdk-source.zip`. Modular's own source, and every other download, stays MIT.\n\nEverything else is as in [v0.3.0](https://github.com/chrischaps/Modular/releases/tag/v0.3.0): groups, live input, recording, new modules and examples. Or [try it in the browser](https://docs.chaps.dev/modular/play/) first.\n\n## Downloads\n\n- **Windows**: `modular_synth-windows.zip`, or `modular_synth-windows-asio.zip` for low latency\n- **macOS**: `modular_synth-macos-apple-silicon.zip` or `modular_synth-macos-intel.zip`\n- **Linux**: `modular_synth-linux.zip`\n\nUnzip and run `modular_synth`. Press **Play**, then play the `Z` to `M` keys.\n",
+  "html_url": "https://github.com/chrischaps/Modular/releases/tag/v0.3.1",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-09T04:06:10Z",
+  "assets": [
+   {
+    "name": "asio-sdk-source.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.3.1/asio-sdk-source.zip",
+    "size": 8905312
+   },
+   {
+    "name": "modular_synth-linux.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.3.1/modular_synth-linux.zip",
+    "size": 8050124
+   },
+   {
+    "name": "modular_synth-macos-apple-silicon.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.3.1/modular_synth-macos-apple-silicon.zip",
+    "size": 3792076
+   },
+   {
+    "name": "modular_synth-macos-intel.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.3.1/modular_synth-macos-intel.zip",
+    "size": 3931490
+   },
+   {
+    "name": "modular_synth-windows-asio.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.3.1/modular_synth-windows-asio.zip",
+    "size": 3819578
+   },
+   {
+    "name": "modular_synth-windows.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.3.1/modular_synth-windows.zip",
+    "size": 3680326
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.3.0",
+  "name": "v0.3.0 — groups, live input, and Modular in the browser",
+  "body": "**Try it without installing:** [Modular in the browser](https://docs.chaps.dev/modular/play/). Every recipe in the [manual](https://docs.chaps.dev/modular) can now be played on its page.\n\n## New\n\n- **Groups.** Select modules and press `Ctrl+G` to fold them into one node. Open it with `Tab`, pin knobs to its face, and save it to **My Modules** for reuse in any patch.\n- **Frames and notes.** Titled backdrops and text cards on the canvas. Every example is laid out with them, so it reads as a lesson.\n- **Live input.** An Audio Input module and input device picker, with the measured round-trip latency in the status bar. For low-latency playing on Windows, get the low-latency build from [v0.3.1](https://github.com/chrischaps/Modular/releases/tag/v0.3.1).\n- **Record to WAV** from the transport (`Ctrl+R`). Each take is saved with the patch that made it.\n- **New modules:** Noise (white, pink, brown, smooth random), Quantizer (snap pitch to a scale), and a Stereo Mixer with pan, mute, meters and poly spread.\n- **Glide** on Keyboard, MIDI Note and Poly MIDI. Tempo-synced LFO, and MIDI clock input.\n- **Three new examples:** Shoreline, Backbeat (a full drum kit) and Afterglow (a chord progression), all playing themselves.\n- **Play the on-screen pianos.** The Keyboard and Poly MIDI modules play when you hold their piano keys with the mouse or a finger.\n- **Knob faces:** an LED ring and a menu of other styles. Trackpad pinch and `Ctrl`+scroll zoom about the pointer.\n\n## Fixed\n\n- The Keyboard plays legato and honours its Priority.\n- The Mixer's soft clip eases in instead of stepping to 1.333.\n- The first clock after a Reset plays step 1.\n- LFO and Chorus rate knobs stay live while patched.\n- MIDI Learn can be cancelled.\n- The MIDI Monitor's rows no longer overlap.\n- Module title bars read on every header colour.\n- The toolbar fits its window, and the status reads Playing, Stopped or No audio honestly.\n- The app stays dark on a light-mode system.\n\n## Downloads\n\nUnzip and run `modular_synth`. Press **Play**, then play the `Z` to `M` keys.\n\n",
+  "html_url": "https://github.com/chrischaps/Modular/releases/tag/v0.3.0",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-09T03:30:27Z",
+  "assets": [
+   {
+    "name": "modular_synth-linux.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.3.0/modular_synth-linux.zip",
+    "size": 8049634
+   },
+   {
+    "name": "modular_synth-macos-apple-silicon.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.3.0/modular_synth-macos-apple-silicon.zip",
+    "size": 3792096
+   },
+   {
+    "name": "modular_synth-macos-intel.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.3.0/modular_synth-macos-intel.zip",
+    "size": 3931397
+   },
+   {
+    "name": "modular_synth-windows.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.3.0/modular_synth-windows.zip",
+    "size": 3681160
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.2.0",
+  "name": "v0.2.0 — the October glow-up",
+  "body": "The October glow-up. Version 0.1 was built in a three-day sprint in January; it looked finished, but several knobs didn't do what they said. This release makes every knob keep its promise. See it and hear it at https://chaps.dev/projects/modular.\n\n## Sound\n- **In tune**: the oscillator defaults to C4 and is measured within half a cent (it used to play a major sixth sharp).\n- **Oscillator v2**: tune section, hard sync, through-zero FM, sub-oscillator, up to seven unison voices.\n- **Filters**: the SVF is rebuilt as a TPT design with log-domain cutoff, a notch output and 1V/oct cutoff CV; a new four-pole **ladder filter** saturates and is 2× oversampled.\n- **Envelope v2**: accurate stage times, analog-style curves, velocity.\n- **Reverb v2**: a modulated feedback delay network; Size and Decay now do what they say.\n- **Distortion v2**: oversampling, antiderivative anti-aliasing and a real wavefolder.\n- **Delay**: tape mode (wow, flutter, record-head saturation, tape loss) and tempo sync.\n- Chorus, compressor and EQ quality pass; a real output stage with denormal protection.\n\n## Playing\n- **Polyphonic cables** (up to eight voices) and a **Poly MIDI** module; poly cables draw as bundles, one strand per voice.\n- Sample-accurate MIDI on the audio thread.\n- **Bypass** footswitch on every filter and effect (Ctrl+B).\n- Cables show the last few seconds of their signal flowing from output to input (Chevrons, Dots or Comets).\n\n## Workflow\n- Opens on **First Sound**; an **Examples** menu holds six patches that teach the basics.\n- **Undo/redo**, a **quick-add palette** (Space or Tab), copy/paste/duplicate/delete, and right-click menus on modules.\n- Autosave and crash recovery, recent files, and a save prompt before closing.\n- Patches save parameters by name, so older patches keep loading.\n\n## Engine\n- The audio thread never allocates, locks or blocks: edits compile into a plan that is swapped in between buffers. A CI test enforces it.\n- An offline renderer (`render` binary) renders patches to WAV; 832 tests measure pitch, filter response, reverb decay and more.\n- A frame-stepped capture mode (`--capture`) films the app with its sound in lockstep.\n",
+  "html_url": "https://github.com/chrischaps/Modular/releases/tag/v0.2.0",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-07T02:06:39Z",
+  "assets": [
+   {
+    "name": "modular_synth-linux.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.2.0/modular_synth-linux.zip",
+    "size": 7486028
+   },
+   {
+    "name": "modular_synth-macos-apple-silicon.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.2.0/modular_synth-macos-apple-silicon.zip",
+    "size": 3249588
+   },
+   {
+    "name": "modular_synth-macos-intel.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.2.0/modular_synth-macos-intel.zip",
+    "size": 3348962
+   },
+   {
+    "name": "modular_synth-windows.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.2.0/modular_synth-windows.zip",
+    "size": 3158300
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.1.0",
+  "name": "v0.1.0",
+  "body": "**Full Changelog**: https://github.com/chrischaps/Modular/commits/v0.1.0",
+  "html_url": "https://github.com/chrischaps/Modular/releases/tag/v0.1.0",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-01-23T20:38:36Z",
+  "assets": [
+   {
+    "name": "modular_synth-linux.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.1.0/modular_synth-linux.zip",
+    "size": 7074371
+   },
+   {
+    "name": "modular_synth-macos-apple-silicon.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.1.0/modular_synth-macos-apple-silicon.zip",
+    "size": 2802778
+   },
+   {
+    "name": "modular_synth-macos-intel.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.1.0/modular_synth-macos-intel.zip",
+    "size": 2884229
+   },
+   {
+    "name": "modular_synth-windows.zip",
+    "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.1.0/modular_synth-windows.zip",
+    "size": 2674702
+   }
+  ]
+ }
+]

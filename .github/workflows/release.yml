@@ -4,20 +4,35 @@ on:
   push:
     tags:
       - 'v*'
+  # A trial run: builds and packages everything as workflow artifacts, and
+  # publishes nothing
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
   BINARY_NAME: modular_synth
+  # These builds may replace themselves with a newer release (src/app/update);
+  # a copy built from source only says one exists
+  MODULAR_RELEASE_BUILD: "1"
+  # The ASIO build is made from this copy of Steinberg's ASIO SDK 2.3.4 and
+  # no other: the one v0.3.1 was built from, checked by its SHA-256. Left to
+  # itself, asio-sys downloads whatever steinberg.net serves that day, so
+  # the licence could change between releases unnoticed. Moving to a new SDK
+  # is a deliberate change here, made after reading its LICENSE.txt
+  ASIO_SDK_URL: https://github.com/chrischaps/Modular/releases/download/v0.3.1/asio-sdk-source.zip
+  ASIO_SDK_SHA256: d79a79b9515070ebc6962c4b782b7357f6ddbb3c8cc022eaa1a2aeed0d3523ef
 
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: modular_synth.exe
             asset_name: modular_synth-windows
+            flavor: standard
           # The low-latency build: ASIO as well as Windows Audio. It contains
           # Steinberg's ASIO SDK, under the GPLv3 (see packaging/asio)
           - os: windows-latest
@@ -25,6 +40,7 @@ jobs:
             artifact_name: modular_synth.exe
             asset_name: modular_synth-windows-asio
             features: asio
+            flavor: asio
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: modular_synth
@@ -39,6 +55,12 @@ jobs:
             asset_name: modular_synth-linux
 
     runs-on: ${{ matrix.os }}
+
+    env:
+      RELEASE_DIR: target/${{ matrix.target }}/release
+      # SignPath signing runs once the project is set up there and these
+      # are set in the repository (see packaging/SIGNING.md)
+      SIGN: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' && startsWith(matrix.os, 'windows') }}
 
     steps:
       - name: Checkout
@@ -55,12 +77,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libasound2-dev
 
+      - name: Read the version
+        shell: bash
+        run: echo "VERSION=$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)" >> "$GITHUB_ENV"
+
       - name: Build
         if: matrix.features == ''
         run: cargo build --release --target ${{ matrix.target }}
 
-      # The runner has LLVM for bindgen; the build fetches Steinberg's ASIO
-      # SDK, whose PowerShell unzip fails under pwsh's module path
+      - name: Fetch the pinned ASIO SDK
+        if: matrix.features == 'asio'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest $env:ASIO_SDK_URL -OutFile asio-sdk.zip
+          $hash = (Get-FileHash asio-sdk.zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:ASIO_SDK_SHA256) { throw "The ASIO SDK isn't the pinned one: its SHA-256 is $hash" }
+          Expand-Archive asio-sdk.zip -DestinationPath asio-sdk
+          "CPAL_ASIO_DIR=$PWD\asio-sdk" >> $env:GITHUB_ENV
+
+      # The runner has LLVM for bindgen. CPAL_ASIO_DIR keeps asio-sys from
+      # downloading an SDK of its own
       - name: Build with ASIO
         if: matrix.features == 'asio'
         shell: bash
@@ -68,23 +104,121 @@ jobs:
           LIBCLANG_PATH: C:\Program Files\LLVM\bin
         run: env -u PSModulePath cargo build --release --target ${{ matrix.target }} --features asio
 
-      # The GPL text and a notice go in the zip; the SDK it was built from
-      # is published beside it as the rest of the corresponding source
+      - name: Add the licence
+        shell: bash
+        run: cp LICENSE "$RELEASE_DIR/"
+
+      # The GPL text, a notice and the SDK's own licence go in the zip; the
+      # SDK it was built from is published beside it as the rest of the
+      # corresponding source
       - name: Add the ASIO build's licence and source
         if: matrix.features == 'asio'
         shell: pwsh
         run: |
-          Copy-Item packaging/asio/README-LOW-LATENCY.txt, licenses/GPL-3.0.txt target/${{ matrix.target }}/release/
-          Copy-Item -Recurse "$env:TEMP/asio_sdk" asio-sdk-source
+          Copy-Item packaging/asio/README-LOW-LATENCY.txt, licenses/GPL-3.0.txt "$env:RELEASE_DIR/"
+          Copy-Item asio-sdk/LICENSE.txt "$env:RELEASE_DIR/ASIO-SDK-LICENSE.txt"
+          Copy-Item -Recurse asio-sdk asio-sdk-source
+
+      - name: Upload the executable to sign
+        id: unsigned-exe
+        if: env.SIGN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}-unsigned-exe
+          path: ${{ env.RELEASE_DIR }}/${{ matrix.artifact_name }}
+          if-no-files-found: error
+
+      - name: Sign the executable
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'modular' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          github-artifact-id: ${{ steps.unsigned-exe.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed-exe
+
+      - name: Use the signed executable
+        if: env.SIGN == 'true'
+        shell: pwsh
+        run: Copy-Item -Force signed-exe/${{ matrix.artifact_name }} "$env:RELEASE_DIR/"
+
+      # Per user, into %LOCALAPPDATA%\Programs\Modular, with a Start Menu
+      # shortcut and an uninstaller (packaging/windows/modular.iss)
+      - name: Build the installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc /Q "/DVersion=$env:VERSION" "/DFlavor=${{ matrix.flavor }}" "/DSourceDir=$PWD\$env:RELEASE_DIR" "/DOutputDir=$PWD\installer" packaging\windows\modular.iss
+          if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
+          Get-ChildItem installer
+
+      - name: Upload the installer to sign
+        id: unsigned-installer
+        if: env.SIGN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}-unsigned-installer
+          path: installer/*.exe
+          if-no-files-found: error
+
+      - name: Sign the installer
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'modular' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}
+          github-artifact-id: ${{ steps.unsigned-installer.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: installer
+
+      # A Modular Synth.app in a disk image, with a shortcut to Applications.
+      # Unsigned for now: the first open is right-click → Open
+      - name: Bundle the macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app="dmg/Modular Synth.app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+          cp "$RELEASE_DIR/modular_synth" "$app/Contents/MacOS/"
+          cp assets/icon/modular.icns "$app/Contents/Resources/"
+          sed "s/@VERSION@/$VERSION/g" packaging/macos/Info.plist > "$app/Contents/Info.plist"
+          ln -s /Applications dmg/Applications
+          mkdir -p disk-image
+          hdiutil create -volname "Modular Synth" -srcfolder dmg -ov -format UDZO "disk-image/${{ matrix.asset_name }}.dmg"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
           path: |
-            target/${{ matrix.target }}/release/${{ matrix.artifact_name }}
-            target/${{ matrix.target }}/release/README-LOW-LATENCY.txt
-            target/${{ matrix.target }}/release/GPL-3.0.txt
+            ${{ env.RELEASE_DIR }}/${{ matrix.artifact_name }}
+            ${{ env.RELEASE_DIR }}/LICENSE
+            ${{ env.RELEASE_DIR }}/README-LOW-LATENCY.txt
+            ${{ env.RELEASE_DIR }}/GPL-3.0.txt
+            ${{ env.RELEASE_DIR }}/ASIO-SDK-LICENSE.txt
+          if-no-files-found: error
+
+      - name: Upload the installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}-setup
+          path: installer/*.exe
+          if-no-files-found: error
+
+      - name: Upload the disk image
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}-dmg
+          path: disk-image/*.dmg
           if-no-files-found: error
 
       - name: Upload the ASIO SDK source
@@ -97,6 +231,7 @@ jobs:
 
   release:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -107,19 +242,28 @@ jobs:
         with:
           path: artifacts
 
+      # Installers and disk images go up as they are; the rest are zipped.
+      # SHA256SUMS lists every file, and the in-app updater checks a
+      # download against it before unpacking anything
       - name: Package artifacts
         run: |
           cd artifacts
+          rm -rf *-unsigned-exe *-unsigned-installer
           for dir in */; do
             name="${dir%/}"
-            (cd "$dir" && zip -r "../${name}.zip" .)
+            case "$name" in
+              *-setup|*-dmg) mv "$dir"* . ;;
+              *) (cd "$dir" && zip -r "../${name}.zip" .) ;;
+            esac
             rm -rf "$dir"
           done
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/*.zip
+          files: artifacts/*
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

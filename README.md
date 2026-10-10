@@ -39,7 +39,9 @@ It doesn't imitate hardware panels. Every module is a node with jacks on its sid
 
 **[Try it in the browser](https://docs.chaps.dev/modular/play/)**, nothing to install: press **Play**, then play the `Z` to `M` keys or the Keyboard module's piano. The browser build has every module and example; MIDI devices, audio input and recording need the desktop app (see [`WEB.md`](WEB.md)).
 
-To run it on your computer, build it from source. You need a [Rust toolchain](https://rustup.rs). On Linux you also need the ALSA and X11/Wayland development packages listed in `.github/workflows/ci.yml`.
+**[Download it](https://github.com/chrischaps/Modular/releases/latest)** for Windows (an installer, or a zip), macOS (a disk image) or Linux. It tells you when there's a newer version and installs it in place, bringing your patch back where you left it: see [Updates](https://docs.chaps.dev/modular/getting-started/installation.html#updates).
+
+Or build it from source. You need a [Rust toolchain](https://rustup.rs). On Linux you also need the ALSA and X11/Wayland development packages listed in `.github/workflows/ci.yml`.
 
 ```bash
 cargo run --release                           # opens with the First Sound example
@@ -90,4 +92,4 @@ cargo test   # 800+ tests, including the audio-thread allocation guard
 
 ## License
 
-MIT
+Modular is MIT ([`LICENSE`](LICENSE)). The low-latency Windows download (*with ASIO*) is distributed under the GPLv3 instead, because it includes Steinberg's ASIO SDK, which Steinberg licenses under the GPLv3. Its source is this repository at the release's tag, built with `--features asio` against ASIO SDK 2.3.4. Every other download is MIT.

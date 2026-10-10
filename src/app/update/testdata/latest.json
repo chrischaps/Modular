@@ -1,0 +1,21 @@
+{
+ "tag_name": "v0.3.1",
+ "name": "v0.3.1 — a low-latency Windows download",
+ "body": "**New download: `modular_synth-windows-asio.zip`, the low-latency Windows build.** It runs exactly like the standard Windows build, and can also use an audio interface's ASIO driver. That takes the round trip from input to output from about 60 ms (Windows Audio) to 11–20 ms on a Focusrite Scarlett 2i2, quick enough to play a guitar or sing through Modular. Install your interface's ASIO driver, then choose **ASIO** under **Output**.\n\n<img src=\"https://raw.githubusercontent.com/chrischaps/Modular/master/assets/asio/asio-compatible-bw.png\" alt=\"ASIO Compatible. ASIO is a registered trademark of Steinberg Media Technologies GmbH\" width=\"110\">\n\nASIO is a registered trademark of Steinberg Media Technologies GmbH.\n\n**Licence:** the low-latency build contains Steinberg's ASIO SDK, which Steinberg offers under the GPLv3, so that build is distributed under the **GPLv3**. The licence and a notice are in its zip, and the exact SDK it was built from is attached here as `asio-sdk-source.zip`. Modular's own source, and every other download, stays MIT.\n\nEverything else is as in [v0.3.0](https://github.com/chrischaps/Modular/releases/tag/v0.3.0): groups, live input, recording, new modules and examples. Or [try it in the browser](https://docs.chaps.dev/modular/play/) first.\n\n## Downloads\n\n- **Windows**: `modular_synth-windows.zip`, or `modular_synth-windows-asio.zip` for low latency\n- **macOS**: `modular_synth-macos-apple-silicon.zip` or `modular_synth-macos-intel.zip`\n- **Linux**: `modular_synth-linux.zip`\n\nUnzip and run `modular_synth`. Press **Play**, then play the `Z` to `M` keys.\n",
+ "html_url": "https://github.com/chrischaps/Modular/releases/tag/v0.3.1",
+ "draft": false,
+ "prerelease": false,
+ "published_at": "2026-10-09T04:06:10Z",
+ "assets": [
+  {
+   "name": "asio-sdk-source.zip",
+   "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.3.1/asio-sdk-source.zip",
+   "size": 8905312
+  },
+  {
+   "name": "modular_synth-linux.zip",
+   "browser_download_url": "https://github.com/chrischaps/Modular/releases/download/v0.3.1/modular_synth-linux.zip",
+   "size": 8050124
+  }
+ ]
+}

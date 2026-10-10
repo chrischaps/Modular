@@ -20,11 +20,49 @@ Patches go in and out as files: **💾 Save** downloads the patch, and **📂 Op
 
 ## Download a release
 
-Prebuilt binaries for Windows, macOS (Intel and Apple Silicon) and Linux are attached to each [release on GitHub](https://github.com/chrischaps/Modular/releases). Download the zip for your system, unzip it, and run `modular_synth`.
+Each [release on GitHub](https://github.com/chrischaps/Modular/releases) has a download for Windows, macOS (Apple Silicon and Intel) and Linux.
 
-For playing live on Windows, download **`modular_synth-windows-asio.zip`**, the low-latency build, instead. It runs exactly like the standard one, and can also use an audio interface's ASIO driver: see [Build with ASIO](#build-with-asio-windows-optional) for what that gives you, and skip the building.
+### Windows
 
-Releases are cut from time to time and can trail the source. This manual describes the current source, so if a feature here is missing from your copy, build from source.
+Download **`modular_synth-windows-setup.exe`** and run it. It installs Modular for you alone, in `%LOCALAPPDATA%\Programs\Modular`, without asking for an administrator. It adds Modular to the Start Menu, and you can remove it from **Settings → Apps → Installed apps**, like any other app.
+
+For playing live, download **`modular_synth-windows-asio-setup.exe`**, the low-latency build, instead. It runs exactly like the standard one, and can also use an audio interface's ASIO driver: see [Build with ASIO](#build-with-asio-windows-optional) for what that gives you, and skip the building. Installing either one replaces the other.
+
+The first time, Windows may show **"Windows protected your PC"**: the downloads aren't signed yet. Click **More info**, then **Run anyway**.
+
+If you'd rather not install anything, the zips (`modular_synth-windows.zip` and `modular_synth-windows-asio.zip`) hold the same app as one file. Unzip it anywhere and run `modular_synth.exe`.
+
+### macOS
+
+Download the disk image for your Mac: **`modular_synth-macos-apple-silicon.dmg`** for an M-series Mac, or **`modular_synth-macos-intel.dmg`**. Open it and drag **Modular Synth** to **Applications**.
+
+The app isn't signed by Apple yet, so the first time, macOS says it can't check it for malicious software. **Right-click** (or Control-click) Modular Synth in Applications and choose **Open**, then **Open** again. After that it opens normally. On recent versions of macOS, if there's no **Open** button, go to **System Settings → Privacy & Security** and click **Open Anyway** beside the message about Modular Synth.
+
+### Linux
+
+Download `modular_synth-linux.zip`, unzip it, and run `modular_synth`. If it won't start, mark it as a program first: `chmod +x modular_synth`.
+
+## Updates
+
+Once a day, Modular asks GitHub whether a newer release is out. When one is, the dot after the version number in the bottom-right corner lights up blue, and a note says what's new. Click the version number to see the note again.
+
+- **What's New** shows the release notes for every version since yours.
+- **Install** downloads the new version, checks it against the release's published checksums (`SHA256SUMS`), puts it in place and restarts. Your patch, including changes you haven't saved, your audio and MIDI devices, and your view of the canvas come back as they were. If the patch has unsaved changes, Modular offers to save them first. Install waits while a recording is running.
+- **Later** puts the note away; the dot stays lit. **Skip this version** stops offering that version; a newer one is still offered.
+- **Help → Check for Updates…** checks now, and says so if you're up to date.
+
+**What the check sends:** one request to GitHub's public list of releases, saying it comes from `modular_synth` and which version. Nothing about you or your computer, and no usage data. A check that doesn't work, when you're offline say, does nothing visible and tries again next time. To stop checking altogether, turn off **Help → Check for Updates Automatically**; Modular then makes no requests at all.
+
+**Rolling back:** the version you updated from stays beside the new one, and **Help → Roll Back to …** swaps back to it and restarts. The version you left is skipped, so it isn't offered again straight away.
+
+Where Modular can't replace itself, **Install** becomes **Download**, which opens the release page:
+
+- A copy built from source (`cargo run`), which only says that an update exists.
+- A copy in a folder it can't write to, such as `Program Files`.
+- macOS, until the app is signed: macOS doesn't let a downloaded app replace itself.
+- Linux, when a package manager installed it.
+
+Each copy updates to the same kind of download it came from: the low-latency Windows build to the next low-latency build, the standard one to the standard one.
 
 ## Build from source
 
@@ -104,7 +142,7 @@ The low-latency Windows download (`modular_synth-windows-asio.zip`, see [Downloa
 
 Then choose **ASIO** at the top of the **Output** menu. See [Audio Input](../modules/sources/audio-input.md#low-latency-with-asio-windows) for choosing a buffer size.
 
-Steinberg licenses the ASIO SDK under the GPLv3 (or its own proprietary terms). Modular's source is MIT, but a binary built with ASIO includes the SDK, so if you share one, the GPLv3 applies to it. The low-latency download is such a binary: it's distributed under the GPLv3, with the licence and a notice in its zip, and the exact SDK it was built from is attached to the same release (`asio-sdk-source.zip`). The other downloads leave ASIO out and stay MIT.
+Steinberg licenses the ASIO SDK under the GPLv3 (or its own proprietary terms). Modular's source is MIT, but a binary built with ASIO includes the SDK, so if you share one, the GPLv3 applies to it. The low-latency download is such a binary: it's distributed under the GPLv3, with the GPL, Steinberg's licence for the SDK and a notice in its zip and installer. The exact SDK it was built from (ASIO SDK 2.3.4, pinned by its checksum in `release.yml`) is attached to the same release as `asio-sdk-source.zip`. The other downloads leave ASIO out and stay MIT.
 
 ## Command line
 

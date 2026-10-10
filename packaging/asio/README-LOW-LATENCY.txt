@@ -22,6 +22,8 @@ contains Steinberg's ASIO SDK (version 2.3.4), which Steinberg licenses
 either under its proprietary ASIO licence or under the GNU General Public
 License version 3. This build uses the GPL: as a whole, it is distributed
 under the terms of the GNU GPL version 3, in GPL-3.0.txt beside this file.
+Steinberg's licence for the SDK is in ASIO-SDK-LICENSE.txt, and Modular's
+own MIT licence in LICENSE.
 
 The complete corresponding source:
 

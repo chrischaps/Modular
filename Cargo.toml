@@ -30,6 +30,14 @@ image = { version = "0.25", default-features = false, features = ["png"], option
 # std::time's clocks panic in the browser; this is std's on the desktop
 web-time = "1.1"
 
+# Updates (src/app/update): one request to GitHub's releases API, then the
+# release's zip, checked against its SHA256SUMS before it's unpacked
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ureq = "2.12"
+semver = { version = "1", features = ["serde"] }
+sha2 = "0.10"
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
+
 # The browser build (`trunk build`, see index.html): sound through WebAudio,
 # files through downloads and uploads
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -38,6 +46,10 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["Window", "Document", "Location", "Element", "HtmlCanvasElement", "HtmlAnchorElement", "Blob", "BlobPropertyBag", "Url", "UrlSearchParams", "Navigator", "console"] }
+
+# The app icon in the Windows executable (build.rs)
+[build-dependencies]
+winresource = "0.1"
 
 # Where the cursor is while a file is dragged over the window, which
 # winit doesn't say on Windows (already in the tree through winit)

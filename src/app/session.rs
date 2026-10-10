@@ -36,6 +36,12 @@ pub enum Discard {
     OpenFile(PathBuf),
     OpenExample(&'static Example),
     Quit,
+    /// Restart into a downloaded update.
+    #[cfg(not(target_arch = "wasm32"))]
+    Update,
+    /// Restart into the version from before the last update.
+    #[cfg(not(target_arch = "wasm32"))]
+    RollBack,
 }
 
 impl Discard {
@@ -43,7 +49,26 @@ impl Discard {
     fn verb(&self) -> &'static str {
         match self {
             Self::Quit => "Quit Without Saving",
+            _ if self.restarts() => "Restart Without Saving",
             _ => "Don't Save",
+        }
+    }
+
+    /// Whether it restarts the app, which brings unsaved changes back.
+    pub fn restarts(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        if matches!(self, Self::Update | Self::RollBack) {
+            return true;
+        }
+        false
+    }
+
+    /// What happens to unsaved changes.
+    fn consequence(&self) -> &'static str {
+        if self.restarts() {
+            "Your changes come back after the restart either way. Saving puts them in the file too, in case the new version won't open."
+        } else {
+            "Your changes will be lost if you don't save them."
         }
     }
 
@@ -179,7 +204,9 @@ pub fn unsaved_changes_prompt(
 ) -> Option<Answer> {
     let enter = ctx.input(|i| i.key_pressed(egui::Key::Enter));
     let response = prompt(ctx, "unsaved_changes", |ui| {
-        let title = if unsaved {
+        let title = if unsaved && action.restarts() {
+            format!("Save changes to “{patch_name}” before restarting?")
+        } else if unsaved {
             format!("Save changes to “{patch_name}”?")
         } else {
             "Stop recording?".to_string()
@@ -187,7 +214,7 @@ pub fn unsaved_changes_prompt(
         ui.label(RichText::new(title).size(17.0).color(theme::text::PRIMARY));
         ui.add_space(4.0);
         if unsaved {
-            ui.label(RichText::new("Your changes will be lost if you don't save them.").color(theme::text::SECONDARY));
+            ui.label(RichText::new(action.consequence()).color(theme::text::SECONDARY));
         }
         if let Some(length) = recording {
             ui.label(
