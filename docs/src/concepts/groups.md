@@ -78,7 +78,9 @@ The **Library** is a shelf of ready-made groups that ships with Soba. Each one i
 | **Subtractive Voice** | A saw through a ladder filter, one envelope opening the filter and one shaping the level | Pitch, Gate, Velocity → Out |
 | **FM Voice** | Two-operator FM at 1:1, an electric-piano bark that mellows as it rings. **Oct** and **Semi** set the ratio | Pitch, Gate, Velocity → Out |
 | **FM Bell** | Two-operator FM at 1:3.5: clangorous partials that fade to a pure tone | Pitch, Gate, Velocity → Out |
+| **Electric Piano** | A Rhodes-style tine: FM at 1:1 that barks the harder you play and mellows as it rings, with a 14:1 ping on the strike and a slow tremolo. **FM** is the tine, **Vel** the bark, **Dec** how long it rings, **CV Amt** and **Rate** the tremolo | Pitch, Gate, Velocity → Out |
 | **Supersaw Pad** | Seven detuned saws, a slow swell and a filter that breathes | Pitch, Gate, Velocity → Out |
+| **String Machine** | A Solina-style ensemble: detuned saws at 8' and 4', thinned and swelling, through a three-voice chorus. **Cutoff** is the brightness, **Depth** the ensemble, **Atk** the swell and **2** the 4' octave | Pitch, Gate, Velocity → Out |
 | **Mallet** | A short strike rings a resonant filter tuned to the note, like a marimba bar | Pitch, Gate, Velocity → Out |
 | **Acid Bass** | A resonant, driven ladder snapped open on every note; velocity accents | Pitch, Gate, Velocity → Out |
 | **Reese Bass** | Three detuned saws beating against each other, with a slow LFO in the filter | Pitch, Gate, Velocity → Out |
@@ -89,7 +91,7 @@ The **Library** is a shelf of ready-made groups that ships with Soba. Each one i
 | **Pump** | Each trigger ducks the sound and lets it swell back, like a compressor keyed from the kick | In, Trig → Out |
 | **Auto-Pan** | An LFO sweeps a mono sound from side to side. **Tempo** locks the sweep to the Clock | In → Out L, Out R |
 
-The voices share a shape: plug a [Keyboard](../modules/midi/keyboard.md) or [Poly MIDI](../modules/midi/poly-midi.md) into **Pitch**, **Gate** and **Velocity**, and **Out** into a mixer or the output. They're built only from [polyphonic](./polyphony.md) modules, so Poly MIDI plays chords through any of them. They're also levelled to match, so swapping one voice for another doesn't jump in volume.
+The voices share a shape: plug a [Keyboard](../modules/midi/keyboard.md) or [Poly MIDI](../modules/midi/poly-midi.md) into **Pitch**, **Gate** and **Velocity**, and **Out** into a mixer or the output. They're built from [polyphonic](./polyphony.md) modules, so Poly MIDI plays chords through any of them. The String Machine's chorus is the one exception: like a real string machine's ensemble, it hears the whole chord at once. They're also levelled to match, so swapping one voice for another doesn't jump in volume.
 
 A Library group you've changed can be saved to My Modules under its own name, like any other group.
 

@@ -81,11 +81,25 @@ pub const LIBRARY: &[LibraryGroup] = &[
         json: include_str!("../../library/fm-bell.json"),
     },
     LibraryGroup {
+        name: "Electric Piano",
+        file_name: "electric-piano.json",
+        section: Section::Voices,
+        description: "A Rhodes-style tine: FM at 1:1 that barks the harder you play and mellows as it rings, under a slow tremolo. FM is the tine, Vel the bark, Dec how long it rings, CV Amt and Rate the tremolo",
+        json: include_str!("../../library/electric-piano.json"),
+    },
+    LibraryGroup {
         name: "Supersaw Pad",
         file_name: "supersaw-pad.json",
         section: Section::Voices,
         description: "Seven detuned saws, a slow swell and a filter that breathes. Hold chords from Poly MIDI",
         json: include_str!("../../library/supersaw-pad.json"),
+    },
+    LibraryGroup {
+        name: "String Machine",
+        file_name: "string-machine.json",
+        section: Section::Voices,
+        description: "A Solina-style ensemble: detuned saws at 8' and 4', thinned and swelling, through a three-voice chorus. Cutoff is the brightness, Depth the ensemble, Atk the swell and 2 the 4' octave",
+        json: include_str!("../../library/string-machine.json"),
     },
     LibraryGroup {
         name: "Mallet",
@@ -155,7 +169,8 @@ pub const LIBRARY: &[LibraryGroup] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dsp::analysis::{amp_to_db, peak, rms};
+    use crate::dsp::analysis::{amp_to_db, peak, rms, Spectrum};
+    use crate::dsp::MidiMessage;
     use crate::engine::OfflineRenderer;
     use crate::graph::groups::{self, GroupIndex};
     use crate::persistence::{capture_patch, compile_patch, stage_patch, ConnectionData, JackData, NodeData, ParameterValue};
@@ -228,8 +243,10 @@ mod tests {
         for entry in LIBRARY.iter().filter(|g| g.section == Section::Voices) {
             let patch = entry.patch().unwrap();
             for node in patch.all_nodes() {
-                // A mono modulator shared by every voice is fine
-                if node.module_id == "mod.lfo" {
+                // A mono modulator shared by every voice is fine, and so is
+                // an effect hearing the voices summed, as a string
+                // machine's ensemble hears the whole chord
+                if ["mod.lfo", "fx.chorus"].contains(&node.module_id.as_str()) {
                     continue;
                 }
                 assert!(polyphonic.contains(&node.module_id.as_str()), "{}: {} isn't polyphonic", entry.name, node.module_id);
@@ -361,5 +378,34 @@ mod tests {
                 assert!((-16.0..=-9.0).contains(&peak_db), "{}: one note peaks at {peak_db:.1} dBFS", entry.name);
             }
         }
+    }
+
+    /// The first `seconds` of one middle C played at `velocity`, alone.
+    fn one_note(entry: &LibraryGroup, velocity: u8, seconds: f32) -> Vec<f32> {
+        let sample_rate = 48_000.0;
+        let patch = played(entry);
+        let (mut renderer, _) = OfflineRenderer::from_patch(&patch, sample_rate, 256).unwrap();
+        renderer.queue_midi(0, 0, MidiMessage::NoteOn { note: 60, velocity });
+        renderer.render((seconds * sample_rate) as usize).left
+    }
+
+    /// Where a sound's power sits on average, in Hz: higher is brighter,
+    /// whatever its level. FM at 1:1 throws a sideband onto 0 Hz, so
+    /// everything below 40 Hz is left out.
+    fn centroid(samples: &[f32]) -> f64 {
+        let spectrum = Spectrum::of(samples, 48_000.0);
+        let audible = spectrum.magnitudes.iter().enumerate().map(|(bin, m)| (bin as f64 * spectrum.bin_hz, m * m)).filter(|&(hz, _)| hz >= 40.0);
+        let weighted: f64 = audible.clone().map(|(hz, p)| hz * p).sum();
+        weighted / audible.map(|(_, p)| p).sum::<f64>()
+    }
+
+    #[test]
+    fn electric_piano_brightens_with_velocity() {
+        // As on a Rhodes, a harder note barks: it changes the tone, not
+        // only the level. The bark is in the attack, so hear its first 50 ms
+        let piano = LIBRARY.iter().find(|g| g.name == "Electric Piano").unwrap();
+        let attack = |velocity| centroid(&one_note(piano, velocity, 0.05));
+        let (soft, hard) = (attack(40), attack(120));
+        assert!(hard > 1.3 * soft, "velocity 40 centres on {soft:.0} Hz, 120 on {hard:.0} Hz");
     }
 }
