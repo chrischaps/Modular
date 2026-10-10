@@ -2,15 +2,27 @@
 //!
 //! A 16-step sequencer with per-step pitch, gate, and velocity.
 //! Advances on clock input, outputs CV/Gate signals for driving oscillators and envelopes.
+//!
+//! It holds four patterns, A to D, played in the order a Chain gives as on
+//! the Trigger Sequencer, so "A A B C" plays a 64-step line, and a Pattern
+//! CV can pick them instead. Pattern A's parameters are the ones the
+//! sequencer has always had ("Step 3 Pitch"); B to D's come after all of
+//! them ("Step B3 Pitch"), so patches saved before there were patterns load
+//! with only A and play as they did.
+
+use std::sync::LazyLock;
 
 use crate::dsp::{
     context::ProcessContext,
     module_trait::{DspModule, ModuleCategory, ModuleInfo},
     parameter::ParameterDefinition,
     port::PortDefinition,
-    signal::SignalBuffer,
-    ParameterDisplay, SignalType,
+    signal::{connected_input, SignalBuffer},
+    ParameterDisplay, Readout, SignalType,
 };
+
+use super::trigger_sequencer::{chain_from, TriggerSequencer, CHAIN_CHOICES, CHAIN_IDS, CHAIN_NAMES, CHAIN_SLOTS};
+pub use super::trigger_sequencer::{PATTERNS, PATTERN_NAMES};
 
 /// Maximum number of steps in the sequencer.
 pub const MAX_STEPS: usize = 16;
@@ -71,6 +83,40 @@ static STEP_TIE_NAMES: [&str; MAX_STEPS] = [
     "Step 9 Tie", "Step 10 Tie", "Step 11 Tie", "Step 12 Tie",
     "Step 13 Tie", "Step 14 Tie", "Step 15 Tie", "Step 16 Tie",
 ];
+
+/// The four things each step holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StepField {
+    Pitch = 0,
+    Gate = 1,
+    Velocity = 2,
+    Tie = 3,
+}
+
+const FIELDS: [StepField; 4] = [StepField::Pitch, StepField::Gate, StepField::Velocity, StepField::Tie];
+const FIELD_NAMES: [&str; 4] = ["Pitch", "Gate", "Velocity", "Tie"];
+
+/// Patterns B to D's parameter ids and names, made once and kept: they must
+/// be `'static`, and there are 192 of them. In the order the parameters
+/// are: pattern, then step, then field.
+struct PatternNames {
+    ids: Vec<&'static str>,
+    names: Vec<&'static str>,
+}
+
+static PATTERN_PARAM_NAMES: LazyLock<PatternNames> = LazyLock::new(|| {
+    let keep = |text: String| -> &'static str { Box::leak(text.into_boxed_str()) };
+    let mut names = PatternNames { ids: Vec::new(), names: Vec::new() };
+    for letter in &PATTERN_NAMES[1..] {
+        for step in 1..=MAX_STEPS {
+            for field in FIELD_NAMES {
+                names.ids.push(keep(format!("step_{}{step}_{}", letter.to_lowercase(), field.to_lowercase())));
+                names.names.push(keep(format!("Step {letter}{step} {field}")));
+            }
+        }
+    }
+    names
+});
 
 /// What Gate Length is a share of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -215,13 +261,15 @@ pub fn note_to_name(note: u8) -> String {
 /// - **Clock** (Gate): Advances to the next step on rising edge.
 /// - **Reset** (Gate): Returns to step 1 on rising edge.
 /// - **Run** (Gate): Enables/disables sequencer advancement.
+/// - **Pattern** (Control): Picks the pattern for each pass in place of the
+///   Chain, in four equal zones of 0 to 1 (as on the Trigger Sequencer).
 ///
 /// **Outputs:**
 /// - **Pitch** (Control): V/Oct pitch CV from current step.
 /// - **Gate** (Gate): Gate output for current step.
 /// - **Velocity** (Control): Velocity (0-1) from current step.
 /// - **Step** (Control): Current step as 0-1 value (for visualization).
-/// - **EOC** (Gate): End-of-cycle trigger pulse.
+/// - **EOC** (Gate): End-of-cycle trigger pulse, at the end of the chain.
 ///
 /// # Parameters
 ///
@@ -236,6 +284,16 @@ pub fn note_to_name(note: u8) -> String {
 /// - **Gate Mode** (Step / 100 ms): What Gate Length is a share of.
 /// - **Step 1-16 Tie** (0/1): Holds the step's gate into the next step,
 ///   which then continues the note instead of starting a new one.
+/// - **Chain 1-8** (– / A-D): The patterns played, a pass each, in order.
+/// - **Step B1-D16 Pitch, Gate, Velocity, Tie**: Patterns B to D's steps.
+///
+/// # Patterns
+///
+/// A pass through a pattern ends where the sequence wraps (or turns, in
+/// ping-pong), or after Steps clocks in random order. The next pass plays
+/// the Chain's next pattern, or the one the Pattern CV picks at that clock.
+/// The playing note's tie carries into the next pattern's first step, and
+/// EOC fires once the whole chain has played.
 ///
 /// In the Step gate mode a note always starts with a rising edge: when a new
 /// note begins while the gate is still high, the gate drops for one sample
@@ -264,6 +322,16 @@ pub struct StepSequencer {
     eoc_timer: usize,
     /// Simple PRNG state for random mode.
     random_state: u32,
+    /// The pattern playing.
+    pattern: usize,
+    /// Which Chain entry is playing.
+    chain_slot: usize,
+    /// Clocks into this pass through the pattern (random order counts them).
+    pass_clocks: usize,
+    /// The pattern the next pass will play, for the display.
+    next_pattern: usize,
+    /// Pattern was patched in the last block.
+    pattern_cv: bool,
     /// Sample rate from prepare().
     sample_rate: f32,
     /// Port definitions.
@@ -280,6 +348,7 @@ impl StepSequencer {
             PortDefinition::input_with_default("clock", "Clock", SignalType::Gate, 0.0).describe("Each rising edge advances to the next step; patch a Clock gate here"),
             PortDefinition::input_with_default("reset", "Reset", SignalType::Gate, 0.0).describe("A rising edge jumps back to step 1"),
             PortDefinition::input_with_default("run", "Run", SignalType::Gate, 1.0).describe("Steps only advance while high; runs when unpatched"),
+            PortDefinition::input_with_default("pattern", "Pattern", SignalType::Control, 0.0).describe("Picks the pattern for each pass in place of the Chain: 0 to 0.25 is A, then B, C and D"),
             // Output ports
             PortDefinition::output("pitch", "Pitch", SignalType::Control).describe("Pitch of the current step as V/Oct; patch into an oscillator"),
             PortDefinition::output("gate", "Gate", SignalType::Gate).describe("Pulses on each clock when the step's gate is on; patch into an envelope"),
@@ -360,6 +429,29 @@ impl StepSequencer {
             ).describe("Holds this step's note into the next step, which continues it without a new attack"));
         }
 
+        // The Chain and patterns B to D, after everything the sequencer had
+        // before it had patterns
+        for slot in 0..CHAIN_SLOTS {
+            parameters.push(
+                ParameterDefinition::choice(CHAIN_IDS[slot], CHAIN_NAMES[slot], &CHAIN_CHOICES, usize::from(slot == 0))
+                    .describe("A pattern in the chain, which plays its patterns a pass each, in order, then repeats"),
+            );
+        }
+        let names = &*PATTERN_PARAM_NAMES;
+        for (index, field) in FIELDS.iter().cycle().take((PATTERNS - 1) * MAX_STEPS * 4).enumerate() {
+            let (id, name) = (names.ids[index], names.names[index]);
+            parameters.push(match field {
+                StepField::Pitch => ParameterDefinition::new(id, name, 0.0, 127.0, 60.0, ParameterDisplay::linear(""))
+                    .describe("Note for this step as a MIDI number; 60 is middle C"),
+                StepField::Gate => ParameterDefinition::toggle(id, name, true).describe("Plays this step when on; silent when off"),
+                StepField::Velocity => ParameterDefinition::new(id, name, 0.0, 127.0, 100.0, ParameterDisplay::linear(""))
+                    .describe("Velocity for this step, 0 to 127"),
+                StepField::Tie => ParameterDefinition::toggle(id, name, false)
+                    .describe("Holds this step's note into the next step, which continues it without a new attack"),
+            });
+        }
+        debug_assert_eq!(parameters.len(), Self::PARAM_COUNT);
+
         Self {
             current_step: 0,
             ping_pong_direction: 1,
@@ -372,6 +464,11 @@ impl StepSequencer {
             timer: StepTimer::new(),
             eoc_timer: 0,
             random_state: 12345, // Seed for PRNG
+            pattern: 0,
+            chain_slot: 0,
+            pass_clocks: 0,
+            next_pattern: 0,
+            pattern_cv: false,
             sample_rate: 44100.0,
             ports,
             parameters,
@@ -382,6 +479,7 @@ impl StepSequencer {
     const PORT_CLOCK: usize = 0;
     const PORT_RESET: usize = 1;
     const PORT_RUN: usize = 2;
+    const PORT_PATTERN: usize = 3;
     const PORT_PITCH: usize = 0;
     const PORT_GATE: usize = 1;
     const PORT_VELOCITY: usize = 2;
@@ -415,6 +513,75 @@ impl StepSequencer {
     const fn step_tie_param(step: usize) -> usize {
         Self::PARAM_GATE_MODE + 1 + step
     }
+
+    /// The first of the eight Chain slots, after the ties.
+    pub const PARAM_CHAIN: usize = Self::step_tie_param(MAX_STEPS);
+    /// Patterns B to D's steps, four parameters a step, after the Chain.
+    const PARAM_PATTERNS: usize = Self::PARAM_CHAIN + CHAIN_SLOTS;
+    pub const PARAM_COUNT: usize = Self::PARAM_PATTERNS + (PATTERNS - 1) * MAX_STEPS * 4;
+
+    /// The parameter holding one of a step's fields (all 0-based).
+    pub const fn step_param(pattern: usize, step: usize, field: StepField) -> usize {
+        if pattern == 0 {
+            match field {
+                StepField::Pitch => Self::step_pitch_param(step),
+                StepField::Gate => Self::step_gate_param(step),
+                StepField::Velocity => Self::step_velocity_param(step),
+                StepField::Tie => Self::step_tie_param(step),
+            }
+        } else {
+            Self::PARAM_PATTERNS + ((pattern - 1) * MAX_STEPS + step) * 4 + field as usize
+        }
+    }
+
+    /// The name of the parameter holding a step's field: "Step 3 Pitch" in
+    /// pattern A, "Step B3 Pitch" in B.
+    pub fn step_param_name(pattern: usize, step: usize, field: StepField) -> &'static str {
+        if pattern == 0 {
+            match field {
+                StepField::Pitch => STEP_PITCH_NAMES[step],
+                StepField::Gate => STEP_GATE_NAMES[step],
+                StepField::Velocity => STEP_VELOCITY_NAMES[step],
+                StepField::Tie => STEP_TIE_NAMES[step],
+            }
+        } else {
+            PATTERN_PARAM_NAMES.names[((pattern - 1) * MAX_STEPS + step) * 4 + field as usize]
+        }
+    }
+
+    /// The patterns the Chain plays, in order, and how many.
+    pub fn chain(params: &[f32]) -> ([usize; CHAIN_SLOTS], usize) {
+        chain_from(&params[Self::PARAM_CHAIN..Self::PARAM_CHAIN + CHAIN_SLOTS])
+    }
+
+    /// The pattern for the Chain slot playing, or for the Pattern CV.
+    fn pick(&mut self, params: &[f32], cv: Option<f32>) -> usize {
+        match cv {
+            Some(cv) => TriggerSequencer::pattern_for_cv(cv),
+            None => {
+                let (chain, len) = Self::chain(params);
+                self.chain_slot %= len;
+                chain[self.chain_slot]
+            }
+        }
+    }
+
+    /// The pattern the next pass will play.
+    fn coming_pattern(&self, params: &[f32], cv: Option<f32>) -> usize {
+        match cv {
+            Some(cv) => TriggerSequencer::pattern_for_cv(cv),
+            None => {
+                let (chain, len) = Self::chain(params);
+                if self.reset_pending { chain[0] } else { chain[(self.chain_slot + 1) % len] }
+            }
+        }
+    }
+
+    /// Readout values: the pattern, + 4 × the Chain slot, + 32 once a step
+    /// has played.
+    pub const READOUT_PATTERN: usize = 0;
+    /// The next pass's pattern, + 64 while Pattern is patched.
+    pub const READOUT_NEXT: usize = 1;
 
     /// How long a new note's gate stays high, in samples.
     ///
@@ -516,7 +683,7 @@ impl DspModule for StepSequencer {
             id: "seq.step",
             name: "Step Sequencer",
             category: ModuleCategory::Utility,
-            description: "16-step sequencer with pitch, gate, and velocity per step",
+            description: "16-step sequencer with pitch, gate, and velocity per step, in four patterns played in a chain",
         };
         &INFO
     }
@@ -552,6 +719,8 @@ impl DspModule for StepSequencer {
         let clock_in = inputs.get(Self::PORT_CLOCK);
         let reset_in = inputs.get(Self::PORT_RESET);
         let run_in = inputs.get(Self::PORT_RUN);
+        let pattern_in = connected_input(inputs, Self::PORT_PATTERN);
+        self.pattern_cv = pattern_in.is_some();
 
         // Process each sample
         for i in 0..context.block_size {
@@ -576,6 +745,7 @@ impl DspModule for StepSequencer {
             self.prev_reset = reset_high;
 
             let is_running = run_value > Self::GATE_THRESHOLD;
+            let cv = pattern_in.map(|buf| buf.samples.get(i).copied().unwrap_or(0.0));
 
             // Handle reset
             if reset_rising {
@@ -594,22 +764,46 @@ impl DspModule for StepSequencer {
             let mut retrigger = false;
 
             // Handle clock advance. The first clock after a reset plays the
-            // start step rather than moving past it, so a reset on the
-            // downbeat puts step 1 on the downbeat
+            // start step of the chain's first pattern rather than moving
+            // past it, so a reset on the downbeat puts step 1 on the downbeat
             if clock_rising && is_running {
-                let hit_end = if self.reset_pending {
+                let end_of_chain = if self.reset_pending {
                     self.reset_pending = false;
                     self.current_step = direction.start_step(num_steps);
+                    self.chain_slot = 0;
+                    self.pass_clocks = 0;
+                    self.pattern = self.pick(params, cv);
                     false
                 } else {
-                    self.advance_step(num_steps, direction)
+                    let hit_end = self.advance_step(num_steps, direction);
+                    // A pass through the pattern ends where the sequence
+                    // wraps or turns; in random order, after Steps clocks
+                    self.pass_clocks += 1;
+                    let pass_over = match direction {
+                        SequenceDirection::Random => self.pass_clocks >= num_steps,
+                        _ => hit_end,
+                    };
+                    let mut chain_over = false;
+                    if pass_over {
+                        self.pass_clocks = 0;
+                        self.chain_slot += 1;
+                        if self.chain_slot >= Self::chain(params).1 {
+                            self.chain_slot = 0;
+                            chain_over = true;
+                        }
+                        self.pattern = self.pick(params, cv);
+                    }
+                    // With the Pattern CV choosing, every pass is the whole
+                    // sequence
+                    hit_end && (chain_over || cv.is_some())
                 };
+                let pattern = self.pattern;
 
                 // A step that plays starts a note, or continues the last one
                 // if that was tied. A rest ends the note
-                let step_gate = params[Self::step_gate_param(self.current_step)] > 0.5;
+                let step_gate = params[Self::step_param(pattern, self.current_step, StepField::Gate)] > 0.5;
                 if step_gate {
-                    let tie = params[Self::step_tie_param(self.current_step)] > 0.5;
+                    let tie = params[Self::step_param(pattern, self.current_step, StepField::Tie)] > 0.5;
                     // Fixed gates never dipped, so old patches whose notes
                     // overlap still run them together
                     retrigger = gate_mode == GateMode::Step && self.gate_high && !self.tied;
@@ -620,8 +814,9 @@ impl DspModule for StepSequencer {
                     self.tied = false;
                 }
 
-                // Fire EOC pulse if we hit the end of cycle
-                if hit_end && direction != SequenceDirection::Random {
+                // Fire EOC pulse once the chain has played through (never in
+                // random order, which has no end)
+                if end_of_chain {
                     self.eoc_timer = Self::EOC_PULSE_SAMPLES;
                 }
             }
@@ -632,9 +827,9 @@ impl DspModule for StepSequencer {
             }
 
             // Get current step's data
-            let step_pitch = params[Self::step_pitch_param(self.current_step)] as u8;
-            let step_gate_enabled = params[Self::step_gate_param(self.current_step)] > 0.5;
-            let step_velocity = params[Self::step_velocity_param(self.current_step)] / 127.0;
+            let step_pitch = params[Self::step_param(self.pattern, self.current_step, StepField::Pitch)] as u8;
+            let step_gate_enabled = params[Self::step_param(self.pattern, self.current_step, StepField::Gate)] > 0.5;
+            let step_velocity = params[Self::step_param(self.pattern, self.current_step, StepField::Velocity)] / 127.0;
 
             // Generate outputs (access directly by index to avoid multiple mutable borrows)
             outputs[Self::PORT_PITCH].samples[i] = note_to_voct(step_pitch);
@@ -663,6 +858,9 @@ impl DspModule for StepSequencer {
             }
             self.timer.tick();
         }
+
+        let last_cv = pattern_in.and_then(|buf| buf.samples.get(context.block_size.saturating_sub(1)).copied());
+        self.next_pattern = self.coming_pattern(params, last_cv);
     }
 
     fn reset(&mut self) {
@@ -676,6 +874,44 @@ impl DspModule for StepSequencer {
         self.gate_high = false;
         self.timer.forget();
         self.eoc_timer = 0;
+        self.pattern = 0;
+        self.chain_slot = 0;
+        self.pass_clocks = 0;
+    }
+
+    fn readout(&self, _params: &[f32]) -> Option<Readout> {
+        let mut readout = Readout::default();
+        let started = if self.reset_pending { 0 } else { 32 };
+        readout.values[Self::READOUT_PATTERN] = (self.pattern + 4 * self.chain_slot + started) as f32;
+        let patched = if self.pattern_cv { 64 } else { 0 };
+        readout.values[Self::READOUT_NEXT] = (self.next_pattern + patched) as f32;
+        Some(readout)
+    }
+}
+
+/// Where a Step Sequencer is in its chain, read back from its [`Readout`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PatternPosition {
+    pub pattern: usize,
+    pub chain_slot: usize,
+    /// A step has played since the start or the last reset.
+    pub started: bool,
+    pub next_pattern: usize,
+    /// Pattern is patched, so the CV picks patterns rather than the Chain.
+    pub pattern_cv: bool,
+}
+
+impl PatternPosition {
+    pub fn from_readout(readout: &Readout) -> Self {
+        let now = readout.values[StepSequencer::READOUT_PATTERN] as usize;
+        let next = readout.values[StepSequencer::READOUT_NEXT] as usize;
+        Self {
+            pattern: now % 4,
+            chain_slot: (now / 4) % 8,
+            started: now & 32 != 0,
+            next_pattern: next % 4,
+            pattern_cv: next & 64 != 0,
+        }
     }
 }
 
@@ -706,8 +942,8 @@ mod tests {
         let seq = StepSequencer::new();
         let ports = seq.ports();
 
-        // 3 inputs + 5 outputs = 8 ports
-        assert_eq!(ports.len(), 8);
+        // 4 inputs + 5 outputs = 9 ports
+        assert_eq!(ports.len(), 9);
 
         // Inputs
         assert!(ports[0].is_input());
@@ -716,18 +952,20 @@ mod tests {
         assert_eq!(ports[1].id, "reset");
         assert!(ports[2].is_input());
         assert_eq!(ports[2].id, "run");
+        assert!(ports[3].is_input());
+        assert_eq!(ports[3].id, "pattern");
 
         // Outputs
-        assert!(ports[3].is_output());
-        assert_eq!(ports[3].id, "pitch");
         assert!(ports[4].is_output());
-        assert_eq!(ports[4].id, "gate");
+        assert_eq!(ports[4].id, "pitch");
         assert!(ports[5].is_output());
-        assert_eq!(ports[5].id, "velocity");
+        assert_eq!(ports[5].id, "gate");
         assert!(ports[6].is_output());
-        assert_eq!(ports[6].id, "step_out");
+        assert_eq!(ports[6].id, "velocity");
         assert!(ports[7].is_output());
-        assert_eq!(ports[7].id, "eoc");
+        assert_eq!(ports[7].id, "step_out");
+        assert!(ports[8].is_output());
+        assert_eq!(ports[8].id, "eoc");
     }
 
     #[test]
@@ -735,11 +973,16 @@ mod tests {
         let seq = StepSequencer::new();
         let params = seq.parameters();
 
-        // 3 global + 16 steps * 3 params each, then Gate Mode and 16 ties
-        assert_eq!(params.len(), 3 + MAX_STEPS * 3 + 1 + MAX_STEPS);
+        // 3 global + 16 steps * 3 params each, then Gate Mode and 16 ties,
+        // then the Chain and patterns B to D
+        assert_eq!(params.len(), StepSequencer::PARAM_COUNT);
+        assert_eq!(params.len(), 3 + MAX_STEPS * 3 + 1 + MAX_STEPS + CHAIN_SLOTS + 3 * MAX_STEPS * 4);
         assert_eq!(params[StepSequencer::PARAM_GATE_MODE].id, "gate_mode");
         assert_eq!(params[StepSequencer::step_tie_param(0)].id, "step_1_tie");
         assert_eq!(params[StepSequencer::step_tie_param(15)].id, "step_16_tie");
+        assert_eq!(params[StepSequencer::PARAM_CHAIN].name, "Chain 1");
+        assert_eq!(params[StepSequencer::PARAM_CHAIN].default, 1.0, "the chain starts as just A");
+        assert_eq!(params[StepSequencer::PARAM_CHAIN + 7].default, 0.0);
 
         // Global params
         assert_eq!(params[0].id, "steps");
@@ -1070,6 +1313,216 @@ mod tests {
         // Stops for 3 s and restarts with a reset, at the same tempo
         let gate = gate_over(&params, 6000, &[0, 1000, 4000, 5000], &[4000]);
         assert_eq!(high_for(&gate, 4000), 500);
+    }
+
+    #[test]
+    fn every_step_field_names_its_own_parameter() {
+        let seq = StepSequencer::new();
+        let params = seq.parameters();
+        for pattern in 0..PATTERNS {
+            for step in 0..MAX_STEPS {
+                for field in FIELDS {
+                    let index = StepSequencer::step_param(pattern, step, field);
+                    assert_eq!(params[index].name, StepSequencer::step_param_name(pattern, step, field));
+                }
+            }
+        }
+        assert_eq!(StepSequencer::step_param_name(0, 2, StepField::Pitch), "Step 3 Pitch");
+        assert_eq!(StepSequencer::step_param_name(1, 2, StepField::Pitch), "Step B3 Pitch");
+        assert_eq!(StepSequencer::step_param_name(3, 15, StepField::Tie), "Step D16 Tie");
+        assert_eq!(params[StepSequencer::step_param(2, 9, StepField::Velocity)].id, "step_c10_velocity");
+        // Unique, or saving by name would mix them up
+        let mut names: Vec<&str> = params.iter().map(|p| p.name).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), params.len());
+    }
+
+    fn set_chain(params: &mut [f32], patterns: &str) {
+        for slot in 0..CHAIN_SLOTS {
+            params[StepSequencer::PARAM_CHAIN + slot] = 0.0;
+        }
+        for (slot, letter) in patterns.chars().enumerate() {
+            params[StepSequencer::PARAM_CHAIN + slot] = (letter as u8 - b'A' + 1) as f32;
+        }
+    }
+
+    /// Gives every step of a pattern one note, so the Pitch output says
+    /// which pattern is playing.
+    fn fill_pattern(params: &mut [f32], pattern: usize, note: u8) {
+        for step in 0..MAX_STEPS {
+            params[StepSequencer::step_param(pattern, step, StepField::Pitch)] = note as f32;
+        }
+    }
+
+    /// Runs the sequencer at 1 kHz with a clock every `period` ms and an
+    /// optional Pattern CV, and returns every output.
+    fn run_all(params: &[f32], ms: usize, period: usize, pattern_cv: Option<&[f32]>) -> Vec<Vec<f32>> {
+        let mut seq = StepSequencer::new();
+        seq.prepare(1000.0, ms);
+        let mut clock = SignalBuffer::control(ms);
+        for t in (0..ms).step_by(period) {
+            clock.samples[t] = 1.0;
+        }
+        let reset = SignalBuffer::control(ms);
+        let mut run = SignalBuffer::control(ms);
+        run.samples.fill(1.0);
+        let pattern = match pattern_cv {
+            Some(cv) => {
+                let mut buf = SignalBuffer::control(ms);
+                buf.samples.copy_from_slice(cv);
+                buf
+            }
+            None => SignalBuffer::unconnected(ms, SignalType::Control),
+        };
+        let mut outputs: Vec<SignalBuffer> = (0..5).map(|_| SignalBuffer::control(ms)).collect();
+        seq.process(&[&clock, &reset, &run, &pattern], &mut outputs, params, &ProcessContext::new(1000.0, ms));
+        outputs.into_iter().map(|b| b.samples).collect()
+    }
+
+    /// The note sounding at each step's clock.
+    fn notes_at(pitch: &[f32], period: usize, steps: usize) -> Vec<i32> {
+        (0..steps).map(|step| (pitch[step * period] * 12.0).round() as i32 + 60).collect()
+    }
+
+    #[test]
+    fn a_chain_plays_its_patterns_in_order() {
+        let mut params = params_with(4.0, 0.0, 50.0);
+        for (pattern, note) in [(0, 60), (1, 62), (2, 64), (3, 65)] {
+            fill_pattern(&mut params, pattern, note);
+        }
+        set_chain(&mut params, "AABC");
+        let out = run_all(&params, 32 * 100, 100, None);
+        let notes = notes_at(&out[0], 100, 32);
+        let line: Vec<i32> = [60, 60, 62, 64].iter().flat_map(|&n| [n; 4]).collect();
+        assert_eq!(notes[..16], line[..], "A A B C, four steps each");
+        assert_eq!(notes[16..], line[..], "then round again");
+    }
+
+    #[test]
+    fn eoc_fires_at_the_end_of_the_chain() {
+        let mut params = params_with(4.0, 0.0, 50.0);
+        set_chain(&mut params, "AB");
+        let out = run_all(&params, 32 * 100, 100, None);
+        // Steps 0-3 are A, 4-7 B; the chain's end is the clock that wraps
+        // back to A
+        assert_eq!(rises(&out[4]), [800, 1600, 2400]);
+
+        // A chain of one is the old pattern-length cycle
+        set_chain(&mut params, "A");
+        let out = run_all(&params, 16 * 100, 100, None);
+        assert_eq!(rises(&out[4]), [400, 800, 1200]);
+    }
+
+    #[test]
+    fn a_tie_carries_across_a_pattern_boundary() {
+        let mut params = params_with(4.0, 0.0, 50.0);
+        fill_pattern(&mut params, 1, 67);
+        set_chain(&mut params, "AB");
+        // A's last step ties into B's first
+        params[StepSequencer::step_param(0, 3, StepField::Tie)] = 1.0;
+        let out = run_all(&params, 800, 100, None);
+        let gate = &out[1];
+        assert_eq!(rises(gate), [0, 100, 200, 300, 500, 600, 700]);
+        assert_eq!(high_for(gate, 300), 150, "held through A's last step and half of B's first");
+        assert_eq!((out[0][400] * 12.0).round() as i32 + 60, 67, "on B's note");
+    }
+
+    #[test]
+    fn patterns_follow_the_direction() {
+        let mut params = params_with(3.0, 1.0, 50.0);
+        for pattern in 0..2 {
+            for step in 0..3 {
+                params[StepSequencer::step_param(pattern, step, StepField::Pitch)] = (60 + 10 * pattern + step) as f32;
+            }
+        }
+        set_chain(&mut params, "AB");
+        let out = run_all(&params, 6 * 100, 100, None);
+        // Backward through A, then backward through B
+        assert_eq!(notes_at(&out[0], 100, 6), [62, 61, 60, 72, 71, 70]);
+
+        // Ping-pong turns into the next pattern
+        params[StepSequencer::PARAM_DIRECTION] = 2.0;
+        let out = run_all(&params, 7 * 100, 100, None);
+        assert_eq!(notes_at(&out[0], 100, 7), [60, 61, 62, 71, 70, 61, 62]);
+    }
+
+    #[test]
+    fn random_order_moves_along_the_chain_every_steps_clocks() {
+        let mut params = params_with(4.0, 3.0, 50.0);
+        fill_pattern(&mut params, 1, 72);
+        set_chain(&mut params, "AB");
+        let out = run_all(&params, 16 * 100, 100, None);
+        let notes = notes_at(&out[0], 100, 16);
+        assert_eq!(notes, [[60; 4], [72; 4], [60; 4], [72; 4]].concat());
+        assert!(rises(&out[4]).is_empty(), "random order has no end");
+    }
+
+    #[test]
+    fn pattern_cv_picks_the_pattern_at_each_pass() {
+        let mut params = params_with(4.0, 0.0, 50.0);
+        for (pattern, note) in [(0, 60), (1, 62), (2, 64), (3, 65)] {
+            fill_pattern(&mut params, pattern, note);
+        }
+        set_chain(&mut params, "AB");
+        // The CV moves to C (0.6) halfway through the first pass, and the
+        // pattern only changes where the next pass starts
+        let mut cv = vec![0.1; 1200];
+        cv[200..].fill(0.6);
+        let out = run_all(&params, 1200, 100, Some(&cv));
+        assert_eq!(notes_at(&out[0], 100, 12), [[60; 4], [64; 4], [64; 4]].concat());
+        // Every pass ends the sequence, with no chain to play through
+        assert_eq!(rises(&out[4]), [400, 800]);
+    }
+
+    #[test]
+    fn pattern_cv_changes_on_the_clock_that_starts_a_pass() {
+        let mut params = params_with(4.0, 0.0, 50.0);
+        fill_pattern(&mut params, 1, 62);
+        // An Arranger lane jumps from A to B on the same sample as the
+        // clock that starts the second pass
+        let mut cv = vec![0.0; 800];
+        cv[400..].fill(0.3);
+        let out = run_all(&params, 800, 100, Some(&cv));
+        assert_eq!((out[0][399] * 12.0).round() as i32 + 60, 60);
+        assert_eq!((out[0][400] * 12.0).round() as i32 + 60, 62, "B's first step on the boundary's sample");
+    }
+
+    #[test]
+    fn reset_starts_the_chain_over() {
+        let mut params = params_with(2.0, 0.0, 50.0);
+        fill_pattern(&mut params, 1, 62);
+        set_chain(&mut params, "AB");
+        let mut seq = StepSequencer::new();
+        seq.prepare(1000.0, 1);
+        // Into B (clocks 3 and 4), then reset
+        for _ in 0..3 {
+            tick(&mut seq, &params, true, false);
+            tick(&mut seq, &params, false, false);
+        }
+        assert_eq!(seq.pattern, 1);
+        tick(&mut seq, &params, false, true);
+        tick(&mut seq, &params, false, false);
+        tick(&mut seq, &params, true, false);
+        assert_eq!((seq.pattern, seq.current_step()), (0, 0));
+    }
+
+    #[test]
+    fn readout_reports_the_pattern_and_the_next() {
+        let mut params = params_with(2.0, 0.0, 50.0);
+        set_chain(&mut params, "BCD");
+        let mut seq = StepSequencer::new();
+        seq.prepare(1000.0, 1);
+        let before = PatternPosition::from_readout(&seq.readout(&params).unwrap());
+        assert!(!before.started);
+        // Clocks 1-2 play B, 3-4 C
+        for _ in 0..3 {
+            tick(&mut seq, &params, true, false);
+            tick(&mut seq, &params, false, false);
+        }
+        let at = PatternPosition::from_readout(&seq.readout(&params).unwrap());
+        assert!(at.started && !at.pattern_cv);
+        assert_eq!((at.pattern, at.chain_slot, at.next_pattern), (2, 1, 3));
     }
 
     #[test]

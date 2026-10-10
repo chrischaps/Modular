@@ -328,7 +328,8 @@ static MODULE_UI: &[ModuleUi] = &[
         module_id: "seq.step",
         knobs: &[knob("Steps"), knob_as("Gate Length", "Gate")],
         labels: &[("Direction", "Dir"), ("Gate Mode", "Gate of")],
-        hidden: &["Step *"],
+        // The grid, the pattern tabs and the Chain edit these
+        hidden: &["Step *", "Chain *"],
         // Step drives the grid's playhead, patched or not
         monitor: &["Gate", "Step", "EOC"],
         display: NodeDisplay::StepGrid,

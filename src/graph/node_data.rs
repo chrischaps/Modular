@@ -21,7 +21,7 @@ use crate::modules::{LadderFilter, SvfFilter};
 use crate::widgets::{knob, led, KnobStyle, waveform_display, generate_waveform_cycle, KnobConfig, LedConfig, WaveformConfig, WaveformType, adsr_display, AdsrConfig, AdsrParams, spectrum_display, FrequencyPoint, SpectrumConfig, SpectrumStyle, piano, piano_keys, PianoConfig, PianoData, noise_display, NoiseDisplayConfig};
 use super::groups::{GroupId, NodeKind, Side};
 use super::hints::{self, Hint};
-use super::step_grid::{step_grid, StepPattern};
+use super::step_grid::step_sequencer_display;
 use super::{SynthResponse, SynthValueType};
 
 /// MIDI event colors for the MIDI Monitor display.
@@ -1561,47 +1561,7 @@ impl NodeDataTrait for SynthNodeData {
             );
             ui.add_space(4.0 * zoom);
 
-            // Get step data from the node's input parameters
-            let mut pattern = StepPattern {
-                steps: 8,
-                current: 0,
-                pitches: [60; 16],
-                gates: [true; 16],
-                ties: [false; 16],
-            };
-            if let Some(node) = graph.nodes.get(node_id) {
-                for (name, input_id) in &node.inputs {
-                    let value = &graph.get_input(*input_id).value;
-                    if name == "Steps" {
-                        if let SynthValueType::Number { value, .. } = value {
-                            pattern.steps = (*value as usize).clamp(1, 16);
-                        }
-                        continue;
-                    }
-                    // "Step 3 Pitch", "Step 3 Gate", "Step 3 Tie"
-                    let Some((number, field)) = name.strip_prefix("Step ").and_then(|rest| rest.split_once(' ')) else {
-                        continue;
-                    };
-                    let Some(step) = number.parse::<usize>().ok().filter(|n| (1..=16).contains(n)).map(|n| n - 1) else {
-                        continue;
-                    };
-                    match (field, value) {
-                        ("Pitch", SynthValueType::Number { value, .. }) => pattern.pitches[step] = *value as u8,
-                        ("Gate", SynthValueType::Toggle { value, .. }) => pattern.gates[step] = *value,
-                        ("Tie", SynthValueType::Toggle { value, .. }) => pattern.ties[step] = *value,
-                        _ => {}
-                    }
-                }
-            }
-
-            // Get current step from output (Step port is output index 3)
-            let steps = pattern.steps;
-            pattern.current = engine_node_id
-                .and_then(|eid| user_state.get_output_value(eid, 3))
-                .map(|v| ((v * (steps - 1).max(1) as f32).round() as usize).min(steps - 1))
-                .unwrap_or(0);
-
-            step_grid(ui, zoom, &pattern, node_id, &mut responses);
+            step_sequencer_display(ui, zoom, node_id, graph, user_state, &mut responses);
         }
 
         // Special rendering for Oscillator module - waveform preview

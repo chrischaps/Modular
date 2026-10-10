@@ -116,13 +116,14 @@ fn edit(node_id: NodeId, label: impl Into<String>, changes: Vec<(String, f32)>) 
 }
 
 /// The pattern the grid shows. It's the editor's choice, not the patch's,
-/// so it isn't saved and isn't an edit.
-fn edit_pattern(ctx: &egui::Context, node_id: NodeId) -> usize {
-    ctx.data(|data| data.get_temp::<usize>(Id::new((node_id, "trigger-edit-pattern")))).unwrap_or(0).min(PATTERNS - 1)
+/// so it isn't saved and isn't an edit. The Step Sequencer's grid keeps its
+/// own the same way.
+pub(super) fn edit_pattern(ctx: &egui::Context, node_id: NodeId) -> usize {
+    ctx.data(|data| data.get_temp::<usize>(Id::new((node_id, "edit-pattern")))).unwrap_or(0).min(PATTERNS - 1)
 }
 
 fn set_edit_pattern(ctx: &egui::Context, node_id: NodeId, pattern: usize) {
-    ctx.data_mut(|data| data.insert_temp(Id::new((node_id, "trigger-edit-pattern")), pattern));
+    ctx.data_mut(|data| data.insert_temp(Id::new((node_id, "edit-pattern")), pattern));
 }
 
 fn position(user_state: &SynthGraphState, node_id: NodeId) -> Option<Position> {
@@ -579,10 +580,6 @@ pub fn pattern_bar(
     let mut edits = Vec::new();
     let Some(params) = Params::of(graph, node_id) else { return edits };
     let reported = position(user_state, node_id);
-    let pattern_cv = reported.is_some_and(|p| p.pattern_cv);
-    let position = reported.filter(|p| p.started);
-    let editing = edit_pattern(ui.ctx(), node_id);
-    let green = theme::signal::GATE;
     let width = grid_width(z);
 
     // Separator, as the other displays have
@@ -596,6 +593,59 @@ pub fn pattern_bar(
     );
     ui.add_space(6.0 * z);
 
+    let bar = PatternBar {
+        inset: LABEL * z,
+        width,
+        chain: params.chain(),
+        chain_names: std::array::from_fn(|slot| params.name(Seq::PARAM_CHAIN + slot)),
+        playing: reported.filter(|p| p.started).map(|p| Playing { pattern: p.pattern, chain_slot: p.chain_slot, next: p.next_pattern }),
+        pattern_cv: reported.is_some_and(|p| p.pattern_cv),
+    };
+    edits.extend(pattern_tabs(ui, node_id, z, &bar, |ui, pattern, edits| pattern_menu(ui, node_id, &params, pattern, edits)));
+    edits
+}
+
+/// Where a sequencer is in its chain, as the tabs show it.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Playing {
+    pub pattern: usize,
+    pub chain_slot: usize,
+    /// The pattern that plays next.
+    pub next: usize,
+}
+
+/// What a sequencer's pattern tabs and Chain show.
+pub(super) struct PatternBar {
+    /// Room left of the tabs, for their captions.
+    pub inset: f32,
+    pub width: f32,
+    /// The Chain's slots: 0 for empty, else the pattern + 1.
+    pub chain: [usize; CHAIN_SLOTS],
+    /// The names of the Chain slots' parameters.
+    pub chain_names: [String; CHAIN_SLOTS],
+    /// Where it is, once a step has played.
+    pub playing: Option<Playing>,
+    /// Pattern is patched, so the CV picks patterns rather than the Chain.
+    pub pattern_cv: bool,
+}
+
+/// Tabs for the pattern being edited, the one playing marked with a green
+/// dot, and the Chain under them, its playing slot underlined. Shared by
+/// the Trigger and Step Sequencers; `menu` fills a tab's right-click menu.
+pub(super) fn pattern_tabs(
+    ui: &mut egui::Ui,
+    node_id: NodeId,
+    zoom: f32,
+    bar: &PatternBar,
+    mut menu: impl FnMut(&mut egui::Ui, usize, &mut Vec<SynthResponse>),
+) -> Vec<SynthResponse> {
+    let z = zoom;
+    let mut edits = Vec::new();
+    let PatternBar { inset, width, pattern_cv, .. } = *bar;
+    let position = bar.playing;
+    let editing = edit_pattern(ui.ctx(), node_id);
+    let green = theme::signal::GATE;
+
     let caption = FontId::proportional(9.5 * z);
     let letter_font = FontId::proportional(10.0 * z);
     let tab = Vec2::new(20.0 * z, 15.0 * z);
@@ -605,10 +655,10 @@ pub fn pattern_bar(
     let painter = ui.painter().clone();
     painter.text(Pos2::new(row.left(), row.center().y), egui::Align2::LEFT_CENTER, "Edit", caption.clone(), theme::text::SECONDARY);
     for (pattern, letter) in PATTERN_NAMES.iter().enumerate() {
-        let rect = Rect::from_min_size(Pos2::new(row.left() + LABEL * z + pattern as f32 * (tab.x + 4.0 * z), row.top()), tab);
+        let rect = Rect::from_min_size(Pos2::new(row.left() + inset + pattern as f32 * (tab.x + 4.0 * z), row.top()), tab);
         let selected = pattern == editing;
         let playing = position.is_some_and(|p| p.pattern == pattern);
-        let next = position.is_some_and(|p| p.next_pattern == pattern && p.pattern != pattern);
+        let next = position.is_some_and(|p| p.next == pattern && p.pattern != pattern);
         let fill = if selected { theme::background::WIDGET_ACTIVE } else { theme::background::WIDGET };
         painter.rect_filled(rect, 3.0 * z, fill);
         if selected {
@@ -631,7 +681,7 @@ pub fn pattern_bar(
         if response.clicked() {
             set_edit_pattern(ui.ctx(), node_id, pattern);
         }
-        response.context_menu(|ui| pattern_menu(ui, node_id, &params, pattern, &mut edits));
+        response.context_menu(|ui| menu(ui, pattern, &mut edits));
     }
 
     ui.add_space(3.0 * z);
@@ -641,10 +691,10 @@ pub fn pattern_bar(
     let painter = ui.painter().clone();
     let fade = if pattern_cv { 0.4 } else { 1.0 };
     painter.text(Pos2::new(row.left(), row.center().y), egui::Align2::LEFT_CENTER, "Chain", caption.clone(), theme::text::SECONDARY);
-    let chain = params.chain();
+    let chain = bar.chain;
     let filled: Vec<usize> = (0..CHAIN_SLOTS).filter(|&slot| chain[slot] > 0).collect();
     let slot_size = Vec2::new(14.0 * z, tab.y);
-    let mut x = row.left() + LABEL * z;
+    let mut x = row.left() + inset;
     for (index, &slot) in filled.iter().enumerate() {
         let rect = Rect::from_min_size(Pos2::new(x, row.top()), slot_size);
         x += slot_size.x + 2.0 * z;
@@ -666,7 +716,7 @@ pub fn pattern_bar(
             edits.push(edit(
                 node_id,
                 format!("Chain {} → {}", index + 1, PATTERN_NAMES[next]),
-                vec![(params.name(Seq::PARAM_CHAIN + slot), (next + 1) as f32)],
+                vec![(bar.chain_names[slot].clone(), (next + 1) as f32)],
             ));
         }
         response.context_menu(|ui| {
@@ -675,7 +725,7 @@ pub fn pattern_bar(
                     edits.push(edit(
                         node_id,
                         format!("Chain {} → {letter}", index + 1),
-                        vec![(params.name(Seq::PARAM_CHAIN + slot), (choice + 1) as f32)],
+                        vec![(bar.chain_names[slot].clone(), (choice + 1) as f32)],
                     ));
                     ui.close_menu();
                 }
@@ -686,7 +736,7 @@ pub fn pattern_bar(
                     // The rest move up, so the chain has no gaps
                     let mut rest: Vec<usize> = filled.iter().filter(|&&s| s != slot).map(|&s| chain[s]).collect();
                     rest.resize(CHAIN_SLOTS, 0);
-                    let changes = rest.iter().enumerate().map(|(s, &v)| (params.name(Seq::PARAM_CHAIN + s), v as f32)).collect();
+                    let changes = rest.iter().enumerate().map(|(s, &v)| (bar.chain_names[s].clone(), v as f32)).collect();
                     edits.push(edit(node_id, format!("Remove chain {}", index + 1), changes));
                     ui.close_menu();
                 }
@@ -710,7 +760,7 @@ pub fn pattern_bar(
             let mut slots: Vec<usize> = filled.iter().map(|&s| chain[s]).collect();
             slots.push(editing + 1);
             slots.resize(CHAIN_SLOTS, 0);
-            let changes: Vec<(String, f32)> = slots.iter().enumerate().map(|(s, &v)| (params.name(Seq::PARAM_CHAIN + s), v as f32)).collect();
+            let changes: Vec<(String, f32)> = slots.iter().enumerate().map(|(s, &v)| (bar.chain_names[s].clone(), v as f32)).collect();
             edits.push(edit(node_id, format!("Add {} to the chain", PATTERN_NAMES[editing]), changes));
         }
     }

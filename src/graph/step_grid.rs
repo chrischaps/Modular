@@ -13,15 +13,22 @@
 //! A tied step reaches across the gap into the next one, the way a held note
 //! looks on a piano roll. At the end of a row, or of the pattern, it reaches
 //! out of its right side and into the next step's left.
+//!
+//! Under the steps are the Trigger Sequencer's tabs: one for each pattern,
+//! A to D, which the grid shows and edits, and the Chain that plays them.
+
+use std::collections::HashMap;
 
 use eframe::egui::{self, Color32, CursorIcon, Id, Key, LayerId, Modifiers, Order, PopupCloseBehavior, RichText, Sense};
 use egui_node_graph2::{NodeId, NodeResponse};
 
 use crate::app::theme;
-use crate::modules::sequencer::note_to_name;
+use crate::modules::sequencer::{note_to_name, PatternPosition, StepField, StepSequencer as Seq, MAX_STEPS, PATTERNS, PATTERN_NAMES};
+use crate::modules::trigger_sequencer::CHAIN_NAMES;
 use crate::widgets::{piano_keys, PianoConfig, PianoData};
 
-use super::{SynthNodeData, SynthResponse};
+use super::trigger_display::{edit_pattern, pattern_tabs, PatternBar, Playing};
+use super::{SynthGraph, SynthGraphState, SynthNodeData, SynthResponse};
 
 const GATE_ON: Color32 = Color32::from_rgb(100, 200, 100);
 const GATE_OFF: Color32 = Color32::from_rgb(60, 60, 70);
@@ -37,15 +44,129 @@ const OCTAVE_WIDTH: f32 = 140.0;
 const KEY_HEIGHT: f32 = 48.0;
 const HINT: &str = "Click: gate · Shift+click: tie\nDrag up or down: note (Shift: by octave)\nRight-click: piano";
 
+/// The grid's width, before zoom.
+const GRID_WIDTH: f32 = 220.0;
+/// Room left of the pattern tabs for their captions, before zoom.
+const TAB_INSET: f32 = 34.0;
+/// The Step output, which the playhead follows.
+const OUT_STEP: usize = 3;
+
 /// A Step Sequencer's pattern, as its grid shows it.
 pub(super) struct StepPattern {
+    /// Which pattern, A to D, as 0 to 3.
+    pub pattern: usize,
     pub steps: usize,
-    /// The step sounding now.
-    pub current: usize,
+    /// The step sounding now, if it's in this pattern.
+    pub current: Option<usize>,
     pub pitches: [u8; 16],
     pub gates: [bool; 16],
     pub ties: [bool; 16],
 }
+
+impl StepPattern {
+    /// The parameter that holds one of a step's fields in this pattern.
+    fn param(&self, step: usize, field: StepField) -> String {
+        Seq::step_param_name(self.pattern, step, field).to_string()
+    }
+}
+
+/// A Step Sequencer node's parameter values, by name.
+struct Values(HashMap<String, f32>);
+
+impl Values {
+    fn of(graph: &SynthGraph, node_id: NodeId) -> Option<Self> {
+        let node = graph.nodes.get(node_id)?;
+        Some(Self(node.inputs.iter().map(|(name, id)| (name.clone(), graph.get_input(*id).value.actual_value())).collect()))
+    }
+
+    fn get(&self, name: &str) -> Option<f32> {
+        self.0.get(name).copied()
+    }
+
+    fn field(&self, pattern: usize, step: usize, field: StepField) -> Option<f32> {
+        self.get(Seq::step_param_name(pattern, step, field))
+    }
+}
+
+/// The Step Sequencer's display: the grid for the pattern being edited,
+/// and under it the pattern tabs and the Chain.
+pub(super) fn step_sequencer_display(
+    ui: &mut egui::Ui,
+    zoom: f32,
+    node_id: NodeId,
+    graph: &SynthGraph,
+    user_state: &SynthGraphState,
+    responses: &mut Vec<NodeResponse<SynthResponse, SynthNodeData>>,
+) {
+    let Some(values) = Values::of(graph, node_id) else { return };
+    let editing = edit_pattern(ui.ctx(), node_id);
+    let engine_id = user_state.get_engine_node_id(node_id);
+    let position = engine_id.and_then(|id| user_state.readouts.get(&id)).map(PatternPosition::from_readout);
+
+    let steps = values.get("Steps").map_or(8, |v| (v as usize).clamp(1, MAX_STEPS));
+    // The playhead only shows on the pattern playing
+    let current = (position.map_or(0, |p| p.pattern) == editing).then(|| {
+        engine_id
+            .and_then(|id| user_state.get_output_value(id, OUT_STEP))
+            .map_or(0, |v| ((v * (steps - 1).max(1) as f32).round() as usize).min(steps - 1))
+    });
+    let pattern = StepPattern {
+        pattern: editing,
+        steps,
+        current,
+        pitches: std::array::from_fn(|step| values.field(editing, step, StepField::Pitch).map_or(60, |v| v as u8)),
+        gates: std::array::from_fn(|step| values.field(editing, step, StepField::Gate).is_none_or(|v| v > 0.5)),
+        ties: std::array::from_fn(|step| values.field(editing, step, StepField::Tie).is_some_and(|v| v > 0.5)),
+    };
+    step_grid(ui, zoom, &pattern, node_id, responses);
+
+    ui.add_space(6.0 * zoom);
+    let bar = PatternBar {
+        inset: TAB_INSET * zoom,
+        width: GRID_WIDTH * zoom,
+        chain: std::array::from_fn(|slot| values.get(CHAIN_NAMES[slot]).map_or(0, |v| (v.round().max(0.0) as usize).min(PATTERNS))),
+        chain_names: std::array::from_fn(|slot| CHAIN_NAMES[slot].to_string()),
+        playing: position.filter(|p| p.started).map(|p| Playing { pattern: p.pattern, chain_slot: p.chain_slot, next: p.next_pattern }),
+        pattern_cv: position.is_some_and(|p| p.pattern_cv),
+    };
+    let edits = pattern_tabs(ui, node_id, zoom, &bar, |ui, pattern, edits| pattern_menu(ui, node_id, &values, pattern, edits));
+    responses.extend(edits.into_iter().map(NodeResponse::User));
+}
+
+/// A pattern tab's right-click menu: copy the pattern to another, or clear
+/// it to rests, ready to write a new line over with the piano.
+fn pattern_menu(ui: &mut egui::Ui, node_id: NodeId, values: &Values, pattern: usize, edits: &mut Vec<SynthResponse>) {
+    const FIELDS: [StepField; 4] = [StepField::Pitch, StepField::Gate, StepField::Velocity, StepField::Tie];
+    let from = PATTERN_NAMES[pattern];
+    let edit = |label: String, changes: Vec<(String, f32)>| SynthResponse::EditParameters { node_id, label, changes };
+    ui.label(RichText::new(format!("Pattern {from}")).strong());
+    ui.separator();
+    for to in (0..PATTERNS).filter(|&p| p != pattern) {
+        let copy = ui.button(format!("Copy to {}", PATTERN_NAMES[to])).on_hover_text("Every step's note, gate, velocity and tie, to start a variation from");
+        if copy.clicked() {
+            let mut changes = Vec::with_capacity(MAX_STEPS * FIELDS.len());
+            for step in 0..MAX_STEPS {
+                for field in FIELDS {
+                    if let Some(value) = values.field(pattern, step, field) {
+                        changes.push((Seq::step_param_name(to, step, field).to_string(), value));
+                    }
+                }
+            }
+            edits.push(edit(format!("Copy pattern {from} to {}", PATTERN_NAMES[to]), changes));
+            ui.close_menu();
+        }
+    }
+    ui.separator();
+    if ui.button(format!("Clear {from}")).on_hover_text("Every step a rest, keeping its note").clicked() {
+        let changes = (0..MAX_STEPS)
+            .flat_map(|step| [StepField::Gate, StepField::Tie].map(|field| (Seq::step_param_name(pattern, step, field).to_string(), 0.0)))
+            .collect();
+        edits.push(edit(format!("Clear pattern {from}"), changes));
+        ui.close_menu();
+    }
+}
+
+
 
 /// The piano's place in the pattern while it's open: the step its next key
 /// writes, the C its lower octave starts on, and the step it opened under.
@@ -114,7 +235,7 @@ pub(super) fn step_grid(
         .map(|e| StepEntry { step: e.step.min(pattern.steps - 1), anchor: e.anchor.min(pattern.steps - 1), ..e });
 
     ui.vertical(|ui| {
-        ui.set_min_width(220.0 * zoom);
+        ui.set_min_width(GRID_WIDTH * zoom);
 
         // Lay out every step first, so a tie can be drawn under both ends
         let mut cells = Vec::with_capacity(pattern.steps);
@@ -149,7 +270,7 @@ pub(super) fn step_grid(
         }
 
         for (step, (step_rect, response)) in cells.iter().enumerate() {
-            let is_current = step == pattern.current;
+            let is_current = pattern.current == Some(step);
             let base_color = if pattern.gates[step] { GATE_ON } else { GATE_OFF };
             let color = if is_current {
                 // Brighten current step
@@ -178,9 +299,9 @@ pub(super) fn step_grid(
 
             if response.clicked() {
                 if ui.input(|i| i.modifiers.shift) {
-                    set(format!("Step {} Tie", step + 1), if pattern.ties[step] { 0.0 } else { 1.0 });
+                    set(pattern.param(step, StepField::Tie), if pattern.ties[step] { 0.0 } else { 1.0 });
                 } else {
-                    set(format!("Step {} Gate", step + 1), if pattern.gates[step] { 0.0 } else { 1.0 });
+                    set(pattern.param(step, StepField::Gate), if pattern.gates[step] { 0.0 } else { 1.0 });
                 }
             }
             if response.secondary_clicked() {
@@ -199,7 +320,7 @@ pub(super) fn step_grid(
                 if let (Some(origin), Some(now)) = (origin, now) {
                     let to = dragged_pitch(drag.from, now.y - origin.y, zoom, octaves);
                     if to != pitch {
-                        set(format!("Step {} Pitch", step + 1), to as f32);
+                        set(pattern.param(step, StepField::Pitch), to as f32);
                     }
                     ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
                     drag_badge(ui, node_id, *step_rect, &note_to_name(to), zoom);
@@ -259,7 +380,7 @@ fn step_piano(ui: &mut egui::Ui, open: &mut StepEntry, pattern: &StepPattern, se
     let pitch = pattern.pitches[step];
 
     ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("Step {}", step + 1)).strong());
+        ui.label(RichText::new(format!("{} · Step {}", PATTERN_NAMES[pattern.pattern], step + 1)).strong());
         ui.label(RichText::new(note_to_name(pitch)).color(theme::signal::CONTROL));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.small_button("▸").on_hover_text("Next step (→)").clicked() {
@@ -302,9 +423,9 @@ fn step_piano(ui: &mut egui::Ui, open: &mut StepEntry, pattern: &StepPattern, se
         })
         .inner;
     if let Some(note) = played {
-        set(format!("Step {} Pitch", step + 1), note as f32);
+        set(pattern.param(step, StepField::Pitch), note as f32);
         if !pattern.gates[step] {
-            set(format!("Step {} Gate", step + 1), 1.0);
+            set(pattern.param(step, StepField::Gate), 1.0);
         }
         open.step = step_along(step, 1, pattern.steps);
     }
@@ -313,7 +434,7 @@ fn step_piano(ui: &mut egui::Ui, open: &mut StepEntry, pattern: &StepPattern, se
     let mut tie = pattern.ties[step];
     let hint = "Holds this note into the next step, which continues it without a new attack (Shift+click)";
     if ui.checkbox(&mut tie, "Tie into next step").on_hover_text(hint).changed() {
-        set(format!("Step {} Tie", step + 1), if tie { 1.0 } else { 0.0 });
+        set(pattern.param(step, StepField::Tie), if tie { 1.0 } else { 0.0 });
     }
     ui.label(RichText::new("Each key writes this step, then moves to the next").small().weak());
 }

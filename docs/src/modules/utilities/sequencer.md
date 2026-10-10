@@ -3,11 +3,11 @@
 **Module ID** `seq.step` · **Category** Utility
 
 ![Step Sequencer Module](../../images/module-sequencer.png)
-*Green steps play, dark steps rest; the outlined step is the one sounding now. A tied step reaches into the next one: here step 4 into 5, 8 into 9, and 15 into 16.*
+*Pattern B, playing. Green steps play, dark steps rest, and the outlined step is the one sounding now. A tied step reaches into the next one: here step 4 into 5, 12 into 13, and 16 round into the next pattern. The Chain plays A A B C; B wears the green dot, and C, ringed, comes next.*
 
 The Step Sequencer plays a repeating pattern of up to 16 notes. Each clock pulse moves it one step along, and each step sends out its own pitch, a gate if the step is switched on, and a velocity. Patch **Pitch** into an oscillator and **Gate** into an envelope, and a [Clock](../modulation/clock.md) turns it into a bass line, an arpeggio or a riff.
 
-The pattern lives on the node itself: a grid of step buttons with each step's note name underneath. Ties join a step to the next one for held notes and legato lines.
+The pattern lives on the node itself: a grid of step buttons with each step's note name underneath. Ties join a step to the next one for held notes and legato lines. It holds four patterns, A to D, and plays them in the order its **Chain** gives, so a melody can run to 64 steps without repeating, and a verse and a chorus can share one sequencer.
 
 ## Inputs
 
@@ -16,6 +16,7 @@ The pattern lives on the node itself: a grid of step buttons with each step's no
 | **Clock** | Gate (Green) | Each rising edge advances one step |
 | **Reset** | Gate (Green) | A rising edge jumps back to step 1 |
 | **Run** | Gate (Green) | Steps advance only while this is high. With nothing patched, the sequencer runs |
+| **Pattern** | Control (Orange) | Picks the pattern for each pass in place of the Chain: 0 to 0.25 is A, 0.25 to 0.5 is B, then C, and D from 0.75 up |
 
 ## Outputs
 
@@ -25,7 +26,7 @@ The pattern lives on the node itself: a grid of step buttons with each step's no
 | **Gate** | Gate (Green) | High for each step that's switched on, for **Gate** of the step. Stays high across a tie |
 | **Velocity** | Control (Orange) | The current step's velocity, 0 to 1 |
 | **Step** | Control (Orange) | The current position as a ramp: 0 on the first step, 1 on the last |
-| **EOC** | Gate (Green) | End of cycle: a 1 ms pulse each time the pattern comes round |
+| **EOC** | Gate (Green) | End of cycle: a 1 ms pulse each time the whole Chain comes round. With a cable in **Pattern**, each time a pattern does |
 
 ## Parameters
 
@@ -36,7 +37,7 @@ The pattern lives on the node itself: a grid of step buttons with each step's no
 | **Dir** (Direction) | Fwd / Bwd / P-P / Rnd | Fwd | Playback order |
 | **Gate of** (Gate Mode) | Step / 100 ms | Step | What **Gate** is a share of: the time between clock pulses, or a fixed 100 ms |
 
-Each of the 16 steps also stores a note (default C4), a gate on/off (default on), a tie (default off) and a velocity (default 100 of 127). Patches save all of them.
+Each of the 16 steps of each pattern also stores a note (default C4), a gate on/off (default on), a tie (default off) and a velocity (default 100 of 127). The Chain has up to eight slots. Patches save all of them. **Steps**, **Dir** and the gate settings are shared by all four patterns.
 
 ## Programming a pattern
 
@@ -64,6 +65,24 @@ Right-click a step and a two-octave piano opens under it, with the step's note l
 Each note you write is its own undo step, so **Ctrl+Z** takes back the last key you played.
 
 Velocities can't be edited on the node yet. Every step plays at 100 unless the patch file says otherwise. If you do set them there, patch **Velocity** into an envelope's **Velocity** input for accents.
+
+## Patterns and the Chain
+
+The tabs under the grid pick which pattern you're editing: clicking, dragging and the piano all write to the pattern on show. The one playing wears a green dot, and the one coming next a green ring. The playhead's outline only shows on the pattern playing. Which tab is open is the editor's choice: it isn't saved with the patch, and it isn't an edit. **Right-click** a tab to copy its pattern to another (to start a variation from it), or to clear it. Clearing turns every step into a rest but keeps the notes, ready for the piano to write a new line over.
+
+The **Chain** is the order the patterns play in, a pass each, round and round. The pass playing is underlined. It works as on the [Trigger Sequencer](./trigger-sequencer.md#patterns-and-the-chain):
+
+- **Click** a slot to change its pattern: A, B, C, D, then A again.
+- **Right-click** it to pick a pattern, or to remove the slot. The slots after it move up.
+- **+** adds a pass of the pattern you're editing to the end. The Chain holds up to eight.
+
+A new Step Sequencer plays `A`, and so do patches saved before it had patterns, exactly as they always did. For a 64-step line, write four bars of it into A, B, C and D, and make the Chain `A B C D`. For a 16-bar verse whose first half repeats, `A A B C` will do.
+
+A pass ends where the pattern comes round: after the last step going **Fwd**, after step 1 going **Bwd**, and at each turn in **P-P**, so a ping-pong bounces from one pattern into the next. In **Rnd** a pass is **Steps** clocks long. A tie on the last step carries into the first step of the next pattern, so a phrase can hold a note over the join.
+
+### Pattern CV
+
+With a cable in **Pattern**, the CV picks the patterns instead, and the Chain dims. The CV is read once a pass, on the clock that starts it, in the same four zones as the Trigger Sequencer's, so one CV means the same pattern on both. An [Arranger](./arranger.md) lane is made for this: a verse section that holds the lane at A and a chorus that holds it at B make one sequencer play the song's two melodies. The Arranger moves its lanes on the same clock edge the sequencer steps on, so a section's first note comes from its own pattern, with no lag. Leave that lane's **Glide** at 0.
 
 ## Timing
 
@@ -150,6 +169,7 @@ The [Clock](../modulation/clock.md)'s **Run** and **Reset** outputs are made for
 ## Related modules
 
 - [Clock](../modulation/clock.md): drives the sequencer
+- [Arranger](./arranger.md): picks the pattern for each section of a song, through **Pattern**
 - [Trigger Sequencer](./trigger-sequencer.md): eight lanes of drum hits from one module, with chained patterns for fills
 - [Clock Divider](./divider.md): divides the clock, so a sequencer can play once every few bars from its **Run** and **Reset**
 - [ADSR Envelope](../modulation/adsr.md): shapes each step's note from the Gate output

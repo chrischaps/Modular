@@ -119,8 +119,8 @@ static NAMES: LazyLock<Names> = LazyLock::new(|| {
     names
 });
 
-static CHAIN_IDS: [&str; CHAIN_SLOTS] = ["chain_1", "chain_2", "chain_3", "chain_4", "chain_5", "chain_6", "chain_7", "chain_8"];
-static CHAIN_NAMES: [&str; CHAIN_SLOTS] = ["Chain 1", "Chain 2", "Chain 3", "Chain 4", "Chain 5", "Chain 6", "Chain 7", "Chain 8"];
+pub(crate) static CHAIN_IDS: [&str; CHAIN_SLOTS] = ["chain_1", "chain_2", "chain_3", "chain_4", "chain_5", "chain_6", "chain_7", "chain_8"];
+pub(crate) static CHAIN_NAMES: [&str; CHAIN_SLOTS] = ["Chain 1", "Chain 2", "Chain 3", "Chain 4", "Chain 5", "Chain 6", "Chain 7", "Chain 8"];
 /// What a Chain slot can hold: nothing, or a pattern.
 pub const CHAIN_CHOICES: [&str; PATTERNS + 1] = ["–", "A", "B", "C", "D"];
 static LENGTH_IDS: [&str; LANES] = ["length_1", "length_2", "length_3", "length_4", "length_5", "length_6", "length_7", "length_8"];
@@ -130,6 +130,22 @@ static GATE_IDS: [&str; LANES] = ["gate_1", "gate_2", "gate_3", "gate_4", "gate_
 pub static GATE_NAMES: [&str; LANES] = ["Gate 1", "Gate 2", "Gate 3", "Gate 4", "Gate 5", "Gate 6", "Gate 7", "Gate 8"];
 static VEL_IDS: [&str; LANES] = ["vel_1", "vel_2", "vel_3", "vel_4", "vel_5", "vel_6", "vel_7", "vel_8"];
 pub static VEL_NAMES: [&str; LANES] = ["Vel 1", "Vel 2", "Vel 3", "Vel 4", "Vel 5", "Vel 6", "Vel 7", "Vel 8"];
+
+/// The patterns a Chain's slot values play, in order, and how many. Empty
+/// slots are skipped; an empty chain plays A. Shared with the Step
+/// Sequencer, whose Chain works the same way.
+pub fn chain_from(slots: &[f32]) -> ([usize; CHAIN_SLOTS], usize) {
+    let mut chain = [0; CHAIN_SLOTS];
+    let mut len = 0;
+    for &value in slots.iter().take(CHAIN_SLOTS) {
+        let choice = value.round() as usize;
+        if (1..=PATTERNS).contains(&choice) {
+            chain[len] = choice - 1;
+            len += 1;
+        }
+    }
+    (chain, len.max(1))
+}
 
 /// A lane's playing state.
 #[derive(Clone, Copy, Debug, Default)]
@@ -332,19 +348,7 @@ impl TriggerSequencer {
     /// The patterns the Chain plays, in order, and how many. Empty slots are
     /// skipped; an empty chain plays A.
     pub fn chain(params: &[f32]) -> ([usize; CHAIN_SLOTS], usize) {
-        let mut chain = [0; CHAIN_SLOTS];
-        let mut len = 0;
-        for slot in 0..CHAIN_SLOTS {
-            let choice = params[Self::PARAM_CHAIN + slot].round() as usize;
-            if (1..=PATTERNS).contains(&choice) {
-                chain[len] = choice - 1;
-                len += 1;
-            }
-        }
-        if len == 0 {
-            len = 1;
-        }
-        (chain, len)
+        chain_from(&params[Self::PARAM_CHAIN..Self::PARAM_CHAIN + CHAIN_SLOTS])
     }
 
     /// The pattern a Pattern CV picks.
