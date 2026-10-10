@@ -352,7 +352,9 @@ impl SynthApp {
         let can_leave = self.user_state.level.is_some()
             && self.user_state.context_menu_pos.is_none()
             && !self.is_midi_learning()
-            && self.user_state.annotations.editing.is_none();
+            && self.user_state.annotations.editing.is_none()
+            // Escape closes an open popup (a step's piano) first
+            && !ctx.memory(|m| m.any_popup_open());
         let (ungroup, group, rename, enter, leave) = ctx.input_mut(|i| {
             // Ctrl+G alone would also match Ctrl+Alt+G, so that goes first
             let ungroup = i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::ALT, Key::G));

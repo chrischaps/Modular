@@ -116,7 +116,7 @@ The envelope's 300 ms attack takes the edge off each note and its 2-second relea
 
 **Bend the scale.** Click keys on the Quantizer's piano. Take out E and A for a bare, open C D G, or add B for six notes and a little more tension. Only the second voice changes; the melody stays where it is.
 
-**Rewrite the melody.** Click a step to turn its gate on or off. Right-click a step to move its pitch by a semitone or an octave. Stay on C, D, E, G and A to keep the pentatonic calm.
+**Rewrite the melody.** Click a step to turn its gate on or off. Drag a step up or down to change its note, or right-click it and play a new line on its piano. Stay on C, D, E, G and A to keep the pentatonic calm.
 
 **An odd-length loop.** Set **Steps** to 5 or 7 so the phrase falls out of step with the bar.
 

@@ -17,6 +17,7 @@ mod drum_display;
 mod logic_display;
 mod looper_display;
 mod trigger_display;
+mod step_grid;
 mod mixer_strips;
 mod module_ui;
 mod node_data;

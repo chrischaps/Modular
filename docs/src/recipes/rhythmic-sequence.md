@@ -106,7 +106,7 @@ The highpass filter at 4.5 kHz keeps only the sizzle. Pink noise rather than whi
 
 **Play the filter.** While it runs, sweep **Cutoff** between 150 Hz and 1 kHz and push **Res** toward 90%. Lengthen the filter envelope's **Dec** to 400 ms for longer squelches.
 
-**Change the line.** Click a step to toggle its gate. Right-click a step to move its pitch by a semitone or an octave.
+**Change the line.** Click a step to toggle its gate. Drag a step up or down to change its note, or right-click it and play a new line on its piano: each key writes a step and moves to the next.
 
 **Different tempo.** Turn the Clock's **BPM**. The delay follows, staying on the dotted eighth.
 
