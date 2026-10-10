@@ -111,7 +111,7 @@
             {
               "name": "Cutoff",
               "type": "Number",
-              "value": 900.0
+              "value": 500.0
             },
             {
               "name": "Resonance",
@@ -122,11 +122,17 @@
               "name": "Drive",
               "type": "Number",
               "value": 1.5
+            },
+            {
+              "name": "Cutoff CV",
+              "type": "Number",
+              "value": 2.5
             }
           ],
           "pinned": {
             "Cutoff": 1,
-            "Resonance": 1
+            "Resonance": 1,
+            "Cutoff CV": 1
           }
         },
         {
@@ -153,7 +159,7 @@
           "id": 4,
           "module_id": "mod.adsr",
           "position": [
-            0.0,
+            320.0,
             380.0
           ],
           "parameters": [
@@ -200,29 +206,6 @@
           ],
           "pinned": {
             "Decay": 1
-          }
-        },
-        {
-          "id": 5,
-          "module_id": "util.attenuverter",
-          "position": [
-            320.0,
-            380.0
-          ],
-          "parameters": [
-            {
-              "name": "Amount",
-              "type": "Number",
-              "value": 0.9
-            },
-            {
-              "name": "Offset",
-              "type": "Number",
-              "value": 0.0
-            }
-          ],
-          "pinned": {
-            "Amount": 1
           }
         },
         {
@@ -327,12 +310,6 @@
         },
         {
           "from_node": 4,
-          "from_port": "Out",
-          "to_node": 5,
-          "to_port": "In"
-        },
-        {
-          "from_node": 5,
           "from_port": "Out",
           "to_node": 2,
           "to_port": "Cutoff"

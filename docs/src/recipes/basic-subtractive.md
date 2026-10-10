@@ -55,7 +55,7 @@ One output can feed any number of inputs, so the Keyboard's gate starts both env
 
 The **amp envelope** shapes the volume through the VCA. It rises in 5 ms, which is quick but not a click, falls to 70% over 200 ms, and fades out over 300 ms after you let go.
 
-The **filter envelope** shapes the brightness. The SVF's **Cutoff** input works in octaves: +1 doubles the cutoff. So as the envelope jumps to its peak of 1.0, the filter opens one octave above the knob, to 1.4 kHz. Over the next 300 ms it settles to its 30% sustain, about 860 Hz. That fall in brightness, faster than the fall in volume, is what makes each note sound plucked rather than switched on.
+The **filter envelope** shapes the brightness. The SVF's **Cutoff** input works in octaves, and its **CV Amt** is at 1, so +1 doubles the cutoff. As the envelope jumps to its peak of 1.0, the filter opens one octave above the knob, to 1.4 kHz. Over the next 300 ms it settles to its 30% sustain, about 860 Hz. That fall in brightness, faster than the fall in volume, is what makes each note sound plucked rather than switched on.
 
 ## Variations
 
@@ -67,7 +67,7 @@ The **filter envelope** shapes the brightness. The SVF's **Cutoff** input works 
 
 **Supersaw.** On the Oscillator, set **Voices** to 7 and **Detune** to about 40%. Seven detuned saws through the same filter make a wide, shimmering lead.
 
-**More sweep.** To open the filter by more than an octave, double the envelope by patching it into both inputs of a [Mix](../modules/utilities/mix.md), as the [Rhythmic Sequence](./rhythmic-sequence.md) example does.
+**More sweep.** Turn the filter's **CV Amt** up to open it by more than an octave: 2 takes the peak to 2.8 kHz, 3 to 5.6 kHz. Lower **Cutoff** as you go, so the notes still settle dark.
 
 **Space.** Add a [Stereo Delay](../modules/effects/delay.md) and a [Reverb](../modules/effects/reverb.md) between the VCA and the Audio Output.
 

@@ -20,7 +20,7 @@ What gives it its character:
 | Port | Signal Type | Description |
 |------|-------------|-------------|
 | **In** | Audio (Blue) | Audio to filter |
-| **Cutoff** | Control (Orange) | Cutoff CV, 1 per octave: +1 doubles the cutoff, -1 halves it. The same scale as V/Oct, so a keyboard's pitch tracks directly |
+| **Cutoff** | Control (Orange) | Cutoff CV, in octaves: each unit moves the cutoff by **CV Amt** octaves. At the default of 1, +1 doubles the cutoff and -1 halves it: the V/Oct scale, so a keyboard's pitch tracks directly |
 | **Resonance** | Control (Orange) | Adds to the **Res** knob: +1 adds 50% |
 
 **Cutoff** and **Resonance** modulate around their knobs. The knob sets the center, and stays live while a cable is patched in.
@@ -38,11 +38,12 @@ What gives it its character:
 |------|-------|---------|-------------|
 | **Cutoff** | 20 Hz – 20 kHz | 1000 Hz | Filter cutoff frequency |
 | **Res** (Resonance) | 0 – 100% | 50% | Peak at the cutoff. Self-oscillates above 80% |
+| **CV Amt** (Cutoff CV) | -4 – +4 oct | 1 oct | Octaves the cutoff moves per unit at the **Cutoff** input. Negative turns the CV upside down |
 | **Drive** | 1x – 10x | 1x | Input gain into the saturating stages |
 
 ## Ladder or SVF?
 
-Both filters cover the musical range, self-oscillate, and take cutoff CV at 1 per octave. They differ in character:
+Both filters cover the musical range, self-oscillate, and take cutoff CV in octaves, scaled by **CV Amt**. They differ in character:
 
 | | Ladder | SVF |
 |---|---|---|
@@ -52,6 +53,21 @@ Both filters cover the musical range, self-oscillate, and take cutoff CV at 1 pe
 | Self-oscillation | Top fifth of the knob, about -20 dBFS | Top few percent, about -12 dBFS |
 
 Reach for the ladder for basses, leads and anything that should sound fat. Reach for the [SVF Filter](./svf-filter.md) when you want the other modes, or a lighter, more transparent touch.
+
+## CV Amt
+
+**CV Amt** sets how far the **Cutoff** input reaches: how many octaves one unit of CV moves the cutoff. It runs from -4 to +4 octaves per unit, and starts at 1, the V/Oct scale.
+
+An envelope runs from 0 to 1, so **CV Amt** is the size of its sweep, the knob a hardware synth calls *Env Amount* or *Contour*:
+
+- **1** opens the filter one octave at the envelope's peak. Gentle: a sound that brightens a little at each note.
+- **2 to 3** suits a pluck or a brassy swell.
+- **3 to 4** is acid: a resonant peak that shoots up from the bass to the treble and falls back.
+- **Negative** values turn the CV upside down. An envelope then closes the filter as the note starts and opens it again as it releases, so set the **Cutoff** knob high.
+
+With pitch on **Cutoff**, **CV Amt** is the keyboard tracking: 1 keeps the filter's brightness the same on every note, 0.5 tracks at half the rate, and 0 ignores the keys.
+
+**CV Amt** scales whatever is patched into **Cutoff** before it's added to the **Cutoff** knob, so the knob still sets where the sweep starts. With a polyphonic envelope, each voice's sweep is scaled the same way.
 
 ## Drive
 
@@ -81,7 +97,7 @@ A saw through LP24 with the cutoff at a few hundred Hz is the classic fat bass. 
 [ADSR Out] ──> [Ladder Filter Cutoff]
 ```
 
-The envelope's 0-to-1 output raises the cutoff by up to one octave above the knob. Set the knob where the sweep should start, and add resonance and a little Drive to make it bite.
+The envelope's 0-to-1 output raises the cutoff by up to **CV Amt** octaves above the knob. Set the knob where the sweep should start and **CV Amt** to how far it should go, then add resonance and a little Drive to make it bite. For a 303-style squelch, try **Cutoff** 300 Hz, **Res** 80%, **CV Amt** 3 and a 300 ms decay.
 
 ### Keyboard tracking
 
@@ -90,17 +106,17 @@ The envelope's 0-to-1 output raises the cutoff by up to one octave above the kno
                  ──> [Ladder Filter Cutoff]
 ```
 
-Because the Cutoff input is 1 per octave, a pitch CV patched straight in keeps the filter's brightness the same on every note. With the resonance high enough to self-oscillate and nothing patched into **In**, this turns the ladder into a sine oscillator that plays in tune.
+At the default **CV Amt** of 1, the Cutoff input is 1 per octave, so a pitch CV patched straight in keeps the filter's brightness the same on every note. With the resonance high enough to self-oscillate and nothing patched into **In**, this turns the ladder into a sine oscillator that plays in tune.
 
 ## Starting points
 
-| Sound | Cutoff | Res | Drive | Output |
-|-------|--------|-----|-------|--------|
-| Fat bass | 200 – 400 Hz | 30% | 2x | LP24 |
-| Squelchy acid | 400 – 800 Hz | 70% | 3x | LP24 |
-| Buzzy lead | 1 – 3 kHz | 40% | 1.5x | LP12 |
-| Warm pad | 600 Hz | 20% | 1x | LP24 |
-| Sine voice | Played from the keyboard | 90% | 1x | LP24, nothing in **In** |
+| Sound | Cutoff | Res | Drive | Cutoff input | Output |
+|-------|--------|-----|-------|--------------|--------|
+| Fat bass | 200 – 400 Hz | 30% | 2x | Nothing | LP24 |
+| Squelchy acid | 250 – 400 Hz | 70 – 80% | 3x | An envelope, **CV Amt** 3 | LP24 |
+| Buzzy lead | 1 – 3 kHz | 40% | 1.5x | An envelope, **CV Amt** 1 – 2 | LP12 |
+| Warm pad | 600 Hz | 20% | 1x | A slow LFO, **CV Amt** 0.5 | LP24 |
+| Sine voice | Played from the keyboard | 90% | 1x | Pitch, **CV Amt** 1 | LP24, nothing in **In** |
 
 ## Polyphony
 
@@ -121,3 +137,4 @@ Click the power switch at the left of the header, choose **Bypass** from the mod
 - [Oscillator](../sources/oscillator.md), the usual thing to filter
 - [ADSR Envelope](../modulation/adsr.md) to sweep the cutoff with each note
 - [LFO](../modulation/lfo.md) for wobbles and sweeps
+- [Library](../../concepts/groups.md#the-library): **Acid Bass** and **Subtractive Voice** are ladders with an envelope on **Cutoff**, and **CV Amt** on their faces

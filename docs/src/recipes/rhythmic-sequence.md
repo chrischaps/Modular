@@ -25,9 +25,8 @@ A 16-step acid bassline at 120 BPM: a saw through a resonant lowpass that snaps 
 | [Clock](../modules/modulation/clock.md) | **BPM** 120, **Div** 1/16 |
 | [Step Sequencer](../modules/utilities/sequencer.md) | **Steps** 16, **Dir** Fwd, **Gate** 50%, **Gate of** 100 ms |
 | [Oscillator](../modules/sources/oscillator.md) | **Wave** Saw |
-| [SVF Filter](../modules/filters/svf-filter.md) | **Cutoff** 300 Hz, **Res** 70% |
+| [SVF Filter](../modules/filters/svf-filter.md) | **Cutoff** 300 Hz, **Res** 70%, **CV Amt** 2 oct |
 | [ADSR Envelope](../modules/modulation/adsr.md) (filter) | **Atk** 1 ms, **Dec** 200 ms, **Sus** 10%, **Rel** 50 ms |
-| [Mix](../modules/utilities/mix.md) | **Level 1** 100%, **Level 2** 100% |
 | [ADSR Envelope](../modules/modulation/adsr.md) (amp) | **Atk** 1 ms, **Dec** 150 ms, **Sus** 30%, **Rel** 50 ms |
 | [VCA](../modules/utilities/vca.md) | Defaults |
 | [Distortion](../modules/effects/distortion.md) | **Type** Soft, **Drive** 30%, **Mix** 70% |
@@ -59,14 +58,12 @@ A dash is a step with its gate off: a rest. The line sits on the root, C2, and m
 ```text
 [Oscillator Out] ──> [SVF Filter In]
 [Step Sequencer Gate] ──> [ADSR (filter) Gate]
-[ADSR (filter) Out] ──> [Mix In 1]
-                    ──> [Mix In 2]
-[Mix Out] ──> [SVF Filter Cutoff]
+[ADSR (filter) Out] ──> [SVF Filter Cutoff]
 ```
 
 The filter sits low, at 300 Hz, with **Res** at 70%. The filter envelope kicks it open on every step with a gate, then drops it back in 200 ms. That fast sweep of a sharp resonant peak is the acid sound.
 
-The filter's **Cutoff** input works in octaves, and an envelope peaks at 1.0, so one envelope on its own opens the filter by one octave. The patch sends the envelope into both inputs of a Mix to add two copies together, which opens it further. The Mix soft-clips anything over 1.0, easing it toward 1.5, so in practice the peak is nearly an octave and a half, up to roughly 840 Hz.
+The filter's **Cutoff** input works in octaves, and an envelope peaks at 1.0. The filter's **CV Amt** sets how many octaves that peak is worth: at 2, each step's envelope throws the cutoff two octaves up, to 1.2 kHz, and lets it fall back to the bass.
 
 ### Volume, drive and echo
 
@@ -104,7 +101,7 @@ The highpass filter at 4.5 kHz keeps only the sizzle. Pink noise rather than whi
 
 ## Variations
 
-**Play the filter.** While it runs, sweep **Cutoff** between 150 Hz and 1 kHz and push **Res** toward 90%. Lengthen the filter envelope's **Dec** to 400 ms for longer squelches.
+**Play the filter.** While it runs, sweep **Cutoff** between 150 Hz and 1 kHz and push **Res** toward 90%. Lengthen the filter envelope's **Dec** to 400 ms for longer squelches, and turn **CV Amt** up to 3 or 4 for wider ones.
 
 **Change the line.** Click a step to toggle its gate. Drag a step up or down to change its note, or right-click it and play a new line on its piano: each key writes a step and moves to the next.
 

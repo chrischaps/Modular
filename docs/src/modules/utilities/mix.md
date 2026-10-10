@@ -41,7 +41,7 @@ Out = In 1 × Level 1 + In 2 × Level 2 + In 3 × Level 3 + In 4 × Level 4
 
 Anything within ±1 passes through untouched. Past that, the sum soft-clips: it bends smoothly over and eases toward ±1.5 without ever reaching it, so two full-scale signals come out at about 1.48. The same bend is on the Mixer's outputs.
 
-The headroom above 1 is deliberate. Summing two envelopes for a filter's **Cutoff**, as the [Rhythmic Sequence](../../recipes/rhythmic-sequence.md) example does, opens the filter further than one envelope can. For audio, the bend rounds off loud peaks, so bring the levels down to around 50–70% each when you add loud sources and want them clean.
+The headroom above 1 is deliberate: summed control signals can add up past 1 without being clipped flat. (To open a filter further, turn up its **CV Amt** rather than summing envelopes.) For audio, the bend rounds off loud peaks, so bring the levels down to around 50–70% each when you add loud sources and want them clean.
 
 ## Patches
 

@@ -109,7 +109,7 @@ Add this to the two-envelope patch and harder notes come out brighter but no lou
 [Attenuverter Out] ──> [SVF Filter Cutoff]
 ```
 
-The filter closes as the note opens and opens again as it releases, for "backwards" sweeps.
+The filter closes as the note opens and opens again as it releases, for "backwards" sweeps. On a filter you can skip the Attenuverter: patch the envelope straight into **Cutoff** and turn the filter's **CV Amt** below zero.
 
 ### Retriggering a held note
 

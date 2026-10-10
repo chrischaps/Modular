@@ -1346,7 +1346,7 @@
       "id": 21,
       "module_id": "mod.adsr",
       "position": [
-        1369.0,
+        1414.0,
         1362.0
       ],
       "parameters": [
@@ -1396,7 +1396,7 @@
       "id": 22,
       "module_id": "util.vca",
       "position": [
-        1629.0,
+        1674.0,
         1402.0
       ],
       "parameters": [
@@ -1916,7 +1916,7 @@
         1304.0
       ],
       "size": [
-        1080.0,
+        1125.0,
         620.0
       ],
       "color": "teal"

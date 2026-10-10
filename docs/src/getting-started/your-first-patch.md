@@ -85,7 +85,7 @@ Real instruments are brightest at the start of a note. You can do the same by le
 1. Patch the envelope's **Out** into the filter's **Cutoff** input. One output can feed any number of inputs, so the envelope keeps driving the VCA too.
 2. Turn the **Cutoff** knob down to about 400 Hz.
 
-Each note now opens the filter and closes it again as the envelope decays. The **Cutoff** knob stays live and sets where the sweep starts; the envelope adds up to one octave on top. A small dot above the knob shows that a cable is moving it.
+Each note now opens the filter and closes it again as the envelope decays. The **Cutoff** knob stays live and sets where the sweep starts. **CV Amt** sets how far the envelope carries it: one octave at first. Turn **CV Amt** up to 3 and each note opens with a squelch. A small dot above the **Cutoff** knob shows that a cable is moving it.
 
 For a plucky, percussive bass, set **Atk** to its minimum, **Dec** to about 200 ms and **Sus** low. For a slow, brightening pad, lengthen **Atk**.
 
@@ -116,7 +116,7 @@ The signal path runs left to right: the oscillator makes the tone, the filter co
 
 - **Use separate envelopes.** Add a second ADSR Envelope for the filter, also gated by the Keyboard, so brightness and loudness can have different shapes.
 - **Add velocity.** Patch the Keyboard's **Velocity** into the envelope's **Velocity** input, then lower the Keyboard's **Vel** knob for quieter notes.
-- **Add movement.** Patch a **Modulation › LFO** into the filter's **Cutoff** for a slow sweep. Its **Out** swings the cutoff an octave either way.
+- **Add movement.** Patch a **Modulation › LFO** into the filter's **Cutoff** for a slow sweep. Its **Out** swings the cutoff **CV Amt** octaves either way.
 - **Add space.** Put an **Effect › Reverb** between the VCA and the Audio Output: VCA **Out** into Reverb **In L**, then the Reverb's **Out L** and **Out R** into the output's **Left** and **Right**.
 - **Watch it.** Patch the VCA's **Out** into a **Utility › Oscilloscope** as well as the output to see the envelope shape the wave.
 

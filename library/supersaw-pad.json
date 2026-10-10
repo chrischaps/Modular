@@ -126,6 +126,11 @@
               "name": "Drive",
               "type": "Number",
               "value": 1.0
+            },
+            {
+              "name": "Cutoff CV",
+              "type": "Number",
+              "value": 1.0
             }
           ],
           "pinned": {

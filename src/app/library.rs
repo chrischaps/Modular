@@ -210,7 +210,7 @@ mod tests {
         let voice = library.iter().find(|m| m.name == "Subtractive Voice").unwrap();
         assert!(voice.in_library());
         assert_eq!(voice.from_where(), "the Library");
-        assert!(voice.summary.ends_with(". Pitch, Gate, Velocity → Out · 6 modules"), "{}", voice.summary);
+        assert!(voice.summary.ends_with(". Pitch, Gate, Velocity → Out · 5 modules"), "{}", voice.summary);
         assert_eq!(voice.load().unwrap().groups[0].name, "Subtractive Voice");
     }
 

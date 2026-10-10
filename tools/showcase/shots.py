@@ -162,7 +162,7 @@ def fm_bell(s):
 def footswitch(s):
     """The sequence plays itself; a hand stomps the distortion out and back
     in, puts the delay on tape and feeds it back."""
-    s.at(-2.0, "play").at(-2.0, "view -700 10 0.05")
+    s.at(-2.0, "play").at(-2.0, "view -745 10 0.05")
     s.at(0.0, "cursor on")
     # Distortion's power switch: out, then back in
     s.click(1.6, 456, 92, travel=0.7)

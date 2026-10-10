@@ -8666,7 +8666,7 @@
       "id": 39,
       "module_id": "fx.compressor",
       "position": [
-        1399.0,
+        1444.0,
         2889.0
       ],
       "parameters": [
@@ -8716,7 +8716,7 @@
       "id": 40,
       "module_id": "fx.chorus",
       "position": [
-        1813.0,
+        1858.0,
         2889.0
       ],
       "parameters": [
@@ -8761,7 +8761,7 @@
       "id": 41,
       "module_id": "mod.lfo",
       "position": [
-        1399.0,
+        1444.0,
         3154.0
       ],
       "parameters": [
@@ -9931,7 +9931,7 @@
       "id": 56,
       "module_id": "fx.distortion",
       "position": [
-        3343.0,
+        3388.0,
         733.0
       ],
       "parameters": [
@@ -9976,7 +9976,7 @@
       "id": 57,
       "module_id": "fx.eq",
       "position": [
-        3549.0,
+        3594.0,
         733.0
       ],
       "parameters": [
@@ -10727,7 +10727,7 @@
       "id": 69,
       "module_id": "mod.adsr",
       "position": [
-        2747.0,
+        2792.0,
         2639.0
       ],
       "parameters": [
@@ -10777,7 +10777,7 @@
       "id": 70,
       "module_id": "osc.sine",
       "position": [
-        3005.0,
+        3050.0,
         2639.0
       ],
       "parameters": [
@@ -10837,7 +10837,7 @@
       "id": 71,
       "module_id": "filter.svf",
       "position": [
-        3218.0,
+        3263.0,
         2639.0
       ],
       "parameters": [
@@ -10862,7 +10862,7 @@
       "id": 72,
       "module_id": "util.vca",
       "position": [
-        3218.0,
+        3263.0,
         3008.0
       ],
       "parameters": [
@@ -10882,7 +10882,7 @@
       "id": 73,
       "module_id": "util.looper",
       "position": [
-        1523.0,
+        1568.0,
         1827.0
       ],
       "parameters": [
@@ -16343,7 +16343,7 @@
         1787.0
       ],
       "size": [
-        1777.0,
+        1822.0,
         992.0
       ],
       "color": "blue"
@@ -16355,7 +16355,7 @@
         2849.0
       ],
       "size": [
-        2119.0,
+        2164.0,
         698.0
       ],
       "color": "teal"
@@ -16367,7 +16367,7 @@
         0.0
       ],
       "size": [
-        1363.0,
+        1408.0,
         623.0
       ],
       "color": "cyan"
@@ -16379,7 +16379,7 @@
         693.0
       ],
       "size": [
-        1822.0,
+        1867.0,
         774.0
       ],
       "color": "blue"
@@ -16403,7 +16403,7 @@
         2599.0
       ],
       "size": [
-        1238.0,
+        1324.0,
         792.0
       ],
       "color": "slate"

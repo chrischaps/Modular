@@ -386,7 +386,7 @@
       "id": 5,
       "module_id": "util.vca",
       "position": [
-        972.0,
+        1017.0,
         60.0
       ],
       "parameters": [
@@ -406,7 +406,7 @@
       "id": 6,
       "module_id": "fx.distortion",
       "position": [
-        1135.0,
+        1180.0,
         20.0
       ],
       "parameters": [
@@ -451,7 +451,7 @@
       "id": 7,
       "module_id": "fx.delay",
       "position": [
-        1357.0,
+        1402.0,
         20.0
       ],
       "parameters": [

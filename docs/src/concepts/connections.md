@@ -32,7 +32,7 @@ The stereo effects work the same way. Patch only their left input and they treat
 
 Many parameters have both a knob and an input jack of the same name, such as **Cutoff** on the filters or **Time** on the Delay. With nothing patched, the knob sets the value. Patch a cable in and the signal modulates the parameter *around the knob*: the knob sets the center, and the cable moves the value up and down from there.
 
-How far a cable moves the parameter depends on the parameter, and each module page gives the scale. On both filters, for instance, the Cutoff CV is 1 per octave: +1.0 doubles the cutoff and −1.0 halves it. With Cutoff at 1 kHz, a bipolar LFO sweeps the filter from 500 Hz to 2 kHz.
+How far a cable moves the parameter depends on the parameter, and each module page gives the scale. On both filters, for instance, the Cutoff CV is in octaves: at the default **CV Amt** of 1, +1.0 doubles the cutoff and −1.0 halves it. With Cutoff at 1 kHz, a bipolar LFO sweeps the filter from 500 Hz to 2 kHz. Some inputs have a knob of their own that sets how far they reach, as **CV Amt** does here.
 
 A small dot above the knob shows that a cable is patched in: orange once the signal is arriving, green while it's connected but hasn't reported a value yet. You can keep turning the knob to move the center while the cable plays.
 

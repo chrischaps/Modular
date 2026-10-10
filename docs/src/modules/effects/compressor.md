@@ -115,7 +115,7 @@ The sidechain only drives the detector; it isn't heard through the compressor. P
 
 **Parallel compression.** Set **Ratio** high (6:1 or more) and the threshold low, then bring **Mix** down to about 50%. The heavily compressed signal thickens the quiet details while the dry signal keeps the transients.
 
-**Moving other things with GR.** **GR** rises as the compressor works. Because 1.0 stands for 60 dB of reduction, the signal is small: 6 dB of reduction reads 0.1. Patched into a filter's **Cutoff** (1 per octave), that moves the cutoff a tenth of an octave: enough for the tone to brighten slightly as the compressor clamps down.
+**Moving other things with GR.** **GR** rises as the compressor works. Because 1.0 stands for 60 dB of reduction, the signal is small: 6 dB of reduction reads 0.1. Patched into a filter's **Cutoff** (1 per octave at the default **CV Amt**), that moves the cutoff a tenth of an octave: enough for the tone to brighten slightly as the compressor clamps down. Turn the filter's **CV Amt** up to make more of it.
 
 ## Related modules
 

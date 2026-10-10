@@ -466,7 +466,7 @@
       "id": 7,
       "module_id": "util.vca",
       "position": [
-        1517.0,
+        1562.0,
         60.0
       ],
       "parameters": [
@@ -486,7 +486,7 @@
       "id": 8,
       "module_id": "fx.delay",
       "position": [
-        1782.0,
+        1827.0,
         20.0
       ],
       "parameters": [
@@ -536,7 +536,7 @@
       "id": 9,
       "module_id": "fx.reverb",
       "position": [
-        2102.0,
+        2147.0,
         20.0
       ],
       "parameters": [
@@ -581,7 +581,7 @@
       "id": 10,
       "module_id": "output.audio",
       "position": [
-        2371.0,
+        2416.0,
         60.0
       ],
       "parameters": [
@@ -651,7 +651,7 @@
       "id": 13,
       "module_id": "mod.adsr",
       "position": [
-        1517.0,
+        1562.0,
         300.0
       ],
       "parameters": [

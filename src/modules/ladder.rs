@@ -124,8 +124,9 @@ impl LadderCore {
 /// # Ports
 ///
 /// - **In** (Audio, Input): The audio signal to filter.
-/// - **Cutoff** (Control, Input): Cutoff CV, 1 per octave: patch a keyboard's
-///   pitch here and the cutoff tracks the notes.
+/// - **Cutoff** (Control, Input): Cutoff CV, in octaves per unit times the
+///   Cutoff CV knob. At the default of 1, patch a keyboard's pitch here and
+///   the cutoff tracks the notes.
 /// - **Resonance** (Control, Input): CV modulation for resonance.
 /// - **LP24** (Audio, Output): 4-pole lowpass, 24 dB/oct.
 /// - **LP12** (Audio, Output): 2-pole lowpass tapped from the same loop, 12 dB/oct.
@@ -135,6 +136,8 @@ impl LadderCore {
 /// - **Cutoff** (20-20000 Hz): Filter cutoff frequency.
 /// - **Resonance** (0-1): Emphasis at cutoff. Self-oscillates at the top of the range.
 /// - **Drive** (1-10): Input gain into the saturating stages.
+/// - **Cutoff CV** (-4 to +4 oct): Octaves per unit of Cutoff CV, so a 0-1
+///   envelope can sweep up to four octaves. Negative values close the filter.
 pub struct LadderFilter {
     /// Sample rate from last prepare() call.
     sample_rate: f32,
@@ -155,6 +158,8 @@ pub struct LadderFilter {
     resonance_smooth: SmoothedValue,
     /// Smoothed drive parameter.
     drive_smooth: SmoothedValue,
+    /// Smoothed Cutoff CV depth, in octaves per unit of CV.
+    cv_depth_smooth: SmoothedValue,
 }
 
 impl LadderFilter {
@@ -171,7 +176,7 @@ impl LadderFilter {
             ports: vec![
                 // Input ports
                 PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0).describe("Audio to filter"),
-                PortDefinition::input_with_default("cutoff_cv", "Cutoff", SignalType::Control, 0.0).describe("CV that sweeps the cutoff, one octave per unit"),
+                PortDefinition::input_with_default("cutoff_cv", "Cutoff", SignalType::Control, 0.0).describe("CV that sweeps the cutoff, by the Cutoff CV knob's octaves per unit"),
                 PortDefinition::input_with_default("res_cv", "Resonance", SignalType::Control, 0.0).describe("CV that raises or lowers the resonance"),
                 // Output ports
                 PortDefinition::output("lp24", "LP24", SignalType::Audio).describe("Four-pole lowpass, 24 dB per octave"),
@@ -181,10 +186,12 @@ impl LadderFilter {
                 ParameterDefinition::frequency("cutoff", "Cutoff", 20.0, 20000.0, 1000.0).describe("Where the filter starts cutting, in Hz"),
                 ParameterDefinition::new("resonance", "Resonance", 0.0, 1.0, 0.5, ParameterDisplay::Linear { unit: "" }).describe("Resonant peak at the cutoff; high values self-oscillate"),
                 ParameterDefinition::new("drive", "Drive", 1.0, 10.0, 1.0, ParameterDisplay::Linear { unit: "x" }).describe("Input gain into the saturating stages; higher is grittier"),
+                ParameterDefinition::new("cutoff_cv_depth", "Cutoff CV", -4.0, 4.0, 1.0, ParameterDisplay::Linear { unit: "oct" }).describe("Octaves the cutoff moves per unit at the Cutoff input; negative closes it"),
             ],
             log_cutoff_smooth: SmoothedValue::with_default_smoothing(1000.0f32.log2(), sample_rate),
             resonance_smooth: SmoothedValue::with_default_smoothing(0.5, sample_rate),
             drive_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
+            cv_depth_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
         }
     }
 
@@ -197,6 +204,7 @@ impl LadderFilter {
     const PARAM_CUTOFF: usize = 0;
     const PARAM_RESONANCE: usize = 1;
     const PARAM_DRIVE: usize = 2;
+    const PARAM_CUTOFF_CV: usize = 3;
 
     /// Lowest cutoff the filter will run at, after CV.
     const MIN_CUTOFF_HZ: f32 = 20.0;
@@ -275,6 +283,7 @@ impl DspModule for LadderFilter {
         self.log_cutoff_smooth.set_sample_rate(sample_rate);
         self.resonance_smooth.set_sample_rate(sample_rate);
         self.drive_smooth.set_sample_rate(sample_rate);
+        self.cv_depth_smooth.set_sample_rate(sample_rate);
     }
 
     fn process(
@@ -288,6 +297,8 @@ impl DspModule for LadderFilter {
         self.log_cutoff_smooth.set_target(cutoff_param.log2());
         self.resonance_smooth.set_target(params[Self::PARAM_RESONANCE]);
         self.drive_smooth.set_target(params[Self::PARAM_DRIVE].clamp(1.0, 10.0));
+        let cv_depth = params.get(Self::PARAM_CUTOFF_CV).copied().unwrap_or(1.0);
+        self.cv_depth_smooth.set_target(cv_depth.clamp(-4.0, 4.0));
 
         let audio_in = inputs.get(Self::PORT_IN);
         let cutoff_cv = inputs.get(Self::PORT_CUTOFF_CV);
@@ -308,8 +319,9 @@ impl DspModule for LadderFilter {
             let base_resonance = self.resonance_smooth.next();
             let drive = self.drive_smooth.next();
 
-            // Cutoff CV is 1 per octave, added in the log domain
-            let cutoff = (log_cutoff + sample(cutoff_cv, i))
+            // Cutoff CV is in octaves, scaled by its depth, added in the log domain
+            let cv_depth = self.cv_depth_smooth.next();
+            let cutoff = (log_cutoff + sample(cutoff_cv, i) * cv_depth)
                 .exp2()
                 .clamp(Self::MIN_CUTOFF_HZ, max_cutoff);
             let resonance = (base_resonance + sample(res_cv, i) * 0.5).clamp(0.0, 1.0);
@@ -338,6 +350,7 @@ impl DspModule for LadderFilter {
         self.log_cutoff_smooth.reset(self.log_cutoff_smooth.target());
         self.resonance_smooth.reset(self.resonance_smooth.target());
         self.drive_smooth.reset(self.drive_smooth.target());
+        self.cv_depth_smooth.reset(self.cv_depth_smooth.target());
     }
 }
 
@@ -426,6 +439,7 @@ mod tests {
                 ("Cutoff", 20.0, 20000.0, 1000.0),
                 ("Resonance", 0.0, 1.0, 0.5),
                 ("Drive", 1.0, 10.0, 1.0),
+                ("Cutoff CV", -4.0, 4.0, 1.0),
             ]
         );
     }
@@ -498,6 +512,25 @@ mod tests {
             let outs = run([cutoff, 0.0, 1.0], &input, cv);
             let db = amp_to_db(tone_level(&outs[0].samples, 1000.0) / tone_level(&input.samples, 1000.0));
             assert!((db + 12.04).abs() < 0.5, "{} Hz, CV {}: {:.2} dB", cutoff, cv, db);
+        }
+    }
+
+    #[test]
+    fn test_cutoff_cv_depth_scales_the_octaves() {
+        // At 3 oct/unit, +1 CV takes a 125 Hz cutoff to 1 kHz; at -2, it
+        // closes a 4 kHz cutoff to 1 kHz. Either way 1 kHz sits at the cutoff
+        let n = 19200;
+        let input = sine(1000.0, 0.01, n);
+        for (cutoff, depth) in [(125.0, 3.0), (4000.0, -2.0)] {
+            let params = [cutoff, 0.0, 1.0, depth];
+            let mut filter = settled([cutoff, 0.0, 1.0]);
+            filter.cv_depth_smooth.reset(depth);
+            let mut cv = SignalBuffer::control(n);
+            cv.fill(1.0);
+            let mut outs = outputs(n);
+            filter.process(&[&input, &cv], &mut outs, &params, &ProcessContext::new(SR, n));
+            let db = amp_to_db(tone_level(&outs[0].samples, 1000.0) / tone_level(&input.samples, 1000.0));
+            assert!((db + 12.04).abs() < 0.5, "{} Hz at {} oct/unit: {:.2} dB", cutoff, depth, db);
         }
     }
 

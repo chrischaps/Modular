@@ -271,7 +271,7 @@
       "id": 9,
       "module_id": "mod.lfo",
       "position": [
-        804.0,
+        849.0,
         1134.0
       ],
       "parameters": [
@@ -346,7 +346,7 @@
       "id": 12,
       "module_id": "util.vca",
       "position": [
-        804.0,
+        849.0,
         914.0
       ],
       "parameters": [
@@ -527,7 +527,7 @@
         856.0
       ],
       "size": [
-        773.0,
+        818.0,
         671.0
       ],
       "color": "blue"
@@ -545,7 +545,7 @@
     {
       "text": "Each rise of the LFO is a wave arriving: louder, and brighter as the filter opens.",
       "position": [
-        1037.0,
+        1082.0,
         1334.0
       ],
       "width": 240.0

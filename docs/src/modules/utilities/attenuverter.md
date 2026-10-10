@@ -68,7 +68,7 @@ A negative Amount turns the envelope upside down, so the filter closes as the no
                 (Amt -1)
 ```
 
-The SVF's Cutoff input moves the cutoff in octaves around its knob, so set the **Cutoff** knob high and let the inverted envelope pull it down.
+The SVF's Cutoff input moves the cutoff in octaves around its knob, so set the **Cutoff** knob high and let the inverted envelope pull it down. (On a filter, a negative **CV Amt** does the same without an Attenuverter. This patch is for anything else an envelope should close.)
 
 ### Unipolar to bipolar
 
@@ -99,7 +99,7 @@ Leave **In** empty and use **Offset** as a knob you can patch. One Attenuverter 
 
 ### Velocity to brightness, per voice
 
-In a polyphonic patch, scale each voice's velocity before it moves the filter, so harder notes are brighter without the filter jumping a full octave:
+In a polyphonic patch, scale each voice's velocity before it moves the filter, so harder notes are brighter without the filter jumping a full octave. (The filter's own **CV Amt** at 0.5 does the same, if nothing else is patched into its **Cutoff**.)
 
 ```text
 [Poly MIDI Velocity] ──> [Attenuverter In] ──> [SVF Filter Cutoff]

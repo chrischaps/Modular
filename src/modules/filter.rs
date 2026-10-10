@@ -32,12 +32,16 @@ use crate::dsp::{
 ///
 /// Cutoff lives in octaves: the knob is smoothed in log2(Hz) and CV is added
 /// in octaves, so a sweep moves evenly through the musical range instead of
-/// rushing through the bass and crawling through the treble.
+/// rushing through the bass and crawling through the treble. The Cutoff CV
+/// knob sets how many octaves one unit of CV moves it: 1 is the V/Oct scale,
+/// so pitch into Cutoff tracks the keyboard, and 3 lets a 0-1 envelope sweep
+/// three octaves.
 ///
 /// # Ports
 ///
 /// - **In** (Audio, Input): The audio signal to filter.
-/// - **Cutoff** (Control, Input): Cutoff CV, 1 per octave (the V/Oct scale).
+/// - **Cutoff** (Control, Input): Cutoff CV, in octaves per unit times the
+///   Cutoff CV knob (1 by default: the V/Oct scale).
 /// - **Resonance** (Control, Input): CV modulation for resonance.
 /// - **LowPass** (Audio, Output): Lowpass filtered output.
 /// - **HighPass** (Audio, Output): Highpass filtered output.
@@ -49,6 +53,8 @@ use crate::dsp::{
 /// - **Cutoff** (20-20000 Hz): Filter cutoff frequency.
 /// - **Resonance** (0-1): Emphasis at cutoff. Self-oscillates at the top of the range.
 /// - **Drive** (1-10): Input gain/saturation for analog-style warmth.
+/// - **Cutoff CV** (-4 to +4 oct): Octaves per unit of Cutoff CV. Negative
+///   values turn the CV upside down, so an envelope closes the filter.
 pub struct SvfFilter {
     /// Sample rate from last prepare() call.
     sample_rate: f32,
@@ -73,6 +79,8 @@ pub struct SvfFilter {
     resonance_smooth: SmoothedValue,
     /// Smoothed drive parameter.
     drive_smooth: SmoothedValue,
+    /// Smoothed Cutoff CV depth, in octaves per unit of CV.
+    cv_depth_smooth: SmoothedValue,
 }
 
 impl SvfFilter {
@@ -89,7 +97,7 @@ impl SvfFilter {
             ports: vec![
                 // Input ports
                 PortDefinition::input_with_default("in", "In", SignalType::Audio, 0.0).describe("Audio to filter"),
-                PortDefinition::input_with_default("cutoff_cv", "Cutoff", SignalType::Control, 0.0).describe("CV that sweeps the cutoff, one octave per unit"),
+                PortDefinition::input_with_default("cutoff_cv", "Cutoff", SignalType::Control, 0.0).describe("CV that sweeps the cutoff, by the Cutoff CV knob's octaves per unit"),
                 PortDefinition::input_with_default("res_cv", "Resonance", SignalType::Control, 0.0).describe("CV that raises or lowers the resonance"),
                 // Output ports
                 PortDefinition::output("lowpass", "LowPass", SignalType::Audio).describe("Passes frequencies below the cutoff"),
@@ -115,11 +123,20 @@ impl SvfFilter {
                     1.0,
                     crate::dsp::ParameterDisplay::Linear { unit: "x" },
                 ).describe("Input gain into the filter; higher adds saturation"),
+                ParameterDefinition::new(
+                    "cutoff_cv_depth",
+                    "Cutoff CV",
+                    -4.0,
+                    4.0,
+                    1.0,
+                    crate::dsp::ParameterDisplay::Linear { unit: "oct" },
+                ).describe("Octaves the cutoff moves per unit at the Cutoff input; negative closes it"),
             ],
             // Initialize smoothed parameters
             log_cutoff_smooth: SmoothedValue::with_default_smoothing(1000.0f32.log2(), sample_rate),
             resonance_smooth: SmoothedValue::with_default_smoothing(0.5, sample_rate),
             drive_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
+            cv_depth_smooth: SmoothedValue::with_default_smoothing(1.0, sample_rate),
         }
     }
 
@@ -132,6 +149,7 @@ impl SvfFilter {
     const PARAM_CUTOFF: usize = 0;
     const PARAM_RESONANCE: usize = 1;
     const PARAM_DRIVE: usize = 2;
+    const PARAM_CUTOFF_CV: usize = 3;
 
     /// Lowest cutoff the filter will run at, after CV.
     const MIN_CUTOFF_HZ: f32 = 20.0;
@@ -199,6 +217,7 @@ impl DspModule for SvfFilter {
         self.log_cutoff_smooth.set_sample_rate(sample_rate);
         self.resonance_smooth.set_sample_rate(sample_rate);
         self.drive_smooth.set_sample_rate(sample_rate);
+        self.cv_depth_smooth.set_sample_rate(sample_rate);
     }
 
     fn process(
@@ -213,6 +232,8 @@ impl DspModule for SvfFilter {
         self.log_cutoff_smooth.set_target(cutoff_param.log2());
         self.resonance_smooth.set_target(params[Self::PARAM_RESONANCE]);
         self.drive_smooth.set_target(params[Self::PARAM_DRIVE].clamp(1.0, 10.0));
+        let cv_depth = params.get(Self::PARAM_CUTOFF_CV).copied().unwrap_or(1.0);
+        self.cv_depth_smooth.set_target(cv_depth.clamp(-4.0, 4.0));
 
         // Get input buffers
         let audio_in = inputs.get(Self::PORT_IN);
@@ -239,10 +260,12 @@ impl DspModule for SvfFilter {
                 .unwrap_or(0.0);
             let input = fast_tanh(input * drive) + self.noise.sample();
 
-            // Cutoff CV adds octaves in the log domain
+            // Cutoff CV adds octaves in the log domain, scaled by its depth
+            let cv_depth = self.cv_depth_smooth.next();
             let cutoff_mod = cutoff_cv
                 .map(|buf| buf.samples.get(i).copied().unwrap_or(0.0))
-                .unwrap_or(0.0);
+                .unwrap_or(0.0)
+                * cv_depth;
             let cutoff = (log_cutoff + cutoff_mod)
                 .exp2()
                 .clamp(Self::MIN_CUTOFF_HZ, max_cutoff);
@@ -293,6 +316,7 @@ impl DspModule for SvfFilter {
         self.log_cutoff_smooth.reset(self.log_cutoff_smooth.target());
         self.resonance_smooth.reset(self.resonance_smooth.target());
         self.drive_smooth.reset(self.drive_smooth.target());
+        self.cv_depth_smooth.reset(self.cv_depth_smooth.target());
     }
 }
 
@@ -370,7 +394,7 @@ mod tests {
         let filter = SvfFilter::new();
         let params = filter.parameters();
 
-        assert_eq!(params.len(), 3);
+        assert_eq!(params.len(), 4);
 
         // Cutoff parameter
         assert_eq!(params[0].id, "cutoff");
@@ -389,6 +413,10 @@ mod tests {
         assert_eq!(params[2].min, 1.0);
         assert_eq!(params[2].max, 10.0);
         assert_eq!(params[2].default, 1.0);
+
+        // Cutoff CV depth: bipolar, and 1 oct/unit unless turned
+        assert_eq!(params[3].name, "Cutoff CV");
+        assert_eq!((params[3].min, params[3].max, params[3].default), (-4.0, 4.0, 1.0));
     }
 
     #[test]
@@ -543,21 +571,28 @@ mod tests {
         assert_eq!(module.info().id, "filter.svf");
         assert_eq!(module.info().name, "SVF Filter");
         assert_eq!(module.ports().len(), 7);
-        assert_eq!(module.parameters().len(), 3);
+        assert_eq!(module.parameters().len(), 4);
     }
 
     /// Steady-state RMS gain of output `port` for a sine at `freq`, with an
     /// optional constant cutoff CV.
     fn gain(port: usize, cutoff: f32, resonance: f32, freq: f32, cutoff_cv: f32) -> f32 {
+        gain_at_depth(port, cutoff, resonance, freq, cutoff_cv, 1.0)
+    }
+
+    /// `gain`, with the Cutoff CV knob at `depth` octaves per unit.
+    fn gain_at_depth(port: usize, cutoff: f32, resonance: f32, freq: f32, cutoff_cv: f32, depth: f32) -> f32 {
         let sample_rate = 44100.0;
         let n = 8820;
+        let params = [cutoff, resonance, 1.0, depth];
         let mut filter = settled_filter(sample_rate, n, [cutoff, resonance, 1.0]);
+        filter.cv_depth_smooth.reset(depth);
         let input = sine(freq, 0.1, sample_rate, n);
         let mut cv = SignalBuffer::control(n);
         cv.fill(cutoff_cv);
         let mut outputs = outputs(n);
         let ctx = ProcessContext::new(sample_rate, n);
-        filter.process(&[&input, &cv], &mut outputs, &[cutoff, resonance, 1.0], &ctx);
+        filter.process(&[&input, &cv], &mut outputs, &params, &ctx);
         let skip = n / 2;
         rms(&outputs[port].samples[skip..]) / rms(&input.samples[skip..])
     }
@@ -631,6 +666,69 @@ mod tests {
         // ...and -1 CV is -1 octave, the same distance down
         let down = gain(0, 2000.0, 0.0, 1000.0, -1.0);
         assert!((down - 0.5).abs() < 0.05, "gain at the modulated cutoff = {}", down);
+    }
+
+    #[test]
+    fn test_cutoff_cv_depth_scales_the_octaves() {
+        // At 3 oct/unit, +1 CV takes a 250 Hz cutoff three octaves up to 2 kHz
+        let up = gain_at_depth(0, 250.0, 0.0, 2000.0, 1.0, 3.0);
+        assert!((up - 0.5).abs() < 0.05, "gain at the modulated cutoff = {}", up);
+        // A negative depth turns the CV upside down: +1 CV at -2 closes 4 kHz to 1 kHz
+        let down = gain_at_depth(0, 4000.0, 0.0, 1000.0, 1.0, -2.0);
+        assert!((down - 0.5).abs() < 0.05, "gain at the modulated cutoff = {}", down);
+        // At 0 the CV does nothing
+        let none = gain_at_depth(0, 1000.0, 0.0, 1000.0, 1.0, 0.0);
+        assert!((none - 0.5).abs() < 0.05, "gain at the unmodulated cutoff = {}", none);
+    }
+
+    #[test]
+    fn test_cv_depth_multiplies_the_cv() {
+        // Depth 2 sounds exactly like the CV doubled by hand into depth 1,
+        // sample for sample: the knob is a gain on the CV and nothing else
+        let n = 4096;
+        let input = sine(220.0, 0.8, 44100.0, n);
+        let mut cv = SignalBuffer::control(n);
+        for i in 0..n {
+            cv.samples[i] = (i as f32 / n as f32 * 7.0).sin() * 1.7;
+        }
+        let mut doubled = cv.clone();
+        doubled.samples.iter_mut().for_each(|s| *s *= 2.0);
+        let ctx = ProcessContext::new(44100.0, n);
+        let lowpass = |cv: &SignalBuffer, depth: f32| {
+            let mut filter = SvfFilter::new();
+            filter.prepare(44100.0, n);
+            filter.cv_depth_smooth.reset(depth);
+            let mut outs = outputs(n);
+            filter.process(&[&input, cv], &mut outs, &[700.0, 0.6, 2.0, depth], &ctx);
+            outs.swap_remove(0).samples
+        };
+        assert_eq!(lowpass(&cv, 2.0), lowpass(&doubled, 1.0));
+    }
+
+    #[test]
+    fn test_cv_depth_scales_each_voice_on_its_own() {
+        use crate::dsp::poly::Poly;
+        // Two voices share a 2 kHz tone, each with its own envelope level on
+        // Cutoff. At 3 oct/unit the voice at 1.0 opens from 250 Hz to 2 kHz
+        // and passes it; the voice at 0.0 stays at 250 Hz and cuts it
+        let sample_rate = 44100.0;
+        let n = 2048;
+        let mut filter = Poly::new(SvfFilter::new);
+        filter.prepare(sample_rate, n);
+        let input = sine(2000.0, 0.1, sample_rate, n);
+        let mut cv = SignalBuffer::polyphonic(n, SignalType::Control);
+        cv.set_channels(2);
+        cv.channel_mut(1).fill(1.0);
+        let mut outs: Vec<_> = (0..4).map(|_| SignalBuffer::polyphonic(n, SignalType::Audio)).collect();
+        let ctx = ProcessContext::new(sample_rate, n);
+        // Let the cutoff and depth smoothing settle, then measure
+        for _ in 0..4 {
+            filter.process(&[&input, &cv], &mut outs, &[250.0, 0.0, 1.0, 3.0], &ctx);
+        }
+        let level = |voice: usize| rms(&outs[0].voice(voice).samples[n / 2..]) / rms(&input.samples[n / 2..]);
+        assert_eq!(outs[0].channels(), 2);
+        assert!((level(1) - 0.5).abs() < 0.05, "opened voice: gain {}", level(1));
+        assert!(level(0) < 0.03, "closed voice: gain {}", level(0));
     }
 
     /// Samples taken for the knob's cutoff to pass the geometric midpoint

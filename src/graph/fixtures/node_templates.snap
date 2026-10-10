@@ -166,12 +166,14 @@ in   In                 Audio    ConnectionOnly       inline=true  port
 in   Cutoff             Control  ConnectionOrConstant inline=true  num 1000 [20..20000] Hz log
 in   Resonance          Control  ConnectionOrConstant inline=true  num 0.5 [0..1]
 in   Drive              Control  ConstantOnly         inline=false num 1 [1..10] x
+in   Cutoff CV          Control  ConstantOnly         inline=false num 1 [-4..4] oct
 out  LowPass            Audio
 out  HighPass           Audio
 out  BandPass           Audio
 out  Notch              Audio
 knob Cutoff             "Cutoff" Modulatable
 knob Resonance          "Res" Modulatable
+knob Cutoff CV          "CV Amt" KnobOnly
 knob Drive              "Drive" KnobOnly
 display FilterResponse
 
@@ -180,10 +182,12 @@ in   In                 Audio    ConnectionOnly       inline=true  port
 in   Cutoff             Control  ConnectionOrConstant inline=true  num 1000 [20..20000] Hz log
 in   Resonance          Control  ConnectionOrConstant inline=true  num 0.5 [0..1]
 in   Drive              Control  ConstantOnly         inline=false num 1 [1..10] x
+in   Cutoff CV          Control  ConstantOnly         inline=false num 1 [-4..4] oct
 out  LP24               Audio
 out  LP12               Audio
 knob Cutoff             "Cutoff" Modulatable
 knob Resonance          "Res" Modulatable
+knob Cutoff CV          "CV Amt" KnobOnly
 knob Drive              "Drive" KnobOnly
 display LadderResponse
 

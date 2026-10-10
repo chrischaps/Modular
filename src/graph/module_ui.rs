@@ -185,13 +185,15 @@ static MODULE_UI: &[ModuleUi] = &[
     },
     ModuleUi {
         module_id: "filter.svf",
-        knobs: &[modulatable("Cutoff", "Cutoff"), modulatable("Resonance", "Res"), knob("Drive")],
+        // The CV depth beside Res, where a 303 puts Env Mod
+        knobs: &[modulatable("Cutoff", "Cutoff"), modulatable("Resonance", "Res"), knob_as("Cutoff CV", "CV Amt"), knob("Drive")],
         display: NodeDisplay::FilterResponse,
         ..ModuleUi::DEFAULT
     },
     ModuleUi {
         module_id: "filter.ladder",
-        knobs: &[modulatable("Cutoff", "Cutoff"), modulatable("Resonance", "Res"), knob("Drive")],
+        // The CV depth beside Res, where a 303 puts Env Mod
+        knobs: &[modulatable("Cutoff", "Cutoff"), modulatable("Resonance", "Res"), knob_as("Cutoff CV", "CV Amt"), knob("Drive")],
         display: NodeDisplay::LadderResponse,
         ..ModuleUi::DEFAULT
     },

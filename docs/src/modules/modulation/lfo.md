@@ -115,7 +115,7 @@ Rate 4 to 8 Hz, Sine or Triangle, **Bipolar off**, so the level dips and returns
 [LFO Out] ──> [SVF Filter Cutoff]
 ```
 
-The Cutoff input works in octaves, so a bipolar LFO at full level sweeps one octave either side of the knob. A slow Triangle gives a smooth wah; a Square jumps between two brightnesses. To sweep less, pass the LFO through an [Attenuverter](../utilities/attenuverter.md).
+The Cutoff input works in octaves, so a bipolar LFO at full level sweeps the filter's **CV Amt** octaves either side of the knob: one, at first. A slow Triangle gives a smooth wah; a Square jumps between two brightnesses. Turn **CV Amt** down to sweep less, or up to sweep more.
 
 ### A filter that breathes with the bar
 

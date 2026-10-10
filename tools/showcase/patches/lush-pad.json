@@ -126,7 +126,7 @@
       "id": 4,
       "module_id": "util.vca",
       "position": [
-        686.0,
+        731.0,
         60.0
       ],
       "parameters": [
@@ -146,7 +146,7 @@
       "id": 10,
       "module_id": "util.mixer",
       "position": [
-        951.0,
+        996.0,
         20.0
       ],
       "parameters": [
@@ -286,7 +286,7 @@
       "id": 5,
       "module_id": "fx.chorus",
       "position": [
-        1369.0,
+        1414.0,
         20.0
       ],
       "parameters": [
@@ -331,7 +331,7 @@
       "id": 6,
       "module_id": "fx.reverb",
       "position": [
-        1689.0,
+        1734.0,
         20.0
       ],
       "parameters": [
@@ -376,7 +376,7 @@
       "id": 7,
       "module_id": "output.audio",
       "position": [
-        1958.0,
+        2003.0,
         60.0
       ],
       "parameters": [
@@ -401,7 +401,7 @@
       "id": 8,
       "module_id": "mod.adsr",
       "position": [
-        686.0,
+        731.0,
         300.0
       ],
       "parameters": [
